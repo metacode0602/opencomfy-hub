@@ -4,7 +4,7 @@ import "@workspace/ui/globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@workspace/ui/components/sonner"
 import { cn } from "@workspace/ui/lib/utils"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { TooltipProvider } from "@workspace/ui/components/tooltip"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
 
