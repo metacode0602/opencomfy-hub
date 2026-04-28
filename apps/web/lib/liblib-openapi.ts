@@ -91,6 +91,8 @@ export async function liblibSignedPostJson(
   )
   const started = Date.now()
 
+  console.warn("liblibSignedPostJson: url", url, "body", JSON.stringify(body, null, 2))
+  
   try {
     const res = await fetch(url, {
       method: "POST",

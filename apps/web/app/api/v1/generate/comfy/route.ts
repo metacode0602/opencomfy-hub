@@ -14,6 +14,41 @@ const bodySchema = z.object({
   generateParams: z.record(z.string(), z.unknown()),
 })
 
+function unwrapGenerateParams(input: Record<string, unknown>): {
+  templateUuid?: string
+  generateParams: Record<string, unknown>
+} {
+  const maybeInner = input.generateParams
+  const inner =
+    maybeInner &&
+    typeof maybeInner === "object" &&
+    !Array.isArray(maybeInner) &&
+    maybeInner !== null
+      ? (maybeInner as Record<string, unknown>)
+      : null
+
+  // 兼容前端/历史调用：把 { templateUuid, generateParams: {...} } 解包成 {...}
+  const keys = Object.keys(input)
+  const nestedTemplateUuid = input.templateUuid
+  const looksLikeWrappedCall =
+    keys.length === 2 &&
+    keys.includes("templateUuid") &&
+    keys.includes("generateParams") &&
+    typeof nestedTemplateUuid === "string" &&
+    !!nestedTemplateUuid.trim() &&
+    !!inner
+
+  if (looksLikeWrappedCall) {
+    const templateUuid =
+      typeof nestedTemplateUuid === "string" && nestedTemplateUuid.trim()
+        ? nestedTemplateUuid
+        : undefined
+    return { templateUuid, generateParams: inner }
+  }
+
+  return { generateParams: input }
+}
+
 /**
  * POST /api/v1/generate/comfy
  * 代理调用 LibLib ComfyUI 工作流生图（上游 POST /api/generate/comfyui/app）
@@ -49,9 +84,15 @@ export async function POST(request: Request) {
     )
   }
 
-  const { templateUuid, generateParams } = parsed.data
+  const { templateUuid: rawTemplateUuid, generateParams: rawGenerateParams } =
+    parsed.data
+
+  const unwrapped = unwrapGenerateParams(rawGenerateParams)
+  const templateUuid =
+    rawTemplateUuid ?? unwrapped.templateUuid ?? DEFAULT_TEMPLATE_UUID
+  const generateParams = unwrapped.generateParams
   const upstreamBody = {
-    templateUuid: templateUuid ?? DEFAULT_TEMPLATE_UUID,
+    templateUuid,
     generateParams,
   }
   console.warn("liblibSignedPostJson: upstreamBody", JSON.stringify(upstreamBody, null, 2))
