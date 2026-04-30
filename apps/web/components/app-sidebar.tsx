@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
+import { ThemeToggle } from "@/components/theme-toggle"
 import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,

@@ -25,7 +25,7 @@ export default function MarketplacePage() {
     {
       title: "热门图片风格",
       icon: Palette,
-      href: "/create/marketplace/styles",
+      href: "/dashboard/marketplace/styles",
       items: styleTemplates.slice(0, 4),
       type: "style" as const,
       color: "from-purple-500 to-pink-500",
@@ -33,7 +33,7 @@ export default function MarketplacePage() {
     {
       title: "精选视频特效",
       icon: Film,
-      href: "/create/marketplace/effects",
+      href: "/dashboard/marketplace/effects",
       items: effectTemplates.slice(0, 4),
       type: "effect" as const,
       color: "from-orange-500 to-red-500",
@@ -41,7 +41,7 @@ export default function MarketplacePage() {
     {
       title: "实用工作流",
       icon: GitBranch,
-      href: "/create/marketplace/workflows",
+      href: "/dashboard/marketplace/workflows",
       items: workflowTemplates.slice(0, 4),
       type: "workflow" as const,
       color: "from-green-500 to-teal-500",

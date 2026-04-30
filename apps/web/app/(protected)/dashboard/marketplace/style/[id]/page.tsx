@@ -84,7 +84,7 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-6 py-6">
         {/* Back Button */}
-        <Link href="/create/marketplace/styles">
+        <Link href="/dashboard/marketplace/styles">
           <Button variant="ghost" className="mb-6 gap-2">
             <ArrowLeft className="w-4 h-4" />
             返回风格列表

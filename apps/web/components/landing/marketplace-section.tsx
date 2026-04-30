@@ -22,7 +22,7 @@ const categories = [
     description: "赛博朋克、水墨山水、动漫插画等数百种风格模板",
     count: "200+",
     color: "from-purple-500 to-pink-500",
-    href: "/create/marketplace/styles",
+    href: "/dashboard/marketplace/styles",
     preview: [
       "https://images.unsplash.com/photo-1563089145-599997674d42?w=200&h=200&fit=crop",
       "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=200&h=200&fit=crop",
@@ -35,7 +35,7 @@ const categories = [
     description: "电影转场、粒子特效、运镜追踪等专业级视频效果",
     count: "150+",
     color: "from-orange-500 to-red-500",
-    href: "/create/marketplace/effects",
+    href: "/dashboard/marketplace/effects",
     preview: [
       "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=200&h=200&fit=crop",
       "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=200&h=200&fit=crop",
@@ -48,7 +48,7 @@ const categories = [
     description: "人像精修、超分放大、智能抠图等一键运行的 ComfyUI 工作流",
     count: "80+",
     color: "from-green-500 to-teal-500",
-    href: "/create/marketplace/workflows",
+    href: "/dashboard/marketplace/workflows",
     preview: [
       "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&h=200&fit=crop",
       "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=200&h=200&fit=crop",
@@ -180,7 +180,7 @@ export function MarketplaceSection() {
           viewport={{ once: true }}
           className="text-center mt-12"
         >
-          <Link href="/create/marketplace">
+          <Link href="/dashboard/marketplace">
             <Button size="lg" className="gap-2">
               进入模板市场
               <ArrowRight className="w-4 h-4" />

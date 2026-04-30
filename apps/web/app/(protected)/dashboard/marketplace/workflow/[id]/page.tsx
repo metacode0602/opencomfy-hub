@@ -97,7 +97,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-6 py-6">
         {/* Back Button */}
-        <Link href="/create/marketplace/workflows">
+        <Link href="/dashboard/marketplace/workflows">
           <Button variant="ghost" className="mb-6 gap-2">
             <ArrowLeft className="w-4 h-4" />
             返回工作流列表
@@ -337,7 +337,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                         <CollapsibleContent className="space-y-4 pt-4">
                           <p className="text-sm text-muted-foreground">
                             高级参数需要了解 ComfyUI 工作流原理。
-                            <Link href="/create/help" className="text-primary hover:underline ml-1">
+                            <Link href="/dashboard/help" className="text-primary hover:underline ml-1">
                               查看文档
                             </Link>
                           </p>

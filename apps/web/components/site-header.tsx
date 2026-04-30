@@ -1,5 +1,6 @@
 import { Separator } from "@workspace/ui/components/separator"
 import { SidebarTrigger } from "@workspace/ui/components/sidebar"
+import { ThemeToggle } from "./theme-toggle"
 
 export function SiteHeader() {
   return (
@@ -11,6 +12,9 @@ export function SiteHeader() {
           className="mx-2 data-[orientation=vertical]:h-4"
         />
         <h1 className="text-base font-medium">Documents</h1>
+      </div>
+      <div className="flex items-center justify-end p-4">
+        <ThemeToggle />
       </div>
     </header>
   )

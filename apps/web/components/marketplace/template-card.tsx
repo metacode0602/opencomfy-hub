@@ -16,7 +16,7 @@ interface TemplateCardProps {
 }
 
 export function TemplateCard({ template, type, index = 0 }: TemplateCardProps) {
-  const href = `/create/marketplace/${type}/${template.id}`
+  const href = `/dashboard/marketplace/${type}/${template.id}`
   
   const isWorkflow = type === "workflow"
   const workflow = isWorkflow ? (template as WorkflowTemplate) : null

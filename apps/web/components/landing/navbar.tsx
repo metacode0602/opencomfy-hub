@@ -5,6 +5,7 @@ import Link from "next/link"
 import { motion } from "framer-motion"
 import { Menu, X, Sparkles } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
@@ -47,10 +48,13 @@ export function Navbar() {
 
           {/* CTA Buttons */}
           <div className="hidden md:flex items-center gap-4">
-            <Button variant="ghost" size="sm">
-              登录
+            <ThemeToggle />
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/sign-in">
+                登录
+              </Link>
             </Button>
-            <Link href="/create">
+            <Link href="/dashboard/text-to-image">
               <Button size="sm" className="glow-primary">
                 开始创作
               </Button>
@@ -90,7 +94,7 @@ export function Navbar() {
               <Button variant="ghost" size="sm">
                 登录
               </Button>
-              <Link href="/create">
+              <Link href="/dashboard/text-to-image">
                 <Button size="sm" className="w-full glow-primary">
                   开始创作
                 </Button>

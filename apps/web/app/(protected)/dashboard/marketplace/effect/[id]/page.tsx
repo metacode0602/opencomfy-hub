@@ -58,7 +58,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-6 py-6">
         {/* Back Button */}
-        <Link href="/create/marketplace/effects">
+        <Link href="/dashboard/marketplace/effects">
           <Button variant="ghost" className="mb-6 gap-2">
             <ArrowLeft className="w-4 h-4" />
             返回特效列表
