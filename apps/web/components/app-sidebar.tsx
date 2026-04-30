@@ -2,7 +2,6 @@
 
 import * as React from "react"
 
-import { NavDocuments } from "@/components/nav-documents"
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
@@ -15,7 +14,24 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@workspace/ui/components/sidebar"
-import { LayoutDashboardIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, CameraIcon, FileTextIcon, Settings2Icon, CircleHelpIcon, SearchIcon, DatabaseIcon, FileChartColumnIcon, FileIcon, CommandIcon } from "lucide-react"
+import {
+  CommandIcon,
+  Film,
+  GitBranch,
+  HelpCircle,
+  History,
+  ImageIcon,
+  Layers,
+  Palette,
+  Play,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Store,
+  Video,
+  Wand2,
+} from "lucide-react"
+import Link from "next/link"
 
 const data = {
   user: {
@@ -25,153 +41,73 @@ const data = {
   },
   navMain: [
     {
-      title: "Dashboard",
-      url: "#",
-      icon: (
-        <LayoutDashboardIcon
-        />
-      ),
+      title: "文生图",
+      url: "/dashboard/text-to-image",
+      icon: <Wand2 className="size-4" />,
     },
     {
-      title: "Lifecycle",
-      url: "#",
-      icon: (
-        <ListIcon
-        />
-      ),
+      title: "图生图",
+      url: "/dashboard/image-to-image",
+      icon: <ImageIcon className="size-4" />,
     },
     {
-      title: "Analytics",
-      url: "#",
-      icon: (
-        <ChartBarIcon
-        />
-      ),
+      title: "文生视频",
+      url: "/dashboard/text-to-video",
+      icon: <Video className="size-4" />,
     },
     {
-      title: "Projects",
-      url: "#",
-      icon: (
-        <FolderIcon
-        />
-      ),
+      title: "图生视频",
+      url: "/dashboard/image-to-video",
+      icon: <Play className="size-4" />,
     },
     {
-      title: "Team",
-      url: "#",
-      icon: (
-        <UsersIcon
-        />
-      ),
+      title: "参考生视频",
+      url: "/dashboard/ref-to-video",
+      icon: <RefreshCw className="size-4" />,
+    },
+    {
+      title: "工作流",
+      url: "/dashboard/workflow",
+      icon: <Layers className="size-4" />,
     },
   ],
-  navClouds: [
+  navMarketplace: [
     {
-      title: "Capture",
-      icon: (
-        <CameraIcon
-        />
-      ),
-      isActive: true,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
+      title: "模板市场",
+      url: "/dashboard/marketplace",
+      icon: <Store className="size-4" />,
     },
     {
-      title: "Proposal",
-      icon: (
-        <FileTextIcon
-        />
-      ),
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
+      title: "图片风格",
+      url: "/dashboard/marketplace/styles",
+      icon: <Palette className="size-4" />,
     },
     {
-      title: "Prompts",
-      icon: (
-        <FileTextIcon
-        />
-      ),
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
+      title: "视频特效",
+      url: "/dashboard/marketplace/effects",
+      icon: <Film className="size-4" />,
+    },
+    {
+      title: "工作流模板",
+      url: "/dashboard/marketplace/workflows",
+      icon: <GitBranch className="size-4" />,
     },
   ],
   navSecondary: [
     {
-      title: "Settings",
-      url: "#",
-      icon: (
-        <Settings2Icon
-        />
-      ),
+      title: "历史记录",
+      url: "/dashboard/history",
+      icon: <History className="size-4" />,
     },
     {
-      title: "Get Help",
-      url: "#",
-      icon: (
-        <CircleHelpIcon
-        />
-      ),
+      title: "设置",
+      url: "/settings",
+      icon: <Settings className="size-4" />,
     },
     {
-      title: "Search",
-      url: "#",
-      icon: (
-        <SearchIcon
-        />
-      ),
-    },
-  ],
-  documents: [
-    {
-      name: "Data Library",
-      url: "#",
-      icon: (
-        <DatabaseIcon
-        />
-      ),
-    },
-    {
-      name: "Reports",
-      url: "#",
-      icon: (
-        <FileChartColumnIcon
-        />
-      ),
-    },
-    {
-      name: "Word Assistant",
-      url: "#",
-      icon: (
-        <FileIcon
-        />
-      ),
+      title: "帮助",
+      url: "/help",
+      icon: <HelpCircle className="size-4" />,
     },
   ],
 }
@@ -186,17 +122,29 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               asChild
               className="data-[slot=sidebar-menu-button]:p-1.5!"
             >
-              <a href="#">
-                <CommandIcon className="size-5!" />
-                <span className="text-base font-semibold">Acme Inc.</span>
-              </a>
+              <Link href="/" className="flex items-center gap-2 mb-4">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                  <Sparkles className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <span className="font-bold gradient-text">Genesis AI</span>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
+      <SidebarMenuItem>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider mx-8">
+            创作工具
+          </p>
+        </SidebarMenuItem>
         <NavMain items={data.navMain} />
-        <NavDocuments items={data.documents} />
+        <SidebarMenuItem>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider mx-8">
+            预置模板
+          </p>
+        </SidebarMenuItem>
+        <NavSecondary items={data.navMarketplace} />
         <NavSecondary items={data.navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>

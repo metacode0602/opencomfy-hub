@@ -25,11 +25,11 @@ export function proxy(request: NextRequest) {
   const sessionCookie = getSessionCookie(request)
 
   const isAuthRoute =
-    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up")
+    pathname.startsWith("/sign-in") || pathname.startsWith("/sign-up") || pathname.startsWith("/create")
 
-  if (!sessionCookie && !isAuthRoute) {
-    return NextResponse.redirect(new URL("/sign-in", request.url))
-  }
+  // if (!sessionCookie && !isAuthRoute) {
+  //   return NextResponse.redirect(new URL("/sign-in", request.url))
+  // }
 
   return NextResponse.next()
 }
