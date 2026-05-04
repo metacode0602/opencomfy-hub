@@ -180,7 +180,7 @@ export function MarketplaceSection() {
           viewport={{ once: true }}
           className="text-center mt-12"
         >
-          <Link href="/dashboard/marketplace">
+          <Link href="/dashboard/marketplace/index">
             <Button size="lg" className="gap-2">
               进入模板市场
               <ArrowRight className="w-4 h-4" />

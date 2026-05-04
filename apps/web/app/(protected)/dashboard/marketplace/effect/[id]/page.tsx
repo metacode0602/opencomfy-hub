@@ -29,13 +29,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@workspace/ui/components/collapsible"
-import { effectTemplates } from "@/lib/types/marketplace-data"
+import { EffectTemplate, effectTemplates } from "@/lib/types/marketplace-data"
 import { cn } from "@workspace/ui/lib/utils"
 import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
 export default function EffectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const template = effectTemplates.find((t) => t.id === id) || effectTemplates[0]
+  const template = effectTemplates.find((t) => t.id === id) || effectTemplates[0] as EffectTemplate
   
   const [description, setDescription] = useState("")
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
@@ -304,7 +304,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                         <Slider
                           value={[duration]}
-                          onValueChange={([v]) => setDuration(v)}
+                          onValueChange={([v]) => setDuration(v ?? 0)}
                           min={1}
                           max={10}
                           step={1}
@@ -319,7 +319,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                         <Slider
                           value={[fps]}
-                          onValueChange={([v]) => setFps(v)}
+                          onValueChange={([v]) => setFps(v ?? 0)}
                           min={12}
                           max={60}
                           step={6}
@@ -334,7 +334,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                         <Slider
                           value={[motionStrength * 100]}
-                          onValueChange={([v]) => setMotionStrength(v / 100)}
+                          onValueChange={([v]) => setMotionStrength(v ?? 0 / 100)}
                           min={0}
                           max={100}
                           step={5}
@@ -349,7 +349,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                         </div>
                         <Slider
                           value={[styleStrength * 100]}
-                          onValueChange={([v]) => setStyleStrength(v / 100)}
+                          onValueChange={([v]) => setStyleStrength(v ?? 0 / 100)}
                           min={0}
                           max={100}
                           step={5}

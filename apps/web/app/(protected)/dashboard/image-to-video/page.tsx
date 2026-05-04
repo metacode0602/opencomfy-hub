@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Play, Sparkles } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ModelSelector } from "@/components/create/model-selector"
@@ -15,15 +15,31 @@ const motionTypes = [
   { id: "pan-right", label: "向右平移" },
   { id: "rotate", label: "旋转" },
   { id: "auto", label: "智能识别" },
-]
+] as const
+
+const MOCK_VIDEO_BY_MOTION: Record<(typeof motionTypes)[number]["id"], string> = {
+  "zoom-in":
+    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+  "zoom-out":
+    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+  "pan-left":
+    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+  "pan-right":
+    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+  rotate:
+    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+  auto: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+}
 
 export default function ImageToVideoPage() {
   const [sourceImage, setSourceImage] = useState<string>()
   const [prompt, setPrompt] = useState("")
-  const [motionType, setMotionType] = useState("auto")
+  const [motionType, setMotionType] =
+    useState<(typeof motionTypes)[number]["id"]>("auto")
   const [model, setModel] = useState("runway-gen3")
   const [isGenerating, setIsGenerating] = useState(false)
-  const [result, setResult] = useState<string | undefined>()
+  const [genProgress, setGenProgress] = useState(0)
+  const [resultVideoUrl, setResultVideoUrl] = useState<string>()
   const [parameters, setParameters] = useState({
     width: 1920,
     height: 1080,
@@ -35,20 +51,39 @@ export default function ImageToVideoPage() {
     fps: 24,
   })
 
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    }
+  }, [])
+
   const handleGenerate = () => {
     if (!sourceImage) return
+    setResultVideoUrl(undefined)
     setIsGenerating(true)
-    setTimeout(() => {
+    setGenProgress(0)
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    progressTimerRef.current = setInterval(() => {
+      setGenProgress((p) => (p >= 88 ? p : p + 3 + Math.floor(Math.random() * 5)))
+    }, 320)
+    window.setTimeout(() => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current)
+        progressTimerRef.current = null
+      }
+      setGenProgress(100)
       setIsGenerating(false)
-      setResult("generated")
-    }, 5000)
+      setResultVideoUrl(MOCK_VIDEO_BY_MOTION[motionType])
+    }, 4800)
   }
+
+  const promptSummary = `${motionTypes.find((t) => t.id === motionType)?.label}${prompt ? ` · ${prompt}` : ""}`
 
   return (
     <div className="h-full flex">
-      {/* Left Panel - Controls */}
       <div className="w-[400px] flex-shrink-0 border-r border-border overflow-y-auto p-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center">
             <Play className="h-5 w-5 text-orange-400" />
@@ -59,44 +94,41 @@ export default function ImageToVideoPage() {
           </div>
         </div>
 
-        {/* Model Selector */}
         <div className="space-y-2">
           <label className="text-sm font-medium">选择模型</label>
           <ModelSelector type="video" value={model} onChange={setModel} />
         </div>
 
-        {/* Image Upload */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">上传起始画面</label>
+          <label className="text-sm font-medium">起始画面</label>
           <ImageUpload
             value={sourceImage}
             onChange={setSourceImage}
-            label="上传图片"
-            description="将作为视频的第一帧"
+            label="选择图片"
+            description="将作为视频的第一帧，JPG / PNG，最大 10MB"
           />
         </div>
 
-        {/* Motion Type */}
         <div className="space-y-2">
           <label className="text-sm font-medium">运动方式</label>
           <div className="grid grid-cols-3 gap-2">
-            {motionTypes.map((type) => (
+            {motionTypes.map((typeItem) => (
               <button
-                key={type.id}
-                onClick={() => setMotionType(type.id)}
+                key={typeItem.id}
+                type="button"
+                onClick={() => setMotionType(typeItem.id)}
                 className={`px-3 py-2 rounded-lg text-sm transition-colors ${
-                  motionType === type.id
+                  motionType === typeItem.id
                     ? "bg-primary text-primary-foreground"
                     : "bg-secondary hover:bg-secondary/80"
                 }`}
               >
-                {type.label}
+                {typeItem.label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Motion Description */}
         <div className="space-y-2">
           <label className="text-sm font-medium">运动描述 (可选)</label>
           <textarea
@@ -107,14 +139,13 @@ export default function ImageToVideoPage() {
           />
         </div>
 
-        {/* Parameters */}
         <ParametersPanel
           type="video"
           parameters={parameters}
           onChange={setParameters}
+          defaultExpanded={false}
         />
 
-        {/* Generate Button */}
         <Button
           size="lg"
           className="w-full glow-primary"
@@ -126,14 +157,15 @@ export default function ImageToVideoPage() {
         </Button>
       </div>
 
-      {/* Right Panel - Result */}
       <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <GenerationResult
             type="video"
             isGenerating={isGenerating}
-            result={result}
-            prompt={`${motionTypes.find(t => t.id === motionType)?.label}${prompt ? ` - ${prompt}` : ""}`}
+            resultVideoUrl={resultVideoUrl}
+            progress={genProgress}
+            prompt={promptSummary}
+            emptyDescription="上传起始画面并点击生成开始创作"
           />
         </div>
       </div>

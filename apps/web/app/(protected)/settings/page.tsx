@@ -25,7 +25,7 @@ export default function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8">
           <div className="w-10 h-10 rounded-xl bg-gray-500/20 flex items-center justify-center">

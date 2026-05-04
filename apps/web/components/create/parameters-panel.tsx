@@ -41,23 +41,37 @@ function Slider({ label, value, onChange, min, max, step = 1, tooltip }: SliderP
   )
 }
 
-interface ParametersPanelProps {
-  type: "image" | "video"
-  parameters: {
-    width: number
-    height: number
-    steps: number
-    cfgScale: number
-    seed: number
-    negativePrompt: string
-    duration?: number
-    fps?: number
-  }
-  onChange: (params: ParametersPanelProps["parameters"]) => void
+export type CreateImageParameters = {
+  width: number
+  height: number
+  steps: number
+  cfgScale: number
+  seed: number
+  negativePrompt: string
 }
 
-export function ParametersPanel({ type, parameters, onChange }: ParametersPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(true)
+export type CreateVideoParameters = CreateImageParameters & {
+  duration: number
+  fps: number
+}
+
+type ParametersPanelProps =
+  | {
+      type: "image"
+      parameters: CreateImageParameters
+      onChange: (params: CreateImageParameters) => void
+      defaultExpanded?: boolean
+    }
+  | {
+      type: "video"
+      parameters: CreateVideoParameters
+      onChange: (params: CreateVideoParameters) => void
+      defaultExpanded?: boolean
+    }
+
+export function ParametersPanel(props: ParametersPanelProps) {
+  const [isExpanded, setIsExpanded] = useState(props.defaultExpanded ?? true)
+  const { type, parameters } = props
 
   const aspectRatios = [
     { label: "1:1", width: 1024, height: 1024 },
@@ -67,17 +81,10 @@ export function ParametersPanel({ type, parameters, onChange }: ParametersPanelP
     { label: "3:4", width: 1080, height: 1440 },
   ]
 
-  const updateParam = <K extends keyof ParametersPanelProps["parameters"]>(
-    key: K,
-    value: ParametersPanelProps["parameters"][K]
-  ) => {
-    onChange({ ...parameters, [key]: value })
-  }
-
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* Header */}
       <button
+        type="button"
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between p-4 hover:bg-secondary/50 transition-colors"
       >
@@ -90,10 +97,8 @@ export function ParametersPanel({ type, parameters, onChange }: ParametersPanelP
         />
       </button>
 
-      {/* Content */}
       {isExpanded && (
         <div className="p-4 pt-0 space-y-6">
-          {/* Aspect Ratio */}
           <div className="space-y-2">
             <span className="text-sm font-medium">画面比例</span>
             <div className="flex flex-wrap gap-2">
@@ -107,9 +112,21 @@ export function ParametersPanel({ type, parameters, onChange }: ParametersPanelP
                       : "outline"
                   }
                   size="sm"
+                  type="button"
                   onClick={() => {
-                    updateParam("width", ratio.width)
-                    updateParam("height", ratio.height)
+                    if (props.type === "image") {
+                      props.onChange({
+                        ...props.parameters,
+                        width: ratio.width,
+                        height: ratio.height,
+                      })
+                    } else {
+                      props.onChange({
+                        ...props.parameters,
+                        width: ratio.width,
+                        height: ratio.height,
+                      })
+                    }
                   }}
                 >
                   {ratio.label}
@@ -118,56 +135,74 @@ export function ParametersPanel({ type, parameters, onChange }: ParametersPanelP
             </div>
           </div>
 
-          {/* Steps */}
           <Slider
             label="生成步数"
             value={parameters.steps}
-            onChange={(v) => updateParam("steps", v)}
+            onChange={(v) => {
+              if (props.type === "image") {
+                props.onChange({ ...props.parameters, steps: v })
+              } else {
+                props.onChange({ ...props.parameters, steps: v })
+              }
+            }}
             min={10}
             max={50}
             tooltip="更多步数通常意味着更高质量，但生成时间更长"
           />
 
-          {/* CFG Scale */}
           <Slider
             label="引导系数"
             value={parameters.cfgScale}
-            onChange={(v) => updateParam("cfgScale", v)}
+            onChange={(v) => {
+              if (props.type === "image") {
+                props.onChange({ ...props.parameters, cfgScale: v })
+              } else {
+                props.onChange({ ...props.parameters, cfgScale: v })
+              }
+            }}
             min={1}
             max={20}
             step={0.5}
             tooltip="控制 AI 对提示词的遵循程度"
           />
 
-          {/* Video-specific parameters */}
           {type === "video" && (
             <>
               <Slider
                 label="视频时长 (秒)"
-                value={parameters.duration || 5}
-                onChange={(v) => updateParam("duration", v)}
+                value={parameters.duration}
+                onChange={(v) =>
+                  props.onChange({ ...props.parameters, duration: v })
+                }
                 min={2}
                 max={30}
               />
               <Slider
                 label="帧率 (FPS)"
-                value={parameters.fps || 24}
-                onChange={(v) => updateParam("fps", v)}
+                value={parameters.fps}
+                onChange={(v) => props.onChange({ ...props.parameters, fps: v })}
                 min={12}
                 max={60}
               />
             </>
           )}
 
-          {/* Seed */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">随机种子</span>
               <Button
                 variant="ghost"
                 size="sm"
+                type="button"
                 className="h-7 text-xs"
-                onClick={() => updateParam("seed", Math.floor(Math.random() * 1000000))}
+                onClick={() => {
+                  const seed = Math.floor(Math.random() * 1000000)
+                  if (props.type === "image") {
+                    props.onChange({ ...props.parameters, seed })
+                  } else {
+                    props.onChange({ ...props.parameters, seed })
+                  }
+                }}
               >
                 随机
               </Button>
@@ -175,17 +210,30 @@ export function ParametersPanel({ type, parameters, onChange }: ParametersPanelP
             <Input
               type="number"
               value={parameters.seed}
-              onChange={(e) => updateParam("seed", Number(e.target.value))}
+              onChange={(e) => {
+                const seed = Number(e.target.value)
+                if (props.type === "image") {
+                  props.onChange({ ...props.parameters, seed })
+                } else {
+                  props.onChange({ ...props.parameters, seed })
+                }
+              }}
               className="h-9"
             />
           </div>
 
-          {/* Negative Prompt */}
           <div className="space-y-2">
             <span className="text-sm font-medium">负面提示词</span>
             <textarea
               value={parameters.negativePrompt}
-              onChange={(e) => updateParam("negativePrompt", e.target.value)}
+              onChange={(e) => {
+                const negativePrompt = e.target.value
+                if (props.type === "image") {
+                  props.onChange({ ...props.parameters, negativePrompt })
+                } else {
+                  props.onChange({ ...props.parameters, negativePrompt })
+                }
+              }}
               placeholder="描述你不想在结果中出现的内容..."
               className="w-full h-20 px-3 py-2 rounded-lg bg-input border border-border text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
             />

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Wand2, Sparkles, Lightbulb } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ModelSelector } from "@/components/create/model-selector"
@@ -14,11 +14,21 @@ const promptSuggestions = [
   "宁静的日式庭院，锦鲤池塘，樱花飘落，水墨画风格",
 ]
 
+const MOCK_IMAGE_BY_MODEL: Record<string, string> = {
+  "flux-pro":
+    "https://images.unsplash.com/photo-1579783902614-aacfb63fd3f4?w=1024&h=1024&fit=crop",
+  sdxl: "https://images.unsplash.com/photo-1547826039-bfc35e0f1ea8?w=1024&h=1024&fit=crop",
+  sd3: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&h=1024&fit=crop",
+  midjourney:
+    "https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=1024&h=1024&fit=crop",
+}
+
 export default function TextToImagePage() {
   const [prompt, setPrompt] = useState("")
   const [model, setModel] = useState("flux-pro")
   const [isGenerating, setIsGenerating] = useState(false)
-  const [result, setResult] = useState<string | undefined>()
+  const [genProgress, setGenProgress] = useState(0)
+  const [resultImageUrl, setResultImageUrl] = useState<string>()
   const [parameters, setParameters] = useState({
     width: 1024,
     height: 1024,
@@ -28,21 +38,39 @@ export default function TextToImagePage() {
     negativePrompt: "低质量, 模糊, 变形, 丑陋",
   })
 
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    }
+  }, [])
+
   const handleGenerate = () => {
     if (!prompt.trim()) return
+    setResultImageUrl(undefined)
     setIsGenerating(true)
-    // Simulate generation
-    setTimeout(() => {
+    setGenProgress(0)
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    progressTimerRef.current = setInterval(() => {
+      setGenProgress((p) => (p >= 90 ? p : p + 6 + Math.floor(Math.random() * 8)))
+    }, 220)
+    window.setTimeout(() => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current)
+        progressTimerRef.current = null
+      }
+      setGenProgress(100)
       setIsGenerating(false)
-      setResult("generated")
-    }, 3000)
+      setResultImageUrl(
+        MOCK_IMAGE_BY_MODEL[model] ?? MOCK_IMAGE_BY_MODEL["flux-pro"]
+      )
+    }, 2800)
   }
 
   return (
     <div className="h-full flex">
-      {/* Left Panel - Controls */}
       <div className="w-[400px] flex-shrink-0 border-r border-border overflow-y-auto p-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
             <Wand2 className="h-5 w-5 text-blue-400" />
@@ -53,13 +81,11 @@ export default function TextToImagePage() {
           </div>
         </div>
 
-        {/* Model Selector */}
         <div className="space-y-2">
           <label className="text-sm font-medium">选择模型</label>
           <ModelSelector type="image" value={model} onChange={setModel} />
         </div>
 
-        {/* Prompt Input */}
         <div className="space-y-2">
           <label className="text-sm font-medium">描述你想要的图片</label>
           <div className="relative">
@@ -75,7 +101,6 @@ export default function TextToImagePage() {
           </div>
         </div>
 
-        {/* Prompt Suggestions */}
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Lightbulb className="h-4 w-4" />
@@ -85,6 +110,7 @@ export default function TextToImagePage() {
             {promptSuggestions.map((suggestion, index) => (
               <button
                 key={index}
+                type="button"
                 onClick={() => setPrompt(suggestion)}
                 className="px-3 py-1.5 rounded-full text-xs bg-secondary hover:bg-secondary/80 transition-colors text-left"
               >
@@ -94,14 +120,13 @@ export default function TextToImagePage() {
           </div>
         </div>
 
-        {/* Parameters */}
         <ParametersPanel
           type="image"
           parameters={parameters}
           onChange={setParameters}
+          defaultExpanded={false}
         />
 
-        {/* Generate Button */}
         <Button
           size="lg"
           className="w-full glow-primary"
@@ -113,14 +138,15 @@ export default function TextToImagePage() {
         </Button>
       </div>
 
-      {/* Right Panel - Result */}
       <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <GenerationResult
             type="image"
             isGenerating={isGenerating}
-            result={result}
+            resultImageUrl={resultImageUrl}
+            progress={genProgress}
             prompt={prompt}
+            emptyDescription="输入描述并点击生成开始创作"
           />
         </div>
       </div>

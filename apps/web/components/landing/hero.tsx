@@ -64,7 +64,7 @@ export function Hero() {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4"
         >
-          <Link href="/create">
+          <Link href="/dashboard/text-to-image">
             <Button size="lg" className="glow-primary text-lg px-8 h-12">
               免费开始创作
               <ArrowRight className="ml-2 h-5 w-5" />
@@ -84,18 +84,20 @@ export function Hero() {
           className="mt-16 flex flex-wrap items-center justify-center gap-3"
         >
           {[
-            { icon: Wand2, label: "文生图" },
-            { icon: ImageIcon, label: "图生图" },
-            { icon: Video, label: "文生视频" },
-            { icon: Play, label: "图生视频" },
+            { icon: Wand2, label: "文生图", href: "/dashboard/text-to-image" },
+            { icon: ImageIcon, label: "图生图", href: "/dashboard/image-to-image" },
+            { icon: Video, label: "文生视频", href: "/dashboard/text-to-video" },
+            { icon: Play, label: "图生视频", href: "/dashboard/image-to-video" },
           ].map((item, index) => (
+            <Link href={item.href} key={item.label}>
             <div
               key={item.label}
               className="flex items-center gap-2 px-4 py-2 rounded-full bg-secondary/50 border border-border"
             >
-              <item.icon className="h-4 w-4 text-primary" />
-              <span className="text-sm">{item.label}</span>
-            </div>
+                <item.icon className="h-4 w-4 text-primary" />
+                <span className="text-sm">{item.label}</span>
+              </div>
+            </Link>
           ))}
         </motion.div>
 

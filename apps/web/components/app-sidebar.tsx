@@ -75,7 +75,7 @@ const data = {
   navMarketplace: [
     {
       title: "模板市场",
-      url: "/dashboard/marketplace",
+      url: "/dashboard/marketplace/index",
       icon: <Store className="size-4" />,
     },
     {

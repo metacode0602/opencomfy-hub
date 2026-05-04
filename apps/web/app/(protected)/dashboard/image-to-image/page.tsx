@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { ImageIcon, Sparkles, Lightbulb } from "lucide-react"
+import { useState, useRef, useEffect } from "react"
+import { ImageIcon, Sparkles } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { ModelSelector } from "@/components/create/model-selector"
 import { ParametersPanel } from "@/components/create/parameters-panel"
@@ -15,15 +15,31 @@ const styleOptions = [
   { id: "sketch", label: "素描" },
   { id: "3d", label: "3D渲染" },
   { id: "pixel", label: "像素风" },
-]
+] as const
+
+/** Mock 生成图（Unsplash），按风格区分展示 */
+const MOCK_IMAGE_BY_STYLE: Record<(typeof styleOptions)[number]["id"], string> = {
+  anime:
+    "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024&h=1024&fit=crop",
+  watercolor:
+    "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1024&h=1024&fit=crop",
+  oil: "https://images.unsplash.com/photo-1577083552431-6e5fd01988ec?w=1024&h=1024&fit=crop",
+  sketch:
+    "https://images.unsplash.com/photo-1541961016664-225de22e4ea7?w=1024&h=1024&fit=crop",
+  "3d": "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=1024&h=1024&fit=crop",
+  pixel:
+    "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1024&h=1024&fit=crop",
+}
 
 export default function ImageToImagePage() {
   const [sourceImage, setSourceImage] = useState<string>()
   const [prompt, setPrompt] = useState("")
-  const [selectedStyle, setSelectedStyle] = useState("anime")
+  const [selectedStyle, setSelectedStyle] =
+    useState<(typeof styleOptions)[number]["id"]>("anime")
   const [model, setModel] = useState("flux-pro")
   const [isGenerating, setIsGenerating] = useState(false)
-  const [result, setResult] = useState<string | undefined>()
+  const [genProgress, setGenProgress] = useState(0)
+  const [resultImageUrl, setResultImageUrl] = useState<string>()
   const [strength, setStrength] = useState(0.7)
   const [parameters, setParameters] = useState({
     width: 1024,
@@ -34,20 +50,39 @@ export default function ImageToImagePage() {
     negativePrompt: "低质量, 模糊, 变形",
   })
 
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    }
+  }, [])
+
   const handleGenerate = () => {
     if (!sourceImage) return
+    setResultImageUrl(undefined)
     setIsGenerating(true)
-    setTimeout(() => {
+    setGenProgress(0)
+    if (progressTimerRef.current) clearInterval(progressTimerRef.current)
+    progressTimerRef.current = setInterval(() => {
+      setGenProgress((p) => (p >= 90 ? p : p + 6 + Math.floor(Math.random() * 8)))
+    }, 220)
+    window.setTimeout(() => {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current)
+        progressTimerRef.current = null
+      }
+      setGenProgress(100)
       setIsGenerating(false)
-      setResult("generated")
-    }, 3000)
+      setResultImageUrl(MOCK_IMAGE_BY_STYLE[selectedStyle])
+    }, 2800)
   }
+
+  const promptSummary = `${styleOptions.find((s) => s.id === selectedStyle)?.label} 风格${prompt ? `，${prompt}` : ""}`
 
   return (
     <div className="h-full flex">
-      {/* Left Panel - Controls */}
       <div className="w-[400px] flex-shrink-0 border-r border-border overflow-y-auto p-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
             <ImageIcon className="h-5 w-5 text-purple-400" />
@@ -58,30 +93,28 @@ export default function ImageToImagePage() {
           </div>
         </div>
 
-        {/* Model Selector */}
         <div className="space-y-2">
           <label className="text-sm font-medium">选择模型</label>
           <ModelSelector type="image" value={model} onChange={setModel} />
         </div>
 
-        {/* Image Upload */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">上传参考图片</label>
+          <label className="text-sm font-medium">参考图片</label>
           <ImageUpload
             value={sourceImage}
             onChange={setSourceImage}
-            label="上传参考图"
-            description="支持 JPG、PNG 格式，最大 10MB"
+            label="选择图片"
+            description="JPG、PNG，最大 10MB"
           />
         </div>
 
-        {/* Style Selection */}
         <div className="space-y-2">
           <label className="text-sm font-medium">选择风格</label>
           <div className="grid grid-cols-3 gap-2">
             {styleOptions.map((style) => (
               <button
                 key={style.id}
+                type="button"
                 onClick={() => setSelectedStyle(style.id)}
                 className={`px-3 py-2 rounded-lg text-sm transition-colors ${
                   selectedStyle === style.id
@@ -95,11 +128,12 @@ export default function ImageToImagePage() {
           </div>
         </div>
 
-        {/* Strength Slider */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">转换强度</span>
-            <span className="text-sm text-muted-foreground">{Math.round(strength * 100)}%</span>
+            <span className="text-sm text-muted-foreground">
+              {Math.round(strength * 100)}%
+            </span>
           </div>
           <input
             type="range"
@@ -115,7 +149,6 @@ export default function ImageToImagePage() {
           </p>
         </div>
 
-        {/* Additional Prompt */}
         <div className="space-y-2">
           <label className="text-sm font-medium">补充描述 (可选)</label>
           <textarea
@@ -126,14 +159,13 @@ export default function ImageToImagePage() {
           />
         </div>
 
-        {/* Parameters */}
         <ParametersPanel
           type="image"
           parameters={parameters}
           onChange={setParameters}
+          defaultExpanded={false}
         />
 
-        {/* Generate Button */}
         <Button
           size="lg"
           className="w-full glow-primary"
@@ -145,14 +177,15 @@ export default function ImageToImagePage() {
         </Button>
       </div>
 
-      {/* Right Panel - Result */}
       <div className="flex-1 p-6 overflow-y-auto">
         <div className="max-w-5xl mx-auto">
           <GenerationResult
             type="image"
             isGenerating={isGenerating}
-            result={result}
-            prompt={`${styleOptions.find(s => s.id === selectedStyle)?.label} 风格${prompt ? `，${prompt}` : ""}`}
+            resultImageUrl={resultImageUrl}
+            progress={genProgress}
+            prompt={promptSummary}
+            emptyDescription="上传参考图并点击生成开始创作"
           />
         </div>
       </div>
