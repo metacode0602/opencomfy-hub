@@ -37,12 +37,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@workspace/ui/components/collapsible"
-import { styleTemplates } from "@/lib/types/marketplace-data"
+import { StyleTemplate, styleTemplates } from "@/lib/types/marketplace-data"
 import { cn } from "@workspace/ui/lib/utils"
+import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
 export default function StyleDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const template = styleTemplates.find((t) => t.id === id) || styleTemplates[0]
+  const template = styleTemplates.find((t) => t.id === id) || styleTemplates[0] as StyleTemplate
   
   const [prompt, setPrompt] = useState("")
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
@@ -50,6 +51,11 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
   const [isLiked, setIsLiked] = useState(false)
   const [isCopied, setIsCopied] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [showResultModal, setShowResultModal] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState(0)
+  const [generationResult, setGenerationResult] = useState<GenerationResultData | null>(null)
+  const [generatedResults, setGeneratedResults] = useState<GenerationResultData[]>([])
+  const [currentResultIndex, setCurrentResultIndex] = useState(0)
   
   // Advanced parameters
   const [steps, setSteps] = useState(template.parameters.steps)
@@ -68,8 +74,61 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleGenerate = () => {
     setIsGenerating(true)
-    // Simulate generation
-    setTimeout(() => setIsGenerating(false), 3000)
+    setShowResultModal(true)
+    setGenerationProgress(0)
+    setGenerationResult(null)
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 95) {
+          clearInterval(progressInterval)
+          return prev
+        }
+        return prev + Math.random() * 20
+      })
+    }, 400)
+
+    // Simulate generation complete with multiple results
+    setTimeout(() => {
+      clearInterval(progressInterval)
+      setGenerationProgress(100)
+      setIsGenerating(false)
+      
+      // Generate 4 mock results
+      const newResults: GenerationResultData[] = Array.from({ length: 4 }, (_, i) => ({
+        id: `style-${Date.now()}-${i}`,
+        type: "image" as const,
+        url: exampleImages[i] || template.thumbnail,
+        thumbnailUrl: exampleImages[i] || template.thumbnail,
+        prompt: prompt || template.defaultPrompt || template.name,
+        width: width,
+        height: height,
+        model: template.baseModel,
+        createdAt: new Date(),
+        parameters: {
+          "迭代步数": steps.toString(),
+          "提示词强度": cfgScale.toString(),
+          "采样器": sampler,
+          "尺寸": `${width}x${height}`,
+        }
+      }))
+      
+      setGeneratedResults(newResults)
+      setGenerationResult(newResults[0] ?? null)
+      setCurrentResultIndex(0)
+    }, 3000)
+  }
+
+  const handleRegenerate = () => {
+    setGenerationResult(null)
+    setGeneratedResults([])
+    handleGenerate()
+  }
+
+  const handleNavigateResult = (index: number) => {
+    setCurrentResultIndex(index)
+    setGenerationResult(generatedResults[index] ?? null)
   }
 
   // Example generated images (mock)
@@ -84,7 +143,7 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-6 py-6">
         {/* Back Button */}
-        <Link href="/dashboard/marketplace/styles">
+        <Link href="/create/marketplace/styles">
           <Button variant="ghost" className="mb-6 gap-2">
             <ArrowLeft className="w-4 h-4" />
             返回风格列表
@@ -258,7 +317,7 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
                         </div>
                         <Slider
                           value={[steps]}
-                          onValueChange={([v]) => setSteps(v)}
+                          onValueChange={([v]) => setSteps(v ?? 0)}
                           min={10}
                           max={50}
                           step={1}
@@ -273,7 +332,7 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
                         </div>
                         <Slider
                           value={[cfgScale]}
-                          onValueChange={([v]) => setCfgScale(v)}
+                          onValueChange={([v]) => setCfgScale(v ?? 0)}
                           min={1}
                           max={20}
                           step={0.5}
@@ -354,6 +413,21 @@ export default function StyleDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       </div>
+
+      {/* Result Preview Modal */}
+      <ResultPreviewModal
+        isOpen={showResultModal}
+        onClose={() => setShowResultModal(false)}
+        result={generationResult}
+        isGenerating={isGenerating}
+        progress={generationProgress}
+        onRegenerate={handleRegenerate}
+        onDownload={() => console.log("Download")}
+        onShare={() => console.log("Share")}
+        results={generatedResults}
+        currentIndex={currentResultIndex}
+        onNavigate={handleNavigateResult}
+      />
     </div>
   )
 }

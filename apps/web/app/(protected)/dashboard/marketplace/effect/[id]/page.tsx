@@ -31,6 +31,7 @@ import {
 } from "@workspace/ui/components/collapsible"
 import { effectTemplates } from "@/lib/types/marketplace-data"
 import { cn } from "@workspace/ui/lib/utils"
+import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
 export default function EffectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -42,6 +43,9 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
   const [isLiked, setIsLiked] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [uploadedImage, setUploadedImage] = useState<string | null>(null)
+  const [showResultModal, setShowResultModal] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState(0)
+  const [generationResult, setGenerationResult] = useState<GenerationResultData | null>(null)
   
   // Advanced parameters
   const [fps, setFps] = useState(template.parameters.fps)
@@ -51,7 +55,52 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
 
   const handleGenerate = () => {
     setIsGenerating(true)
-    setTimeout(() => setIsGenerating(false), 4000)
+    setShowResultModal(true)
+    setGenerationProgress(0)
+    setGenerationResult(null)
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 95) {
+          clearInterval(progressInterval)
+          return prev
+        }
+        return prev + Math.random() * 15
+      })
+    }, 500)
+
+    // Simulate generation complete
+    setTimeout(() => {
+      clearInterval(progressInterval)
+      setGenerationProgress(100)
+      setIsGenerating(false)
+      
+      // Mock result data
+      setGenerationResult({
+        id: `effect-${Date.now()}`,
+        type: "video",
+        url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        thumbnailUrl: template.thumbnail,
+        prompt: `${template.name} - ${description || "默认效果"}`,
+        duration: duration,
+        width: 1920,
+        height: 1080,
+        model: template.baseModel,
+        createdAt: new Date(),
+        parameters: {
+          "帧率": `${fps} FPS`,
+          "运动强度": `${Math.round(motionStrength * 100)}%`,
+          "风格强度": `${Math.round(styleStrength * 100)}%`,
+          "时长": `${duration}s`,
+        }
+      })
+    }, 4000)
+  }
+
+  const handleRegenerate = () => {
+    setGenerationResult(null)
+    handleGenerate()
   }
 
   return (
@@ -344,6 +393,18 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
       </div>
+
+      {/* Result Preview Modal */}
+      <ResultPreviewModal
+        isOpen={showResultModal}
+        onClose={() => setShowResultModal(false)}
+        result={generationResult}
+        isGenerating={isGenerating}
+        progress={generationProgress}
+        onRegenerate={handleRegenerate}
+        onDownload={() => console.log("Download")}
+        onShare={() => console.log("Share")}
+      />
     </div>
   )
 }

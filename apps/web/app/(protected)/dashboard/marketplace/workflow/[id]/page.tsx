@@ -20,7 +20,7 @@ import {
   AlertCircle,
   X
 } from "lucide-react"
-import { Button } from "@workspace/ui/components/button"
+  import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Textarea } from "@workspace/ui/components/textarea"
 import { Input } from "@workspace/ui/components/input"
@@ -42,17 +42,21 @@ import {
   Alert,
   AlertDescription,
 } from "@workspace/ui/components/alert"
-import { workflowTemplates } from "@/lib/types/marketplace-data"
-import { cn } from "@workspace/ui/lib/utils"
+import { WorkflowTemplate, workflowTemplates } from "@/lib/types/marketplace-data"
+import { cn } from "@/lib/utils"
+import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
 export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const template = workflowTemplates.find((t) => t.id === id) || workflowTemplates[0]
+  const template = workflowTemplates.find((t) => t.id === id) || workflowTemplates[0] as WorkflowTemplate
   
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [isLiked, setIsLiked] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
+  const [showResultModal, setShowResultModal] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState(0)
+  const [generationResult, setGenerationResult] = useState<GenerationResultData | null>(null)
   
   // Form state for inputs
   const [inputValues, setInputValues] = useState<Record<string, string | File | null>>({})
@@ -72,7 +76,61 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
 
   const handleGenerate = () => {
     setIsGenerating(true)
-    setTimeout(() => setIsGenerating(false), 5000)
+    setShowResultModal(true)
+    setGenerationProgress(0)
+    setGenerationResult(null)
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setGenerationProgress(prev => {
+        if (prev >= 95) {
+          clearInterval(progressInterval)
+          return prev
+        }
+        return prev + Math.random() * 12
+      })
+    }, 600)
+
+    // Simulate generation complete
+    setTimeout(() => {
+      clearInterval(progressInterval)
+      setGenerationProgress(100)
+      setIsGenerating(false)
+      
+      // Determine result type based on workflow
+      const isVideoWorkflow = template.tags.some(tag => 
+        tag.includes("视频") || tag.includes("动画") || tag.includes("motion")
+      )
+      
+      // Mock result data
+      setGenerationResult({
+        id: `workflow-${Date.now()}`,
+        type: isVideoWorkflow ? "video" : "image",
+        url: isVideoWorkflow 
+          ? "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+          : template.thumbnail,
+        thumbnailUrl: template.thumbnail,
+        prompt: Object.entries(inputValues)
+          .filter(([_, v]) => typeof v === "string" && v)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ") || template.name,
+        duration: isVideoWorkflow ? 5 : undefined,
+        width: 1920,
+        height: 1080,
+        model: "ComfyUI",
+        createdAt: new Date(),
+        parameters: {
+          "工作流": template.name,
+          "节点数": template.nodes.toString(),
+          "复杂度": complexityLabels[template.complexity],
+        }
+      })
+    }, 5000)
+  }
+
+  const handleRegenerate = () => {
+    setGenerationResult(null)
+    handleGenerate()
   }
 
   const handleFileUpload = (inputName: string, file: File) => {
@@ -97,7 +155,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-6 py-6">
         {/* Back Button */}
-        <Link href="/dashboard/marketplace/workflows">
+        <Link href="/create/marketplace/workflows">
           <Button variant="ghost" className="mb-6 gap-2">
             <ArrowLeft className="w-4 h-4" />
             返回工作流列表
@@ -259,7 +317,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                             <div className="relative aspect-video max-w-[200px] mx-auto rounded-lg overflow-hidden">
                               {input.type === "image" ? (
                                 <Image
-                                  src={uploadedFiles[input.name]}
+                                  src={uploadedFiles[input.name] ?? ""}
                                   alt={input.name}
                                   fill
                                   className="object-cover"
@@ -337,7 +395,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                         <CollapsibleContent className="space-y-4 pt-4">
                           <p className="text-sm text-muted-foreground">
                             高级参数需要了解 ComfyUI 工作流原理。
-                            <Link href="/dashboard/help" className="text-primary hover:underline ml-1">
+                            <Link href="/create/help" className="text-primary hover:underline ml-1">
                               查看文档
                             </Link>
                           </p>
@@ -387,6 +445,18 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
           </div>
         </div>
       </div>
+
+      {/* Result Preview Modal */}
+      <ResultPreviewModal
+        isOpen={showResultModal}
+        onClose={() => setShowResultModal(false)}
+        result={generationResult}
+        isGenerating={isGenerating}
+        progress={generationProgress}
+        onRegenerate={handleRegenerate}
+        onDownload={() => console.log("Download")}
+        onShare={() => console.log("Share")}
+      />
     </div>
   )
 }

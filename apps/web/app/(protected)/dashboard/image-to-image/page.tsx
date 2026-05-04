@@ -147,7 +147,7 @@ export default function ImageToImagePage() {
 
       {/* Right Panel - Result */}
       <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <GenerationResult
             type="image"
             isGenerating={isGenerating}

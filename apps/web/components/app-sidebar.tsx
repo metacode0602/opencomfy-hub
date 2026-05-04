@@ -68,7 +68,7 @@ const data = {
     },
     {
       title: "工作流",
-      url: "/dashboard/workflow",
+      url: "/dashboard/comfyui",
       icon: <Layers className="size-4" />,
     },
   ],
