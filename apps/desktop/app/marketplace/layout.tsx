@@ -11,7 +11,7 @@ export default function GenerateLayout({
       <header className="border-b bg-background/80 px-4 py-3 backdrop-blur">
         <nav className="mx-auto flex max-w-7xl items-center gap-4 text-sm">
           <Link
-            href="/index"
+            href="/marketplace"
             className="font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
           >
             ← 返回首页
