@@ -1,6 +1,8 @@
 {
   "Metadata": {
-    "name": "OpenRoute"
+    "name": "OpenRoute",
+    "title": "OpenRoute",
+    "description": "OpenRoute is a platform for building and deploying AI applications."
   },
   "Mail": {
     "common": {

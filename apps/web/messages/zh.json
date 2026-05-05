@@ -1,6 +1,8 @@
 {
   "Metadata": {
-    "name": "OpenRoute"
+    "name": "OpenRoute",
+    "title": "OpenRoute",
+    "description": "OpenRoute 是一个用于构建和部署 AI 应用的平台。"
   },
   "Mail": {
     "common": {
