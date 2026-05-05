@@ -13,6 +13,8 @@ import {
 } from "@workspace/ui/components/dialog"
 import { cn } from "@/lib/utils"
 import Link from "next/link"
+import Image from "next/image"
+import { websiteConfig } from "@/lib/config/website"
 
 const plans = [
   {
@@ -64,7 +66,7 @@ const plans = [
   },
 ]
 
-const SALES_WECHAT_ID = "ComfyHub_Sales"
+const SALES_WECHAT_ID = websiteConfig.metadata.social.wechatId;
 
 export function Pricing() {
   const [contactDialogOpen, setContactDialogOpen] = useState(false)
@@ -212,9 +214,10 @@ export function Pricing() {
           
           <div className="flex flex-col items-center gap-6 py-4">
             {/* QR Code Placeholder */}
-            <div className="w-48 h-48 rounded-xl border-2 border-dashed border-border bg-muted/30 flex items-center justify-center">
+            <div className="w-48 h-48 rounded-xl bg-muted/30 flex items-center justify-center">
               <div className="text-center">
-                <QrCode className="h-24 w-24 text-muted-foreground/50 mx-auto mb-2" />
+                {/* <QrCode className="h-24 w-24 text-muted-foreground/50 mx-auto mb-2" /> */}
+                <Image src="/images/wechat.png" alt="WeChat QR Code" width={200} height={200} className="mx-auto mb-2 rounded-xl" />
                 <p className="text-xs text-muted-foreground">微信二维码</p>
               </div>
             </div>
