@@ -1,16 +1,4 @@
-import { createAuth } from "@workspace/auth"
-import { db } from "./db"
-
-// export const auth = createAuth(db, {
-//   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
-//   secret: process.env.BETTER_AUTH_SECRET!,
-//   trustedOrigins: process.env.BETTER_AUTH_TRUSTED_ORIGINS
-//     ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",").map((s) => s.trim())
-//     : [],
-// })
-
-
-// import { db } from '@/db/drizzle'
+import { db } from './db'
 
 import { OrganizationInvitationEmail } from '@workspace/email'
 import { getActiveOrganization } from '@/lib/server/actions/organizations'
@@ -29,8 +17,13 @@ import { account, session,user, verification } from '@workspace/db/schema'
 import { Locale } from 'next-intl'
 import { parse as parseCookies } from 'cookie'
 import { websiteConfig } from './config/website'
-import { getUrlWithLocaleInCallbackUrl } from "@/lib/utils/urls"
-import { getUserById } from "@/lib/server/actions/users"
+import { getUrlWithLocaleInCallbackUrl } from '@/lib/utils/urls'
+import { getUserById } from '@/lib/server/actions/users'
+import { sendEmail } from '@/lib/mail'
+import { LOCALE_COOKIE_NAME, routing } from '@/lib/i18n/routing'
+import { render } from '@react-email/render'
+import { createElement } from 'react'
+import * as tencentcloud from 'tencentcloud-sdk-nodejs'
 
 const isProd = process.env.NODE_ENV === 'production'
 
@@ -91,7 +84,7 @@ export const auth = betterAuth({
         !user.email.endsWith('@openroute.cn')
       ) {
         try {
-          const subscribed = await subscribe(user.email)
+          const subscribed = await subscribeUserToNewsletter(user.email)
           if (!subscribed) {
             console.error(`Failed to subscribe user ${user.email} to newsletter`)
           } else {
@@ -147,8 +140,8 @@ export const auth = betterAuth({
           try {
             await auth.api.createOrganization({
               body: {
-                name: user.name || user.email.split('@')[0], // 使用用户名或邮箱前缀作为组织名
-                slug: (user.name || user.email.split('@')[0]).toLowerCase().replace(/\s+/g, '-'),
+                name: user.name || user.email?.split('@')[0] || 'user', // 使用用户名或邮箱前缀作为组织名
+                slug: (user.name || user.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, '-'),
                 userId: user.id,
                 metadata: {
                   langfuse: {
@@ -176,7 +169,7 @@ export const auth = betterAuth({
             if (userInfo && userInfo.id) {
               const newOrganization = await auth.api.createOrganization({
                 body: {
-                  name: userInfo?.email || userInfo?.phoneNumber || userInfo?.name || '',
+                  name: userInfo?.email || userInfo?.name || '',
                   slug: (userInfo?.email?.replace('@', '-') || userInfo.id).toLowerCase().replace(/\s+/g, '-'),
                   userId: userInfo?.id,
                   metadata: {
@@ -202,7 +195,7 @@ export const auth = betterAuth({
           return {
             data: {
               ...session,
-              activeOrganizationId: organization?.id,
+              activeOrganizationId: organization?.organization?.id,
             },
           }
         },
@@ -226,18 +219,30 @@ export const auth = betterAuth({
     organizationPlugin({
       async sendInvitationEmail(data) {
         const inviteLink = `${process.env.NEXT_PUBLIC_APP_URL}/api/accept-invitation/${data.id}`
-
-        resend.emails.send({
-          from: `${process.env.EMAIL_SENDER_NAME} <${process.env.EMAIL_SENDER_ADDRESS}>`,
-          to: data.email,
-          subject: "You've been invited to join our organization",
-          react: OrganizationInvitationEmail({
+        const html = await render(
+          createElement(OrganizationInvitationEmail, {
             email: data.email,
             invitedByUsername: data.inviter.user.name,
             invitedByEmail: data.inviter.user.email,
             teamName: data.organization.name,
             inviteLink,
           }),
+        )
+        const text = await render(
+          createElement(OrganizationInvitationEmail, {
+            email: data.email,
+            invitedByUsername: data.inviter.user.name,
+            invitedByEmail: data.inviter.user.email,
+            teamName: data.organization.name,
+            inviteLink,
+          }),
+          { plainText: true },
+        )
+        await sendEmail({
+          to: data.email,
+          subject: "You've been invited to join our organization",
+          html,
+          text,
         })
       },
       roles: {
@@ -255,7 +260,6 @@ export const auth = betterAuth({
       bannedUserMessage:
         'You have been banned from this application. Please contact support if you believe this is an error.',
     }),
-    apiKey(),
     phoneNumber({
       sendOTP: async ({ phoneNumber, code }, request) => {
         // Implement sending OTP code via SMS
@@ -298,6 +302,11 @@ export const auth = betterAuth({
 export function getLocaleFromRequest(request?: Request): Locale {
   const cookies = parseCookies(request?.headers.get('cookie') ?? '')
   return (cookies[LOCALE_COOKIE_NAME] as Locale) ?? routing.defaultLocale
+}
+
+/** Hook newsletter provider here (e.g. mailing list API). */
+async function subscribeUserToNewsletter(_email: string): Promise<boolean> {
+  return false
 }
 
 async function sendSmsCodeByTecent(phone: string, code: string) {

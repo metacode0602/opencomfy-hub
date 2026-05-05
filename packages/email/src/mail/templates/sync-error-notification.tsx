@@ -1,7 +1,6 @@
-import { defaultMessages } from '@/i18n/messages'
-import { routing } from '@/i18n/routing'
-import EmailLayout from '@/mail/components/email-layout'
-import type { BaseEmailProps } from '@/mail/types'
+import EmailLayout from '../components/email-layout'
+import { previewDefaultLocale, previewMessages } from '../preview-messages'
+import type { BaseEmailProps } from '../types'
 import { Heading, Hr, Section, Text } from '@react-email/components'
 
 interface SyncErrorNotificationProps extends BaseEmailProps {
@@ -88,8 +87,8 @@ export function SyncErrorNotification({
 }
 
 SyncErrorNotification.PreviewProps = {
-  locale: routing.defaultLocale,
-  messages: defaultMessages,
+  locale: previewDefaultLocale,
+  messages: previewMessages,
   syncDate: '2025-01-15 10:30:00',
   totalUsers: 100,
   processed: 85,

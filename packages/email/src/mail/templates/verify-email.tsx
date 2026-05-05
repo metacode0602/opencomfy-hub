@@ -27,8 +27,8 @@ export function VerifyEmail({ url, name, locale, messages }: VerifyEmailProps) {
 }
 
 VerifyEmail.PreviewProps = {
-  locale: routing.defaultLocale,
-  messages: defaultMessages,
+  locale: previewDefaultLocale,
+  messages: previewMessages,
   url: 'https://www.openroute.cn',
   name: 'username',
 }

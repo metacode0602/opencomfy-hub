@@ -1,3 +1,33 @@
 {
-	"Metadata": {}
+  "Metadata": {
+    "name": "OpenRoute"
+  },
+  "Mail": {
+    "common": {
+      "team": "The {name} team",
+      "copyright": "© {year} All rights reserved."
+    },
+    "verifyEmail": {
+      "subject": "Verify your email",
+      "title": "Hello {name},",
+      "body": "Please confirm your email address using the button below.",
+      "confirmEmail": "Verify email"
+    },
+    "forgotPassword": {
+      "subject": "Reset your password",
+      "title": "Hello {name},",
+      "body": "We received a request to reset your password. Click the button below to continue.",
+      "resetPassword": "Reset password"
+    },
+    "contactMessage": {
+      "subject": "New contact message",
+      "name": "Name: {name}",
+      "email": "Email: {email}",
+      "message": "Message: {message}"
+    },
+    "subscribeNewsletter": {
+      "subject": "Newsletter subscription",
+      "body": "You are subscribed to our newsletter."
+    }
+  }
 }

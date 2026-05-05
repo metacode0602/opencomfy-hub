@@ -42,7 +42,7 @@ interface ModelSelectorProps {
 
 export function ModelSelector({ type, value, onChange }: ModelSelectorProps) {
   const models = type === "image" ? imageModels : videoModels
-  const selectedModel = models.find((m) => m.id === value) || models[0]
+  const selectedModel = models.find((m) => m.id === value) ?? models[0]!
 
   return (
     <DropdownMenu>

@@ -1,3 +1,33 @@
 {
-	"Metadata": {}
+  "Metadata": {
+    "name": "OpenRoute"
+  },
+  "Mail": {
+    "common": {
+      "team": "{name} 团队",
+      "copyright": "© {year} 保留所有权利。"
+    },
+    "verifyEmail": {
+      "subject": "验证您的邮箱",
+      "title": "您好 {name}，",
+      "body": "请点击下方按钮完成邮箱验证。",
+      "confirmEmail": "验证邮箱"
+    },
+    "forgotPassword": {
+      "subject": "重置密码",
+      "title": "您好 {name}，",
+      "body": "我们收到了重置密码的请求，请点击下方按钮继续。",
+      "resetPassword": "重置密码"
+    },
+    "contactMessage": {
+      "subject": "新的联系留言",
+      "name": "姓名：{name}",
+      "email": "邮箱：{email}",
+      "message": "留言：{message}"
+    },
+    "subscribeNewsletter": {
+      "subject": "订阅电子通讯",
+      "body": "您已成功订阅我们的电子通讯。"
+    }
+  }
 }

@@ -1,10 +1,10 @@
 
 import { websiteConfig } from '@/lib/config/website'
 import { sendInquiryNotifySms } from '@/lib/sms-notify'
-import { sendEmail } from '@/mail'
+import { sendEmail } from '@/lib/mail'
 import { getLocale } from 'next-intl/server'
 import { z } from 'zod'
-import contactInquiriesDataAccess from '@/web/contact-inquiries'
+import contactInquiriesDataAccess from '@/lib/server/actions/contact-inquiries'
 
 /**
  * DOC: When using Zod for validation, how can I localize error messages?
@@ -71,7 +71,7 @@ export const sendMessageAction = async (parsedInput: ContactFormInput) => {
       email,
       message,
       phone: phone?.trim(),
-    }).catch((err) => console.error('[send-message] notify SMS error:', err))
+    }).catch((err: unknown) => console.error('[send-message] notify SMS error:', err))
 
     return { success: true }
   } catch (error) {

@@ -83,12 +83,12 @@ export const websiteConfig = {
     relatedPostsSize: 3,
   },
   mail: {
-    provider: 'nodemailer',
+    provider: 'nodemailer' as const,
     fromEmail: 'ByteMarketing <service@julianshuke.com>',
     supportEmail: 'ByteMarketing <service@bytemarketing.net>',
   },
   newsletter: {
-    provider: 'nodemailer',
+    provider: 'nodemailer' as const,
     autoSubscribeAfterSignUp: true,
   },
   storage: {

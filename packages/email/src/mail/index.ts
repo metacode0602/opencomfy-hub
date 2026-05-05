@@ -1,5 +1,6 @@
 import { render } from '@react-email/render'
-import type { Locale, Messages } from 'next-intl'
+import { createElement, type ComponentType, type ReactElement } from 'react'
+import type { Locale } from 'next-intl'
 import type { CreateMailServiceOptions } from './config'
 import { NodemailerProvider } from './provider/nodemailer'
 import { ResendProvider } from './provider/resend'
@@ -31,14 +32,14 @@ export function createMailService(options: CreateMailServiceOptions): MailServic
   let mailProvider: MailProvider | null = null
 
   const getTemplate: GetTemplateFn = async ({ template, context, locale = options.defaultLocale }) => {
-    const mainTemplate = EmailTemplates[template]
+    const Template = EmailTemplates[template] as unknown as ComponentType<Record<string, unknown>>
     const messages = await options.getMessagesForLocale(locale)
 
-    const email = mainTemplate({
-      ...(context as Record<string, unknown>),
+    const email = createElement(Template, {
+      ...context,
       locale,
       messages,
-    })
+    } as Record<string, unknown>) as ReactElement
 
     let subject = ''
     try {

@@ -1,7 +1,6 @@
-import { defaultMessages } from '@/i18n/messages'
-import { routing } from '@/i18n/routing'
-import EmailLayout from '@/mail/components/email-layout'
-import type { BaseEmailProps } from '@/mail/types'
+import EmailLayout from '../components/email-layout'
+import { previewDefaultLocale, previewMessages } from '../preview-messages'
+import type { BaseEmailProps } from '../types'
 import { Text } from '@react-email/components'
 import { createTranslator } from 'use-intl/core'
 
@@ -28,8 +27,8 @@ export function ContactMessage({ name, email, message, locale, messages }: Conta
 }
 
 ContactMessage.PreviewProps = {
-  locale: routing.defaultLocale,
-  messages: defaultMessages,
+  locale: previewDefaultLocale,
+  messages: previewMessages,
   name: 'username',
   email: 'username@example.com',
   message: 'This is a test message',

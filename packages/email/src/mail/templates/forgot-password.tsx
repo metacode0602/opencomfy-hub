@@ -1,8 +1,7 @@
-import { defaultMessages } from '@/i18n/messages'
-import { routing } from '@/i18n/routing'
-import EmailButton from '@/mail/components/email-button'
-import EmailLayout from '@/mail/components/email-layout'
-import type { BaseEmailProps } from '@/mail/types'
+import EmailButton from '../components/email-button'
+import EmailLayout from '../components/email-layout'
+import { previewDefaultLocale, previewMessages } from '../preview-messages'
+import type { BaseEmailProps } from '../types'
 import { Text } from '@react-email/components'
 import { createTranslator } from 'use-intl/core'
 
@@ -28,8 +27,8 @@ export function ForgotPassword({ url, name, locale, messages }: ForgotPasswordPr
 }
 
 ForgotPassword.PreviewProps = {
-  locale: routing.defaultLocale,
-  messages: defaultMessages,
+  locale: previewDefaultLocale,
+  messages: previewMessages,
   url: 'https://www.openroute.cn',
   name: 'username',
 }

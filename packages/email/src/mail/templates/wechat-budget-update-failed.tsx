@@ -1,8 +1,7 @@
 import { Heading, Hr, Section, Text } from '@react-email/components'
-import { defaultMessages } from '@/i18n/messages'
-import { routing } from '@/i18n/routing'
-import EmailLayout from '@/mail/components/email-layout'
-import type { BaseEmailProps } from '@/mail/types'
+import EmailLayout from '../components/email-layout'
+import { previewDefaultLocale, previewMessages } from '../preview-messages'
+import type { BaseEmailProps } from '../types'
 
 interface WechatBudgetUpdateFailedProps extends BaseEmailProps {
   orderId: string
@@ -112,8 +111,8 @@ export function WechatBudgetUpdateFailed({
 }
 
 WechatBudgetUpdateFailed.PreviewProps = {
-  locale: routing.defaultLocale,
-  messages: defaultMessages,
+  locale: previewDefaultLocale,
+  messages: previewMessages,
   orderId: 'wechat_1234567890_abcdef',
   amount: 100.0,
   newBalance: 500.0,

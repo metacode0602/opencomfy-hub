@@ -22,7 +22,6 @@ export const trpcLinks = [
       if (session instanceof Error || !session) {
         return {}
       }
-      // @ts-expect-error - better-auth 类型定义问题
       return {
         Authorization: `Bearer ${session.data?.session.token}`,
         'x-trpc-source': 'client',
