@@ -70,9 +70,11 @@ export function Hero() {
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </Link>
-          <Button variant="outline" size="lg" className="text-lg px-8 h-12">
-            <Play className="mr-2 h-5 w-5" />
-            观看演示
+          <Button variant="outline" size="lg" className="text-lg px-8 h-12" asChild>
+            <Link href="/dashboard/dancing/zk-video">
+              <Play className="mr-2 h-5 w-5" />
+              观看演示
+            </Link>
           </Button>
         </motion.div>
 

@@ -11,12 +11,12 @@ import type { StyleTemplate, EffectTemplate, WorkflowTemplate } from "@/lib/type
 
 interface TemplateCardProps {
   template: StyleTemplate | EffectTemplate | WorkflowTemplate
-  type: "style" | "effect" | "workflow"
+  type: "style" | "effect" | "workflow" | "dancing"
   index?: number
 }
 
 export function TemplateCard({ template, type, index = 0 }: TemplateCardProps) {
-  const href = `/dashboard/marketplace/${type}/${template.id}`
+  const href = type === "dancing" ? `/dashboard/dancing/${template.id}` : `/dashboard/marketplace/${type}/${template.id}`
   
   const isWorkflow = type === "workflow"
   const workflow = isWorkflow ? (template as WorkflowTemplate) : null

@@ -30,6 +30,7 @@ import {
   Sparkles,
   Store,
   Video,
+  VideotapeIcon,
   Wand2,
 } from "lucide-react"
 import Link from "next/link"
@@ -73,6 +74,11 @@ const data = {
     },
   ],
   navMarketplace: [
+    {
+      title: "舞蹈生成",
+      url: "/dashboard/dancing",
+      icon: <VideotapeIcon className="size-4" />,
+    },
     {
       title: "模板市场",
       url: "/dashboard/marketplace/index",
