@@ -43,7 +43,7 @@ import {
   AlertDescription,
 } from "@workspace/ui/components/alert"
 import { WorkflowTemplate, workflowTemplates } from "@/lib/types/marketplace-data"
-import { cn } from "@/lib/utils"
+import { cn } from "@workspace/ui/lib/utils"
 import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
 export default function WorkflowDetailPage({ params }: { params: Promise<{ id: string }> }) {

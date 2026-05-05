@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@workspace/ui/components/dialog"
-import { cn } from "@/lib/utils"
+import { cn } from "@workspace/ui/lib/utils"
 import Link from "next/link"
 import Image from "next/image"
 import { websiteConfig } from "@/lib/config/website"

@@ -1,11 +1,11 @@
-import { createTRPCRouter, protectedProcedure, publicProcedure } from '@/server/routers/trpc'
+import { createTRPCRouter, protectedProcedure, publicProcedure } from '@/lib/server/routers/trpc'
 import { z } from 'zod'
 import {
   generateUserInvitationCode,
   verifyInvitationCode,
   getUserInvitationStats,
   getUserInvitationCode,
-} from '@/server/actions/invitations'
+} from '@/lib/server/actions/invitations'
 
 export const invitationRouter = createTRPCRouter({
   /**
@@ -18,18 +18,18 @@ export const invitationRouter = createTRPCRouter({
         expiresAt: z.date().optional(),
       })
     )
-    .mutation(async ({ ctx }) => {
+    .mutation(async ({ ctx, input }) => {
       try {
         const code = await generateUserInvitationCode(ctx.user.id, {
-          maxUsage: ctx.input.maxUsage,
-          expiresAt: ctx.input.expiresAt,
+          maxUsage: input.maxUsage,
+          expiresAt: input.expiresAt,
         })
 
         return {
           success: true,
           data: {
-            code: code.code,
-            id: code.id,
+            code: code?.code,
+            id: code?.id,
           },
         }
       } catch (error) {

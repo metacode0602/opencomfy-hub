@@ -1,6 +1,6 @@
 import { createTRPCRouter, protectedProcedure } from '../trpc'
-import { db } from '@/db/drizzle'
-import { session, user } from '@/db/schema'
+import { db } from '@/lib/db'
+import { session, user } from '@workspace/db/schema'
 import { eq, and, gt, count } from 'drizzle-orm'
 
 export const firstLoginRouter = createTRPCRouter({

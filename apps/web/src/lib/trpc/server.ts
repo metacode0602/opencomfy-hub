@@ -1,12 +1,12 @@
-import { createTRPCContext, type AppRouter, createCallerFactory } from '@/server/routers'
-import type { UserWithRole } from '@/server/routers/trpc'
+import { createTRPCContext, type AppRouter, createCallerFactory } from '@/lib/server/routers'
+import type { UserWithRole } from '@/lib/server/routers/trpc'
 import { createTRPCClient, httpBatchLink, loggerLink } from '@trpc/client'
 import superjson from 'superjson'
 import { authClient } from '../auth-client'
 import { auth } from '../auth'
-import { getBaseUrl } from '../urls/urls'
+import { getBaseUrl } from '@/lib/utils/urls'
 import { headers } from 'next/headers'
-import { appRouter } from '@/server/routers'
+import { appRouter } from '@/lib/server/routers'
 
 // TRPC Server Api
 export const serverApi = createTRPCClient<AppRouter>({

@@ -12,7 +12,7 @@ export default function LandingPage() {
     <main className="min-h-screen">
       <Navbar />
       <Hero />
-      {/* <Features /> */}
+      <Features />
       <MarketplaceSection />
       <Models />
       <Showcase />
