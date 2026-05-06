@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  next-themes@0.4.6:
+    hash: 94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47
+    path: patches/next-themes@0.4.6.patch
+
 importers:
 
   .:
@@ -131,7 +136,7 @@ importers:
         version: 16.2.3(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       next-themes:
         specifier: ^0.4.6
-        version: 0.4.6(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+        version: 0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       radix-ui:
         specifier: ^1.4.3
         version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -308,6 +313,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@better-fetch/fetch':
+        specifier: ^1.1.21
+        version: 1.1.21
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -359,6 +367,9 @@ importers:
       '@workspace/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@workspace/shared-next':
+        specifier: workspace:*
+        version: link:../../packages/shared-next
       '@workspace/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -403,7 +414,7 @@ importers:
         version: 4.11.0(next@16.2.3(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
       next-themes:
         specifier: ^0.4.6
-        version: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -646,6 +657,42 @@ importers:
         specifier: ^8.57.2
         version: 8.58.0(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
 
+  packages/shared-next:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.6.0
+      '@types/react':
+        specifier: ^19.2.10
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.14)
+      '@workspace/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@workspace/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      eslint:
+        specifier: ^9.39.2
+        version: 9.39.4(jiti@2.6.1)
+      next:
+        specifier: 16.2.3
+        version: 16.2.3(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      prettier:
+        specifier: ^3.8.1
+        version: 3.8.3
+      react:
+        specifier: ^19.2.4
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.2.4
+        version: 19.2.5(react@19.2.5)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
   packages/typescript-config: {}
 
   packages/ui:
@@ -676,7 +723,7 @@ importers:
         version: 1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       next-themes:
         specifier: ^0.4.6
-        version: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+        version: 0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       radix-ui:
         specifier: ^1.4.3
         version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -13467,7 +13514,7 @@ snapshots:
       fumadocs-core: 16.7.7(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.4)(@types/mdast@4.0.4)(@types/react@19.2.14)(flexsearch@0.8.212)(lucide-react@1.14.0(react@19.2.4))(next@16.2.3(@opentelemetry/api@1.9.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(zod@4.3.6)
       lucide-react: 1.14.0(react@19.2.4)
       motion: 12.38.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      next-themes: 0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      next-themes: 0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
       react-medium-image-zoom: 5.4.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -14773,12 +14820,12 @@ snapshots:
     transitivePeerDependencies:
       - '@swc/helpers'
 
-  next-themes@0.4.6(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
+  next-themes@0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
     dependencies:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
-  next-themes@0.4.6(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
+  next-themes@0.4.6(patch_hash=94d86b7ef145c9e764d80d64ddfb07b05cb021a90b8a150b39da44254d6d5f47)(react-dom@19.2.5(react@19.2.5))(react@19.2.5):
     dependencies:
       react: 19.2.5
       react-dom: 19.2.5(react@19.2.5)
