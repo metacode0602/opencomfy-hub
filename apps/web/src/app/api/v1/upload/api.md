@@ -158,6 +158,35 @@ print(f"Status Code: {response.status_code}")
 - sourceImage参数值应为完整的图片URL地址
 - 图片URL由postUrl和key拼接而成
 
+### 本仓库：`POST /api/v1/upload` 与 Comfy 工作流
+
+服务端代理上传完成后，响应 JSON 中会包含：
+
+| 字段 | 说明 |
+|------|------|
+| `imageUrl` | 已按 `{postUrl}/{key}` 规则拼好的完整可访问 URL，可直接用于生图 |
+| `postUrl` | OSS 根地址（无末尾 `/`） |
+| `key` | 对象键（可含路径前缀，如 `aliyun-cn-prod/xxx.png`） |
+
+在 **Comfy 工作流**（例如 `POST /api/v1/generate/comfy`）中，应将上述**完整图片 URL** 写入对应节点的 `inputs.image`（如 `LoadImage` 节点），例如：
+
+```json
+{
+  "templateUuid": "<模版 UUID>",
+  "generateParams": {
+    "33": {
+      "class_type": "LoadImage",
+      "inputs": {
+        "image": "https://liblibai-airship-temp.oss-cn-beijing.aliyuncs.com/aliyun-cn-prod/a0d9244a5ea14465955faf6b178240b8.png"
+      }
+    },
+    "workflowUuid": "<工作流 UUID>"
+  }
+}
+```
+
+其中 `inputs.image` 的值须与上传结果中的 `imageUrl`（或自行拼接的 `{postUrl}/{key}`）一致，且为带协议的完整 URL。
+
 ## 错误处理
 
 常见错误情况：

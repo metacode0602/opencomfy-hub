@@ -57,7 +57,18 @@ export function useGenerateJob(submitPath: string, statusPath: string) {
 
       setPhase({ kind: "running", stage: "submit", attempt: 0 })
 
-      const sub = await postJson<unknown>(submitPath, body)
+      let sub: Awaited<ReturnType<typeof postJson<unknown>>>
+      try {
+        sub = await postJson<unknown>(submitPath, body)
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : typeof e === "string" ? e : "未知错误"
+        setPhase({
+          kind: "error",
+          message: `网络请求失败：${msg}。请确认 dashboard（默认 http://localhost:3000）已启动，且与 NEXT_PUBLIC_OPENCOMFY_API_BASE 一致。`,
+        })
+        return
+      }
       if (ac.signal.aborted) return
 
       if (!sub.ok) {
@@ -93,7 +104,18 @@ export function useGenerateJob(submitPath: string, statusPath: string) {
           attempt,
         })
 
-        const st = await postJson<unknown>(statusPath, { generateUuid: uuid })
+        let st: Awaited<ReturnType<typeof postJson<unknown>>>
+        try {
+          st = await postJson<unknown>(statusPath, { generateUuid: uuid })
+        } catch (e) {
+          const msg =
+            e instanceof Error ? e.message : typeof e === "string" ? e : "未知错误"
+          setPhase({
+            kind: "error",
+            message: `轮询时网络失败：${msg}`,
+          })
+          return
+        }
         if (ac.signal.aborted) return
 
         if (!st.ok) {
