@@ -152,6 +152,7 @@ export interface EffectTemplate {
   category: "transition" | "motion" | "style" | "text" | "particle" | "dancing"
   thumbnail: string
   previewUrl?: string
+  videoUrl?: string  // 视频地址
   author: string
   likes: number
   uses: number
@@ -168,24 +169,25 @@ export interface EffectTemplate {
 
 
 export const dancingTemplates: EffectTemplate[] = [
-    {
-      id: "zk-video",
-      name: "璇非摇手势舞",
-      description: "璇非摇手势舞，秋日心动指南，璇非摇",
-      category: "dancing",
-      thumbnail: "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=400&h=400&fit=crop",
-      author: "Genesis官方",
-      likes: 1823,
-      uses: 12456,
-      tags: ["转场", "璇非摇", "专业", "秋日心动"],
-      duration: 3,
-      baseModel: "Sora",
-      parameters: {
-        fps: 24,
-        motionStrength: 0.7,
-        styleStrength: 0.5,
-      },
+  {
+    id: "zk-video",
+    name: "璇非摇手势舞",
+    description: "璇非摇手势舞，秋日心动指南，璇非摇",
+    category: "dancing",
+    thumbnail: "/assets/pics/yaofeiyao.png",
+    videoUrl: "/assets/videos/xuanfeiyao.mp4",
+    author: "Genesis官方",
+    likes: 1823,
+    uses: 12456,
+    tags: ["转场", "璇非摇", "专业", "秋日心动"],
+    duration: 3,
+    baseModel: "Sora",
+    parameters: {
+      fps: 24,
+      motionStrength: 0.7,
+      styleStrength: 0.5,
     },
+  },
 ]
 
 export const effectTemplates: EffectTemplate[] = [

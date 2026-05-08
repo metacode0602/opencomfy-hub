@@ -31,7 +31,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@workspace/ui/components/collapsible"
-import { EffectTemplate, effectTemplates } from "@/lib/types/marketplace-data"
+import { dancingTemplates, EffectTemplate, effectTemplates } from "@/lib/types/marketplace-data"
 import { cn } from "@workspace/ui/lib/utils"
 import { ResultPreviewModal, GenerationResultData } from "@/components/marketplace/result-preview-modal"
 
@@ -136,7 +136,7 @@ function progressFromStatus(status: number, percent?: number): number {
 
 export default function EffectDetailPage() {
   const id = "zk-video";
-  const template = effectTemplates.find((t) => t.id === id) || effectTemplates[0] as EffectTemplate
+  const template = dancingTemplates.find((t) => t.id === id) || dancingTemplates[0] as EffectTemplate
   
   const [description, setDescription] = useState("")
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
@@ -155,6 +155,8 @@ export default function EffectDetailPage() {
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelledRef = useRef(false)
   const previewBlobRef = useRef<string | null>(null)
+  const demoVideoRef = useRef<HTMLVideoElement | null>(null)
+  const [isDemoVideoPlaying, setIsDemoVideoPlaying] = useState(false)
 
   // Advanced parameters
   const [fps, setFps] = useState(template.parameters.fps)
@@ -181,6 +183,15 @@ export default function EffectDetailPage() {
       if (b?.startsWith("blob:")) URL.revokeObjectURL(b)
     }
   }, [clearPollTimer])
+
+  useEffect(() => {
+    if (!isDemoVideoPlaying || !template.videoUrl) return
+    const el = demoVideoRef.current
+    if (!el) return
+    void el.play().catch(() => {
+      /* 部分环境需用户手势后才可播；点击已触发，忽略即可 */
+    })
+  }, [isDemoVideoPlaying, template.videoUrl])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -355,7 +366,7 @@ export default function EffectDetailPage() {
 
     setGenerationProgress(12)
     // 测试代码，正式代码需要删除
-    imageUrl = "https://liblibai-tmp-image.liblib.cloud/img/920809fc878b42509425f8bb79d905c6/f06d53252886e8b3e9267b39db612759b1ebb7782d4c22e901eaf16bb8a75b9b.png";
+    // imageUrl = "https://liblibai-tmp-image.liblib.cloud/img/920809fc878b42509425f8bb79d905c6/f06d53252886e8b3e9267b39db612759b1ebb7782d4c22e901eaf16bb8a75b9b.png";
     const generateBody = {
       templateUuid: ZK_TEMPLATE_UUID,
       generateParams: {
@@ -448,21 +459,41 @@ export default function EffectDetailPage() {
               animate={{ opacity: 1, scale: 1 }}
               className="relative aspect-video rounded-2xl overflow-hidden border border-border bg-muted"
             >
-              <Image
-                src={template.thumbnail}
-                alt={template.name}
-                fill
-                className="object-cover"
-              />
-              {/* Play Overlay */}
-              <div className="absolute inset-0 flex items-center justify-center bg-background/30">
-                <Button size="lg" className="gap-2 rounded-full">
-                  <Play className="w-5 h-5" />
-                  预览舞蹈生成
-                </Button>
-              </div>
-              {/* Duration Badge */}
-              <Badge className="absolute bottom-4 right-4 bg-background/80 backdrop-blur-sm">
+              {isDemoVideoPlaying && template.videoUrl ? (
+                <video
+                  ref={demoVideoRef}
+                  src={template.videoUrl}
+                  className="absolute inset-0 h-full w-full object-contain bg-black"
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <>
+                  <Image
+                    src={template.thumbnail}
+                    alt={template.name}
+                    fill
+                    className="object-contain"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/30">
+                    <Button
+                      type="button"
+                      size="lg"
+                      className="gap-2 rounded-full"
+                      disabled={!template.videoUrl}
+                      onClick={() => {
+                        if (!template.videoUrl) return
+                        setIsDemoVideoPlaying(true)
+                      }}
+                    >
+                      <Play className="w-5 h-5" />
+                      预览舞蹈生成
+                    </Button>
+                  </div>
+                </>
+              )}
+              <Badge className="absolute bottom-4 right-4 bg-background/80 backdrop-blur-sm pointer-events-none z-10">
                 <Clock className="w-3 h-3 mr-1" />
                 {template.duration}秒
               </Badge>
