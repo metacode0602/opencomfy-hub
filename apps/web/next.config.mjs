@@ -2,6 +2,7 @@ import createNextIntlPlugin from "next-intl/plugin"
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   transpilePackages: [
     "@workspace/ui",
     "@workspace/auth",
@@ -13,6 +14,10 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: "images.unsplash.com",
+      },
+      {
+        protocol: "https",
+        hostname: "liblibai-tmp-image.liblib.cloud",
       },
     ],
   },
