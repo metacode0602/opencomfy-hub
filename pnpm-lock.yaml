@@ -331,9 +331,6 @@ importers:
       '@react-email/render':
         specifier: ^2.0.8
         version: 2.0.8(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      '@swc/helpers':
-        specifier: ^0.5.17
-        version: 0.5.21
       '@tabler/icons-react':
         specifier: ^3.41.0
         version: 3.41.1(react@19.2.4)
@@ -11434,6 +11431,7 @@ snapshots:
   '@swc/helpers@0.5.21':
     dependencies:
       tslib: 2.8.1
+    optional: true
 
   '@swc/types@0.1.26':
     dependencies:
