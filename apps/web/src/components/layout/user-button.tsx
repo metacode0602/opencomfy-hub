@@ -52,11 +52,11 @@ export function UserButton({ user }: UserButtonProps) {
       <DropdownMenuTrigger>
         <UserAvatar name={user.name} image={user.image} className='size-8 cursor-pointer border' />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='end'>
+      <DropdownMenuContent align='end' className='w-56'>
         <div className='flex items-center justify-start gap-2 p-2'>
           <div className='flex flex-col space-y-1 leading-none'>
             <p className='font-medium'>{user.name}</p>
-            <p className='w-[200px] truncate text-muted-foreground text-sm'>{user.email}</p>
+            <p className='truncate text-muted-foreground text-sm'>{user.email}</p>
           </div>
         </div>
         <DropdownMenuSeparator />

@@ -272,7 +272,7 @@ export const auth = betterAuth({
       },
       signUpOnVerification: {
         getTempEmail: (phoneNumber) => {
-          return `${phoneNumber}@opencomfy.com`
+          return `${phoneNumber}@${websiteConfig.auth.emailSuffix}`
         },
         //optionally, you can also pass `getTempName` function to generate a temporary name for the user
         getTempName: (phoneNumber) => {

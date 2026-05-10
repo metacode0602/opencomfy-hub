@@ -7,10 +7,10 @@ const footerLinks = {
   product: {
     title: "产品",
     links: [
-      { label: "功能", href: "#features" },
-      { label: "模型", href: "#models" },
-      { label: "定价", href: "#pricing" },
-      { label: "更新日志", href: "#" },
+      { label: "功能", href: "/#features" },
+      { label: "模型", href: "/#models" },
+      { label: "定价", href: "/#pricing" },
+      { label: "更新日志", href: "/changelog" },
     ],
   },
   resources: {
@@ -25,18 +25,18 @@ const footerLinks = {
   company: {
     title: "公司",
     links: [
-      { label: "关于我们", href: "#" },
+      { label: "关于我们", href: "/about" },
       { label: "博客", href: "#" },
       { label: "招聘", href: "#" },
-      { label: "联系我们", href: "#" },
+      { label: "联系我们", href: "/contact" },
     ],
   },
   legal: {
     title: "法律",
     links: [
-      { label: "隐私政策", href: "#" },
-      { label: "服务条款", href: "#" },
-      { label: "Cookie 政策", href: "#" },
+      { label: "隐私政策", href: "/privacy" },
+      { label: "服务条款", href: "/terms" },
+      { label: "Cookie 政策", href: "/cookie" },
     ],
   },
 }

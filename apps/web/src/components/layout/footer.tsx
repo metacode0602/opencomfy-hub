@@ -4,8 +4,8 @@ import Container from '@/components/layout/container'
 import { Logo } from '@/components/layout/logo'
 import { getFooterLinks } from '@/lib/config/footer-config'
 import { getSocialLinks } from '@/lib/config/social-config'
-import { LocaleLink } from '@/i18n/navigation'
-import { cn } from '@/lib/utils'
+import { LocaleLink } from '@/lib/i18n/navigation'
+import { cn } from '@workspace/ui/lib/utils'
 import { useTranslations } from 'next-intl'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -24,7 +24,7 @@ export function Footer({ className }: React.HTMLAttributes<HTMLElement>) {
             <div className='space-y-4'>
               {/* logo and name */}
               <div className='flex items-center space-x-2'>
-                <Logo full={true} />
+                <Logo />
                 {/* <span className='font-semibold text-sm lg:text-xl whitespace-nowrap'>{t('Metadata.name')}</span> */}
               </div>
 

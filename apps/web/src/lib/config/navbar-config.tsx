@@ -1,11 +1,12 @@
 'use client'
 
-import { Routes } from '@/lib/routes'
 import type { NestedMenuItem } from '@/lib/types/index'
 import {
-  BookXIcon,
-  MessageCircleIcon,
+  BrainIcon,
+  DollarSignIcon,
   SparklesIcon,
+  Package2,
+  BookOpenIcon,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -24,22 +25,28 @@ export function getNavbarLinks(): NestedMenuItem[] {
 
   return [
     {
-      title: "公司咨询",
-      icon: <MessageCircleIcon className="size-4 shrink-0" />,
-      href: Routes.Company,
+      title: "功能",
+      icon: <Package2 className="size-4 shrink-0" />,
+      href: "/#features",
       external: false,
     },
     {
-      title: "观点洞察",
-      icon: <SparklesIcon className="size-4 shrink-0" />,
-      href: Routes.Insights,
+      title: "模型",
+      icon: <BrainIcon className="size-4 shrink-0" />,
+      href: "/#models",
       external: false,
     },
-    // {
-    //   title: t('blog.title'),
-    //   icon: <FileTextIcon className='size-4 shrink-0' />,
-    //   href: Routes.Blog,
-    //   external: false,
-    // }
+    {
+      title: "案例",
+      icon: <BookOpenIcon className='size-4 shrink-0' />,
+      href: "/#showcase",
+      external: false,
+    },
+    {
+      title: "定价",
+      icon: <DollarSignIcon className='size-4 shrink-0' />,
+      href: "/#pricing",
+      external: false,
+    },  
   ]
 }

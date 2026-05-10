@@ -29,9 +29,9 @@ export const websiteConfig = {
     social: {
       wechatId: 'qijianbin001',
       phoneNumber: '13681332236',
-      email: 'service@bytemarketing.net',
+      email: 'service@vercelai.cn',
       address: '北京市朝阳区百富国际大厦A座28F',
-      websiteUrl: 'https://www.bytemarketing.net',
+      websiteUrl: 'https://www.vercelai.cn',
       github: '',
       twitter: '',
       blueSky: '',
@@ -58,11 +58,11 @@ export const websiteConfig = {
     enableSpeedInsights: false,
   },
   auth: {
-    emailSuffix: '@bytemarketing.net', // 邮箱后缀
-    cookieDomain: process.env.NODE_ENV === 'production' ? '.bytemarketing.net' : 'localhost',
+    emailSuffix: 'vercelai.cn', // 邮箱后缀
+    cookieDomain: process.env.NODE_ENV === 'production' ? '.vercelai.cn' : 'localhost',
     trustedOrigins:
       process.env.NODE_ENV === 'production'
-        ? ['https://www.bytemarketing.net', 'https://bytemarketing.net']
+        ? ['https://www.vercelai.cn', 'https://vercelai.cn']
         : ['http://localhost:30041'],
     enableGoogleLogin: false,
     enableGithubLogin: false,
@@ -89,8 +89,8 @@ export const websiteConfig = {
   },
   mail: {
     provider: 'nodemailer' as const,
-    fromEmail: 'ByteMarketing <service@julianshuke.com>',
-    supportEmail: 'ByteMarketing <service@bytemarketing.net>',
+    fromEmail: 'VercelAI <service@vercelai.cn>',
+    supportEmail: 'VercelAI <service@vercelai.cn>',
   },
   newsletter: {
     provider: 'nodemailer' as const,

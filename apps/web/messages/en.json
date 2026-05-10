@@ -45,6 +45,7 @@
       "autoCreateAccount": "Account will be created automatically if phone number doesn't exist",
       "invitationCodeHint": "💡 First time phone login will automatically create a new account, you can enter invitation code to get rewards",
       "sendCodeFailed": "Failed to send code, please try again",
+      "verifyFailed": "Verification failed. Please check your code and try again.",
       "captchaHint": "Drag the slider to the line",
       "captchaLoading": "Loading…",
       "captchaComplete": "Complete",
@@ -189,9 +190,9 @@
     }
   },
   "Metadata": {
-    "name": "OpenRoute",
-    "title": "OpenRoute",
-    "description": "OpenRoute is a platform for building and deploying AI applications."
+    "name": "Genesis AI",
+    "title": "Genesis AI",
+    "description": "Genesis AI is a platform for building and deploying AI applications."
   },
   "Mail": {
     "common": {

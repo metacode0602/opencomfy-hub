@@ -50,7 +50,7 @@ export function Navbar() {
           <div className="hidden md:flex items-center gap-4">
             <ThemeToggle />
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/sign-in">
+              <Link href="/login">
                 登录
               </Link>
             </Button>

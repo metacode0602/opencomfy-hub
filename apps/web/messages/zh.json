@@ -46,6 +46,7 @@
       "autoCreateAccount": "手机号不存在时将自动创建账号",
       "invitationCodeHint": "💡 首次使用手机号登录将自动注册新账户，可输入邀请码获得奖励",
       "sendCodeFailed": "发送验证码失败，请重试",
+      "verifyFailed": "验证失败，请检查验证码后重试",
       "captchaHint": "请将滑块拖到竖线位置",
       "captchaLoading": "加载中…",
       "captchaComplete": "完成",
@@ -177,9 +178,9 @@
 
 
   "Metadata": {
-    "name": "OpenRoute",
-    "title": "OpenRoute",
-    "description": "OpenRoute 是一个用于构建和部署 AI 应用的平台。"
+    "name": "Genesis AI",
+    "title": "Genesis AI",
+    "description": "Genesis AI 是一个用于构建和部署 AI 应用的平台。"
   },
   "Mail": {
     "common": {

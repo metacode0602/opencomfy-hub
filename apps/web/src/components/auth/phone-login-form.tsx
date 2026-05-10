@@ -110,6 +110,7 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
             setCodeSent(true)
             setSuccess(t('codeSent'))
             setCountdown(60)
+            form.clearErrors('verificationCode')
             form.setFocus('verificationCode')
           },
           onError: (ctx) => {
@@ -132,6 +133,7 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
     setIsPending(true)
     setError('')
     setSuccess('')
+    form.clearErrors('verificationCode')
     try {
       const { data: result, error } = await authClient.phoneNumber.verify(
         {
@@ -146,7 +148,10 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
       )
       console.warn('[phone-signin] [onVerificationSubmit] result', result, error)
       if (error && error?.code !== 'SUCCESS') {
-        toast.error('验证失败', { description: error?.message })
+        form.setError('verificationCode', {
+          type: 'server',
+          message: error?.message?.trim() || t('verifyFailed'),
+        })
       } else {
         toast.success('验证成功')
         // 验证成功，可以跳转到首页或其他页面
@@ -155,6 +160,10 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
       }
     } catch (error) {
       console.error('验证码验证失败:', error)
+      form.setError('verificationCode', {
+        type: 'server',
+        message: t('verifyFailed'),
+      })
     } finally {
       setIsPending(false)
     }
@@ -196,13 +205,13 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
             )}
           />
 
-          <div className='flex gap-2'>
-            <Controller
-              name='verificationCode'
-              control={form.control}
-              render={({ field, fieldState }) => (
-                <Field className='flex-1' data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor={`${formId}-code`}>{t('verificationCode')}</FieldLabel>
+          <Controller
+            name='verificationCode'
+            control={form.control}
+            render={({ field, fieldState }) => (
+              <Field data-invalid={fieldState.invalid}>
+                <FieldLabel htmlFor={`${formId}-code`}>{t('verificationCode')}</FieldLabel>
+                <div className='flex gap-4 items-center'>
                   <Input
                     {...field}
                     id={`${formId}-code`}
@@ -213,30 +222,35 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
                     inputMode='numeric'
                     aria-invalid={fieldState.invalid}
                     autoComplete='one-time-code'
+                    className='min-w-0 flex-1'
+                    onChange={(e) => {
+                      field.onChange(e)
+                      if (fieldState.error?.type === 'server') {
+                        form.clearErrors('verificationCode')
+                      }
+                    }}
                   />
-                  {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
-                </Field>
-              )}
-            />
-            <div className='flex flex-col justify-end'>
-              <Button
-                type='button'
-                variant='outline'
-                disabled={!canSendCode || !phoneNumber || !phoneRegex.test(phoneNumber)}
-                onClick={() => {
-                  if (!phoneNumber || !phoneRegex.test(phoneNumber)) {
-                    form.setError('phoneNumber', { message: t('invalidPhone') })
-                    return
-                  }
-                  setCaptchaOpen(true)
-                }}
-                className='h-10 px-3'
-              >
-                {isSendingCode && <Loader2Icon className='mr-2 h-4 w-4 animate-spin' />}
-                {countdown > 0 ? t('countdown', { seconds: countdown }) : t('sendCode')}
-              </Button>
-            </div>
-          </div>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    disabled={!canSendCode || !phoneNumber || !phoneRegex.test(phoneNumber)}
+                    onClick={() => {
+                      if (!phoneNumber || !phoneRegex.test(phoneNumber)) {
+                        form.setError('phoneNumber', { message: t('invalidPhone') })
+                        return
+                      }
+                      setCaptchaOpen(true)
+                    }}
+                    className='h-10 shrink-0 px-3'
+                  >
+                    {isSendingCode && <Loader2Icon className='mr-2 h-4 w-4 animate-spin' />}
+                    {countdown > 0 ? t('countdown', { seconds: countdown }) : t('sendCode')}
+                  </Button>
+                </div>
+                {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+              </Field>
+            )}
+          />
 
           <Controller
             name='invitationCode'

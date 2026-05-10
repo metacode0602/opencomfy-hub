@@ -213,8 +213,9 @@ class RateLimiter {
         const expiredKeys: string[] = []
 
         results?.forEach((result, index) => {
-          if (result && result[1] === -1) {
-            expiredKeys.push(keys[index])
+          const key = keys[index]
+          if (key !== undefined && result && result[1] === -1) {
+            expiredKeys.push(key)
           }
         })
 

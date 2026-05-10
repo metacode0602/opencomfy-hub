@@ -9,6 +9,7 @@ import { getTranslations } from 'next-intl/server'
 import { notFound } from 'next/navigation'
 
 import Container from '@/components/layout/container'
+export const dynamic = 'force-dynamic'
 
 export async function generateMetadata({
   params,
