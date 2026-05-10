@@ -116,7 +116,7 @@ export const EmailLoginForm = ({ className, callbackUrl: propCallbackUrl }: Emai
       bottomButtonHref={`${Routes.Register}`}
       className={cn('', className)}
     >
-      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-8'>
+      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-8 p-6'>
         <FieldGroup className='gap-4'>
           <Controller
             name='email'

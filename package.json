@@ -8,7 +8,13 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "format": "turbo format",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "docker:build:web": "docker build -f docker/Dockerfile --target web --build-arg BUILD_TARGET=web -t opencomfy-hub-web:latest .",
+    "docker:build:docs": "docker build -f docker/Dockerfile --target docs --build-arg BUILD_TARGET=docs -t opencomfy-hub-docs:latest .",
+    "docker:build:api": "docker build -f docker/Dockerfile --target api --build-arg BUILD_TARGET=api -t opencomfy-hub-api:latest .",
+    "docker:build:combined": "docker build -f docker/Dockerfile --target all --build-arg BUILD_TARGET=all -t opencomfy-hub:latest .",
+    "docker:compose:build": "docker compose -f docker/docker-compose.build.yml build",
+    "docker:build": "docker compose -f docker/docker-compose.build.yml build"
   },
   "devDependencies": {
     "@workspace/eslint-config": "workspace:*",

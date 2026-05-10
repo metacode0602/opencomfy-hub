@@ -126,6 +126,13 @@
     "cancel": "取消",
     "logoutFailed": "退出失败"
   },
+  "Marketing": {
+    "avatar": {
+      "dashboard": "控制台",
+      "billing": "账单",
+      "settings": "设置"
+    }
+  },
   "ChangelogPage": {
     "title": "版本说明",
     "description": "查看我们产品的最新动态",

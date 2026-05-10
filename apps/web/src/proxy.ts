@@ -75,13 +75,14 @@ export function proxy(request: NextRequest) {
 
   const isPublicRoute =
     pathForAuth === "/" ||
-    pathForAuth.startsWith("/sign-in") ||
-    pathForAuth.startsWith("/sign-up") ||
-    pathForAuth.startsWith("/create") ||
+    pathForAuth.startsWith("/login") ||
+    pathForAuth.startsWith("/register") ||
+    pathForAuth.startsWith("/forgot-password") ||
+    pathForAuth.startsWith("/reset-password") ||
     pathForAuth.startsWith("/error")
 
   if (!sessionCookie && !isPublicRoute) {
-    const signInHref = buildLocalizedHref(locale, "/sign-in")
+    const signInHref = buildLocalizedHref(locale, "/login")
     return NextResponse.redirect(new URL(signInHref, request.url))
   }
 

@@ -34,6 +34,13 @@ export enum Routes {
   UsageList = '/dashboard/usage-list',
   // dashboard routes
   Dashboard = '/dashboard',
+  SettingsProfile = '/settings/profile',
+  SettingsBilling = '/settings/billing',
+  SettingsSecurity = '/settings/security',
+  SettingsNotifications = '/settings/notifications',
+  SettingsPlatforms = '/settings/platforms',
+  SettingsInvite = '/settings/invite',
+  SettingsLogout = '/settings/logout',
 }
 
 /**

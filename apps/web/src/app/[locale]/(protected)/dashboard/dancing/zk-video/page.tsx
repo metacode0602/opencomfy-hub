@@ -474,6 +474,7 @@ export default function EffectDetailPage() {
                     src={template.thumbnail}
                     alt={template.name}
                     fill
+                    priority
                     sizes="(max-width: 1023px) 100vw, 50vw"
                     className="object-contain"
                   />

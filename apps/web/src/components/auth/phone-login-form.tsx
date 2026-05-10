@@ -170,7 +170,7 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
       bottomButtonHref={`${Routes.Register}`}
       className={cn('', className)}
     >
-      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6'>
+      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6 p-6'>
         <FieldGroup className='gap-4'>
           <Controller
             name='phoneNumber'

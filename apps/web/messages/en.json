@@ -125,6 +125,13 @@
     "cancel": "Cancel",
     "logoutFailed": "Failed to log out"
   },
+  "Marketing": {
+    "avatar": {
+      "dashboard": "Dashboard",
+      "billing": "Billing",
+      "settings": "Settings"
+    }
+  },
   "ChangelogPage": {
     "title": "Release Notes",
     "description": "Stay up to date with the latest changes in our product",

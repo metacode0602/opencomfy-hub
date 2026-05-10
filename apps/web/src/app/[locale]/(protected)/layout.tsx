@@ -1,15 +1,27 @@
-
 import "@workspace/ui/globals.css"
 import { SidebarInset, SidebarProvider } from "@workspace/ui/components/sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { AppSidebar } from "@/components/app-sidebar"
+import { auth } from "@/lib/auth"
+import { headers } from "next/headers"
 
-
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  })
+  const sidebarUser =
+    session?.user != null
+      ? {
+          name: session.user.name ?? "",
+          email: session.user.email ?? "",
+          image: session.user.image ?? null,
+        }
+      : null
+
   return (
     <SidebarProvider
       style={
@@ -19,7 +31,7 @@ export default function RootLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" />
+      <AppSidebar variant="inset" user={sidebarUser} />
       <SidebarInset>
         <SiteHeader />
         <div className="flex flex-1 flex-col">
