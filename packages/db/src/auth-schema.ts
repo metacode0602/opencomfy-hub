@@ -2,12 +2,19 @@ import { relations } from "drizzle-orm"
 import { pgTable, text, timestamp, boolean, index, varchar, integer, jsonb } from "drizzle-orm/pg-core"
 import { createId } from '@paralleldrive/cuid2'
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
+export const user = pgTable("users", {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  emailVerified: boolean('email_verified').notNull(),
+  image: text('image'),
+  phoneNumber: text('phone_number'), // 用户手机号码
+  phoneNumberVerified: boolean('phone_number_verified').default(false).notNull(), // 手机号是否已验证
+  role: varchar('role', { length: 256 }).default('user'), // 用户角色：admin, user, guest
+  banned: boolean('banned'),
+  banReason: text('ban_reason'),
+  banExpires: timestamp('ban_expires'),
+  customerId: text('customer_id'),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

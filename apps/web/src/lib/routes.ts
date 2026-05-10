@@ -1,3 +1,4 @@
+import { websiteConfig } from "./config/website"
 
 /**
  * The routes for the application

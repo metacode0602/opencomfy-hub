@@ -474,6 +474,7 @@ export default function EffectDetailPage() {
                     src={template.thumbnail}
                     alt={template.name}
                     fill
+                    sizes="(max-width: 1023px) 100vw, 50vw"
                     className="object-contain"
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-background/30">
@@ -585,6 +586,7 @@ export default function EffectDetailPage() {
                           src={previewUrl}
                           alt="上传的素材"
                           fill
+                          sizes="320px"
                           className="object-cover"
                           unoptimized={previewUrl.startsWith("blob:")}
                         />

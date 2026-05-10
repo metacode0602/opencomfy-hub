@@ -11,10 +11,10 @@ export function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
 
   const navItems = [
-    { label: "功能", href: "#features" },
-    { label: "模型", href: "#models" },
-    { label: "案例", href: "#showcase" },
-    { label: "定价", href: "#pricing" },
+    { label: "功能", href: "/#features" },
+    { label: "模型", href: "/#models" },
+    { label: "案例", href: "/#showcase" },
+    { label: "定价", href: "/#pricing" },
   ]
 
   return (

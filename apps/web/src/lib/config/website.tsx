@@ -1,3 +1,4 @@
+import { Routes } from "../routes";
 
 /**
  * website config, without translations
@@ -7,14 +8,15 @@
  */
 export const websiteConfig = {
   metadata: {
-    title: '字节聚力',
+    title: 'Vercel AI',
     description:
       '字节聚力（北京）科技有限公司是一家专注AI搜索时代的数字营销服务商，提供GEO生成式搜索引擎优化解决方案，帮助企业在AI驱动的信息检索时代抢占先机。',
-    base_url: 'https://www.bytemarketing.net',
+    base_url: 'https://www.vercelai.cn',
     theme: {
       defaultTheme: 'default',
       enableSwitch: false,
     },
+
     mode: {
       defaultMode: 'system',
       enableSwitch: true,
@@ -47,6 +49,9 @@ export const websiteConfig = {
     enableDiscordWidget: false,
     enableUpgradeCard: false,
     enableAffonsoAffiliate: false,
+  },
+  routes: {
+    defaultLoginRedirect: Routes.Dashboard,
   },
   analytics: {
     enableVercelAnalytics: false,

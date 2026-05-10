@@ -16,11 +16,11 @@ const promptSuggestions = [
 
 const MOCK_IMAGE_BY_MODEL: Record<string, string> = {
   "flux-pro":
-    "https://images.unsplash.com/photo-1579783902614-aacfb63fd3f4?w=1024&h=1024&fit=crop",
-  sdxl: "https://images.unsplash.com/photo-1547826039-bfc35e0f1ea8?w=1024&h=1024&fit=crop",
-  sd3: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1579783902614-aacfb63fd3f4.jpg",
+  sdxl: "/images/unsplash/photo-1547826039-bfc35e0f1ea8.jpg",
+  sd3: "/images/unsplash/photo-1618005182384-a83a8bd57fbe.jpg",
   midjourney:
-    "https://images.unsplash.com/photo-1561214115-f2f134cc4912?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1561214115-f2f134cc4912.jpg",
 }
 
 export default function TextToImagePage() {

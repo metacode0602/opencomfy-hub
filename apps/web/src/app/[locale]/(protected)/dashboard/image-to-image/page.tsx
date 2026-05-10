@@ -20,15 +20,15 @@ const styleOptions = [
 /** Mock 生成图（Unsplash），按风格区分展示 */
 const MOCK_IMAGE_BY_STYLE: Record<(typeof styleOptions)[number]["id"], string> = {
   anime:
-    "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1578632767115-351597cf2477.jpg",
   watercolor:
-    "https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1024&h=1024&fit=crop",
-  oil: "https://images.unsplash.com/photo-1577083552431-6e5fd01988ec?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1513364776144-60967b0f800f.jpg",
+  oil: "/images/unsplash/photo-1577083552431-6e5fd01988ec.jpg",
   sketch:
-    "https://images.unsplash.com/photo-1541961016664-225de22e4ea7?w=1024&h=1024&fit=crop",
-  "3d": "https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1541961016664-225de22e4ea7.jpg",
+  "3d": "/images/unsplash/photo-1633356122544-f134324a6cee.jpg",
   pixel:
-    "https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1024&h=1024&fit=crop",
+    "/images/unsplash/photo-1550745165-9bc0b252726f.jpg",
 }
 
 export default function ImageToImagePage() {

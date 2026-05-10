@@ -127,6 +127,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                 src={template.thumbnail}
                 alt={template.name}
                 fill
+                sizes="(max-width: 1023px) 100vw, 50vw"
                 className="object-cover"
               />
               {/* Play Overlay */}
@@ -229,6 +230,7 @@ export default function EffectDetailPage({ params }: { params: Promise<{ id: str
                           src={uploadedImage}
                           alt="上传的素材"
                           fill
+                          sizes="320px"
                           className="object-cover"
                         />
                       </div>

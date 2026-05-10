@@ -1,5 +1,5 @@
 import { Analytics } from '@workspace/shared-next/analytics'
-import { fontBricolageGrotesque, fontNotoSans, fontNotoSansMono, fontNotoSerif } from '@workspace/shared-next/assets/fonts'
+import { fontBricolageGrotesque, fontNotoSansMono, fontNotoSerif } from '@workspace/shared-next/assets/fonts'
 import { AffonsoScript } from '@workspace/shared-next/affiliate/affonso'
 import { TailwindIndicator } from '@workspace/ui/components/layout/tailwind-indicator'
 import { routing } from '@/lib/i18n/routing'

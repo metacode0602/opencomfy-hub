@@ -78,9 +78,9 @@ export default function StyleDetailPage() {
   // Example generated images (mock)
   const exampleImages = [
     template.thumbnail,
-    "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=400&h=400&fit=crop",
-    "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=400&h=400&fit=crop",
-    "https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?w=400&h=400&fit=crop",
+    "/images/unsplash/photo-1518837695005-2083093ee35b.jpg",
+    "/images/unsplash/photo-1534796636912-3b95b3ab5986.jpg",
+    "/images/unsplash/photo-1558591710-4b4a1ae0f04d.jpg",
   ]
 
   return (

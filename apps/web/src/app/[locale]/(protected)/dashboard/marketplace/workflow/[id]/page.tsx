@@ -175,6 +175,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                 src={template.thumbnail}
                 alt={template.name}
                 fill
+                sizes="(max-width: 1023px) 100vw, 50vw"
                 className="object-cover"
               />
               {/* Complexity Badge */}
@@ -320,6 +321,7 @@ export default function WorkflowDetailPage({ params }: { params: Promise<{ id: s
                                   src={uploadedFiles[input.name] ?? ""}
                                   alt={input.name}
                                   fill
+                                  sizes="200px"
                                   className="object-cover"
                                 />
                               ) : (

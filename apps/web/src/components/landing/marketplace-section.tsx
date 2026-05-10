@@ -24,9 +24,9 @@ const categories = [
     color: "from-purple-500 to-pink-500",
     href: "/dashboard/marketplace/styles",
     preview: [
-      "https://images.unsplash.com/photo-1563089145-599997674d42?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1501785888041-af3ef285b470?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=200&h=200&fit=crop",
+      "/images/unsplash/photo-1563089145-599997674d42.jpg",
+      "/images/unsplash/photo-1501785888041-af3ef285b470.jpg",
+      "/images/unsplash/photo-1578632767115-351597cf2477.jpg",
     ],
   },
   {
@@ -37,9 +37,9 @@ const categories = [
     color: "from-orange-500 to-red-500",
     href: "/dashboard/marketplace/effects",
     preview: [
-      "https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=200&h=200&fit=crop",
+      "/images/unsplash/photo-1536440136628-849c177e76a1.jpg",
+      "/images/unsplash/photo-1534796636912-3b95b3ab5986.jpg",
+      "/images/unsplash/photo-1492691527719-9d1e07e534b4.jpg",
     ],
   },
   {
@@ -50,9 +50,9 @@ const categories = [
     color: "from-green-500 to-teal-500",
     href: "/dashboard/marketplace/workflows",
     preview: [
-      "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=200&h=200&fit=crop",
-      "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=200&h=200&fit=crop",
+      "/images/unsplash/photo-1531746020798-e6953c6e8e04.jpg",
+      "/images/unsplash/photo-1518837695005-2083093ee35b.jpg",
+      "/images/unsplash/photo-1506905925346-21bda4d32df4.jpg",
     ],
   },
 ]
@@ -133,6 +133,7 @@ export function MarketplaceSection() {
                           src={img}
                           alt=""
                           fill
+                          sizes="48px"
                           className="object-cover"
                         />
                       </div>

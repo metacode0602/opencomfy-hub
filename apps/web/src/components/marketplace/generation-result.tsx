@@ -100,7 +100,7 @@ export function GenerationResult({
   const handleDownload = () => {
     const url = type === "video" 
       ? "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-      : "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1920&h=1080&fit=crop"
+      : "/images/unsplash/photo-1534796636912-3b95b3ab5986.jpg"
     const link = document.createElement("a")
     link.href = url
     link.download = `comfyhub-result.${type === "video" ? "mp4" : "png"}`
@@ -191,9 +191,10 @@ export function GenerationResult({
           </>
         ) : (
           <Image
-            src="https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1920&h=1080&fit=crop"
+            src="/images/unsplash/photo-1534796636912-3b95b3ab5986.jpg"
             alt="生成结果"
             fill
+            sizes="(max-width: 1280px) 100vw, 896px"
             className="object-contain"
           />
         )}
@@ -347,7 +348,7 @@ export function GenerationResult({
                 ) : (
                   <div className="relative w-full h-full flex items-center justify-center p-4">
                     <Image
-                      src="https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1920&h=1080&fit=crop"
+                      src="/images/unsplash/photo-1534796636912-3b95b3ab5986.jpg"
                       alt="生成结果"
                       fill
                       className="object-contain"

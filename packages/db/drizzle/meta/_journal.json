@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1774894801739,
-      "tag": "0000_nappy_greymalkin",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1778064129953,
-      "tag": "0001_married_jimmy_woo",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1778064319559,
-      "tag": "0002_happy_starfox",
+      "when": 1778339326440,
+      "tag": "0000_yielding_selene",
       "breakpoints": true
     }
   ]

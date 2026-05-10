@@ -1,4 +1,186 @@
 {
+  "AboutPage": {
+    "title": "About",
+    "description": "字节聚力 (Beijing) Technology Co., Ltd. is a growth-oriented digital marketing service provider, offering GEO Generative Search Engine Optimization solutions",
+    "authorName": "字节聚力 (Beijing) Technology Co., Ltd.",
+    "authorBio": "Digital Marketing Experts in the AI Search Era",
+    "introduction": "👋 **Hello, this is 字节聚力 (Beijing) Technology Co., Ltd.!**\n\nWe are a growth-oriented digital marketing service provider, focusing on breakthroughs in the AI search era. Through industry-customized AI technology, full-scenario optimization capabilities, and sustainable service systems, we help enterprises seize opportunities in the AI-driven information retrieval era.\n\n## 🚀 Our Core Product: GEO Generative Search Engine Optimization\n\nGEO is a marketing system specifically designed for generative AI search, optimizing content semantics and knowledge structure to adapt brand information to AI's recognition and recommendation logic. When users ask relevant questions, your brand will directly become the recommended answer in AI responses.\n\n### Three Core Values:\n- **Smart Exposure**: Allow your content to be directly captured and output by AI, breaking through traditional exposure traffic bottlenecks\n- **Efficient Conversion**: AI-recommended traffic comes with high-intention attributes, with conversion efficiency significantly surpassing traditional SEO and advertising\n- **Sustainable Returns**: Achieve low-cost, high-conversion long-term customer acquisition through systematic layout and dynamic optimization\n\n## 💡 Our Core Advantages\n\n### Technology Leadership\nDeeply mastering AI search algorithms and optimization technology, continuously tracking cutting-edge developments, providing you with the most advanced solutions.\n\n### Deep Customization\nBased on industry characteristics and enterprise needs, tailor-made exclusive marketing strategies to achieve precise growth.\n\n### Full Guarantee\nDedicated team tracks the entire process and is responsible for results, ensuring that every investment yields measurable returns.\n\n## 🛠️ Complete GEO Service System\n\nWe provide full-linkage professional services from strategy to execution, from exposure to conversion:\n\n- **Strategic Insights**: Build user intent maps and keyword systems based on semantic analysis\n- **Content Construction**: Establish AI-friendly content libraries covering user decision-making paths\n- **Authoritative Distribution**: Deploy content on AI platforms and high-credibility media\n- **Conversion Optimization**: Improve website AI recognition and set up efficient lead generation paths\n- **Dynamic Defense & Precision Operations**: Real-time monitoring of competitor dynamics and industry trends\n- **Effect Tracking & Iteration**: Full data monitoring, combining real-time feedback to optimize strategies\n\n## 🎯 Our Mission\n\nSeize the AI search dividend window, allowing more enterprise brands to stand out in generative search. We not only help enterprises quickly enter the AI search track, but are also committed to systematically building brand digital assets, precipitating each content exposure into sustainably reusable brand awareness and search rights.\n\n## 📞 Contact Us\n\nWhether you want to learn about GEO technology or need professional AI search marketing consultation, we look forward to communicating with you. Let's start a new era of brand growth in the AI search era together!\n\n**Choose 字节聚力, choose leading marketing in the AI search era!** 🌟",
+    "talkWithMe": "Contact Us",
+    "followMe": "Follow Us"
+  },
+  "AuthPage": {
+    "login": {
+      "title": "Login",
+      "welcomeBack": "Welcome back",
+      "email": "Email",
+      "password": "Password",
+      "signIn": "Sign In",
+      "signUpHint": "Don't have an account? Sign up",
+      "forgotPassword": "Forgot Password?",
+      "signInWithGoogle": "Sign In with Google",
+      "signInWithGitHub": "Sign In with GitHub",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
+      "or": "Or continue with",
+      "emailRequired": "Please enter your email",
+      "passwordRequired": "Please enter your password",
+      "switchToPhone": "Sign in with phone"
+    },
+    "phoneLogin": {
+      "title": "Phone Login",
+      "welcomeBack": "Welcome back",
+      "description": "Please enter your phone number to sign in",
+      "phoneNumber": "Phone Number",
+      "verificationCode": "Verification Code",
+      "sendCode": "Send Code",
+      "resendCode": "Resend",
+      "signIn": "Sign In",
+      "signUpHint": "Don't have an account? Sign up",
+      "switchToEmail": "Sign in with email",
+      "phoneRequired": "Please enter your phone number",
+      "codeRequired": "Please enter verification code",
+      "invalidPhone": "Please enter a valid phone number",
+      "codeSent": "Verification code sent",
+      "countdown": "Resend in {seconds}s",
+      "autoCreateAccount": "Account will be created automatically if phone number doesn't exist",
+      "invitationCodeHint": "💡 First time phone login will automatically create a new account, you can enter invitation code to get rewards",
+      "sendCodeFailed": "Failed to send code, please try again",
+      "captchaHint": "Drag the slider to the line",
+      "captchaLoading": "Loading…",
+      "captchaComplete": "Complete",
+      "captchaVerifying": "Verifying…",
+      "captchaChallengeFailed": "Failed to load verification, please try again",
+      "captchaVerifyFailed": "Verification failed, please try again",
+      "captchaMismatch": "Verification failed, please try again",
+      "captchaTooManyAttempts": "Too many attempts, please slide again"
+    },
+    "register": {
+      "title": "Register",
+      "createAccount": "Create an account",
+      "name": "Name",
+      "email": "Email",
+      "password": "Password",
+      "signUp": "Sign Up",
+      "signInHint": "Already have an account? Sign in",
+      "checkEmail": "Please check your email inbox",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
+      "nameRequired": "Please enter your name",
+      "emailRequired": "Please enter your email",
+      "passwordRequired": "Please enter your password"
+    },
+    "forgotPassword": {
+      "title": "Forgot Password",
+      "email": "Email",
+      "send": "Send reset link",
+      "backToLogin": "Back to login",
+      "checkEmail": "Please check your email inbox",
+      "emailRequired": "Please enter your email"
+    },
+    "resetPassword": {
+      "title": "Reset Password",
+      "password": "Password",
+      "reset": "Reset password",
+      "backToLogin": "Back to login",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password",
+      "minLength": "Password must be at least 8 characters"
+    },
+    "error": {
+      "title": "Oops! Something went wrong!",
+      "tryAgain": "Please try again.",
+      "backToLogin": "Back to login",
+      "checkEmail": "Please check your email inbox"
+    },
+    "common": {
+      "termsOfService": "Terms of Service",
+      "privacyPolicy": "Privacy Policy",
+      "byClickingContinue": "By clicking continue, you agree to our ",
+      "and": " and "
+    }
+  },
+  "Common": {
+    "login": "Log in",
+    "logout": "Log out",
+    "signUp": "Sign up",
+    "language": "Switch language",
+    "mode": {
+      "label": "Toggle mode",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "theme": {
+      "label": "Toggle theme",
+      "default": "Default",
+      "blue": "Blue",
+      "green": "Green",
+      "amber": "Amber",
+      "neutral": "Neutral"
+    },
+    "copy": "Copy",
+    "saving": "Saving...",
+    "save": "Save",
+    "loading": "Loading...",
+    "cancel": "Cancel",
+    "logoutFailed": "Failed to log out"
+  },
+  "ChangelogPage": {
+    "title": "Release Notes",
+    "description": "Stay up to date with the latest changes in our product",
+    "subtitle": "Stay up to date with the latest changes in our product"
+  },
+  "ContactPage": {
+    "title": "Contact",
+    "description": "We'll help you find the right plan for your business",
+    "subtitle": "We'll help you find the right plan for your business",
+    "form": {
+      "title": "Contact Us",
+      "description": "If you have any questions or feedback, please reach out to our team",
+      "name": "Name",
+      "email": "Email",
+      "message": "Message",
+      "submit": "Submit",
+      "submitting": "Submitting...",
+      "success": "Message sent successfully",
+      "fail": "Failed to send message",
+      "nameMinLength": "Name must be at least 3 characters",
+      "nameMaxLength": "Name must not exceed 30 characters",
+      "emailValidation": "Please enter a valid email address",
+      "messageMinLength": "Message must be at least 10 characters",
+      "messageMaxLength": "Message must not exceed 500 characters"
+    },
+    "wechat": {
+      "title": "Contact via WeChat",
+      "description": "Scan the QR code to add WeChat",
+      "contactWeChat": "Contact WeChat",
+      "openDialog": "Open WeChat contact dialog",
+      "qrCodeAlt": "WeChat QR code",
+      "qrCodePlaceholder": "QR code failed to load",
+      "wechatId": "WeChat ID",
+      "copy": "Copy",
+      "copied": "Copied",
+      "copySuccess": "WeChat ID copied to clipboard",
+      "copyFailed": "Copy failed, please copy manually",
+      "supportNote": "Need technical support?",
+      "instruction1": "Scan the QR code above or copy the WeChat ID to add manually"
+    }
+  },
+  "WaitlistPage": {
+    "title": "Waitlist",
+    "description": "Join our waitlist for the launch of our product",
+    "subtitle": "Join our waitlist for the launch of our product",
+    "form": {
+      "title": "Join Our Waitlist",
+      "description": "We will notify you when we launch our product",
+      "email": "Email",
+      "subscribe": "Subscribe",
+      "subscribing": "Subscribing...",
+      "success": "Subscribed successfully",
+      "fail": "Failed to subscribe",
+      "emailValidation": "Please enter a valid email address"
+    }
+  },
   "Metadata": {
     "name": "OpenRoute",
     "title": "OpenRoute",

@@ -49,6 +49,7 @@ export function TemplateCard({ template, type, index = 0 }: TemplateCardProps) {
               src={template.thumbnail}
               alt={template.name}
               fill
+              sizes="(max-width: 639px) 100vw, (max-width: 1023px) 50vw, (max-width: 1279px) 33vw, 25vw"
               className="object-cover transition-transform duration-500 group-hover:scale-110"
             />
             
