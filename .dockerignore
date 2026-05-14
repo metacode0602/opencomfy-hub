@@ -1,0 +1,31 @@
+# 须匹配各 workspace 下的 node_modules；pnpm 在 Windows 上会建 Junction，
+# 仅写 node_modules 时嵌套目录仍会进入上下文，导致 load build context: archive/tar: unknown file mode
+**/node_modules
+**/.next
+**/dist
+.git
+**/.turbo
+.turbo
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地与 IDE
+.idea
+.vscode
+*.swp
+
+# 不进入镜像的构建产物（源码仍保留；desktop 在 lockfile 中需保留目录）
+apps/web/.next
+apps/docs/.next
+apps/api/dist
+
+apps/desktop
+# 敏感环境（运行时由 compose / k8s 注入）
+.env
+.env.*
+!.env*.example
+
+# 体积大且与三应用镜像无关
+**/screenshots
+**/*.mp4

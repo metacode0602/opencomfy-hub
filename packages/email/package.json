@@ -1,0 +1,43 @@
+{
+  "name": "@workspace/email",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "email:dev": "email dev",
+    "lint": "eslint",
+    "format": "prettier --write \"**/*.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@react-email/ui": "6.0.8",
+    "@types/node": "^25.1.0",
+    "@types/nodemailer": "^8.0.0",
+    "@types/react": "^19.2.10",
+    "@types/react-dom": "^19.2.3",
+    "@workspace/eslint-config": "workspace:*",
+    "@workspace/typescript-config": "workspace:*",
+    "eslint": "^9.39.2",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3"
+  },
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./mail": {
+      "default": "./src/mail/index.ts"
+    }
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.0.8",
+    "next-intl": "^4.11.0",
+    "use-intl": "^4.11.0",
+    "nodemailer": "^8.0.7",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "react-email": "6.0.8",
+    "resend": "^6.12.2"
+  }
+}

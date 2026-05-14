@@ -1,0 +1,63 @@
+services:
+  web:
+    image: opencomfy-hub-web:${TAG:-latest}
+    restart: unless-stopped
+    volumes:
+      # By default, the data is stored in a docker volume called "data".
+      # If you want to mount a custom directory, change the volume mapping to:
+      # - /path/to/your/directory:/data
+      - ./data/web:/data
+      - ./data/adblocker:/data/adblocker
+    ports:
+      - 3000:3000
+    env_file:
+      - .env
+    depends_on:
+      - meilisearch
+      - postgres
+    environment:
+      MEILI_ADDR: http://meilisearch:7700
+      BROWSER_WEB_URL: http://chrome:9222
+      # OPENAI_API_KEY: ...
+
+      # You almost never want to change the value of the DATA_DIR variable.
+      # If you want to mount a custom directory, change the volume mapping above instead.
+      DATA_DIR: /data # DON'T CHANGE THIS
+
+  postgres:
+    image: pgvector/pgvector:${POSTGRES_VERSION:-pg16}
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+    ports:
+      - 5434:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: >
+      --requirepass ${REDIS_AUTH:-myredissecret}
+      --stop-writes-on-bgsave-error no
+      --dir /data
+      --dbfilename dump.rdb
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    ports:
+      - 6379:6379
+    volumes:
+      - ./volumes/redis/data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_AUTH:-myredissecret}", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10

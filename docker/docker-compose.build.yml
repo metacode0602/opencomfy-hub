@@ -1,0 +1,42 @@
+# 构建镜像（在仓库根目录执行）:
+#   docker compose -f docker/docker-compose.build.yml build
+#
+# 单独镜像：web / docs / api；三合一：all
+# 每项 build.args.BUILD_TARGET 必须与 build.target 一致。
+
+services:
+  web:
+    image: opencomfy-hub-web:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: web
+      args:
+        BUILD_TARGET: web
+
+  docs:
+    image: opencomfy-hub-docs:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: docs
+      args:
+        BUILD_TARGET: docs
+
+  api:
+    image: opencomfy-hub-api:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: api
+      args:
+        BUILD_TARGET: api
+
+  all:
+    image: opencomfy-hub:${TAG:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: all
+      args:
+        BUILD_TARGET: all

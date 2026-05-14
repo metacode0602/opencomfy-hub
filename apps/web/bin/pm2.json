@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "name": "@opencomfy-hub-web",
+      "script": "apps/web/server.js",
+      "exec_mode": "fork",
+      "instances": 1
+    }
+  ]
+}

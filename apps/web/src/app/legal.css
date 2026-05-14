@@ -1,0 +1,5 @@
+/* fumadocs-ui preset uses @apply; load Tailwind first so utilities resolve */
+@import "tailwindcss";
+
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';

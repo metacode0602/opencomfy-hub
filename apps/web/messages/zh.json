@@ -1,0 +1,238 @@
+{
+  "AboutPage": {
+    "title": "关于我们",
+    "description": "字节聚力（北京）科技有限公司是一家专注AI搜索时代的数字营销服务商，提供GEO生成式搜索引擎优化解决方案",
+    "authorName": "字节聚力（北京）科技有限公司",
+    "authorBio": "AI搜索时代的数字营销专家",
+    "introduction": "👋 **你好，这里是字节聚力（北京）科技有限公司！**\n\n我们是一家以增长为导向的数字营销服务商，专注于AI搜索时代的增长突破。通过行业定制化AI技术、全场景优化能力和可持续服务体系，帮助企业在AI驱动的信息检索时代抢占先机。\n\n## 🚀 我们的核心产品：GEO生成式搜索引擎优化\n\nGEO是专为生成式AI搜索设计的营销体系，通过优化内容语义与知识结构，让品牌信息适配AI的识别与推荐逻辑。当用户提出相关问题时，您的品牌将直接成为AI回答中的推荐答案。\n\n### 三大核心价值：\n- **智能曝光**：让您的内容被AI直接抓取并输出，突破传统曝光的流量瓶颈\n- **高效转化**：AI推荐的流量自带高意向属性，转化效率显著超越传统SEO与广告\n- **持续回报**：通过系统布局与动态优化，实现低成本、高转化的长效获客\n\n## 💡 我们的核心优势\n\n### 技术领先\n深度掌握AI搜索算法与优化技术，持续跟踪前沿动态，为您提供最先进的解决方案。\n\n### 深度定制\n基于行业特性和企业需求，量身打造专属营销策略，实现精准增长。\n\n### 全程保障\n专属团队全程跟踪，为结果负责，确保每一项投入都能获得可衡量的回报。\n\n## 🛠️ 完整的GEO服务体系\n\n我们提供从策略到执行，从曝光到转化的全链路专业服务：\n\n- **策略洞察**：基于语义分析构建用户意图地图与关键词体系\n- **内容构建**：建立覆盖用户全决策路径的AI友好内容库\n- **权威分发**：在AI平台与高可信度媒体进行内容部署\n- **转化优化**：提升官网AI识别度，布设高效留资路径\n- **动态攻防与精细化运营**：实时监控竞品动态与行业趋势\n- **效果追踪与迭代**：全程数据监测，结合实时反馈优化策略\n\n## 🎯 我们的使命\n\n抢占AI搜索红利窗口期，让更多企业品牌在生成式搜索中脱颖而出。我们不仅帮助企业快速切入AI搜索赛道，更致力于系统化构建品牌数字资产，将每一次内容曝光沉淀为可持续复用的品牌认知与搜索权益。\n\n## 📞 联系我们\n\n无论您是希望了解GEO技术，还是需要专业的AI搜索营销咨询，我们都期待与您交流。让我们一起开启AI搜索时代的品牌增长新纪元！\n\n**选择字节聚力，选择AI搜索时代的领先营销！** 🌟",
+    "talkWithMe": "联系我们",
+    "followMe": "关注我们",
+    "contactWeChat": "微信联系"
+  },
+  "AuthPage": {
+    "login": {
+      "title": "登录",
+      "welcomeBack": "欢迎回来",
+      "email": "邮箱",
+      "password": "密码",
+      "signIn": "登录",
+      "signUpHint": "没有账号？注册",
+      "forgotPassword": "忘记密码？",
+      "signInWithGoogle": "使用 Google 登录",
+      "signInWithGitHub": "使用 GitHub 登录",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码",
+      "or": "或以社媒账号登录",
+      "emailRequired": "请输入邮箱",
+      "passwordRequired": "请输入密码",
+      "switchToPhone": "使用手机号登录"
+    },
+    "phoneLogin": {
+      "title": "手机号登录",
+      "welcomeBack": "欢迎回来",
+      "description": "请输入您的手机号登录",
+      "phoneNumber": "手机号",
+      "verificationCode": "验证码",
+      "sendCode": "发送验证码",
+      "resendCode": "重新发送",
+      "signIn": "登录",
+      "signUpHint": "没有账号？注册",
+      "switchToEmail": "使用邮箱登录",
+      "phoneRequired": "请输入手机号",
+      "codeRequired": "请输入验证码",
+      "invalidPhone": "请输入正确的手机号",
+      "codeSent": "验证码已发送",
+      "countdown": "{seconds}秒后重新发送",
+      "autoCreateAccount": "手机号不存在时将自动创建账号",
+      "invitationCodeHint": "💡 首次使用手机号登录将自动注册新账户，可输入邀请码获得奖励",
+      "sendCodeFailed": "发送验证码失败，请重试",
+      "verifyFailed": "验证失败，请检查验证码后重试",
+      "captchaHint": "请将滑块拖到竖线位置",
+      "captchaLoading": "加载中…",
+      "captchaComplete": "完成",
+      "captchaVerifying": "验证中…",
+      "captchaChallengeFailed": "获取验证失败，请重试",
+      "captchaVerifyFailed": "验证失败，请重试",
+      "captchaMismatch": "未通过验证，请重试",
+      "captchaTooManyAttempts": "尝试次数过多，请重新滑动"
+    },
+    "register": {
+      "title": "注册",
+      "createAccount": "创建账号",
+      "name": "姓名",
+      "email": "邮箱",
+      "password": "密码",
+      "signUp": "注册",
+      "signInHint": "已经有账号？登录",
+      "checkEmail": "请检查您的邮箱",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码",
+      "nameRequired": "请输入姓名",
+      "emailRequired": "请输入邮箱",
+      "passwordRequired": "请输入密码"
+    },
+    "forgotPassword": {
+      "title": "忘记密码",
+      "email": "邮箱",
+      "send": "发送重置密码链接",
+      "backToLogin": "返回登录",
+      "checkEmail": "请检查您的邮箱",
+      "emailRequired": "请输入邮箱"
+    },
+    "resetPassword": {
+      "title": "重置密码",
+      "password": "密码",
+      "reset": "重置密码",
+      "backToLogin": "返回登录",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码",
+      "minLength": "密码必须至少包含 8 个字符"
+    },
+    "error": {
+      "title": "哎呀！出错了！",
+      "tryAgain": "请重试",
+      "backToLogin": "返回登录",
+      "checkEmail": "请检查您的邮箱"
+    },
+    "common": {
+      "termsOfService": "服务条款",
+      "privacyPolicy": "隐私政策",
+      "byClickingContinue": "继续即表示您同意我们的 ",
+      "and": " 和 "
+    }
+  },
+  "Common": {
+    "login": "登录",
+    "logout": "退出",
+    "signUp": "注册",
+    "language": "切换语言",
+    "mode": {
+      "label": "切换模式",
+      "light": "浅色模式",
+      "dark": "深色模式",
+      "system": "跟随系统"
+    },
+    "theme": {
+      "label": "切换主题",
+      "default": "默认",
+      "blue": "蓝色",
+      "green": "绿色",
+      "amber": "橙色",
+      "neutral": "中性"
+    },
+    "copy": "复制",
+    "save": "保存",
+    "saving": "保存中...",
+    "loading": "加载中...",
+    "cancel": "取消",
+    "logoutFailed": "退出失败"
+  },
+  "Marketing": {
+    "avatar": {
+      "dashboard": "控制台",
+      "billing": "账单",
+      "settings": "设置"
+    }
+  },
+  "ChangelogPage": {
+    "title": "版本说明",
+    "description": "查看我们产品的最新动态",
+    "subtitle": "查看我们产品的最新动态"
+  },
+  "ContactPage": {
+    "title": "联系我们",
+    "description": "我们帮助您找到合适的计划",
+    "subtitle": "我们帮助您找到合适的计划",
+    "form": {
+      "title": "联系我们",
+      "description": "如果您有任何问题或反馈，请随时联系我们的团队",
+      "name": "姓名",
+      "email": "邮箱",
+      "message": "消息",
+      "submit": "提交",
+      "submitting": "提交中...",
+      "success": "消息发送成功",
+      "fail": "消息发送失败",
+      "nameMinLength": "姓名必须至少包含 3 个字符",
+      "nameMaxLength": "姓名必须不超过 30 个字符",
+      "emailValidation": "请输入有效的邮箱地址",
+      "messageMinLength": "消息必须至少包含 10 个字符",
+      "messageMaxLength": "消息必须不超过 500 个字符"
+    },
+    "wechat": {
+      "title": "微信联系",
+      "description": "扫描二维码添加微信",
+      "contactWeChat": "微信联系",
+      "openDialog": "打开微信联系对话框",
+      "qrCodeAlt": "微信二维码",
+      "qrCodePlaceholder": "二维码加载失败",
+      "wechatId": "微信号",
+      "copy": "复制",
+      "copied": "已复制",
+      "copySuccess": "微信号已复制到剪贴板",
+      "copyFailed": "复制失败，请手动复制",
+      "supportNote": "需要技术支持？",
+      "instruction1": "扫描上方二维码添加微信，或复制微信号手动添加"
+    }
+  },
+
+
+  "Metadata": {
+    "name": "共绩CRM",
+    "title": "共绩CRM",
+    "description": "共绩CRM 是一个用于构建和部署 AI 应用的平台。"
+  },
+  "Mail": {
+    "common": {
+      "team": "{name} 团队",
+      "copyright": "© {year} 保留所有权利。"
+    },
+    "verifyEmail": {
+      "subject": "验证您的邮箱",
+      "title": "您好 {name}，",
+      "body": "请点击下方按钮完成邮箱验证。",
+      "confirmEmail": "验证邮箱"
+    },
+    "forgotPassword": {
+      "subject": "重置密码",
+      "title": "您好 {name}，",
+      "body": "我们收到了重置密码的请求，请点击下方按钮继续。",
+      "resetPassword": "重置密码"
+    },
+    "contactMessage": {
+      "subject": "新的联系留言",
+      "name": "姓名：{name}",
+      "email": "邮箱：{email}",
+      "message": "留言：{message}"
+    },
+    "subscribeNewsletter": {
+      "subject": "订阅电子通讯",
+      "body": "您已成功订阅我们的电子通讯。"
+    }
+  },
+  "WaitlistPage": {
+    "title": "候补名单",
+    "description": "加入产品发布候补名单",
+    "subtitle": "在产品上线时第一时间收到通知",
+    "form": {
+      "title": "加入候补名单",
+      "description": "上线后我们会通过邮件通知您",
+      "email": "邮箱",
+      "subscribe": "订阅",
+      "subscribing": "提交中…",
+      "success": "订阅成功",
+      "fail": "订阅失败，请稍后重试",
+      "emailValidation": "请输入有效的邮箱地址"
+    }
+  },
+  "NotFoundPage": {
+    "title": "404",
+    "message": "抱歉，您正在寻找的页面不存在",
+    "backToHome": "返回首页"
+  },
+  "ErrorPage": {
+    "title": "哎呀！出错了！",
+    "tryAgain": "重试",
+    "backToHome": "返回首页"
+  }
+}
