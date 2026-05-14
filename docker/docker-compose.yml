@@ -1,19 +1,17 @@
 services:
   web:
-    image: opencomfy-hub-web:${TAG:-latest}
+    image: gongji-crm-web:${TAG:-latest}
     restart: unless-stopped
     volumes:
       # By default, the data is stored in a docker volume called "data".
       # If you want to mount a custom directory, change the volume mapping to:
       # - /path/to/your/directory:/data
       - ./data/web:/data
-      - ./data/adblocker:/data/adblocker
     ports:
       - 3000:3000
     env_file:
       - .env
     depends_on:
-      - meilisearch
       - postgres
     environment:
       MEILI_ADDR: http://meilisearch:7700

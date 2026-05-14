@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# opencomfy-hub：单 Dockerfile，多 stage / 多 target。
+# gongji-crm：单 Dockerfile，多 stage / 多 target。
 # 单独镜像：--target 与 --build-arg BUILD_TARGET 须一致（web|docs|api）。
 # 三合一：--target all --build-arg BUILD_TARGET=all
 # 亦可用 docker/docker-compose.build.yml

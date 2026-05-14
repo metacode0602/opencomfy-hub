@@ -237,7 +237,7 @@ export async function POST(request: Request) {
       method: "POST",
       body: ossForm,
       headers: {
-        "User-Agent": "opencomfy-dashboard/1.0",
+        "User-Agent": "gongji-crm/1.0",
       },
     })
     const uploadElapsed = Date.now() - uploadStarted

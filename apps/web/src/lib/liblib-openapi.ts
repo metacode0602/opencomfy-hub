@@ -98,7 +98,7 @@ export async function liblibSignedPostJson(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": "opencomfy-dashboard/1.0",
+        "User-Agent": "gongji-crm/1.0",
       },
       body: JSON.stringify(body),
     })

@@ -6,7 +6,7 @@
 
 services:
   web:
-    image: opencomfy-hub-web:${TAG:-latest}
+    image: gongji-crm-web:${TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -15,7 +15,7 @@ services:
         BUILD_TARGET: web
 
   docs:
-    image: opencomfy-hub-docs:${TAG:-latest}
+    image: gongji-crm-docs:${TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -24,7 +24,7 @@ services:
         BUILD_TARGET: docs
 
   api:
-    image: opencomfy-hub-api:${TAG:-latest}
+    image: gongji-crm-api:${TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -33,7 +33,7 @@ services:
         BUILD_TARGET: api
 
   all:
-    image: opencomfy-hub:${TAG:-latest}
+    image: gongji-crm:${TAG:-latest}
     build:
       context: ..
       dockerfile: docker/Dockerfile

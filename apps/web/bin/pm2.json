@@ -1,7 +1,7 @@
 {
   "apps": [
     {
-      "name": "@opencomfy-hub-web",
+      "name": "@gongji-crm-web",
       "script": "apps/web/server.js",
       "exec_mode": "fork",
       "instances": 1
