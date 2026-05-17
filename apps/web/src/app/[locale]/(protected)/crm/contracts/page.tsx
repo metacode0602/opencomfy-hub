@@ -1,5 +1,10 @@
-import { CrmContractsListClient } from "../_components/crm-contracts-list-client"
+import { AppShell } from '@/components/dashboard/app-shell'
+import { ContractsContent } from '@/components/dashboard/contracts-content'
 
-export default function CrmContractsPage() {
-  return <CrmContractsListClient />
+export default function ContractsPage() {
+  return (
+    <AppShell>
+      <ContractsContent />
+    </AppShell>
+  )
 }

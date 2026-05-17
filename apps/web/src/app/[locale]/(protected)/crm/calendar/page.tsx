@@ -1,5 +1,10 @@
-import { CrmCalendarListClient } from "../_components/crm-calendar-list-client"
+import { AppShell } from '@/components/dashboard/app-shell'
+import { CalendarContent } from '@/components/dashboard/calendar-content'
 
-export default function CrmCalendarPage() {
-  return <CrmCalendarListClient />
+export default function CalendarPage() {
+  return (
+    <AppShell>
+      <CalendarContent />
+    </AppShell>
+  )
 }

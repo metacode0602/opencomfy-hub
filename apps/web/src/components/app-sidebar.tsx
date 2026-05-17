@@ -18,6 +18,7 @@ import {
   AlertCircleIcon,
   ArrowDownRightIcon,
   ArrowDownToLineIcon,
+  BarChart3,
   Building2,
   CalendarDays,
   ChartBarIcon,
@@ -26,8 +27,10 @@ import {
   CreditCard,
   Factory,
   FileText,
+  FolderKanban,
   HelpCircle,
   History,
+  LayoutDashboard,
   ListOrdered,
   Settings,
   Sparkles,
@@ -90,9 +93,24 @@ const data = {
   ],
   navCrm: [
     {
+      title: "工作台",
+      url: "/crm",
+      icon: <LayoutDashboard className="size-4" />,
+    },
+    {
+      title: "数据看板",
+      url: "/crm/analytics",
+      icon: <BarChart3 className="size-4" />,
+    },
+    {
       title: "租户",
       url: "/crm/tenants",
       icon: <Building2 className="size-4" />,
+    },
+    {
+      title: "项目",
+      url: "/crm/projects",
+      icon: <FolderKanban className="size-4" />,
     },
     {
       title: "员工",
@@ -108,12 +126,7 @@ const data = {
       title: "日历",
       url: "/crm/calendar",
       icon: <CalendarDays className="size-4" />,
-    },
-    {
-      title: "时间线",
-      url: "/crm/timeline",
-      icon: <ListOrdered className="size-4" />,
-    },
+    }
   ],
   navMarketplace: [
     {

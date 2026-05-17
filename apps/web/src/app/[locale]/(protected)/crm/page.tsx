@@ -1,11 +1,10 @@
-import { localeRedirect } from "@/lib/i18n/navigation"
-import { type Locale } from "next-intl"
+import { AppShell } from '@/components/dashboard/app-shell'
+import { DashboardContent } from '@/components/dashboard/dashboard-content'
 
-export default async function CrmIndexPage({
-  params,
-}: {
-  params: Promise<{ locale: Locale }>
-}) {
-  const { locale } = await params
-  localeRedirect({ href: "/crm/tenants", locale })
+export default function DashboardPage() {
+  return (
+    <AppShell>
+      <DashboardContent />
+    </AppShell>
+  )
 }

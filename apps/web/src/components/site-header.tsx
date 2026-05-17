@@ -8,6 +8,11 @@ import { cn } from "@workspace/ui/lib/utils"
 import { GlobalDashboardHeader } from "@/app/[locale]/(protected)/dashboard/global/_components/global-dashboard-header"
 
 import { ThemeToggle } from "./theme-toggle"
+import { Button } from "@workspace/ui/components/button"
+import { Badge } from "@workspace/ui/components/badge"
+import { Search } from "lucide-react"
+import { Input } from "@workspace/ui/components/input"
+import { Bell } from "lucide-react"
 
 function isGlobalDashboardPath(pathname: string | null) {
   if (!pathname) return false
@@ -33,7 +38,7 @@ export function SiteHeader() {
           </div>
           <ThemeToggle />
         </div>
-       
+
       </header>
     )
   }
@@ -47,8 +52,31 @@ export function SiteHeader() {
           className="mx-2 data-[orientation=vertical]:h-4"
         />
         <h1 className="text-base font-medium">Documents</h1>
+
+      </div>
+      {/* Header */}
+      <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-card">
+        <div className="flex items-center gap-4 flex-1">
+          <div className="relative max-w-md w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              type="search"
+              placeholder="搜索租户、项目、合同..."
+              className="pl-10 bg-muted/50 border-0 focus-visible:ring-1"
+            />
+          </div>
+        </div>
+
       </div>
       <div className="flex items-center justify-end p-4">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" className="relative">
+            <Bell className="w-5 h-5" />
+            <Badge className="absolute -top-1 -right-1 w-5 h-5 p-0 flex items-center justify-center text-xs">
+              3
+            </Badge>
+          </Button>
+        </div>
         <ThemeToggle />
       </div>
     </header>

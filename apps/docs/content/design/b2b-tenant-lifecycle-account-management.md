@@ -2,7 +2,7 @@
 
 **文档类型**：产品设计（流程、状态、运营工作台）  
 **适用场景**：闲时算力调度平台 — 对租用算力资源的 B 端租户进行客户经理制服务、测试与转正周期管理、充值与消费跟踪  
-**版本**：v1.4  
+**版本**：v1.5  
 **范围**：不含技术实现与业务代码，聚焦角色分工、生命周期口径、**以客户动态（Activity）统一承载的经营与协作信息**、实体关系与运营能力清单。
 
 ---
@@ -15,8 +15,8 @@ B 端租户从首次触达、发券测试、规模验证到签约与持续消费
 
 ### 1.2 产品目标
 
-1. **客户经理责任制**：为每个**租户**（计费隔离与 CRM 经营合一主体，见 §2）配置主责与协作客户经理，明确服务边界与交接规则。  
-2. **算力规模可解释**：在租户维度沉淀「预期规模 / 当前观测规模」等字段，支持来自合同、商务承诺与平台用量数据的**分层展示**，避免单一数字与事实脱节。  
+1. **客户经理责任制**：为每个**客户组合（`commercial_account`）**配置主责与协作客户经理，明确服务边界与交接规则（见 §2 与 [数据库逻辑模型](./database-schema-structure.md) §1）。  
+2. **算力规模可解释**：在**客户组合**维度沉淀「预期规模 / 当前观测规模」等字段，支持来自合同、商务承诺与平台用量数据的**分层展示**，避免单一数字与事实脱节。  
 3. **测试与转正可审计**：测试起止、转正日期有**系统可自动采集**与**必须人工确认**的混合口径；人工节点强制**佐证材料**（如截图、合同扫描件），满足内控与复盘。  
 4. **经营状态一盘棋**：对充值、消费、余额、欠费、优惠券与测试资源等建立**运营视图**，支撑日常跟进、预警与报表。  
 5. **客户动态一盘棋**：客户经理/销售在权限范围内可查看其负责客户的**认证、充值、提现、退款、订单、开票、算力任务（Serverless/Job/云主机等）、裸金属订单**等平台事实，并与**人工纪要、过程文档、协作跟进任务、评论**在同一套**客户动态（Activity）**时间线中按类型展示、筛选与下钻，支撑交接、复盘与合规审计；**跟进责任发生变更时**，对「现任」与「前负责人」的数据可见范围按 §8.5.1 硬边界区分，防止离职/交接后仍窥视客户后续经营细节。
@@ -27,11 +27,12 @@ B 端租户从首次触达、发券测试、规模验证到签约与持续消费
 
 | 名词 | 定义 |
 |------|------|
-| **租户（Tenant）** | 在平台注册并具备独立**计费、资源隔离与 CRM 经营档案**的 B 端主体（常见为公司主体）。逻辑模型上合并原「客户组合」经营字段为**单表 `tenant`**，客户经理归属、客户动态、里程碑、充值与转正等均通过 **`tenant_id`** 关联；**不再**使用 `commercial_account`、`tenant_binding`。若同一法人多租户或需按项目拆跟进，以**多租户**或后续「子账户 / 项目 / 商机」扩展维度承载（另行建模）。产品 UI 仍可使用「客户」「租户档案」等称呼，与「租户子用户」区分即可。 |
+| **租户（Tenant）** | 在平台注册并具备独立**计费与资源隔离**边界的 B 端主体（常见为公司主体）；与控制台法人/身份对齐。 |
+| **客户组合（Commercial Account）** | **运营基本单元**：客户经理跟进、生命周期、客户动态与销售归属的锚点；默认与**主租户** 1:1（`commercial_account.primary_tenant_id`），可通过 `tenant_binding` 将多租户并入同一组合。**CRM 域**子表以 `commercial_account_id` 为主外键；资金流、计量与账单事实仍以 **`tenant_id`** 为锚，与 [计费文档](./billing-finance-costing-reports.md) 双键口径一致。 |
 | **工作日** | 测试周期统计中的「日」默认指**工作日**（与国家法定工作日对齐，可配置节假日历）。用于 SLA 看板时与「自然日」区分展示。 |
 | **测试券** | 平台发放的用于测试计费的优惠凭证（人工发放动作触发系统记录）。 |
-| **转正** | 租户从「测试/孵化」进入「正式合作」经营态的里程碑；**转正日期**由下文规则取整。 |
-| **客户动态（Activity，时间线条目）** | 客户经理/销售在**租户详情 / 客户档案**中看到的**时间轴最小单元**。每条动态有统一的**类型（activity_type）**与发生时间；平台侧动态由业务系统**投影**生成（权威数据仍在各业务域表），人工与协作类动态在 CRM/运营域落库。同一业务事件（如一次充值成功）对应**一条**主动态，状态变更可追加子类型或新版本动态（实现期约定）。 |
+| **转正** | 客户组合从「测试/孵化」进入「正式合作」经营态的里程碑；**转正日期**由下文规则取整。 |
+| **客户动态（Activity，时间线条目）** | 客户经理/销售在**客户组合详情**中看到的**时间轴最小单元**。每条动态有统一的**类型（activity_type）**与发生时间；平台侧动态由业务系统**投影**生成（权威数据仍在各业务域表），人工与协作类动态在 CRM/运营域落库。同一业务事件（如一次充值成功）对应**一条**主动态，状态变更可追加子类型或新版本动态（实现期约定）。 |
 | **算力任务（Workload Task）** | 租户在算力平台中创建的**运行类任务**，包括但不限于 **Serverless、Job、云主机（云主机实例/长租虚机按产品定义）** 等；以调度/计费域的**任务或实例主键**为准，在客户动态中表现为 `activity_type` 为算力任务相关枚举，并可下钻至控制台任务详情（权限受控）。 |
 | **协作跟进任务（Follow-up Task）** | 客户经理/客成为推进商机、测试、签约、回款等在**运营侧**创建的待办（非算力调度任务）；有负责人、截止日期与状态，可在时间线中产生「创建/完成」等动态或在列表独立管理（见第 8 节）。 |
 | **过程文档（Engagement Document）** | 由内部角色上传的**经营过程材料**（方案、报价、对接清单、沟通留档等），不等同于租户在控制台自助下载的**发票 PDF**或合同系统原件；若需对齐，可在动态上**关联**合同/发票业务 ID。 |
@@ -43,7 +44,7 @@ B 端租户从首次触达、发券测试、规模验证到签约与持续消费
 
 | 角色 | 职责 |
 |------|------|
-| **客户经理（AM）** | 所负责**租户**的主责或协作跟进人；维护预期规模、推动测试与充值、更新需人工确认的里程碑与佐证；通过**客户动态**沉淀人工沟通、过程文档与**协作跟进任务**（见第 8 节）；日常查看负责客户的**认证与资金、订单与票据、算力与裸金属消费**等动态。 |
+| **客户经理（AM）** | 所负责**客户组合**的主责或协作跟进人；维护预期规模、推动测试与充值、更新需人工确认的里程碑与佐证；通过**客户动态**沉淀人工沟通、过程文档与**协作跟进任务**（见第 8 节）；日常查看负责客户的**认证与资金、订单与票据、算力与裸金属消费**等动态。 |
 | **交付 / 客成（CS/实施）** | 配合技术接入与验收；填写**测试完成日期**及上传佐证。 |
 | **销售 / 商务** | 签约信息、合同金额与条款摘要的录入或同步；可触发「签约日期」进入转正候选；查看负责客户的**客户动态**以掌握经营事实与内部协作记录（权限与 AM 同策略或可更宽，由组织配置）。 |
 | **财务 / 运营** | 充值到账确认口径与异常调账协同；大额充值规则与风控策略对接。 |
@@ -51,13 +52,13 @@ B 端租户从首次触达、发券测试、规模验证到签约与持续消费
 
 ---
 
-## 4. 租户生命周期总览
+## 4. 租户与客户组合生命周期总览
 
-建议将租户在经营上划分为四大阶段（可与内部 CRM 阶段映射）：
+建议将**客户组合**在经营上划分为四大阶段（可与内部 CRM 阶段映射）：
 
 ```mermaid
 stateDiagram-v2
-  [*] --> 线索孵化: 创建租户/建档
+  [*] --> 线索孵化: 创建客户组合/关联租户
   线索孵化 --> 测试中: 首次人工发测试券
   测试中 --> 测试完成: 交付或客成确认完成+佐证
   测试完成 --> 已转正: 满足转正规则(取最早日期)
@@ -90,7 +91,7 @@ stateDiagram-v2
 ### 5.3 测试周期 KPI（可选）
 
 - 测试周期长度（工作日）= 测试完成日期 − 测试开始日期（按工作日历折算）。  
-- 超期未填写「测试完成」的租户清单（按 AM 分桶）。
+- 超期未填写「测试完成」的客户组合清单（按 AM 分桶）。
 
 ---
 
@@ -114,7 +115,7 @@ stateDiagram-v2
 
 ### 6.2 预期规模（算力规模）与客户经理服务
 
-- **预期规模**：建议在**租户**上维护结构化字段，例如：目标 GPU 型号、卡数或算力单位、期望启用日期、备注来源（合同条款 / 口头承诺 / 内部目标）。  
+- **预期规模**：建议在**客户组合**上维护结构化字段，例如：目标 GPU 型号、卡数或算力单位、期望启用日期、备注来源（合同条款 / 口头承诺 / 内部目标）。  
 - **当前观测规模**：从平台用量、订单、资源占用等**系统自动汇总**（刷新频率与延迟在实现阶段约定），与预期对比展示**达成率**。  
 - **客户经理工作台**：列表展示「未测试 / 测试中 / 待转正 / 已转正 / 沉默」等标签 + 最近一次充值与消费时间 + 余额与欠费摘要 + **最近一条客户动态时间**（见第 8 节），支持按 AM 筛选与导出。
 
@@ -145,7 +146,7 @@ stateDiagram-v2
 
 ### 8.1 产品抽象：一切皆「客户动态」条目
 
-在**租户**维度提供**唯一客户动态时间线**。时间轴上的**每一行**在交互与权限模型上统称为 **Activity（客户动态）**，通过 **`activity_type`（动态类型）** 区分语义与下钻行为：
+在**客户组合**维度提供**唯一客户动态时间线**。时间轴上的**每一行**在交互与权限模型上统称为 **Activity（客户动态）**，通过 **`activity_type`（动态类型）** 区分语义与下钻行为：
 
 - **平台经营类**：认证、充值、提现、退款、订单、开票、**算力任务**、**裸金属订单**等 —— 数据权威在各业务子系统（身份、资金、订单、调度/裸金属等），时间线侧为**只读投影**（可带标题/摘要快照便于扫读）。  
 - **内部协作类**：人工沟通纪要、过程文档上架、协作跟进任务的生命周期事件 —— 在运营/CRM 域创建与编辑，同样投影为一条或多条客户动态（例如任务「创建」与「完成」可各一条，实现期二选一需统一口径）。
@@ -154,7 +155,7 @@ stateDiagram-v2
 
 ### 8.2 客户经理 / 销售可见的平台动态类型（建议枚举）
 
-下列类型应对齐到统一 `activity_type` 字典（展示名可中文），且**仅当**当前用户对该 **租户**（`tenant_id` 授权范围）有「负责/协作/只读」等授权时才展示；敏感子段（如完整银行卡号）遵循脱敏规则。
+下列类型应对齐到统一 `activity_type` 字典（展示名可中文），且**仅当**当前用户对该 **`commercial_account`** 有「负责/协作/只读」等授权时才展示；敏感子段（如完整银行卡号）遵循脱敏规则。
 
 | 分组 | `activity_type`（示例码） | 含义与典型下钻 |
 |------|---------------------------|----------------|
@@ -198,22 +199,22 @@ stateDiagram-v2
 
 #### 8.5.1 销售 / 客户经理：现任与前负责人（跟进变更后的数据边界）
 
-同一**租户**上，一名内部员工可能经历「主责 / 协作 → 交接结束」或多段分配记录（`account_manager_assignment`，外键 **`tenant_id`**）。**数据可见性**在「租户历史」上按下述规则区分（在仍受敏感字段分级、角色策略约束的前提下）：
+同一**客户组合**上，一名内部员工可能经历「主责 / 协作 → 交接结束」或多段分配记录（`account_manager_assignment`，外键 **`commercial_account_id`**）。**数据可见性**在「该组合下租户历史」上按下述规则区分（在仍受敏感字段分级、角色策略约束的前提下）：
 
-| 身份 | 判定 | 对该租户可见范围 |
-|------|------|------------------|
-| **现任主责或协作** | 存在一条对该 **`tenant_id` 当前有效**的分配：`effective_from ≤ 当前时刻`，且 `effective_to` 为空或 `当前时刻 ≤ effective_to` | 可查看该租户下的**全部历史信息**（含交接前已发生的客户动态、充值与消费流水、订单与票据、算力与裸金属相关事实、里程碑与内部协作类动态等），时间线**不按**本人上任日期截断。 |
-| **前负责人（已不再跟进）** | 对该 **`tenant_id` 过去曾有**分配记录，且**当前时刻**不存在满足上表「现任主责或协作」判定条件的、**指向该员工**的有效分配 | **仅**可查看**跟进责任变更生效之前**已形成的历史信息：凡带业务时间戳的数据（如 `account_activity.occurred_at`、订单支付时间、任务结束时间、里程碑填写时间等），须满足 `业务时间 ≤ 该员工在该租户上对应角色分配行的责任结束时刻`（通常即 `effective_to`）。**跟进变更生效当日及之后的**新增客户动态、后续充值/消费/订单、更新后的经营概览与下钻详情等**不可见**（列表不展示、下钻与导出拦截，或统一提示「已交接，无权限查看后续数据」）。同一人多段不重叠的分配，按**各段** `effective_from…effective_to` 分别截断后再合并展示。 |
+| 身份 | 判定 | 对绑定租户 / 客户组合可见范围 |
+|------|------|--------------------------------|
+| **现任主责或协作** | 存在一条对该 **`commercial_account_id` 当前有效**的分配：`effective_from ≤ 当前时刻`，且 `effective_to` 为空或 `当前时刻 ≤ effective_to` | 可查看该客户组合及其绑定租户下的**全部历史信息**（含交接前已发生的客户动态、充值与消费流水、订单与票据、算力与裸金属相关事实、里程碑与内部协作类动态等），时间线**不按**本人上任日期截断。 |
+| **前负责人（已不再跟进）** | 对该 **`commercial_account_id` 过去曾有**分配记录，且**当前时刻**不存在满足上表「现任主责或协作」判定条件的、**指向该员工**的有效分配 | **仅**可查看**跟进责任变更生效之前**已形成的历史信息：凡带业务时间戳的数据（如 `account_activity.occurred_at`、订单支付时间、任务结束时间、里程碑填写时间等），须满足 `业务时间 ≤ 该员工在该组合上对应角色分配行的责任结束时刻`（通常即 `effective_to`）。**跟进变更生效当日及之后的**新增客户动态、后续充值/消费/订单、更新后的经营概览与下钻详情等**不可见**（列表不展示、下钻与导出拦截，或统一提示「已交接，无权限查看后续数据」）。同一人多段不重叠的分配，按**各段** `effective_from…effective_to` 分别截断后再合并展示。 |
 
-**责任结束时刻（产品口径）**：默认取该员工在该租户上**对应角色**分配行的 `effective_to`（精确到秒，与时区一致）；若一条交接拆成「旧行结束」与「新行开始」两条记录，**截断点**应与运营录入的**交接生效时刻**对齐（`旧.effective_to` = `新.effective_from` 为推荐约束）。同一人多段分配时，**前负责人**视图按**各段分别**过滤后再合并展示（仅展示各段窗口内数据，避免后段窗口泄漏）。
+**责任结束时刻（产品口径）**：默认取该员工在该客户组合上**对应角色**分配行的 `effective_to`（精确到秒，与时区一致）；若一条交接拆成「旧行结束」与「新行开始」两条记录，**截断点**应与运营录入的**交接生效时刻**对齐（`旧.effective_to` = `新.effective_from` 为推荐约束）。同一人多段分配时，**前负责人**视图按**各段分别**过滤后再合并展示（仅展示各段窗口内数据，避免后段窗口泄漏）。
 
 **与列表/工作台**：前负责人不应再出现在「我的客户」默认待办池中；若提供「历史客户」入口，仅加载上述截断前的快照式列表，且**禁止**刷新出交接后的增量。
 
-**实现提示（非强制技术方案）**：列表与搜索在查询层统一带 `occurred_at`（或各域权威表业务时间）与「当前用户对该租户的最大可见截止时间」比较；各域只读下钻 API 与导出任务同样校验，避免通过深链绕过时间线 UI。
+**实现提示（非强制技术方案）**：列表与搜索在查询层统一带 `occurred_at`（或各域权威表业务时间）与「当前用户对该组合的最大可见截止时间」比较；各域只读下钻 API 与导出任务同样校验，避免通过深链绕过时间线 UI。
 
 | 可见性级别 | 含义 |
 |------------|------|
-| 内部默认 | **现任**主责/协作：见 §8.5.1；**前负责人**：见 §8.5.1 截断规则。无分配记录的用户不可见该租户经营明细（管理员等特权角色另策）。平台类动态随租户数据权限与时间边界双因子过滤。 |
+| 内部默认 | **现任**主责/协作：见 §8.5.1；**前负责人**：见 §8.5.1 截断规则。无分配记录的用户不可见该组合经营明细（管理员等特权角色另策）。平台类动态随租户数据权限与时间边界双因子过滤。 |
 | 内部受限 | 含敏感条款的过程文档可缩小可见角色；对应动态条目对无权限用户显示为「受限」或隐藏摘要。 |
 | 租户可见（可选二期） | 租户门户侧「通知/工单」若投影到同一时间轴，须与内部动态**分区或分 Tab**，并打标来源。 |
 
@@ -223,7 +224,7 @@ stateDiagram-v2
 
 ## 9. 关键能力清单（模块级）
 
-1. **租户档案**：AM 主责/协作、行业与标签、预期规模与备注（与计费主体同一 `tenant`）。  
+1. **客户组合档案**：租户绑定（`tenant_binding`）、AM 主责/协作、行业与标签、预期规模与备注。  
 2. **测试券发放台**：人工发券动作与审计；反查「首次发券时间」作为测试开始。  
 3. **里程碑与佐证**：测试完成、规模达标等表单项 + 多附件 + 操作者与时间。  
 4. **转正计算与展示**：三候选日期维护、系统自动取 min、展示触发原因与时间线。  
@@ -232,13 +233,13 @@ stateDiagram-v2
 7. **协作跟进任务中心**：与算力任务文案区分；指派、状态、逾期与完成说明；任务事件写入客户动态。  
 8. **看板与导出**：按 AM、阶段、行业筛选；测试周期与转正漏斗；可选统计各 `activity_type` 频次与跟进任务 SLA。  
 9. **权限与审计**：敏感字段（签约金额、合同）分级；客户动态投影写入方、人工协作内容与评论的变更均写审计日志。  
-10. **跟进交接与数据边界**：`account_manager_assignment` 生效区间驱动「现任全历史 / 前负责人截断」查询（§8.5.1）；交接操作写审计，导出与 API 与 UI 同策略。
+10. **跟进交接与数据边界**：`account_manager_assignment`（`commercial_account_id`）生效区间驱动「现任全历史 / 前负责人截断」查询（§8.5.1）；交接操作写审计，导出与 API 与 UI 同策略。
 
 ---
 
 ## 10. 权限与合规（摘要）
 
-- **客户经理 / 销售（现任）**：对当前负责的租户，可见**全量历史**经营与客户动态（§8.5.1）；里程碑等在角色策略内可编辑；不可擅自改财务到账事实。  
+- **客户经理 / 销售（现任）**：对当前负责的**客户组合**，可见**全量历史**经营与客户动态（§8.5.1）；里程碑等在角色策略内可编辑；不可擅自改财务到账事实。  
 - **客户经理 / 销售（前负责人）**：仅可见交接生效时刻**之前**的历史数据，交接后的租户侧增量与内部协作更新均不可见（§8.5.1）；禁止通过导出或 API 获取交接后明细。  
 - **交付/客成**：可填写测试完成及上传佐证；可协同填写规模达标（若流程如此分配）。  
 - **商务/销售**：维护签约与合同关联信息（现任路径下；前负责人若仅查看历史，编辑类能力应按角色另行收敛）。  
@@ -252,7 +253,7 @@ stateDiagram-v2
 
 | 阶段 | 范围 | 价值 |
 |------|------|------|
-| MVP | 租户档案 + AM 绑定（`tenant_id`）+ 首次发券记测试开始 + 测试完成（手填+附件）+ 充值流水展示 + 转正三条件手填/半自动（充值自动） | 跑通「跟进的单一事实来源」 |
+| MVP | 客户组合 + AM 绑定（`commercial_account_id`）+ 首次发券记测试开始 + 测试完成（手填+附件）+ 充值流水展示 + 转正三条件手填/半自动（充值自动） | 跑通「跟进的单一事实来源」 |
 | 二期 | 用量自动汇总、沉默预警、看板与导出、与 CRM/合同系统对接 | 规模化运营效率 |
 | 二期并行建议 | **客户动态（Activity）统一时间线**：平台侧认证/资金/订单/票据/算力任务/裸金属等投影 + 人工纪要/过程文档/协作跟进任务 + 评论 | AM/销售一屏掌握客户事实与内部协作 |
 | 三期 | 预测评分、自动化任务分派、客成 playbook | 增长与留存深化 |
@@ -261,14 +262,14 @@ stateDiagram-v2
 
 ## 12. 验收标准（产品侧）
 
-1. 任一租户可从 **AM → 测试起止 → 转正候选与最终转正日期 → 关键充值/消费**完整追溯（经营与计费同一主键）。  
+1. 任一客户组合可从**租户 → AM → 测试起止 → 转正候选与最终转正日期 → 关键充值/消费**完整追溯（计费事实以 `tenant_id`，运营归属以 `commercial_account_id`）。  
 2. 测试开始日期仅由**首次成功人工发测试券**推导，有不可抵赖的审计记录。  
 3. 测试完成、规模达标等人工节点**无佐证不可提交**（或提交为草稿不可进入统计）。  
 4. 转正日期与「由哪一候选事件触发」在详情页可对用户解释一致。  
 5. 工作日口径在涉及 SLA 的报表中与「自然日」区分展示，节假日历可配置。  
-6. 任一租户在授权范围内可查看**客户动态**时间线，`activity_type` 至少覆盖 §8.2 所列平台类型（可按分期逐步点亮），且与内部协作类型在同一筛选器内可区分。  
+6. 任一**客户组合**在授权范围内可查看**客户动态**时间线，`activity_type` 至少覆盖 §8.2 所列平台类型（可按分期逐步点亮），且与内部协作类型在同一筛选器内可区分。  
 7. **协作跟进任务**与**算力任务（Serverless/Job/云主机）**在 UI 与枚举上**不得混名**；评论仅挂载于客户动态条目，可追溯作者与时间。  
-8. **跟进变更后**：现任销售/客户经理可查看该租户**全部历史**；前负责人仅可见**交接生效时刻之前**的数据，交接后的动态与经营明细不可访问（抽查下钻与导出校验）。
+8. **跟进变更后**：现任销售/客户经理可查看该客户组合（及绑定租户）**全部历史**；前负责人仅可见**交接生效时刻之前**的数据，交接后的动态与经营明细不可访问（抽查下钻与导出校验）。
 
 ---
 
@@ -280,22 +281,24 @@ stateDiagram-v2
 
 | 建议逻辑实体 | 中文含义 | 核心职责 |
 |--------------|----------|----------|
-| `tenant` | 租户 | **计费隔离 + CRM 经营合一**：法人/主体、对外编码、展示名、生命周期与规模/测试/转正等字段；与 [数据库逻辑模型](./database-schema-structure.md) §1 对齐。 |
-| `account_manager_assignment` | 客户经理/销售分配 | 主责/协作、**生效区间**（`effective_from` / `effective_to`）、交接记录；外键 **`tenant_id`**；`effective_to` 为「前负责人」数据可见上界（§8.5.1），并参与报表归属切片。 |
+| `tenant` | 租户 | **计费与资源隔离**；法人/主体、`tenant_code`、`status`；与 [数据库逻辑模型](./database-schema-structure.md) §1 对齐。 |
+| `commercial_account` | 客户组合 | **运营基本单元**；`primary_tenant_id`、展示名、生命周期与规模/测试/转正等经营字段；CRM 子表主锚。 |
+| `tenant_binding` | 租户绑定（可选） | 多租户同属一客户组合时的关联表。 |
+| `account_manager_assignment` | 客户经理/销售分配 | 主责/协作、**生效区间**；外键 **`commercial_account_id`**；`effective_to` 为「前负责人」数据可见上界（§8.5.1），并参与报表归属。 |
 | `user_staff` | 内部员工/系统用户 | AM、客成等操作者主数据（或对接 HR/SSO）。 |
 | `test_voucher_issue` | 测试券发放记录 | 单次发放审计；**首次成功发放**推导测试开始。 |
 | `promo_coupon` / `wallet_coupon` | 优惠券实例 | 若与发放记录分离，发放记录 FK 指向券实例。 |
 | `lifecycle_milestone` | 生命周期里程碑 | 类型：测试完成、规模达标、签约等；含日期、填写人、佐证附件组。 |
 | `milestone_evidence` | 里程碑佐证 | 文件元数据、存储 key、哈希、上传者与时间。 |
 | `contract_snapshot` | 合同摘要/关联 | 签约日期、合同编号、可选金额摘要；可与外部 CRM 同步。 |
-| `recharge_order` | 充值订单/流水 | 金额、状态、成功时间；用于 ≥5000 判定与经营报表。 |
-| `consumption_usage_daily` | 用量/消费汇总（可选粒度） | 按日/按产品汇总，支撑规模达成对比与沉默识别。 |
-| `conversion_record` | 转正记录 | 缓存转正日期、触发事件类型、三候选日期快照；以流水与里程碑为源二次计算亦可。 |
+| `recharge_order` | 充值订单/流水 | **`tenant_id` + `commercial_account_id`**；金额、状态、成功时间；用于 ≥5000 判定与经营/计费报表。 |
+| `consumption_usage_daily` | 用量/消费汇总（可选粒度） | **双键**与月结对齐；支撑规模达成对比与沉默识别。 |
+| `conversion_record` | 转正记录 | 按 **`commercial_account_id`** UK；缓存转正日期、触发事件类型、三候选日期快照。 |
 | `calendar_workday` | 工作日历 | 节假日配置，支撑测试工作日统计。 |
-| `account_activity` | 客户动态（时间线条目） | **统一时间线投影**：`activity_type`、`occurred_at`、`ref_domain`+`ref_id`（指向认证/资金/订单/算力任务等权威记录）、摘要快照、可见性；平台类多为只读同步，内部协作类在 CRM 写入。 |
-| `engagement_document` | 过程文档 | 内部上传文件实体；上架时产生 `activity_type=ENGAGEMENT_DOCUMENT` 的 `account_activity` 并 `ref` 指向本文档。 |
-| `follow_up_task` | 协作跟进任务 | 运营侧待办（非算力任务）；负责人、截止日、状态；状态变更可投影为 `account_activity`（实现期约定一条或多条）。 |
-| `engagement_comment` | 评论 | **仅**挂载 `account_activity_id`；楼中楼用 `parent_comment_id`；正文与 @、附件。 |
+| `account_activity` | 客户动态（时间线条目） | **统一时间线投影**；含 **`commercial_account_id` + `tenant_id`**（事实租户）；`activity_type`、`occurred_at`、`ref_domain`+`ref_id` 等。 |
+| `engagement_document` | 过程文档 | 内部上传文件实体；归属 **`commercial_account_id`**。 |
+| `follow_up_task` | 协作跟进任务 | 运营侧待办；归属 **`commercial_account_id`**。 |
+| `engagement_comment` | 评论 | **仅**挂载 `account_activity_id`；冗余 **`commercial_account_id`** 便于权限过滤。 |
 | `activity_type_definition` | 客户动态类型字典 | `activity_type` 枚举元数据（展示名、分组、排序、是否平台投影）。 |
 | `tenant_certification_record` 等（示意） | 各业务域权威表 | **认证、提现、退款、订单、开票、算力任务、裸金属订单**等以各服务已有模型为准；向 `account_activity` **投影**而非在时间线侧重复造业务状态机。 |
 
@@ -303,35 +306,41 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
-  tenant ||--o{ account_manager_assignment : "AM分配"
+  tenant ||--o| commercial_account : "primary_tenant"
+  commercial_account ||--o{ tenant_binding : "多租户合一"
+  tenant_binding }o--|| tenant : "绑定租户"
+
+  commercial_account ||--o{ account_manager_assignment : "AM分配"
   user_staff ||--o{ account_manager_assignment : "主责或协作"
 
-  tenant ||--o{ test_voucher_issue : "发券记录"
+  commercial_account ||--o{ test_voucher_issue : "发券记录"
   user_staff ||--o{ test_voucher_issue : "操作人"
 
-  tenant ||--o{ lifecycle_milestone : "里程碑"
+  commercial_account ||--o{ lifecycle_milestone : "里程碑"
   user_staff ||--o{ lifecycle_milestone : "填写人"
   lifecycle_milestone ||--o{ milestone_evidence : "佐证附件"
 
-  tenant ||--o{ contract_snapshot : "合同关联"
-  tenant ||--o{ recharge_order : "充值流水"
-  tenant ||--o{ consumption_usage_daily : "用量消费汇总"
+  commercial_account ||--o{ contract_snapshot : "合同关联"
+  commercial_account ||--o{ recharge_order : "CRM"
+  tenant ||--o{ recharge_order : "资金流"
+  commercial_account ||--o{ consumption_usage_daily : "运营"
+  tenant ||--o{ consumption_usage_daily : "用量"
+  commercial_account ||--o| conversion_record : "转正结果"
 
-  tenant ||--o| conversion_record : "转正结果"
-
-  tenant ||--o{ account_activity : "客户动态"
+  commercial_account ||--o{ account_activity : "时间线归属"
+  tenant ||--o{ account_activity : "事实租户"
   user_staff ||--o{ account_activity : "操作者(可选)"
   activity_type_definition ||--o{ account_activity : "类型字典"
 
-  tenant ||--o{ engagement_document : "过程文档"
+  commercial_account ||--o{ engagement_document : "过程文档"
   user_staff ||--o{ engagement_document : "上传者"
   account_activity }o--o| engagement_document : "ref可选"
 
-  tenant ||--o{ follow_up_task : "协作跟进任务"
+  commercial_account ||--o{ follow_up_task : "协作跟进任务"
   user_staff ||--o{ follow_up_task : "负责人"
   account_activity }o--o| follow_up_task : "ref可选"
 
-  tenant ||--o{ engagement_comment : "归属(冗余)"
+  commercial_account ||--o{ engagement_comment : "归属(冗余)"
   account_activity ||--o{ engagement_comment : "评论"
   engagement_comment ||--o{ engagement_comment : "楼中楼"
   user_staff ||--o{ engagement_comment : "作者"
@@ -340,6 +349,11 @@ erDiagram
     text id PK
     string tenant_code UK
     string name
+  }
+
+  commercial_account {
+    text id PK
+    text primary_tenant_id FK
     string account_name
     string lifecycle_phase
     jsonb expected_scale
@@ -351,7 +365,7 @@ erDiagram
 
   account_manager_assignment {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     text user_staff_id FK
     string role_type
     timestamptz effective_from
@@ -360,7 +374,7 @@ erDiagram
 
   test_voucher_issue {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     text operator_id FK
     timestamptz issued_at
     string issue_status
@@ -369,7 +383,7 @@ erDiagram
 
   lifecycle_milestone {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     string milestone_type
     date milestone_date
     text filled_by FK
@@ -377,110 +391,35 @@ erDiagram
     string notes
   }
 
-  milestone_evidence {
-    text id PK
-    text lifecycle_milestone_id FK
-    string file_name
-    string storage_uri
-    text uploaded_by FK
-    timestamptz uploaded_at
-  }
-
-  contract_snapshot {
-    text id PK
-    text tenant_id FK
-    string contract_no
-    date signed_on
-    string external_crm_id
-  }
-
   recharge_order {
     text id PK
     text tenant_id FK
+    text commercial_account_id FK
     decimal amount
-    string currency
     string status
     timestamptz paid_at
   }
 
-  conversion_record {
-    text id PK
-    text tenant_id FK
-    date conversion_date
-    string trigger_type
-    date candidate_signed
-    date candidate_scale_met
-    timestamptz candidate_recharge_ge_threshold
-  }
-
-  activity_type_definition {
-    text id PK
-    string type_code UK
-    string display_name
-    string category
-    bool is_platform_projection
-  }
-
   account_activity {
     text id PK
+    text commercial_account_id FK
     text tenant_id FK
     text activity_type_id FK
     timestamptz occurred_at
     string ref_domain
     text ref_id
-    text actor_user_id
-    string title_snapshot
-    string summary_snapshot
-    jsonb payload
-    string visibility
-  }
-
-  engagement_document {
-    text id PK
-    text tenant_id FK
-    text uploaded_by FK
-    string title
-    int version_no
-    string storage_uri
-    string visibility
-    timestamptz created_at
-  }
-
-  follow_up_task {
-    text id PK
-    text tenant_id FK
-    text assignee_id FK
-    text source_account_activity_id FK
-    string title
-    string status
-    date due_on
-    timestamptz completed_at
-  }
-
-  engagement_comment {
-    text id PK
-    text tenant_id FK
-    text account_activity_id FK
-    text author_id FK
-    text parent_comment_id FK
-    text body
-    timestamptz created_at
   }
 ```
 
 ### 13.3 关系说明（简要）
 
-- **`tenant`**：合并计费主体与 CRM 经营字段的**单表**；子账户/项目/商机等扩展另策，**不再**使用 `commercial_account` / `tenant_binding`。  
-- **测试开始**：可由 `test_voucher_issue` 聚合 `MIN(issued_at WHERE issue_status=success)` 写入或缓存到 **`tenant.test_started_on`**（更新策略：仅当更早成功发券时刷新）。  
-- **测试完成 / 规模达标**：统一用 `lifecycle_milestone` + `milestone_evidence`，`milestone_type` 区分枚举值。  
-- **转正**：`conversion_record` 可由定时任务或提交里程碑时重算：`conversion_date = min(signed_on, scale_met_date, first_recharge_ge_5000_paid_at)`，并写入 `trigger_type` 说明优先级平局时的规则（建议：仍取最早时间，触发类型可多选展示或按预设优先级展示主因）。  
-- **客户动态 `account_activity`**：为时间线的**统一投影表**；`activity_type` 对齐 §8.2 与 `activity_type_definition`。`ref_domain` + `ref_id` 指向业务域权威实体（如 `recharge_order`、`workload_job`、`bare_metal_order`、认证流水 ID 等）；**禁止**在投影表内维护与权威表冲突的资金/订单状态。对**前负责人**的列表/检索须以 `occurred_at` 与对应 `account_manager_assignment.effective_to` 比较过滤（§8.5.1）。  
-- **平台 → 动态**：认证、充值、提现、退款、订单、开票、算力任务（Serverless/Job/云主机）、裸金属订单等由各域在状态变更时投递**幂等**投影（建议带业务唯一键去重，如 `order_id + event_seq`）。  
-- **人工沟通**：`activity_type = HUMAN_TOUCH` 时，`payload` 或扩展子表承载渠道、纪要正文、下一步；不必单独保留已废弃的 `engagement_activity` 表名（若历史代码已用，可迁移为上述类型）。  
-- **`engagement_document` / `follow_up_task`**：实体仍独立存储版本与任务状态；时间线通过 `account_activity` 的 `ref` 或「任务状态变更事件」关联展示。  
-- **`follow_up_task.source_account_activity_id`**：可选，表示由某条人工沟通类客户动态衍生出的跟进任务。  
-- **`engagement_comment`**：**必须**含 `account_activity_id`；若需对里程碑讨论，先为里程碑生成一条客户动态（`ref` 指向 `lifecycle_milestone`）再挂载评论。  
-- **UI 融合查询**：以 `account_activity.occurred_at` 为主排序键；里程碑、发券等若也要进时间线，或投影为 `account_activity`，或在查询层 UNION（实现二选一，避免双计数）。
+- **`tenant` 与 `commercial_account`**：MVP 可 `primary_tenant_id` 非空且唯一约束保证一租户一组合；扩展多租户时启用 `tenant_binding`。  
+- **测试开始**：可由 `test_voucher_issue` 聚合写入或缓存到 **`commercial_account.test_started_on`**。  
+- **测试完成 / 规模达标**：统一用 `lifecycle_milestone` + `milestone_evidence`。  
+- **转正**：`conversion_record` 按 **`commercial_account_id`** 维护；重算规则同 §6。  
+- **客户动态 `account_activity`**：须含 **`commercial_account_id` + `tenant_id`**；前负责人过滤仍按 `account_manager_assignment.effective_to`（§8.5.1）。  
+- **`recharge_order`**：资金流以 `tenant_id` 为准，运营与销售报表须带 `commercial_account_id`。  
+- **`engagement_comment`**：**必须**含 `account_activity_id`；冗余 `commercial_account_id` 便于列表权限。  
 
 ---
 
@@ -488,11 +427,11 @@ erDiagram
 
 | 业务口径 | 产品设计落点 |
 |----------|----------------|
-| 每个租户配置客户经理 | `tenant` + `account_manager_assignment`（`tenant_id`） |
+| 每个客户组合配置客户经理 | `commercial_account` + `account_manager_assignment`（`commercial_account_id`） |
 | 了解算力规模 | `expected_scale` + `consumption_usage_daily`（及详情下钻） |
 | 促成测试 | 测试券发放台 + 测试阶段标签 + 用量/消费提醒 |
 | 按预定规模使用 | 预期 vs 实际对比、规模达标里程碑 + 佐证 |
-| 充值和消费跟踪 | `recharge_order` + 消费流水/汇总 + 经营概览 |
+| 充值和消费跟踪 | `recharge_order`（`tenant_id`+`commercial_account_id`）+ 消费流水/汇总 + 经营概览 |
 | 测试开始（工作日） | `test_voucher_issue` 首次成功时间 |
 | 测试完成 | `lifecycle_milestone`（测试完成）+ `milestone_evidence` |
 | 转正日期取最早 | `contract_snapshot.signed_on`、`lifecycle_milestone`（规模达标）、`recharge_order`（≥5000 成功）→ `conversion_record` |

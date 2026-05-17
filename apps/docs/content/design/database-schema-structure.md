@@ -9,7 +9,7 @@
 - 主键：`id text` PK；值由应用生成（如 ULID、nanoid、KSUID）或数据库 `gen_random_uuid()::text` 等，**全库主键与外键引用列均为 `text`**，与 `id` 同源。
 - 时间：`timestamptz`；仅「日历日」业务字段用 `date`。
 - 软删：需要审计保留的实体可增加 `deleted_at`；客户动态投影表建议以「追加版本」或不可变写入为主。
-- 多租户隔离：B 端数据以 `tenant_id` 为边界（计费与 CRM 经营合一）；供应商侧以 `supplier_id` 为根。
+- 多租户隔离：**计费与资源隔离**以 `tenant_id` 为边界；**客户经理运营、CRM 时间线与销售归属**以 `commercial_account_id` 为锚（`commercial_account` 为运营基本单元，默认与主租户 1:1，可扩展多租户绑定）。**费用、成本、月结汇总、账单与调账**等经营类行数据须**同时**携带 `tenant_id`（与计量、出账、资源事实一致）与 `commercial_account_id`（与 AM 分配、毛利归属、运营下钻一致）；供应商侧以 `supplier_id` 为根。
 - 审计：敏感操作除业务表外写入统一 `audit_log`（文末补充），或各域 `entity_state_transition_log` 等专用审计表。
 
 **字段类型与命名（全文一致）**：
@@ -27,21 +27,37 @@
 
 ## 1. B 端客户经营与 CRM 域
 
-承载：租户经营与客户经理分配、测试券、生命周期里程碑、转正、客户动态（Activity）投影、协作跟进、过程文档、评论、工作日历等。
+承载：**租户**（计费/资源主体）、**客户组合** `commercial_account`（运营基本单元）、客户经理分配、测试券、生命周期里程碑、转正、客户动态（Activity）投影、协作跟进、过程文档、评论、工作日历等。
 
 ### 1.1 表清单与字段说明
 
 #### `tenant`（租户）
 
-平台计费、资源隔离与 **CRM 经营** 合一主体：合并原「租户」与「客户组合 / 经营单元（`commercial_account`）」；与控制台「法人/主体」及运营跟进字段对齐。一租户一行，**不再**维护 `tenant_binding` 多租户绑定。
+平台 **计费、资源隔离与身份** 主体；与控制台「法人/主体」对齐。CRM 经营字段在 **`commercial_account`**。
 
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | 租户主键 |
+| `external_id` | text | UK | 租户外部系统主键 |
 | `tenant_code` | varchar | UK | 对外稳定编码 |
 | `name` | varchar |  | 企业法定名称 |
-| `account_name` | varchar | NOT NULL | 经营展示名（原客户组合展示名） |
+| `short_name` | varchar |  | 简称 |
+| `cert_code` | varchar |  | 统一信用编码 |
 | `status` | varchar |  | 租户状态（注册/冻结等，与身份域一致） |
+| `type` | varchar | system / manual | 系统 / 手动录入 |
+| `created_at` | timestamptz | NOT NULL | 创建时间 |
+| `registered_at` | timestamptz | NOT NULL | 创建时间 |
+
+#### `commercial_account`（客户组合 / 运营基本单元）
+
+客户经理跟进、生命周期、客户动态与**销售归属**的最小单元；默认 **1:1 主租户**，可通过 `tenant_binding` 扩展多租户同属一组合。
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | text | PK | |
+| `primary_tenant_id` | text | FK→tenant，建议 UK（MVP 一租户一组合） | 主绑定租户 |
+| `account_code` | varchar | NOT NULL UK | 项目编码 |
+| `account_name` | varchar | NOT NULL | 展示名 |
 | `type` | varchar | NOT NULL | 租户类型，B端/C端 |
 | `lifecycle_phase` | varchar |  | 线索孵化/测试中/已转正等（与设计状态机对齐） |
 | `expected_scale` | jsonb |  | 预期规模：目标 GPU 型号、卡数、来源备注等 |
@@ -52,6 +68,17 @@
 | `conversion_trigger` | varchar |  | 主触发类型摘要（签约/规模/充值阈值等） |
 | `created_at` / `updated_at` | timestamptz | | |
 
+#### `tenant_binding`（多租户绑定到同一客户组合，可选）
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | text | PK | |
+| `commercial_account_id` | text | FK，NOT NULL | |
+| `tenant_id` | text | FK，NOT NULL | |
+| `binding_role` | varchar |  | 主从/项目线等说明 |
+| `created_at` | timestamptz | | |
+| 唯一约束 | | | `(commercial_account_id, tenant_id)` |
+
 #### `user_staff`（内部员工）
 
 可对接 HR/SSO；AM、客成、运维操作者引用此表。
@@ -61,6 +88,7 @@
 | `id` | text | PK | |
 | `employee_no` | varchar | UK 可选 | 工号 |
 | `display_name` | varchar | NOT NULL | |
+| `department` | varchar | NOT NULL | 所属部门 |
 | `mobile` | varchar | NOT NULL | |
 | `email` | varchar | UK 可选 | |
 | `status` | varchar | | active / 离职等 |
@@ -72,14 +100,15 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营归属单元 |
 | `user_staff_id` | text | FK，NOT NULL | |
 | `role_type` | varchar | NOT NULL | 客户经理 / 交付 / 项目经理 / 售前 等 |
+| `remark` | text | NOT NULL | 备注信息 |
 | `effective_from` | timestamptz | NOT NULL | 责任开始（与交接时刻对齐） |
 | `effective_to` | timestamptz | 可空 | 责任结束；空表示当前有效 |
 | `created_at` | timestamptz | | |
 
-索引建议：`(tenant_id, user_staff_id, effective_from)`；当前有效行可用部分索引 `WHERE effective_to IS NULL`。
+索引建议：`(commercial_account_id, user_staff_id, effective_from)`；当前有效行可用部分索引 `WHERE effective_to IS NULL`。
 
 #### `test_voucher_issue`（测试券发放记录）
 
@@ -88,7 +117,7 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | |
 | `operator_id` | text | FK→user_staff | 人工发放操作者 |
 | `issued_at` | timestamptz | NOT NULL | 发放时间 |
 | `issue_status` | varchar | NOT NULL | success / failed 等 |
@@ -103,12 +132,12 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | |
 | `milestone_type` | varchar | NOT NULL | TEST_COMPLETE / SCALE_MET / … |
 | `milestone_date` | date | NOT NULL | 业务日期 |
 | `filled_by` | text | FK→user_staff | |
 | `filled_at` | timestamptz | NOT NULL | |
-| `notes` | text | | |
+| `remark` | text | | |
 
 #### `milestone_evidence`（里程碑佐证附件）
 
@@ -117,6 +146,7 @@
 | `id` | text | PK | |
 | `lifecycle_milestone_id` | text | FK，NOT NULL | |
 | `file_name` | varchar | NOT NULL | |
+| `file_size` | varchar | NOT NULL | |
 | `storage_uri` | varchar | NOT NULL | 对象存储 key 或 URI |
 | `file_hash` | varchar | 可空 | 完整性校验 |
 | `uploaded_by` | text | FK→user_staff | |
@@ -127,7 +157,7 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | |
 | `contract_no` | varchar | | |
 | `contract_url` | varchar | | 合同链接 |
 | `signed_on` | date | | 签约/生效日（转正候选之一） |
@@ -141,7 +171,8 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | 计费与资金流锚点 |
+| `tenant_id` | text | FK→tenant，NOT NULL | 资金流与出账锚点 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营归属与 CRM 对齐 |
 | `amount` | decimal(15,4) | NOT NULL | |
 | `currency` | char(3) | NOT NULL | |
 | `status` | varchar | NOT NULL | |
@@ -156,13 +187,18 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `tenant_id` | text | FK→tenant，NOT NULL | 用量归属租户 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营聚合与报表 JOIN |
 | `usage_date` | date | NOT NULL | |
 | `product_line` | varchar | | 产品线编码 |
 | `unit` | varchar | | 计价单位，卡时 |
 | `amount` | decimal(15,4) | | 与计费货币口径一致时 |
+| `balance` | decimal(15,4) | | 余额消费 |
+| `coupon` | decimal(15,4) | | 券消费 |
 | `gpu_seconds` 等 | numeric | | 卡时、秒等非金额度量 |
-| 唯一约束 | | | `(tenant_id, usage_date, product_line, …)` |
+| `gpu_seconds_coupon` 等 | numeric | | 券消费卡时、秒等非金额度量 |
+| `gpu_seconds_balance` 等 | numeric | | 余额消费卡时、秒等非金额度量 |
+| 唯一约束 | | | `(tenant_id, commercial_account_id, usage_date, product_line, …)` 或按域裁剪；须能唯一标识「租户 × 组合 × 日 × 产品线」汇总 |
 
 #### `conversion_record`（转正记录 / 缓存）
 
@@ -171,9 +207,10 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，UK | 每租户至多一条当前有效记录或版本表 |
+| `commercial_account_id` | text | FK→commercial_account，UK | 每组合至多一条当前有效记录或版本表 |
 | `conversion_date` | date | NOT NULL | |
 | `trigger_type` | varchar | NOT NULL | 主触发原因 |
+| `remark` | text |  | 备注说明 |
 | `candidate_signed_on` | date | 可空 | |
 | `candidate_scale_met_on` | date | 可空 | |
 | `candidate_recharge_ge_threshold_at` | timestamptz | 可空 | |
@@ -205,7 +242,8 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 时间线归属 |
+| `tenant_id` | text | FK→tenant，NOT NULL | 冗余：事实发生租户（多租户绑定时与 `tenant_binding` 一致） |
 | `activity_type_id` | text | FK→activity_type_definition | |
 | `occurred_at` | timestamptz | NOT NULL | 业务发生时间（排序主键） |
 | `ref_domain` | varchar | 可空 | 如 `recharge_order`、`workload_job` |
@@ -217,14 +255,14 @@
 | `payload` | jsonb | | 扩展字段 |
 | `visibility` | varchar | | 内部默认 / 受限 等 |
 
-索引：`(tenant_id, occurred_at DESC)`。
+索引：`(commercial_account_id, occurred_at DESC)`；可选 `(tenant_id, occurred_at DESC)` 便于按租户筛平台类动态。
 
 #### `engagement_document`（过程文档）
 
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | |
 | `uploaded_by` | text | FK→user_staff，NOT NULL | |
 | `title` | varchar | NOT NULL | |
 | `version_no` | int | NOT NULL DEFAULT 1 | |
@@ -237,7 +275,7 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | |
 | `assignee_id` | text | FK→user_staff | 负责人 |
 | `source_account_activity_id` | text | FK 可空 | 由某条动态衍生 |
 | `title` | varchar | NOT NULL | |
@@ -251,7 +289,7 @@
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant，NOT NULL | 冗余便于列表权限过滤 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 冗余便于列表权限过滤 |
 | `account_activity_id` | text | FK，NOT NULL | |
 | `author_id` | text | FK→user_staff，NOT NULL | |
 | `parent_comment_id` | text | FK 可空 | 楼中楼 |
@@ -260,29 +298,40 @@
 
 **说明**：认证、提现、退款、订单、开票、算力任务、裸金属订单等**权威表在各业务域**；向 `account_activity` **幂等投影**，不在 CRM 库重复状态机。
 
-### 1.2 关系图 — 租户核心主数据
+### 1.2 关系图 — 租户、客户组合与 CRM 主数据
 
 ```mermaid
 erDiagram
-  tenant ||--o{ account_manager_assignment : "AM 生效区间"
+  tenant ||--o| commercial_account : "默认 primary_tenant"
+  commercial_account ||--o{ tenant_binding : "多租户合一组合"
+  tenant_binding }o--|| tenant : "绑定租户"
+
+  commercial_account ||--o{ account_manager_assignment : "AM 生效区间"
   user_staff ||--o{ account_manager_assignment : "主责或协作"
 
-  tenant ||--o{ test_voucher_issue : "测试券发放"
+  commercial_account ||--o{ test_voucher_issue : "测试券发放"
   user_staff ||--o{ test_voucher_issue : "操作人"
 
-  tenant ||--o{ lifecycle_milestone : "里程碑"
+  commercial_account ||--o{ lifecycle_milestone : "里程碑"
   user_staff ||--o{ lifecycle_milestone : "填写人"
   lifecycle_milestone ||--o{ milestone_evidence : "佐证"
 
-  tenant ||--o{ contract_snapshot : "合同摘要"
-  tenant ||--o{ recharge_order : "充值流水"
-  tenant ||--o{ consumption_usage_daily : "日汇总可选"
-  tenant ||--o| conversion_record : "转正缓存"
+  commercial_account ||--o{ contract_snapshot : "合同摘要"
+  commercial_account ||--o{ recharge_order : "充值流水"
+  commercial_account ||--o{ consumption_usage_daily : "日汇总可选"
+  tenant ||--o{ recharge_order : "资金流锚点"
+  tenant ||--o{ consumption_usage_daily : "用量锚点"
+  commercial_account ||--o| conversion_record : "转正缓存"
 
   tenant {
     text id PK
     string tenant_code UK
     string name
+  }
+
+  commercial_account {
+    text id PK
+    text primary_tenant_id FK
     string account_name
     string lifecycle_phase
     jsonb expected_scale
@@ -292,7 +341,7 @@ erDiagram
 
   account_manager_assignment {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     text user_staff_id FK
     string role_type
     timestamptz effective_from
@@ -304,24 +353,26 @@ erDiagram
 
 ```mermaid
 erDiagram
-  tenant ||--o{ account_activity : "时间线"
+  commercial_account ||--o{ account_activity : "时间线"
+  tenant ||--o{ account_activity : "事实租户"
   activity_type_definition ||--o{ account_activity : "类型"
   user_staff ||--o{ account_activity : "actor 可选"
 
-  tenant ||--o{ engagement_document : "过程文档"
+  commercial_account ||--o{ engagement_document : "过程文档"
   user_staff ||--o{ engagement_document : "上传者"
 
-  tenant ||--o{ follow_up_task : "跟进任务"
+  commercial_account ||--o{ follow_up_task : "跟进任务"
   user_staff ||--o{ follow_up_task : "负责人"
   account_activity ||--o{ follow_up_task : "source_activity 可选"
 
   account_activity ||--o{ engagement_comment : "评论"
   engagement_comment ||--o{ engagement_comment : "parent 楼中楼"
   user_staff ||--o{ engagement_comment : "作者"
-  tenant ||--o{ engagement_comment : "冗余归属"
+  commercial_account ||--o{ engagement_comment : "冗余归属"
 
   account_activity {
     text id PK
+    text commercial_account_id FK
     text tenant_id FK
     text activity_type_id FK
     timestamptz occurred_at
@@ -338,7 +389,7 @@ erDiagram
 
   follow_up_task {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     text assignee_id FK
     text source_account_activity_id FK
     string status
@@ -379,7 +430,9 @@ erDiagram
 | `terms_json` | jsonb | 参数全集 |
 | `effective_from` / `effective_to` | timestamptz | **不可覆盖历史** |
 
-#### `supplier_unit_cost`（条款下的单价或分成档）
+#### `supplier_unit_cost`（条款下的单价或分成档 — **当前生效**）
+
+同一 `(supplier_terms_version_id, idc_code, card_type)`（及实现期约定的其它业务键）仅存**一行**：供列表、实时取价、月结跑批默认读当前价。**调价时**：先在 `supplier_unit_cost_history` 闭合上一段 `effective_to`，再更新本行金额字段，并追加历史表新开的区间行（实现期可用事务保证一致）。
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
@@ -391,6 +444,29 @@ erDiagram
 | `unit_cost` | decimal(15,4) | 可空；卡时单价等 |
 | `percent` | numeric | 可空；分成比例 |
 | `tier_json` | jsonb | 可空；阶梯表 |
+| `price_effective_from` | timestamptz | 当前行价格自何时起生效（与历史表当前段 `effective_from` 对齐，便于展示与对账） |
+
+#### `supplier_unit_cost_history`（单价 / 成本区间 — **不可变历史**）
+
+按时间轴记录每次调价后的**区间快照**，用于追溯、补算历史账期、审计。区间左闭右开或全闭由实现期约定并在取价逻辑中统一；**禁止 UPDATE 已闭合区间**（纠错用新行冲正或走调账域）。
+
+| 列名 | 类型 | 说明 |
+|------|------|------|
+| `id` | text PK | |
+| `supplier_unit_cost_id` | text | FK→supplier_unit_cost（维度锚点） |
+| `supplier_terms_version_id` | text | 冗余 FK，便于按版本扫历史 |
+| `supplier_id` | text | 冗余 FK→supplier |
+| `idc_code` | varchar | 机房编码 |
+| `card_type` | varchar | 卡型或调度 SKU |
+| `unit_cost` | decimal(15,4) | 可空；该区间内卡时单价等 |
+| `percent` | numeric | 可空；该区间内分成比例 |
+| `tier_json` | jsonb | 可空；该区间内阶梯表快照 |
+| `effective_from` | timestamptz | 本段开始 |
+| `effective_to` | timestamptz | 本段结束；**可空**表示直至被下一段替换前仍有效（闭合时写入） |
+| `superseded_by_history_id` | text | 可空；FK→本表，指向「接替」本段的下一行，便于链式审计 |
+| `change_reason` | varchar | 可空；调价原因编码或简述 |
+| `created_at` | timestamptz | 写入时间 |
+| `created_by_staff_id` | text | 可空；FK→user_staff |
 
 
 
@@ -607,11 +683,9 @@ erDiagram
 
 ## 3. 计费、成本与月结域
 
-承载：供应商合作条款版本、单价/阶梯成本、计量明细、租户账单头行、成本计提、券核销、预留包与摊销、封账日志、财务调账。
+承载：供应商合作条款版本、单价/阶梯成本（当前行 + `supplier_unit_cost_history` 区间历史）、计量明细、租户账单头行、成本计提、券核销、预留包与摊销、封账日志、财务调账。
 
 ### 3.1 表清单与字段说明（摘要）
-
-补充消费	余额消费	线上裸金属消费
 
 
 #### `billing_period`（账期，可选独立表）
@@ -634,7 +708,8 @@ erDiagram
 |------|------|------|
 | `id` | text PK | |
 | `billing_period_id` | text | FK→billing_period |
-| `tenant_id` | text | FK→tenant；计费锚点 |
+| `tenant_id` | text | FK→tenant；计费与计量锚点 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营归属与销售报表 JOIN |
 | `type` | varchar | B 端 / C 端消费时的客户类型 |
 | `balance` | decimal(15,4) | 余额消费（金额侧，若与卡时并存则口径与报表一致） |
 | `voucher` | decimal(15,4) | 券消费 |
@@ -645,6 +720,7 @@ erDiagram
 | `idc_code` | varchar | 机房编码 |
 | `user_staff_id` | text | FK→user_staff；客户经理，计提成用 |
 
+**设计说明（月结收入/成本汇总行）**：`tenant_id` 与计量、出账一致；`commercial_account_id` 与 `commercial_account` / AM 分配一致，**销售毛利与运营下钻**须能同时按两维过滤。
 
 #### `tenant_consumption_monthly`（租户月度用量汇总 — 金额汇总，计收入）
 
@@ -653,6 +729,7 @@ erDiagram
 | `id` | text PK | |
 | `billing_period_id` | text | FK→billing_period |
 | `tenant_id` | text | FK→tenant；计费锚点 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营归属与毛利聚合 |
 | `product_line` | varchar | serverless / server / baremetal / JOB |
 | `type` | varchar | B 端 / C 端消费时的客户类型 |
 | `balance` | decimal(15,4) | 余额消费 |
@@ -661,7 +738,7 @@ erDiagram
 
 **设计说明：**
 
-- **数据来源**：Metabase 租户消费分析；未含裸金属收入时需叠加 `tenant_baremetal_monthly` 等导入表。
+- **数据来源**：Metabase 租户消费分析；未含裸金属收入时需叠加 `tenant_baremetal_monthly` 等导入表。导入与重算时须校验 `(tenant_id, commercial_account_id)` 与主数据一致（主租户或 `tenant_binding`）。
 
 #### `tenant_baremetal_monthly`（租户月度裸金属订单 — 收入/成本）
 
@@ -671,6 +748,7 @@ erDiagram
 | `billing_period_id` | text | FK→billing_period | |
 | `order_no` | varchar | NOT NULL | 订单编号（展示用，建议 UK） |
 | `tenant_id` | text | FK→tenant，NOT NULL | |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 与主数据一致，便于组合维报表 |
 | `idc_name` | varchar | 可空 | 机房名称（可反查 `idc_code`） |
 | `idc_code` | varchar | 可空 | 机房编码 |
 | `device_model` | varchar | 可空 | 设备型号 |
@@ -697,6 +775,7 @@ erDiagram
 | `project_name` | varchar | 可空 | 项目名称 |
 | `tenant_name` | varchar | NOT NULL | 客户全称（展示冗余） |
 | `tenant_id` | text | FK→tenant，NOT NULL | 与全文租户主键一致 |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 运营组合维与销售归属 |
 | `supplementary_consumption` | decimal(15,4) | 可空 | 补充消费金额 |
 | `balance_consumption` | decimal(15,4) | 可空 | 余额消费金额 |
 | `bare_metal_consumption` | decimal(15,4) | 可空 | 线上裸金属消费金额 |
@@ -706,8 +785,8 @@ erDiagram
 
 **设计说明：**
 
-- **金额**：统一 `decimal(15,4)`。
-- **租户**：统一 `text` 与 `tenant.id` 对齐，便于索引与 JOIN。
+- **金额**：统一 `decimal(15,4)`。  
+- **双键**：`tenant_id` 与计量/出账一致；`commercial_account_id` 与 AM、毛利月报、运营下钻一致。
 
 #### `tenant_reserved_monthly`（租户预留资源包消费）
 
@@ -716,6 +795,7 @@ erDiagram
 | `id` | text PK | |
 | `billing_period_id` | text | FK→billing_period |
 | `tenant_id` | text | FK→tenant |
+| `commercial_account_id` | text | FK→commercial_account，NOT NULL | 预留包费用归属运营单元 |
 | `reserved_id` | varchar | 预留资源包业务编号（外部系统编码；若内部有包主数据表可改为 text FK） |
 | `reserved_detail` | jsonb | 预留包配置快照 |
 | `amount` | decimal(15,4) | 预留包金额 |
@@ -732,6 +812,8 @@ erDiagram
 |------|------|------|------|
 | `id` | text | PK | |
 | `billing_period_id` | text | FK→billing_period | |
+| `tenant_id` | text | FK→tenant，可空 | `type=sum` 时可为空或取主租户，按实现约定 |
+| `commercial_account_id` | text | FK→commercial_account，可空 | `type=sum` 时可为空；`type=record` 时建议非空 |
 | `supplier_unit_cost_id` | text | FK→supplier_unit_cost，可空 | `type=record` 时指向成本版本 |
 | `account_manager` | varchar | NOT NULL | 客户经理展示名（冗余） |
 | `staff_id` | text | FK→user_staff，NOT NULL | 客户经理 |
@@ -767,6 +849,8 @@ erDiagram
 |------|------|------|
 | `id` | text PK | |
 | `billing_period_id` | text | FK→billing_period |
+| `tenant_id` | text | FK→tenant，可空 | 与被调账单行一致 |
+| `commercial_account_id` | text | FK→commercial_account，可空 | 与被调账单行一致 |
 | `original_invoice_line_id` | text | 逻辑 FK→账单明细（实现期对应 `billing_invoice_line.id` 等） |
 | `adjustment_amount` | decimal(15,4) | 调整后金额 |
 | `origin_amount` | decimal(15,4) | 原金额 |
@@ -778,7 +862,7 @@ erDiagram
 
 #### `billing_invoice` / `billing_invoice_line` / `cost_accrual_line` / `metering_usage_record` / `voucher_redemption_record`（账单与计量 — 规划扩展）
 
-与 §3.2、§4 中的「账单头行、计量取价、券核销」叙述对应；物理表可在计费服务落地。字段类型遵循本文 **text 外键同源**、金额 `decimal(15,4)`、时间 `timestamptz` 约定；未展开列清单时，可与 `tenant_consumption_monthly` 一样按 `tenant_id` + `billing_period_id` 与租户域对齐。
+与 §3.2、§4 中的「账单头行、计量取价、券核销」叙述对应；物理表可在计费服务落地。字段类型遵循本文 **text 外键同源**、金额 `decimal(15,4)`、时间 `timestamptz` 约定；未展开列清单时，账单头/行、计量行、成本计提行、券核销记录等均须携带 **`tenant_id` + `commercial_account_id`**（与 `tenant_consumption_monthly` 等月结汇总对齐）。
 
 ### 3.2 关系图 — 计费月结汇总与供应商取价
 
@@ -789,6 +873,7 @@ erDiagram
   supplier ||--o{ supplier_terms_version : "条款版本"
   supplier ||--o{ supplier_unit_cost : "成本归属"
   supplier_terms_version ||--o{ supplier_unit_cost : "单价或阶梯"
+  supplier_unit_cost ||--o{ supplier_unit_cost_history : "单价区间"
 
   billing_period ||--o{ tenant_usage_monthly : "卡时汇总"
   billing_period ||--o{ tenant_consumption_monthly : "金额汇总"
@@ -800,10 +885,17 @@ erDiagram
   billing_period ||--o{ finance_adjustment_order : "调账来源账期"
 
   tenant ||--o{ tenant_usage_monthly : "计费锚点"
+  commercial_account ||--o{ tenant_usage_monthly : "运营锚点"
   tenant ||--o{ tenant_consumption_monthly : "计费锚点"
+  commercial_account ||--o{ tenant_consumption_monthly : "运营锚点"
   tenant ||--o{ tenant_baremetal_monthly : "租户"
+  commercial_account ||--o{ tenant_baremetal_monthly : "组合"
   tenant ||--o{ platform_income_monthly : "租户"
+  commercial_account ||--o{ platform_income_monthly : "组合"
   tenant ||--o{ tenant_reserved_monthly : "租户"
+  commercial_account ||--o{ tenant_reserved_monthly : "组合"
+  tenant ||--o{ platform_cost_monthly : "成本租户维"
+  commercial_account ||--o{ platform_cost_monthly : "成本运营维"
 
   user_staff ||--o{ tenant_usage_monthly : "提成 AM"
   user_staff ||--o{ platform_cost_monthly : "AM"
@@ -817,6 +909,15 @@ erDiagram
     date period_end
   }
 
+  commercial_account {
+    text id PK
+    text primary_tenant_id FK
+  }
+
+  tenant {
+    text id PK
+  }
+
   supplier_unit_cost {
     text id PK
     text supplier_terms_version_id FK
@@ -824,47 +925,67 @@ erDiagram
     string idc_code
     string card_type
     decimal unit_cost
+    timestamptz price_effective_from
+  }
+
+  supplier_unit_cost_history {
+    text id PK
+    text supplier_unit_cost_id FK
+    timestamptz effective_from
+    timestamptz effective_to
   }
 
   tenant_usage_monthly {
     text id PK
     text billing_period_id FK
     text tenant_id FK
+    text commercial_account_id FK
     text user_staff_id FK
   }
 
   platform_cost_monthly {
     text id PK
     text billing_period_id FK
+    text tenant_id FK
+    text commercial_account_id FK
     text staff_id FK
     text supplier_unit_cost_id FK
     string type
   }
 ```
 
-### 3.3 关系图 — 租户与销售归属（与 B2B、报表衔接）
+### 3.3 关系图 — 租户、客户组合与销售归属（与 B2B、报表衔接）
 
-计费与 CRM 均以 `tenant` 为锚；月结汇总侧以 `tenant_consumption_monthly` / `platform_income_monthly` 等与 `billing_period` 衔接（与规划中的 `billing_invoice` 可并存）。
+**计费事实**以 `tenant_id` 为锚；**运营与销售归属**以 `commercial_account_id` 为锚。月结汇总表同时携带两键；`account_manager_assignment` 挂在 `commercial_account`。
 
 ```mermaid
 erDiagram
-  tenant ||--o{ account_manager_assignment : "销售归属区间"
+  tenant ||--o| commercial_account : "primary_tenant"
+  commercial_account ||--o{ account_manager_assignment : "销售归属区间"
 
   billing_period ||--o{ tenant_consumption_monthly : "月度金额汇总"
   billing_period ||--o{ platform_income_monthly : "平台收入视图"
 
   tenant ||--o{ tenant_consumption_monthly : "计费锚点"
+  commercial_account ||--o{ tenant_consumption_monthly : "运营锚点"
   tenant ||--o{ platform_income_monthly : "计费锚点"
-  tenant ||--o{ recharge_order : "充值流水"
+  commercial_account ||--o{ platform_income_monthly : "运营锚点"
+  commercial_account ||--o{ recharge_order : "CRM 视图"
+  tenant ||--o{ recharge_order : "资金流"
 
   tenant {
     text id PK
     string tenant_code UK
   }
 
+  commercial_account {
+    text id PK
+    text primary_tenant_id FK
+  }
+
   account_manager_assignment {
     text id PK
-    text tenant_id FK
+    text commercial_account_id FK
     timestamptz effective_from
     timestamptz effective_to
   }
@@ -877,6 +998,7 @@ erDiagram
   tenant_consumption_monthly {
     text id PK
     text tenant_id FK
+    text commercial_account_id FK
     text billing_period_id FK
     string product_line
   }
@@ -890,37 +1012,44 @@ erDiagram
 
 ```mermaid
 erDiagram
-  tenant ||--o{ account_manager_assignment : "AM 区间"
+  tenant ||--o| commercial_account : "primary_tenant"
+  commercial_account ||--o{ tenant_binding : "多租户合一"
+  tenant_binding }o--|| tenant : "绑定租户"
+
+  commercial_account ||--o{ account_manager_assignment : "AM 区间"
   user_staff ||--o{ account_manager_assignment : "员工"
 
-  tenant ||--o{ test_voucher_issue : "测试券"
+  commercial_account ||--o{ test_voucher_issue : "测试券"
   user_staff ||--o{ test_voucher_issue : "操作人"
 
-  tenant ||--o{ lifecycle_milestone : "里程碑"
+  commercial_account ||--o{ lifecycle_milestone : "里程碑"
   user_staff ||--o{ lifecycle_milestone : "填写人"
   lifecycle_milestone ||--o{ milestone_evidence : "佐证"
   user_staff ||--o{ milestone_evidence : "上传人"
 
-  tenant ||--o{ contract_snapshot : "合同摘要"
-  tenant ||--o{ recharge_order : "充值"
-  tenant ||--o{ consumption_usage_daily : "日汇总与用量"
-  tenant ||--o| conversion_record : "转正"
+  commercial_account ||--o{ contract_snapshot : "合同摘要"
+  commercial_account ||--o{ recharge_order : "充值 CRM"
+  tenant ||--o{ recharge_order : "资金流"
+  commercial_account ||--o{ consumption_usage_daily : "运营日汇总"
+  tenant ||--o{ consumption_usage_daily : "用量租户维"
+  commercial_account ||--o| conversion_record : "转正"
 
-  tenant ||--o{ account_activity : "时间线"
+  commercial_account ||--o{ account_activity : "时间线归属"
+  tenant ||--o{ account_activity : "事实租户"
   activity_type_definition ||--o{ account_activity : "类型"
   user_staff ||--o{ account_activity : "actor"
 
-  tenant ||--o{ engagement_document : "过程文档"
+  commercial_account ||--o{ engagement_document : "过程文档"
   user_staff ||--o{ engagement_document : "上传者"
 
-  tenant ||--o{ follow_up_task : "跟进"
+  commercial_account ||--o{ follow_up_task : "跟进"
   user_staff ||--o{ follow_up_task : "负责人"
   account_activity ||--o{ follow_up_task : "来源动态"
 
   account_activity ||--o{ engagement_comment : "评论"
   engagement_comment ||--o{ engagement_comment : "parent"
   user_staff ||--o{ engagement_comment : "作者"
-  tenant ||--o{ engagement_comment : "冗余归属"
+  commercial_account ||--o{ engagement_comment : "冗余归属"
 
   calendar_workday {
     date calendar_date PK
@@ -932,6 +1061,11 @@ erDiagram
     text id PK
     string tenant_code UK
     string name
+  }
+
+  commercial_account {
+    text id PK
+    text primary_tenant_id FK
     string account_name
   }
 
@@ -942,6 +1076,7 @@ erDiagram
 
   account_activity {
     text id PK
+    text commercial_account_id FK
     text tenant_id FK
     text activity_type_id FK
     timestamptz occurred_at
@@ -1023,6 +1158,7 @@ erDiagram
   supplier ||--o{ supplier_terms_version : "条款"
   supplier ||--o{ supplier_unit_cost : "供应商"
   supplier_terms_version ||--o{ supplier_unit_cost : "版本"
+  supplier_unit_cost ||--o{ supplier_unit_cost_history : "历史单价"
 
   billing_period ||--o{ tenant_usage_monthly : "卡时"
   billing_period ||--o{ tenant_consumption_monthly : "金额"
@@ -1033,17 +1169,34 @@ erDiagram
   billing_period ||--o{ billing_period_close_log : "封账"
   billing_period ||--o{ finance_adjustment_order : "账期"
 
-  tenant ||--o{ tenant_usage_monthly : "租户"
-  tenant ||--o{ tenant_consumption_monthly : "租户"
-  tenant ||--o{ tenant_baremetal_monthly : "租户"
-  tenant ||--o{ platform_income_monthly : "租户"
-  tenant ||--o{ tenant_reserved_monthly : "租户"
+  tenant ||--o{ tenant_usage_monthly : "计费"
+  commercial_account ||--o{ tenant_usage_monthly : "运营"
+  tenant ||--o{ tenant_consumption_monthly : "计费"
+  commercial_account ||--o{ tenant_consumption_monthly : "运营"
+  tenant ||--o{ tenant_baremetal_monthly : "计费"
+  commercial_account ||--o{ tenant_baremetal_monthly : "运营"
+  tenant ||--o{ platform_income_monthly : "计费"
+  commercial_account ||--o{ platform_income_monthly : "运营"
+  tenant ||--o{ tenant_reserved_monthly : "计费"
+  commercial_account ||--o{ tenant_reserved_monthly : "运营"
+  tenant ||--o{ platform_cost_monthly : "成本计费维"
+  commercial_account ||--o{ platform_cost_monthly : "成本运营维"
+  tenant ||--o{ finance_adjustment_order : "调账计费维"
+  commercial_account ||--o{ finance_adjustment_order : "调账运营维"
 
   user_staff ||--o{ tenant_usage_monthly : "AM"
   user_staff ||--o{ platform_cost_monthly : "AM"
   user_staff ||--o{ billing_period_close_log : "操作"
 
   supplier_unit_cost ||--o{ platform_cost_monthly : "成本版本"
+
+  tenant {
+    text id PK
+  }
+
+  commercial_account {
+    text id PK
+  }
 
   billing_period {
     text id PK
@@ -1053,6 +1206,8 @@ erDiagram
   finance_adjustment_order {
     text id PK
     text billing_period_id FK
+    text tenant_id FK
+    text commercial_account_id FK
     text target_period_id FK
     string type
   }
@@ -1066,9 +1221,9 @@ erDiagram
 |------|----------|
 | 客户动态投影充值 | `account_activity.ref_domain='recharge_order'`, `ref_id` |
 | 客户动态投影算力任务 | 各域任务表 → Activity；`activity_type_definition.type_code` 区分 Serverless/Job/云主机 |
-| 租户成本取价 | `metering_usage_record` 按资源归属解析 `idc_code`、`card_type`、`resource_pool_id` → 匹配 `supplier_unit_cost` 在 `effective_from…effective_to` 内版本 |
-| 销售毛利月报 | 已落库的 `billing_invoice` 或月结汇总表（`platform_income_monthly` / `tenant_consumption_monthly`）× `billing_period` JOIN `tenant` JOIN 期末有效的 `account_manager_assignment`（`tenant_id`） |
-| 前负责人下钻 | 所有带 `occurred_at` 的明细与 `account_activity` 查询时 `occurred_at ≤ assignment.effective_to`（该员工该租户对应行） |
+| 租户成本取价 | 实时/本期默认：`metering_usage_record` 按资源归属解析 `idc_code`、`card_type`、`resource_pool_id` → 命中当前行 `supplier_unit_cost`。**回溯历史账期或重算**：按计量时刻 `occurred_at`（或账期规则）匹配 `supplier_unit_cost_history` 中 `effective_from ≤ t < effective_to`（或闭区间，与实现一致）的区间行取 `unit_cost` / `percent` / `tier_json` |
+| 销售毛利月报 | 已落库的 `billing_invoice` 或月结汇总表（`platform_income_monthly` / `tenant_consumption_monthly` / `platform_cost_monthly`）× `billing_period` JOIN **`tenant_id` + `commercial_account_id`** JOIN `commercial_account` JOIN 期末有效的 `account_manager_assignment`（`commercial_account_id`） |
+| 前负责人下钻 | 所有带 `occurred_at` 的明细与 `account_activity` 查询时 `occurred_at ≤ assignment.effective_to`（该员工该**客户组合**对应行） |
 
 ---
 
@@ -1092,7 +1247,7 @@ erDiagram
 
 ## 6. 文档维护
 
-- 表名、字段与枚举以三份产品设计为权威；实现期若拆分微服务，保持 **逻辑外键** 与 **幂等键**（如 Activity `idempotency_key`、账单 `(tenant_id, billing_period, line_type, source_id)`）一致。  
+- 表名、字段与枚举以三份产品设计为权威；实现期若拆分微服务，保持 **逻辑外键** 与 **幂等键**（如 Activity `idempotency_key`、账单 `(tenant_id, commercial_account_id, billing_period, line_type, source_id)`）一致。  
 - 变更本结构时请同步更新本文件版本号与变更说明（可在 Git 提交信息中维护）。
 
-**版本**：v1.3（`tenant` 合并原 `commercial_account`；删除 `tenant_binding`；CRM 子表外键统一 `tenant_id`）
+**版本**：v1.5（`supplier_unit_cost` 明确为当前生效快照；新增 `supplier_unit_cost_history` 单价区间历史表；§4 租户成本取价区分实时与回溯）
