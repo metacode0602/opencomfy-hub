@@ -91,6 +91,8 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/apps/web/.next/standalone ./
 COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder /app/apps/web/public ./apps/web/public
+# get-page.ts：process.cwd() + content（changelog / 法律页等 MDX）
+COPY --from=builder /app/apps/web/content ./content
 
 RUN mkdir -p apps/web/.next && chown -R node:node /app
 
@@ -148,6 +150,7 @@ ENV NODE_ENV=production \
 COPY --from=builder /app/apps/web/.next/standalone /services/web
 COPY --from=builder /app/apps/web/.next/static /services/web/apps/web/.next/static
 COPY --from=builder /app/apps/web/public /services/web/apps/web/public
+COPY --from=builder /app/apps/web/content /services/web/content
 
 COPY --from=builder /app/apps/docs/.next/standalone /services/docs
 COPY --from=builder /app/apps/docs/.next/static /services/docs/apps/docs/.next/static

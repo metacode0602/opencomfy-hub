@@ -92,7 +92,13 @@ export function Footer({ className }: React.HTMLAttributes<HTMLElement>) {
               </span>
               <span className='hidden text-muted-foreground/50 sm:inline'>|</span>
               <div className='flex items-center gap-x-2'>
-                <Image src='/images/gongan.jpg' alt='beian' width={16} height={16} className='flex-shrink-0' />
+                <Image
+                  src='/images/gongan.jpg'
+                  alt='beian'
+                  width={16}
+                  height={16}
+                  className='h-4 w-4 flex-shrink-0'
+                />
                 <span className='transition-colors hover:text-primary'>
                   <Link
                     href='http://www.beian.gov.cn/portal/registerSystemInfo'

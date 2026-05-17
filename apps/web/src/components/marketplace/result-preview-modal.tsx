@@ -1,8 +1,9 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import Image from "next/image"
+import QRCode from "react-qr-code"
 import {
   X,
   Download,
@@ -16,10 +17,14 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Check,
+  Loader2,
 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Slider } from "@workspace/ui/components/slider"
 import { cn } from "@workspace/ui/lib/utils"
+import { toast } from "sonner"
 
 export type ResultType = "image" | "video"
 
@@ -27,6 +32,8 @@ export interface GenerationResultData {
   id: string
   type: ResultType
   url: string
+  /** 用于分享的公开链接（如 CDN）；不填则对 http(s) 或站内路径使用 url */
+  shareUrl?: string
   thumbnailUrl?: string
   prompt?: string
   duration?: number
@@ -37,6 +44,55 @@ export interface GenerationResultData {
   parameters?: Record<string, number | string>
 }
 
+function toAbsoluteShareUrl(raw: string): string {
+  if (/^https?:\/\//i.test(raw)) return raw
+  if (typeof window !== "undefined" && raw.startsWith("/")) {
+    return `${window.location.origin}${raw}`
+  }
+  return raw
+}
+
+function getSharePayload(
+  result: GenerationResultData | null,
+  shareUrlOverride?: string
+): { text: string; qrValue: string; canScanOnOtherDevices: boolean } {
+  if (!result) return { text: "", qrValue: "", canScanOnOtherDevices: false }
+  const raw = (shareUrlOverride ?? result.shareUrl ?? result.url).trim()
+  if (!raw) return { text: "", qrValue: "", canScanOnOtherDevices: false }
+  const absolute = toAbsoluteShareUrl(raw)
+  const canScan = /^https?:\/\//i.test(absolute)
+  return { text: absolute, qrValue: absolute, canScanOnOtherDevices: canScan }
+}
+
+async function downloadMedia(url: string, filename: string) {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    try {
+      const link = document.createElement("a")
+      link.href = objectUrl
+      link.download = filename
+      link.rel = "noopener"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  } catch {
+    const link = document.createElement("a")
+    link.href = url
+    link.download = filename
+    link.target = "_blank"
+    link.rel = "noopener"
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+}
+
 interface ResultPreviewModalProps {
   isOpen: boolean
   onClose: () => void
@@ -44,8 +100,12 @@ interface ResultPreviewModalProps {
   isGenerating?: boolean
   progress?: number
   onRegenerate?: () => void
+  /** 下载完成后额外回调（例如统计） */
   onDownload?: () => void
+  /** 打开分享弹窗时回调（例如统计） */
   onShare?: () => void
+  /** 覆盖用于二维码与复制的链接，优先于 result.shareUrl / result.url */
+  shareUrl?: string
   results?: GenerationResultData[]
   currentIndex?: number
   onNavigate?: (index: number) => void
@@ -59,6 +119,7 @@ export function ResultPreviewModal({
   progress = 0,
   onDownload,
   onShare,
+  shareUrl: shareUrlProp,
   results,
   currentIndex = 0,
   onNavigate,
@@ -68,8 +129,16 @@ export function ResultPreviewModal({
   const [currentTime, setCurrentTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  const sharePayload = useMemo(
+    () => getSharePayload(result, shareUrlProp),
+    [result, shareUrlProp]
+  )
 
   useEffect(() => {
     if (videoRef.current) {
@@ -85,8 +154,23 @@ export function ResultPreviewModal({
     if (!isOpen) {
       setIsPlaying(false)
       setCurrentTime(0)
+      setShareOpen(false)
+      setCopied(false)
     }
   }, [isOpen])
+
+  useEffect(() => {
+    if (!shareOpen) setCopied(false)
+  }, [shareOpen])
+
+  useEffect(() => {
+    if (!shareOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShareOpen(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [shareOpen])
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -123,16 +207,37 @@ export function ResultPreviewModal({
     }
   }
 
-  const handleDownload = () => {
-    if (result?.url && onDownload) {
-      onDownload()
-    } else if (result?.url) {
-      const link = document.createElement("a")
-      link.href = result.url
-      link.download = `comfyhub-${result.id}.${result.type === "video" ? "mp4" : "png"}`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
+  const handleDownload = useCallback(async () => {
+    if (!result?.url || isGenerating) return
+    const ext = result.type === "video" ? "mp4" : "png"
+    const filename = `comfyhub-${result.id}.${ext}`
+    setIsDownloading(true)
+    try {
+      await downloadMedia(result.url, filename)
+      onDownload?.()
+    } finally {
+      setIsDownloading(false)
+    }
+  }, [result, isGenerating, onDownload])
+
+  const handleShareClick = () => {
+    if (!result?.url || isGenerating) return
+    onShare?.()
+    setShareOpen(true)
+  }
+
+  const handleCopyShareLink = async () => {
+    if (!sharePayload.text) {
+      toast.error("暂无可复制的链接")
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(sharePayload.text)
+      setCopied(true)
+      toast.success("链接已复制")
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error("复制失败，请手动选择链接复制")
     }
   }
 
@@ -142,6 +247,7 @@ export function ResultPreviewModal({
   if (!isOpen) return null
 
   return (
+    <>
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }}
@@ -166,16 +272,24 @@ export function ResultPreviewModal({
             <Button
               variant="secondary"
               size="icon"
-              className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80 text-white border-0"
-              onClick={handleDownload}
+              className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80 text-white border-0 disabled:opacity-50"
+              onClick={() => void handleDownload()}
+              disabled={!result?.url || isGenerating || isDownloading}
+              aria-label="下载"
             >
-              <Download className="w-5 h-5" />
+              {isDownloading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Download className="w-5 h-5" />
+              )}
             </Button>
             <Button
               variant="secondary"
               size="icon"
-              className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80 text-white border-0"
-              onClick={onShare}
+              className="h-10 w-10 rounded-full bg-black/60 hover:bg-black/80 text-white border-0 disabled:opacity-50"
+              onClick={handleShareClick}
+              disabled={!result?.url || isGenerating}
+              aria-label="分享"
             >
               <Share2 className="w-5 h-5" />
             </Button>
@@ -373,5 +487,81 @@ export function ResultPreviewModal({
         </motion.div>
       </motion.div>
     </AnimatePresence>
+
+    <AnimatePresence>
+      {shareOpen && (
+        <motion.div
+          key="share-dialog"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setShareOpen(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.15 }}
+            className="relative w-full max-w-sm rounded-2xl bg-background p-6 text-foreground shadow-xl ring-1 ring-foreground/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute top-2 right-2 h-9 w-9"
+              onClick={() => setShareOpen(false)}
+              aria-label="关闭分享"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+            <h2 className="pr-10 font-heading text-lg font-medium">分享作品</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {result?.type === "video"
+                ? "扫码即可在手机上播放视频"
+                : "扫码即可在手机上查看图片"}
+            </p>
+            {!sharePayload.text ? (
+              <p className="mt-4 text-sm text-muted-foreground">暂无可用链接</p>
+            ) : (
+              <>
+                {!sharePayload.canScanOnOtherDevices ? (
+                  <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                    当前为临时或本地链接，其它设备扫码可能无法打开。若服务端提供了公开
+                    CDN 地址，请设置 <code className="font-mono">shareUrl</code> 或{" "}
+                    <code className="font-mono">result.shareUrl</code>。
+                  </p>
+                ) : (
+                  <div className="mt-4 flex justify-center rounded-xl bg-white p-4">
+                    <QRCode value={sharePayload.qrValue} size={208} level="M" />
+                  </div>
+                )}
+                <div className="mt-4 flex gap-2">
+                  <div className="min-w-0 flex-1 truncate rounded-lg border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed text-muted-foreground">
+                    {sharePayload.text}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => void handleCopyShareLink()}
+                    aria-label="复制链接"
+                  >
+                    {copied ? (
+                      <Check className="h-4 w-4 text-green-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </>
+            )}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+    </>
   )
 }

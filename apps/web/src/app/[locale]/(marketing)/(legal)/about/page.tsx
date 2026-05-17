@@ -105,8 +105,6 @@ export default async function AboutPage({
                     </Button>
                   )}
                   <WeChatQRDialog
-                    qrCodeUrl='/images/pm.jpg'
-                    wechatId={websiteConfig.metadata.social.wechatId}
                     buttonText='微信联系'
                     buttonVariant='default'
                     showIcon={true}

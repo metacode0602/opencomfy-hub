@@ -29,3 +29,4 @@ apps/desktop
 # 体积大且与三应用镜像无关
 **/screenshots
 **/*.mp4
+apps/**/*.env.*

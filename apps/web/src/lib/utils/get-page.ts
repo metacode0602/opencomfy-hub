@@ -3,6 +3,14 @@ import fs from 'fs'
 import path from 'path'
 import matter from 'gray-matter'
 
+/**
+ * MDX 内容根目录（`content/`）。
+ * 在 `process.cwd()` 上使用 `turbopackIgnore`，避免 Turbopack/NFT 将 cwd 展开为「整仓可读」的误追踪。
+ */
+function getContentRoot(): string {
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), 'content')
+}
+
 interface PageData {
   title: string
   description: string
@@ -73,7 +81,7 @@ async function readMdxFiles(
  * @returns An array of releases sorted by date (newest first)
  */
 export async function getReleases(locale: Locale): Promise<ReleaseData[]> {
-  const releasesDir = path.join(process.cwd(), 'content', 'release')
+  const releasesDir = path.join(getContentRoot(), 'release')
   const allFiles = await readMdxFiles(releasesDir, locale)
 
   // Filter and transform releases
@@ -109,7 +117,7 @@ export async function getReleases(locale: Locale): Promise<ReleaseData[]> {
  */
 export async function getPage(type: string, locale: Locale): Promise<PageData | undefined> {
   try {
-    const pagesDir = path.join(process.cwd(), 'content', 'pages')
+    const pagesDir = path.join(getContentRoot(), 'pages')
 
     // Try to find the localized version first (e.g., cookie-policy.en.mdx)
     const localizedFileName = `${type}.${locale}.mdx`
@@ -158,7 +166,7 @@ export async function getPage(type: string, locale: Locale): Promise<PageData | 
  * @returns Array of pages sorted by date (newest first)
  */
 export async function getAllPages(locale: Locale): Promise<PageData[]> {
-  const pagesDir = path.join(process.cwd(), 'content', 'pages')
+  const pagesDir = path.join(getContentRoot(), 'pages')
   const allFiles = await readMdxFiles(pagesDir, locale)
 
   // Filter by locale and published status

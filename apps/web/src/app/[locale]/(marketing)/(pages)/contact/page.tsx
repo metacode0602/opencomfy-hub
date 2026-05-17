@@ -77,8 +77,6 @@ export default async function ContactPage({
               <p className='text-sm text-muted-foreground'>{t('wechat.description')}</p>
             </div>
             <WeChatQRDialog
-              qrCodeUrl='/images/pm.jpg'
-              wechatId={websiteConfig.metadata.social.wechatId}
               buttonText={t('wechat.contactWeChat')}
               buttonVariant='default'
               showIcon={true}

@@ -65,7 +65,7 @@ interface WeChatQRDialogProps {
  * 提供一个可重用的微信二维码展示对话框
  */
 export function WeChatQRDialog({
-  qrCodeUrl = '/images/pm.jpg', // 默认二维码图片路径
+  qrCodeUrl = '/images/wechat.png', // 默认二维码图片路径
   wechatId = websiteConfig.metadata.social.wechatId,
   buttonText,
   buttonVariant = 'outline',
@@ -131,7 +131,7 @@ export function WeChatQRDialog({
       <DialogContent className='sm:max-w-md'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <MessageCircle className='h-5 w-5 text-amber-500' />
+            <MessageCircle className='h-5 w-5 text-primary' />
             {t('title')}
           </DialogTitle>
           <DialogDescription>{t('description')}</DialogDescription>
