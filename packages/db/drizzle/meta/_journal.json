@@ -8,6 +8,13 @@
       "when": 1778339326440,
       "tag": "0000_yielding_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779119131483,
+      "tag": "0001_eager_blizzard",
+      "breakpoints": true
     }
   ]
 }

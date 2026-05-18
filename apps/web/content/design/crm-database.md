@@ -1,6 +1,6 @@
 # CRM 模块数据库设计
 
-**依据**：`apps/web/src/app/[locale]/(protected)/crm` 路由及子组件、`apps/web/src/components/dashboard/*` 业务面板、`lib/data/types.ts`（客户/项目主流程）、`lib/types/crm.ts`（员工/日历/经营扩展）、`lib/stores/crm-mock-store.ts`。
+**依据**：`apps/web/src/app/[locale]/(protected)/crm` 路由及子组件、`apps/web/src/components/dashboard/*` 业务面板、`lib/data/types.ts`（客户/项目/计费主流程）、`lib/types/crm.ts`（员工/日历/经营扩展）、`lib/stores/crm-mock-store.ts`。
 
 **文档性质**：CRM 域逻辑表结构（PostgreSQL 风格类型）；物理实现可拆 schema，外键语义与唯一约束应保持一致。
 
@@ -10,16 +10,16 @@
 
 ---
 
-## 0. 现状说明（前端双 Mock + 命名错位）
+## 0. 前端 Mock 数据源（v3.0 已落地）
 
-当前 CRM 页面使用 **两套未合并的 Mock 数据源**。前端已按 v3.0 完成 **Customer / Project / PlatformTenant** 拆分：客户路由为 `/crm/customers`，类型见 `lib/data/types.Customer` 与 `mockCustomers`；计费 Mock 仍用 `tenantId` 指向 `mockPlatformTenants`。落库与 API 以 **§1.1 规则** 为准。
+CRM 前端已按 **Customer / Project / PlatformTenant** 完成类型与路由拆分；落库与 API 以 **§1.1 规则** 为准。
 
-| 数据源 | 路径 | 使用页面 | v3.0 归属 |
-|--------|------|----------|-----------|
-| **经营主流程 Mock** | `lib/data/mock-data.ts` + `lib/data/types.ts` | 工作台、**客户列表（实为 tenant）**、项目、合同 | `types.Tenant` → 应对齐 **`customer`**；计费字段拆至 **`tenant`** |
-| **CRM Store Mock** | `lib/data/crm-mock.ts` + `lib/types/crm.ts` + `crm-mock-store` | 员工、日历 | `crm.Tenant` → **`customer`**；`tenant_binding` → **`project_tenant`** |
+| 数据源 | 路径 | 使用页面 | 说明 |
+|--------|------|----------|------|
+| **经营主流程 Mock** | `lib/data/mock-data.ts` + `lib/data/types.ts` | 工作台、`/crm/customers`、项目、合同 | `Customer`、`Project`；计费子实体为 `PlatformTenant`（对应逻辑表 `tenant`） |
+| **CRM Store Mock** | `lib/data/crm-mock.ts` + `lib/types/crm.ts` + `crm-mock-store` | 员工、日历、经营扩展 | `Customer`、`ProjectTenant` 等；`account_activity.customer_id` 已对齐 |
 
-合并实现时：统一 API；`user_staff`、`account_activity`、`calendar_workday` 等复用 Store 形状并改 FK 为 `customer_id` / `project_id`。
+**查询约定**（`mock-data.ts`）：客户维度用 `get*ByCustomerId`（内部按下属 `PlatformTenant.id` 过滤计费表）；项目维度用 `getBillingTenantIdsForProject`（`primaryTenantId` ∪ `project_tenant`）。新建客户/项目 UI：`CreateCustomerDialog`、`CreateProjectDialog` / `EditProjectDialog` + `project-form-fields.tsx`。
 
 ---
 
@@ -30,14 +30,14 @@
 | **三层实体** | **Customer**：CRM 客户主体，一对多 **Project**；**Tenant**：平台计费租户，归属一个 Customer，承载充值/消费/券/账单/算力任务等。 |
 | **默认 1:1** | 创建 Customer 时 **同事务** 创建默认 Tenant（`is_default = true`）；多数客户仅一个 Tenant。 |
 | **项目必属客户** | `project.customer_id` NOT NULL；项目四人组、阶段、时间线均在 Project 层。 |
-| **项目与计费 Tenant** | Project 可指定 `primary_tenant_id`（可空则继承 Customer 默认 Tenant）；多 Tenant 归因用 **`project_tenant`**（替代旧 `tenant_binding` 的项目级语义）。 |
+| **项目与计费 Tenant** | Project 可指定 `primary_tenant_id`（可空则继承 Customer 默认 Tenant）；多 Tenant 归因用 **`project_tenant`**。 |
 | **项目四人组** | 创建项目时四类角色各一条 `project_staff_assignment`；不在 `project` 表存姓名字符串。 |
 | **员工主数据** | `user_staff` 为选人唯一来源。 |
 | **两类「活动」** | `project_activity`：项目时间线；`account_activity`：客户动态（日历，按 `customer_id` 聚合）。 |
 | **两类「任务」** | `compute_task`：平台算力运行任务（**Tenant/计费域**，可按 `tenant_id` 过滤后在 Project 视图展示）；`follow_up_task`：CRM 协作跟进（**Customer/Project**）。 |
 | **合同** | `contract` 为完整商务合同；可同时存 `customer_id`、`project_id`、`tenant_id`（签约计费主体）。 |
 | **分析页只读** | `/crm/analytics` 读计费域月结，非 CRM 写表。 |
-| **路由目标** | CRM「客户」列表/详情应对 **Customer**；**`/crm/tenants` 为历史路径**（§9 迁移为 `/crm/customers` 或保留别名）。 |
+| **客户路由** | CRM「客户」列表/详情为 **`/crm/customers`**，组件 `CustomersContent` / `CustomerDetailContent`。 |
 
 ### 1.1 领域模型与强制规则（避免后期歧义）
 
@@ -58,7 +58,7 @@
 |------|------|
 | **R2.1 必属客户** | `project.customer_id` NOT NULL；删除 Customer 时级联或阻止删除（若仍有 Project）。 |
 | **R2.2 主计费 Tenant** | `project.primary_tenant_id` NULLABLE；为空时读路径使用 `customer` 的 `is_default` Tenant。 |
-| **R2.3 多 Tenant 归因** | 通过 **`project_tenant`**（`project_id`, `tenant_id`, `role`）声明；**禁止**仅依赖已废弃的 hub-`tenant_id` + `bound_tenant_id` 字符串模型。 |
+| **R2.3 多 Tenant 归因** | 通过 **`project_tenant`**（`project_id`, `tenant_id`, `binding_role`）声明；须为真实 `tenant.id` FK。 |
 | **R2.4 项目级余额** | `project.balance` 为 **读模型/缓存**（可选）；财务真值以 Tenant 余额及账单为准。 |
 
 #### 规则 3：计费事实只落 Tenant
@@ -93,42 +93,45 @@
 | 规则 | 说明 |
 |------|------|
 | **R6.1 表名** | 逻辑表：`customer`、`project`、`tenant`、`project_tenant`；ORM 可用 `CommercialProject` 等别名，文档以 `project` 为准。 |
-| **R6.2 禁止混用** | 对外 API 与前端类型：**Customer** ≠ **Tenant**；禁止再把 `types.Tenant` 当作 CRM 客户主体导出。 |
-| **R6.3 兼容字段** | 过渡期 API 可返回 `customerId` + 只读 `tenantId`（默认 Tenant），但 **新写入** 必须带 `customerId`。 |
+| **R6.2 禁止混用** | 对外 API 与前端类型：**Customer** ≠ **PlatformTenant**（计费）；经营客户字段不得落在计费租户类型上。 |
+| **R6.3 兼容字段** | API 响应使用 `customerId`；计费写操作使用 `tenantId`（`PlatformTenant.id`）。 |
 
 ---
 
 ## 2. 页面与表映射
 
-> **v3.0**：「客户」页面对 **Customer**（`/crm/customers`）；计费 Tab 聚合下属 **PlatformTenant**（`mockPlatformTenants`）。
+> 客户页面对 **Customer**（`/crm/customers`）；充值/消费/券等 Tab 通过 `get*ByCustomerId` 聚合下属 **PlatformTenant**（`mockPlatformTenants`）。
 
 ### 2.1 一级路由
 
-| 路由（目标） | 路由（当前） | 页面入口 | 主要组件 | 涉及表 |
-|--------------|--------------|----------|----------|--------|
-| `/crm` | 同左 | `crm/page.tsx` | `DashboardContent` | `customer`、`project`、`contract`、`tenant_bill`、`project_activity` |
-| `/crm/analytics` | 同左 | `crm/analytics/page.tsx` | `AnalyticsContent` | 计费域月结（只读） |
-| **`/crm/customers`** | `/crm/tenants` | `crm/tenants/page.tsx` | `TenantsContent` → **`CustomersContent`** | **`customer`**（当前误用 `tenant`） |
-| **`/crm/customers/[id]`** | `/crm/tenants/[id]` | `crm/tenants/[id]/page.tsx` | `TenantDetailContent` → **`CustomerDetailContent`** | **`customer`**、`tenant`、`project`；计费 Tab 聚合 `tenant` |
-| `/crm/projects` | 同左 | `crm/projects/page.tsx` | `ProjectsContent` | `project`、`customer`、`project_tenant`、`tenant`、`project_staff_assignment` |
-| `/crm/projects/[id]` | 同左 | `crm/projects/[id]/page.tsx` | `ProjectDetailContent` + 子面板 | 同上 + §2.4 |
+| 路由 | 页面入口 | 主要组件 | 涉及表 |
+|------|----------|----------|--------|
+| `/crm` | `crm/page.tsx` | `DashboardContent` | `customer`、`project`、`contract`、`tenant_bill`、`project_activity` |
+| `/crm/analytics` | `crm/analytics/page.tsx` | `AnalyticsContent` | 计费域月结（只读） |
+| `/crm/customers` | `crm/customers/page.tsx` | `CustomersContent` | `customer` |
+| `/crm/customers/[id]` | `crm/customers/[id]/page.tsx` | `CustomerDetailContent` | `customer`、`tenant`、`project`；计费 Tab 聚合 `tenant` |
+| `/crm/projects` | `crm/projects/page.tsx` | `ProjectsContent` | `project`、`customer`、`project_tenant`、`tenant`、`project_staff_assignment` |
+| `/crm/projects/[id]` | `crm/projects/[id]/page.tsx` | `ProjectDetailContent` + 子面板 | 同上 + §2.4 |
 | `/crm/staff` | `crm/staff/page.tsx` | `CrmStaffListClient` | `user_staff`、`account_manager_assignment`（统计） |
 | `/crm/staff/new` | `crm/staff/new/page.tsx` | `CrmStaffFormClient` | `user_staff` |
 | `/crm/staff/[staffId]` | `crm/staff/[staffId]/page.tsx` | `CrmStaffDetailClient` | `user_staff` |
 | `/crm/contracts` | `crm/contracts/page.tsx` | `ContractsContent` | `contract` |
 | `/crm/calendar` | `crm/calendar/page.tsx` | `CalendarContent` | `account_activity`、`activity_type_definition`；可选 `calendar_workday` |
 
-### 2.2 客户详情 Tab（目标：`CustomerDetailContent`）
+侧边栏「客户」入口：`app-sidebar.tsx` → `/crm/customers`。
+
+### 2.2 客户详情 Tab（`CustomerDetailContent`）
 
 | Tab | 组件逻辑 | 表名 | 说明 |
 |-----|----------|------|------|
-| 概览 | 图表占位 | `customer`、`tenant` | 经营字段来自 customer；余额/消费趋势 SUM 下属 **tenant**（§1.1 R3.4） |
-| 计费账户 | 可选子 Tab | `tenant` | 一客户多 Tenant 时列表展示；默认 Tenant 标「主账户」 |
-| 项目 | 项目列表 | `project` | `getProjectsByCustomerId`（当前为 `getProjectsByTenantId`） |
-| 充值记录 | 充值表 | `recharge` | `tenant_id IN customer 下所有 tenant` |
-| 消费记录 | 消费明细 | `consumption_record` | 同上 |
-| 算力券 | 券列表 | `coupon` | 同上 |
-| 合同 | 合同列表 | `contract` | `customer_id` 或下属 tenant / project |
+| 概览 | 图表占位 | `customer`、`tenant` | 经营字段来自 customer；余额等为派生/聚合（§1.1 R3.4） |
+| 项目 | 项目列表 | `project` | `getProjectsByCustomerId` |
+| 充值记录 | 充值表 | `recharge` | `getRechargesByCustomerId` → 下属 tenant 集合 |
+| 消费记录 | 消费明细 | `consumption_record` | `getConsumptionsByCustomerId` |
+| 算力券 | 券列表 | `coupon` | `getCouponsByCustomerId` |
+| 合同 | 合同列表 | `contract` | `getContractsByCustomerId` |
+
+**待 UI**：独立「计费账户」子 Tab（一客户多 `tenant` 时列表；默认账户标「主账户」）— 数据已在 `mockPlatformTenants`，见 `getPlatformTenantsByCustomerId`。
 
 ### 2.3 新建/编辑项目（`CreateProjectDialog` / `EditProjectDialog`）
 
@@ -146,7 +149,7 @@
 |--------|------|
 | 所属客户 | `project.customer_id`（必选） |
 | 主计费账户（租户 ID） | `project.primary_tenant_id`（可选；不选则使用 Customer 的 `is_default` Tenant） |
-| 附加计费账户 | `project_tenant` 多选（可选；须满足 R1.3） |
+| 附加计费账户 | `project_tenant` 多选（可选；须满足 R1.3；**表单待接**，当前仅 `primary_tenant_id`） |
 | 当前阶段 | `project.stage`（`lead` / `testing` / `converted`） |
 | 业务线 | `project.business_line_id` → `business_line.id`（单选，必填） |
 
@@ -182,7 +185,7 @@
 
 | 概念 | 表名 | 前端类型 |
 |------|------|----------|
-| 项目–计费账户关联 | `project_tenant` | `ProjectTenant`（替代旧 `tenant_binding` 项目级语义） |
+| 项目–计费账户关联 | `project_tenant` | `ProjectTenant` |
 | 客户经理分配 | `account_manager_assignment` | `AccountManagerAssignment` |
 | 测试券发放 | `test_voucher_issue` | `TestVoucherIssue` |
 | 生命周期里程碑 | `lifecycle_milestone` | `LifecycleMilestone` |
@@ -213,15 +216,15 @@
 
 #### `customer`（客户主体 — CRM 经营）
 
-对应目标类型 `lib/data/types.Customer`（**待从现有 `Tenant` 拆分**）；合并 `lib/types/crm.Tenant` 中生命周期/规模字段。
+对应 `lib/data/types.Customer`（列表/详情/表单）；经营扩展字段另见 `lib/types/crm.Customer`（Store / 日历）。
 
 | 列名 | 类型 | 约束 | 前端字段 / 页面 |
 |------|------|------|-----------------|
 | `id` | text | PK | `Customer.id` |
 | `name` | varchar | NOT NULL | `name`；客户列表/详情标题 |
-| `customer_code` | varchar | UK 可选 | 原 `tenant_code` |
-| `account_name` | varchar | | 经营简称 |
-| `cert_code` | varchar | | 社会统一信用编码 |
+| `customer_code` | varchar | UK 可选 | Store：`customer_code` |
+| `account_name` | varchar | | Store：`account_name` |
+| `cert_code` | varchar | | `certCode` |
 | `type` | varchar | NOT NULL | `B` / `C` |
 | `status` | varchar | NOT NULL | `active` / `inactive` / `suspended` |
 | `contact_person` | varchar | | `contactPerson` |
@@ -229,15 +232,16 @@
 | `contact_email` | varchar | | `contactEmail` |
 | `industry` | varchar | | `industry` |
 | `address` | text | | `address` |
-| `lifecycle_phase` | varchar | | `lifecycle_phase` |
-| `expected_scale` | jsonb | | |
-| `observed_scale_summary` | jsonb | | |
-| `test_started_on` | date | | |
-| `test_completed_on` | date | | |
-| `conversion_date` | date | | |
-| `conversion_trigger` | varchar | | |
+| `sales_manager_id` | text | FK 可空 | `salesManagerId`（表单选销售经理） |
+| `lifecycle_phase` | varchar | | Store：`lifecycle_phase` |
+| `expected_scale` | jsonb | | `expectedScale`（`CustomerExpectedScale`） |
+| `observed_scale_summary` | jsonb | | Store |
+| `test_started_on` | date | | Store |
+| `test_completed_on` | date | | Store |
+| `conversion_date` | date | | Store |
+| `conversion_trigger` | varchar | | Store |
 | `created_at` | timestamptz | NOT NULL | `createdAt` |
-| `updated_at` | timestamptz | | |
+| `updated_at` | timestamptz | | Store |
 
 **禁止**：`balance`、`platform_tenant_id` — 见 `tenant` 表（§1.1 R3.5）。
 
@@ -245,15 +249,15 @@
 
 #### `tenant`（平台计费租户）
 
-对应平台侧租户；**归属一个 Customer**；承载 §1.1 R3 全部计费写表。
+对应 `lib/data/types.PlatformTenant`；**归属一个 Customer**；承载 §1.1 R3 全部计费写表。Mock：`mockPlatformTenants`（默认与客户 1:1，`id` 常与 `customer.id` 相同；多账户见 `t1-sub` 样例）。
 
 | 列名 | 类型 | 约束 | 前端字段 / 页面 |
 |------|------|------|-----------------|
-| `id` | text | PK | `Tenant.id` |
+| `id` | text | PK | `PlatformTenant.id` |
 | `customer_id` | text | FK→customer, NOT NULL | `customerId` |
 | `name` | varchar | NOT NULL | 计费账户显示名（可与 customer.name 相同） |
-| `platform_tenant_id` | varchar | UK | 平台计费客户 ID |
-| `is_default` | boolean | NOT NULL DEFAULT false | 该 Customer 下默认计费账户 |
+| `platform_tenant_id` | varchar | UK | `platformTenantId` |
+| `is_default` | boolean | NOT NULL DEFAULT false | `isDefault` |
 | `status` | varchar | NOT NULL | `active` / `inactive` / `suspended` |
 | `balance` | decimal(15,4) | NOT NULL DEFAULT 0 | `balance` |
 | `created_at` | timestamptz | NOT NULL | |
@@ -286,7 +290,7 @@
 
 索引：`(customer_id)`、`(primary_tenant_id)`、`(business_line_id)`、`(stage)`、`(status)`。
 
-**迁移说明**：原 `commercial_project.tenant_id` 拆为 `customer_id` + `primary_tenant_id`（原 tenant 行需先挂到 customer）。
+**落库迁移**：自 legacy `commercial_project.tenant_id` 拆为 `customer_id` + `primary_tenant_id`（见 §8.5 SQL 示意）。
 
 **项目人员**：见 `project_staff_assignment`（§3.8）；`delivery_manager`、`project_manager` 与售前/客户经理同为四人组，不在 `project` 表存姓名字符串。
 
@@ -321,15 +325,15 @@
 
 #### `project_tenant`（项目关联计费账户）
 
-替代旧 `tenant_binding` 的 **项目级** 多 Tenant 归因；`bound_tenant_id` 平台字符串 **废弃**。
+项目级多 Tenant 归因（前端 `ProjectTenant` / Store `projectTenants`）。
 
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
 | `project_id` | text | FK→project, NOT NULL | |
 | `tenant_id` | text | FK→tenant, NOT NULL | 必须满足 §1.1 R1.3 |
-| `role` | varchar | 可空 | 如 `primary` / `secondary` / `子商户` |
-| `binding_label` | varchar | 可空 | 展示用 |
+| `binding_role` | varchar | 可空 | Store：`binding_role`；`types.ProjectTenant.role` |
+| `binding_label` | varchar | 可空 | Store / `types.bindingLabel` |
 | `sort_order` | int | DEFAULT 0 | |
 | `created_at` | timestamptz | NOT NULL | |
 
@@ -615,19 +619,14 @@ WHERE t.id = (SELECT primary_tenant_id FROM project WHERE id = :pid)
 
 | 表 | 主外键 | 说明 |
 |----|--------|------|
-| `project_tenant` | `project_id`, `tenant_id` | 见 §3.2；**替代**旧 `tenant_binding` |
+| `project_tenant` | `project_id`, `tenant_id` | 见 §3.2；Store：`projectTenants` |
 | `account_manager_assignment` | **`customer_id`** | 客户级 AM |
 | `lifecycle_milestone`、`milestone_evidence` | **`customer_id`** | |
 | `test_voucher_issue`、`conversion_record` | **`customer_id`** 或 `tenant_id` | 发券/转正若走平台用 `tenant_id` |
-| `contract_snapshot`、`recharge_order`、`consumption_usage_daily` | **`customer_id`** + 可选 `tenant_id` | |
+| `contract_snapshot` | **`customer_id`** + 可选 `tenant_id` | 轻量合同摘要（与 `contract` 并存时：`contract` 为主） |
+| `recharge_order`、`consumption_usage_daily` | **`customer_id`** + 可选 `tenant_id` | |
 | `engagement_document`、`follow_up_task`、`engagement_comment` | **`customer_id`** + `project_id` | `follow_up_task` 禁止仅挂 tenant |
 | `calendar_workday` | — | 无客户 FK |
-
-**旧 `tenant_binding` 迁移**：`tenant_id`（hub）→ 确定 `customer_id`；`bound_tenant_id`（平台 ID）→ 匹配或创建 `tenant` 行后写入 `project_tenant` 或 `tenant.customer_id`。
-- `test_voucher_issue`、`lifecycle_milestone`、`milestone_evidence`
-- `contract_snapshot` — 轻量合同摘要（与 `contract` 并存时：`contract` 为主，`contract_snapshot` 可存外链）
-- `recharge_order`、`consumption_usage_daily`、`conversion_record`
-- `engagement_document`、`follow_up_task`、`engagement_comment`
 
 `lifecycle_milestone.notes` 对应前端 `notes`（非 `remark`）。
 
@@ -821,7 +820,7 @@ erDiagram
 | 员工「负责客户数」 | `account_manager_assignment.customer_id` |
 | 员工「负责项目数」 | `project_staff_assignment` DISTINCT `project_id` |
 | 分析页 | 计费域月结；按 `platform_tenant_id` ↔ `tenant` JOIN |
-| Mock 合并 | `mockTenants` 拆为 `mockCustomers` + `mockTenants`；ID 映射表见 §9 |
+| Mock 数据 | `mockCustomers` + `mockPlatformTenants`；样例 ID 见 §9 |
 
 ---
 
@@ -829,7 +828,7 @@ erDiagram
 
 | 表名 | 中文 | 页面入口 |
 |------|------|----------|
-| `customer` | 客户主体 | `/crm/customers`（目标）、当前 `/crm/tenants` |
+| `customer` | 客户主体 | `/crm/customers` |
 | `tenant` | 平台计费租户 | 客户详情·计费账户 Tab |
 | `project` | 经营项目 | `/crm/projects`、客户详情·项目 Tab |
 | `business_line` | 业务线字典 | 新建/编辑项目（下拉）；Store CRUD |
@@ -857,69 +856,39 @@ erDiagram
 
 ## 7. 文档维护
 
-- 页面或 `lib/data/types.ts` / `lib/types/crm.ts` 变更时同步表定义；**禁止**再把 CRM 客户字段加回 `tenant`。
-- 统一 Mock 后删除 §0 双源说明；API 对外使用 `customerId` / `tenantId` / `projectId`。
+- 页面或 `lib/data/types.ts` / `lib/types/crm.ts` 变更时同步表定义；**禁止**把 CRM 客户经营字段加回 `tenant`。
+- API 对外使用 `customerId` / `tenantId`（`PlatformTenant.id`）/ `projectId`。
 - CRM 写模型以 **Customer + Project + Tenant（§3.2–3.5）** 为准。
-- §8 样例部分表名仍为迁移前写法（`tenant` 兼客户主体），实现时按 §3.2 拆分为 `customer` + `tenant`。
+- §9 业务样例中的 `cust-*` / `tn-*` 为演示 ID，可与 Mock 中 `t1` 等并存，语义以 §1.1 为准。
 
 ---
 
-## 8. 前端与代码迁移指引（不改库表前的重构清单）
+## 8. 前端 v3.0 迁移记录（已完成）
 
-> 本节描述 **仅文档与类型层** 的迁移顺序；具体 PR 可按阶段拆分。当前仓库 **尚未** 改代码。
+> 下列为 2026-05 已完成的前端重构摘要；**PostgreSQL 落库**见 §8.3 SQL。
 
-### 8.0 问题陈述
+### 8.1 已交付项
 
-| 现象 | 根因 |
-|------|------|
-| 侧边栏「客户」进入 `/crm/tenants` | 路由命名沿用平台 tenant |
-| `TenantsContent` 读 `mockTenants` | `types.Tenant` 混合 CRM 客户 + 计费字段 |
-| `TenantDetailContent` 充值/消费 Tab | 按 `tenant.id` 查计费表，实际应为 customer 下 **多 tenant 聚合** |
-| `Project.tenantId` | 应拆为 `customerId` + `primaryTenantId` |
-| `crm.Tenant` / `tenant_binding` | Store 模型与 v3.0 不一致 |
+| 类别 | 交付物 |
+|------|--------|
+| 类型 | `lib/data/types.ts`：`Customer`、`PlatformTenant`、`ProjectTenant`；`Project.customerId` / `primaryTenantId` |
+| Mock | `mockCustomers`、`mockPlatformTenants`；`get*ByCustomerId`、`getBillingTenantIdsForProject` |
+| Store | `lib/types/crm.ts`：`Customer`、`ProjectTenant`；`crm-mock-store`：`projectTenants`、`upsertCustomer` |
+| 组件 | `customers-content.tsx`、`customer-detail-content.tsx`、`create-customer-dialog.tsx`、`edit-customer-dialog.tsx` |
+| 项目表单 | `project-form-fields.tsx` 选客户 → 主计费账户（`PlatformTenant`） |
+| 路由 | `/crm/customers`、`/crm/customers/[id]`；侧边栏已指向 customers |
 
-### 8.1 阶段一：类型与 Mock 拆分（无路由变更）
+### 8.2 待办（前端 / 落库）
 
-| 步骤 | 文件 | 动作 |
-|------|------|------|
-| 1 | `lib/data/types.ts` | 新增 `Customer`；`Tenant` 仅保留 `customerId`、`platformTenantId`、`balance`、`isDefault` 等计费字段 |
-| 2 | `lib/data/mock-data.ts` | `mockTenants` → `mockCustomers` + `mockPlatformTenants`；由原数据 **脚本拆分**（一一默认 tenant） |
-| 3 | `lib/data/mock-data.ts` | `Project`：`tenantId` → `customerId`，`tenantName` → `customerName`；增加 `primaryTenantId` |
-| 4 | `lib/data/mock-data.ts` | 计费数组（`recharges`、`consumptions`…）保持 `tenantId`，确保指向新 `tenant.id` |
-| 5 | `lib/types/crm.ts` | `Tenant` 重命名为 `Customer`（或并存 deprecate）；`TenantBinding` → `ProjectTenant` |
-| 6 | `lib/data/crm-mock.ts` | 对齐 `crmMockTenants` → customers + tenants；binding → `project_tenant` |
-| 7 | `lib/data/mock-data.ts` | 新增 `getProjectsByCustomerId`、`getCustomerById`、`getTenantsByCustomerId`；旧函数 **@deprecated** 包装 |
+| 项 | 说明 |
+|----|------|
+| 客户详情·计费账户 Tab | 多 `PlatformTenant` 列表（§2.2） |
+| 新建客户同事务默认 Tenant | Mock 未强制；落库按 R1.1 |
+| 项目 `project_tenant` 多选 UI | 表单仅 `primaryTenantId` |
+| 旧书签 `/crm/tenants` | 未保留 redirect；可按需补 Next `redirect` |
+| PostgreSQL 落库 | 见 §8.3 |
 
-### 8.2 阶段二：组件与页面（解决「客户页 = tenant」）
-
-| 步骤 | 文件 | 动作 |
-|------|------|------|
-| 1 | `components/dashboard/tenants-content.tsx` | 重命名 `customers-content.tsx`；props/状态改用 `Customer` |
-| 2 | `components/dashboard/tenant-detail-content.tsx` | 重命名 `customer-detail-content.tsx`；props: `customer` + `tenants[]` |
-| 3 | 客户详情 Tab | 充值/消费/券：`getXByTenantIds(tenants.map(t => t.id))` 或 `getXByCustomerId` |
-| 4 | 客户详情 | 新增「计费账户」子 Tab（多 tenant 时） |
-| 5 | `projects-content.tsx` | 创建项目：选 **Customer** → 选/默认 **Tenant** → 可选 `project_tenant` |
-| 6 | `dashboard-content.tsx`、`contracts-content.tsx`、`calendar-content.tsx` | 链接 `/crm/customers/:id`；文案 tenant → customer |
-| 7 | `crm/tenants/page.tsx`、`[id]/page.tsx` | 改引 `CustomersContent` / `CustomerDetailContent`；`mockCustomers` |
-
-### 8.3 阶段三：路由与导航
-
-| 步骤 | 文件 | 动作 |
-|------|------|------|
-| 1 | 新建 `app/.../crm/customers/page.tsx` 等 | 正式路由 |
-| 2 | `crm/tenants/*` | **301 或 Next `redirect`** 到 `/crm/customers/*`（保留旧书签） |
-| 3 | `app-sidebar.tsx` | 「客户」url → `/crm/customers` |
-| 4 | 全局 `grep /crm/tenants` | 合同、员工详情、工作台等链接批量替换 |
-
-### 8.4 阶段四：Store 与日历
-
-| 步骤 | 文件 | 动作 |
-|------|------|------|
-| 1 | `crm-mock-store.ts` | `tenantBindings` → `projectTenants`；级联删除按 `customer_id` |
-| 2 | `calendar-content.tsx` | `activity.tenant_id` → `activity.customer_id`（展示仍可同时显示计费账户名） |
-| 3 | `crm-staff-detail-client.tsx` | 负责客户链接 → `/crm/customers/` |
-
-### 8.5 数据迁移 SQL（落库时）
+### 8.3 数据迁移 SQL（落库时）
 
 ```sql
 -- 1) 由 legacy tenant 生成 customer（示意）
@@ -938,22 +907,23 @@ ALTER TABLE project DROP COLUMN tenant_id; -- 验证后
 -- 4) account_manager_assignment.tenant_id → customer_id
 ```
 
-### 8.6 验收清单
+### 8.4 验收清单
 
-- [ ] 客户列表展示 **Customer** 名称，不直接暴露 `platform_tenant_id` 为主标题
-- [ ] 客户详情余额 = 下属 **Tenant** `balance` 之和
-- [ ] 新建客户自动出现 **1 个默认 Tenant**
-- [ ] 项目列表显示 `customerName`；详情计费 Tab 仅含该项目关联 Tenant 的数据
-- [ ] `follow_up_task` / `compute_task` 不混用（§1.1 R4）
-- [ ] 旧 `/crm/tenants/t1` 可访问或重定向到 `/crm/customers/c1`
+- [x] 客户列表展示 **Customer** 名称（`/crm/customers`）
+- [x] 客户详情充值/消费/券按 **Customer** 聚合下属计费账户
+- [x] 项目列表/表单使用 `customerId`、`customerName`、`primaryTenantId`
+- [x] Store 使用 `Customer` / `ProjectTenant`，无 `tenant_binding`
+- [ ] 新建客户 Mock/API 同事务创建默认 **Tenant**（R1.1）
+- [ ] 客户详情独立「计费账户」Tab
+- [ ] 项目表单支持 `project_tenant` 多选
+- [ ] `follow_up_task` / `compute_task` 落库后不混用（§1.1 R4）
+- [ ] 可选：`/crm/tenants/*` → `/crm/customers/*` 重定向
 
 ---
 
 ## 9. 业务场景样例：客户-项目跟踪与客户经理收入提成
 
 本节给出两类典型经营形态：**一客户一项目**、**一客户多项目**。均基于 §3 表结构，覆盖项目四人组、时间线/跟进、账单与消费，并说明如何汇总 **客户经理（AM）收入** 与 **提成**。样例账期为 `2026-03`～`2026-05`。
-
-> **v3.0 读法**：样例表中 **`tenant`（如 `ten-a`）在实现上应拆为 `customer`（经营）+ `tenant`（计费，`platform_tenant_id`）**；下文保留合并 ID 仅为与旧 Mock 对照，逻辑关系以 §1.1 为准。
 
 ### 9.0 跟踪与计酬约定（全场景共用）
 
@@ -1326,4 +1296,4 @@ AM账期提成     = Σ 项目账期提成
 | AM 绩效报表 | `tenant_bill`（paid）JOIN `project_staff_assignment` JOIN `project`（stage） |
 | 提成策略升级 | `commission_policy` 表 |
 | 与财务域对齐 | `platform_tenant_id` ↔ `tenant`；`project.name` ↔ 收入行项目名 |
-| 路由兼容 | `GET /tenants/:id` 可 308 到 `/customers/:id`（过渡期） |
+| 路由 | 客户资源统一 `/customers`；历史 `/tenants` 路径不再使用 |
