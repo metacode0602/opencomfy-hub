@@ -1,6 +1,52 @@
-// 模拟数据类型定义
+// 模拟数据类型定义（v3.0：Customer / Project / PlatformTenant）
 
-export interface Tenant {
+/** 期望规模 — 单条卡型及数量 */
+export type ExpectedScaleCardEntry = {
+  cardTypeId: string
+  cardCount: number
+}
+
+/** 期望规模 — 存储配置 */
+export type ExpectedScaleStorage = {
+  enabled: boolean
+  storageType: 'shared_storage' | 'object_storage'
+  sizeGB: number
+}
+
+/** 期望规模 — 业务线数量 */
+export type ExpectedScaleProductLines = {
+  /** 裸金属 */
+  bareMetal: number
+  /** 弹性服务 */
+  elasticService: number
+  /** Job */
+  job: number
+}
+
+/** 客户期望规模（对应库表 expected_scale jsonb） */
+export type CustomerExpectedScale = {
+  cards: ExpectedScaleCardEntry[]
+  storage: ExpectedScaleStorage
+  productLines: ExpectedScaleProductLines
+}
+
+export const emptyExpectedScale: CustomerExpectedScale = {
+  cards: [],
+  storage: { enabled: false, storageType: 'shared_storage', sizeGB: 0 },
+  productLines: { bareMetal: 0, elasticService: 0, job: 0 },
+}
+
+export function isExpectedScaleEmpty(scale: CustomerExpectedScale): boolean {
+  const hasCards = scale.cards.some((c) => c.cardTypeId && c.cardCount > 0)
+  const hasStorage = scale.storage.enabled && scale.storage.sizeGB > 0
+  const pl = scale.productLines
+  const hasProductLines =
+    pl.bareMetal > 0 || pl.elasticService > 0 || pl.job > 0
+  return !hasCards && !hasStorage && !hasProductLines
+}
+
+/** CRM 客户主体 */
+export interface Customer {
   id: string
   name: string
   type: 'B' | 'C'
@@ -10,19 +56,50 @@ export interface Tenant {
   contactEmail: string
   industry: string
   address: string
+  /** 统一社会信用代码 */
+  certCode?: string
+  /** 销售经理 ID */
+  salesManagerId?: string
+  /** 销售经理姓名（展示用） */
+  salesManagerName?: string
+  /** 期望规模：卡型多选 */
+  expectedScale?: CustomerExpectedScale | null
   createdAt: string
   projectCount: number
   totalRecharge: number
   totalConsumption: number
+  /** 下属计费账户余额合计（派生，非持久化） */
   balance: number
+}
+
+/** 平台计费租户 */
+export interface PlatformTenant {
+  id: string
+  customerId: string
+  name: string
+  platformTenantId?: string
+  isDefault: boolean
+  status: 'active' | 'inactive' | 'suspended'
+  balance: number
+}
+
+/** 项目–计费账户关联 */
+export interface ProjectTenant {
+  id: string
+  projectId: string
+  tenantId: string
+  role?: string
+  bindingLabel?: string
+  sortOrder: number
 }
 
 export interface Project {
   id: string
   name: string
-  tenantId: string
-  tenantName: string
-  tenantType: 'B' | 'C'
+  customerId: string
+  customerName: string
+  customerType: 'B' | 'C'
+  primaryTenantId: string
   stage: 'lead' | 'testing' | 'converted'
   status: 'active' | 'paused' | 'completed'
   preSalesManager: string
@@ -41,8 +118,9 @@ export interface Contract {
   contractNo: string
   projectId: string
   projectName: string
+  customerId: string
+  customerName: string
   tenantId: string
-  tenantName: string
   type: 'standard' | 'enterprise' | 'custom'
   status: 'draft' | 'pending' | 'active' | 'expired' | 'terminated'
   startDate: string
@@ -96,6 +174,7 @@ export interface Coupon {
 
 export interface Task {
   id: string
+  tenantId: string
   projectId: string
   title: string
   description: string

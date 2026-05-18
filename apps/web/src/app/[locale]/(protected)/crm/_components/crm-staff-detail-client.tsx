@@ -18,7 +18,7 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
-import { useTenantName } from "@/lib/crm/crm-lookups"
+import { useCustomerName } from "@/lib/crm/crm-lookups"
 import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
 import { CrmDeleteDialog } from "./crm-delete-dialog"
 import { CrmStaffFormDialog } from "./crm-staff-form-dialog"
@@ -33,11 +33,11 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
-function AssignmentTenantCell({ tenantId }: { tenantId: string }) {
-  const name = useTenantName(tenantId)
+function AssignmentCustomerCell({ customerId }: { customerId: string }) {
+  const name = useCustomerName(customerId)
   return (
     <Button variant="link" className="h-auto p-0 font-normal" asChild>
-      <LocaleLink href={`/crm/tenants/${tenantId}`}>{name}</LocaleLink>
+      <LocaleLink href={`/crm/customers/${customerId}`}>{name}</LocaleLink>
     </Button>
   )
 }
@@ -151,7 +151,7 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
                     {sortedAssignments.map((a) => (
                       <TableRow key={a.id}>
                         <TableCell>
-                          <AssignmentTenantCell tenantId={a.tenant_id} />
+                          <AssignmentCustomerCell customerId={a.customer_id} />
                         </TableCell>
                         <TableCell>{a.role_type}</TableCell>
                         <TableCell className="text-muted-foreground text-xs whitespace-nowrap">

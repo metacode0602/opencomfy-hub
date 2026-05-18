@@ -117,7 +117,7 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline">编辑信息</Button>
-          <Button>新增机房</Button>
+          <Button>同步数据</Button>
         </div>
       </div>
 

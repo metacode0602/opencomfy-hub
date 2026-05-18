@@ -23,7 +23,7 @@ import { LocaleLink } from '@/lib/i18n/navigation'
 import {
   useActivityTypeName,
   useStaffName,
-  useTenantName,
+  useCustomerName,
 } from '@/lib/crm/crm-lookups'
 import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
 import type { AccountActivity } from '@/lib/types/crm'
@@ -89,7 +89,7 @@ function ActivityDetailDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const tenantName = useTenantName(activity?.tenant_id)
+  const customerName = useCustomerName(activity?.customer_id)
   const typeName = useActivityTypeName(activity?.activity_type_id)
   const actor = useStaffName(activity?.actor_user_id)
 
@@ -101,12 +101,12 @@ function ActivityDetailDialog({
             <DialogHeader>
               <DialogTitle>{activity.title_snapshot ?? '客户动态'}</DialogTitle>
               <DialogDescription>
-                {tenantName} · {typeName}
+                {customerName} · {typeName}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <DetailRow label="业务发生时间" value={formatDateTime(activity.occurred_at)} />
-              <DetailRow label="客户" value={tenantName} />
+              <DetailRow label="客户" value={customerName} />
               <DetailRow label="动态类型" value={typeName} />
               <DetailRow label="关联业务域" value={activity.ref_domain ?? '—'} />
               <DetailRow label="关联记录 ID" value={activity.ref_id ?? '—'} />
@@ -125,7 +125,7 @@ function ActivityDetailDialog({
                 </div>
               )}
               <Button variant="link" className="h-auto px-0" asChild>
-                <LocaleLink href={`/crm/tenants/${activity.tenant_id}`}>
+                <LocaleLink href={`/crm/customers/${activity.customer_id}`}>
                   进入客户详情
                 </LocaleLink>
               </Button>

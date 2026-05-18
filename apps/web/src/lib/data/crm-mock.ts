@@ -13,19 +13,18 @@ import type {
   LifecycleMilestone,
   MilestoneEvidence,
   RechargeOrder,
-  Tenant,
-  TenantBinding,
+  Customer,
+  ProjectTenant,
   TestVoucherIssue,
   UserStaff,
 } from "@/lib/types/crm"
 
-export const crmMockTenants: Tenant[] = [
+export const crmMockCustomers: Customer[] = [
   {
     id: "t-001",
-    tenant_code: "ACME-BJ",
+    customer_code: "ACME-BJ",
     name: "北京某某科技有限公司",
     account_name: "ACME 算力（华北）",
-    platform_tenant_id: "8405",
     status: "active",
     type: "B端",
     lifecycle_phase: "已转正",
@@ -40,10 +39,9 @@ export const crmMockTenants: Tenant[] = [
   },
   {
     id: "t-002",
-    tenant_code: "START-SH",
+    customer_code: "START-SH",
     name: "上海初创智能有限公司",
     account_name: "星拓 AI 实验室",
-    platform_tenant_id: "14829",
     status: "trial",
     type: "B端",
     lifecycle_phase: "测试中",
@@ -58,10 +56,9 @@ export const crmMockTenants: Tenant[] = [
   },
   {
     id: "t-003",
-    tenant_code: "ORIGINFLOW",
+    customer_code: "ORIGINFLOW",
     name: "Originflow",
     account_name: "Originflow",
-    platform_tenant_id: "10290",
     status: "active",
     type: "B端",
     lifecycle_phase: "试用完成",
@@ -76,11 +73,11 @@ export const crmMockTenants: Tenant[] = [
   },
 ]
 
-export const crmMockTenantBindings: TenantBinding[] = [
+export const crmMockProjectTenants: ProjectTenant[] = [
   {
     id: "tb-001",
-    tenant_id: "t-003",
-    bound_tenant_id: "12724",
+    project_id: "p-crm-originflow",
+    tenant_id: "12724",
     binding_label: "兰天游账号",
     binding_role: "子商户",
     sort_order: 1,
@@ -88,8 +85,8 @@ export const crmMockTenantBindings: TenantBinding[] = [
   },
   {
     id: "tb-002",
-    tenant_id: "t-003",
-    bound_tenant_id: "15052",
+    project_id: "p-crm-originflow",
+    tenant_id: "15052",
     binding_label: "originflow独立商户",
     binding_role: "子商户",
     sort_order: 2,
@@ -127,7 +124,7 @@ export const crmMockUserStaff: UserStaff[] = [
 export const crmMockAssignments: AccountManagerAssignment[] = [
   {
     id: "am-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     user_staff_id: "s-001",
     role_type: "客户经理",
     effective_from: "2026-01-05T08:00:00.000Z",
@@ -136,7 +133,7 @@ export const crmMockAssignments: AccountManagerAssignment[] = [
   },
   {
     id: "am-002",
-    tenant_id: "t-002",
+    customer_id: "t-002",
     user_staff_id: "s-002",
     role_type: "客户经理",
     effective_from: "2026-03-28T09:30:00.000Z",
@@ -148,7 +145,7 @@ export const crmMockAssignments: AccountManagerAssignment[] = [
 export const crmMockVouchers: TestVoucherIssue[] = [
   {
     id: "tv-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     operator_id: "s-001",
     issued_at: "2026-01-10T11:00:00.000Z",
     issue_status: "success",
@@ -158,7 +155,7 @@ export const crmMockVouchers: TestVoucherIssue[] = [
   },
   {
     id: "tv-002",
-    tenant_id: "t-002",
+    customer_id: "t-002",
     operator_id: "s-002",
     issued_at: "2026-04-01T10:00:00.000Z",
     issue_status: "success",
@@ -171,7 +168,7 @@ export const crmMockVouchers: TestVoucherIssue[] = [
 export const crmMockMilestones: LifecycleMilestone[] = [
   {
     id: "lm-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     milestone_type: "TEST_COMPLETE",
     milestone_date: "2026-02-28",
     filled_by: "s-001",
@@ -180,7 +177,7 @@ export const crmMockMilestones: LifecycleMilestone[] = [
   },
   {
     id: "lm-002",
-    tenant_id: "t-002",
+    customer_id: "t-002",
     milestone_type: "SCALE_MET",
     milestone_date: "2026-05-01",
     filled_by: "s-002",
@@ -204,7 +201,7 @@ export const crmMockMilestoneEvidence: MilestoneEvidence[] = [
 export const crmMockContractSnapshots: ContractSnapshot[] = [
   {
     id: "cs-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     contract_no: "HT-2026-001",
     contract_url: "https://example.com/contracts/HT-2026-001",
     signed_on: "2026-03-10",
@@ -213,7 +210,7 @@ export const crmMockContractSnapshots: ContractSnapshot[] = [
   },
   {
     id: "cs-002",
-    tenant_id: "t-002",
+    customer_id: "t-002",
     contract_no: null,
     contract_url: null,
     signed_on: null,
@@ -250,7 +247,7 @@ export const crmMockUsageDaily: ConsumptionUsageDaily[] = [
 export const crmMockConversion: ConversionRecord[] = [
   {
     id: "cr-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     conversion_date: "2026-03-15",
     trigger_type: "签约",
     candidate_signed_on: "2026-03-10",
@@ -297,7 +294,8 @@ export const crmMockActivityTypes: ActivityTypeDefinition[] = [
 export const crmMockActivities: AccountActivity[] = [
   {
     id: "aa-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
+    tenant_id: null,
     activity_type_id: "atd-001",
     occurred_at: "2026-03-12T09:05:00.000Z",
     ref_domain: "recharge_order",
@@ -311,7 +309,8 @@ export const crmMockActivities: AccountActivity[] = [
   },
   {
     id: "aa-002",
-    tenant_id: "t-002",
+    customer_id: "t-002",
+    tenant_id: null,
     activity_type_id: "atd-002",
     occurred_at: "2026-05-02T15:00:00.000Z",
     ref_domain: null,
@@ -325,7 +324,8 @@ export const crmMockActivities: AccountActivity[] = [
   },
   {
     id: "aa-003",
-    tenant_id: "t-001",
+    customer_id: "t-001",
+    tenant_id: null,
     activity_type_id: "atd-002",
     occurred_at: "2026-05-10T10:30:00.000Z",
     ref_domain: null,
@@ -339,7 +339,8 @@ export const crmMockActivities: AccountActivity[] = [
   },
   {
     id: "aa-004",
-    tenant_id: "t-002",
+    customer_id: "t-002",
+    tenant_id: null,
     activity_type_id: "atd-001",
     occurred_at: "2026-05-17T08:00:00.000Z",
     ref_domain: "recharge_order",
@@ -353,7 +354,8 @@ export const crmMockActivities: AccountActivity[] = [
   },
   {
     id: "aa-005",
-    tenant_id: "t-001",
+    customer_id: "t-001",
+    tenant_id: null,
     activity_type_id: "atd-002",
     occurred_at: "2026-05-17T14:20:00.000Z",
     ref_domain: null,
@@ -367,7 +369,8 @@ export const crmMockActivities: AccountActivity[] = [
   },
   {
     id: "aa-006",
-    tenant_id: "t-002",
+    customer_id: "t-002",
+    tenant_id: null,
     activity_type_id: "atd-002",
     occurred_at: "2026-05-20T16:00:00.000Z",
     ref_domain: null,
@@ -384,7 +387,7 @@ export const crmMockActivities: AccountActivity[] = [
 export const crmMockDocuments: EngagementDocument[] = [
   {
     id: "ed-001",
-    tenant_id: "t-001",
+    customer_id: "t-001",
     uploaded_by: "s-001",
     title: "上线方案 v2",
     version_no: 2,
@@ -397,7 +400,8 @@ export const crmMockDocuments: EngagementDocument[] = [
 export const crmMockTasks: FollowUpTask[] = [
   {
     id: "fut-001",
-    tenant_id: "t-002",
+    customer_id: "t-002",
+    project_id: null,
     assignee_id: "s-002",
     source_account_activity_id: "aa-002",
     title: "发送扩容报价单",
@@ -411,7 +415,7 @@ export const crmMockTasks: FollowUpTask[] = [
 export const crmMockComments: EngagementComment[] = [
   {
     id: "ec-001",
-    tenant_id: "t-002",
+    customer_id: "t-002",
     account_activity_id: "aa-002",
     author_id: "s-003",
     parent_comment_id: null,
@@ -422,8 +426,8 @@ export const crmMockComments: EngagementComment[] = [
 
 /** zustand 初始快照（与 store 字段一致） */
 export const crmSeedState = {
-  tenants: crmMockTenants,
-  tenantBindings: crmMockTenantBindings,
+  customers: crmMockCustomers,
+  projectTenants: crmMockProjectTenants,
   userStaff: crmMockUserStaff,
   accountManagerAssignments: crmMockAssignments,
   testVoucherIssues: crmMockVouchers,

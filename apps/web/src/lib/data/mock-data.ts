@@ -1,6 +1,8 @@
 import type {
-  Tenant,
+  Customer,
+  PlatformTenant,
   Project,
+  ProjectTenant,
   Contract,
   Recharge,
   Consumption,
@@ -19,8 +21,19 @@ import type {
   SupplierPricingHistory,
 } from './types'
 
-// 模拟客户数据
-export const mockTenants: Tenant[] = [
+/** 销售经理（mock 主数据） */
+export const mockSalesManagers = [
+  { id: 'sm-1', name: '王磊' },
+  { id: 'sm-2', name: '周明' },
+  { id: 'sm-3', name: '赵敏' },
+  { id: 'sm-4', name: '李强' },
+  { id: 'sm-5', name: '张伟' },
+  { id: 'sm-6', name: '陈思思' },
+  { id: 'sm-7', name: '李娜' },
+] as const
+
+// CRM 客户主体
+export const mockCustomers: Customer[] = [
   {
     id: 't1',
     name: '北京深智科技有限公司',
@@ -31,6 +44,17 @@ export const mockTenants: Tenant[] = [
     contactEmail: 'zhangming@deeptech.com',
     industry: '人工智能',
     address: '北京市海淀区中关村软件园',
+    certCode: '91110108MA01XXXX1X',
+    salesManagerId: 'sm-1',
+    salesManagerName: '王磊',
+    expectedScale: {
+      cards: [
+        { cardTypeId: 'card1', cardCount: 16 },
+        { cardTypeId: 'card5', cardCount: 8 },
+      ],
+      storage: { enabled: true, storageType: 'shared_storage', sizeGB: 2048 },
+      productLines: { bareMetal: 2, elasticService: 4, job: 8 },
+    },
     createdAt: '2024-01-15',
     projectCount: 3,
     totalRecharge: 500000,
@@ -47,6 +71,14 @@ export const mockTenants: Tenant[] = [
     contactEmail: 'lihua@yuncloud.com',
     industry: '云计算',
     address: '上海市浦东新区张江高科',
+    certCode: '91310115MA02YYYY2Y',
+    salesManagerId: 'sm-2',
+    salesManagerName: '周明',
+    expectedScale: {
+      cards: [{ cardTypeId: 'card5', cardCount: 8 }],
+      storage: { enabled: false, storageType: 'object_storage', sizeGB: 0 },
+      productLines: { bareMetal: 0, elasticService: 2, job: 4 },
+    },
     createdAt: '2024-02-20',
     projectCount: 2,
     totalRecharge: 800000,
@@ -103,14 +135,25 @@ export const mockTenants: Tenant[] = [
   },
 ]
 
+// 平台计费租户（默认与客户 1:1，id 与 customer 相同）
+export const mockPlatformTenants: PlatformTenant[] = mockCustomers.map((c) => ({
+  id: c.id,
+  customerId: c.id,
+  name: c.name,
+  isDefault: true,
+  status: c.status,
+  balance: c.balance,
+}))
+
 // 模拟项目数据
 export const mockProjects: Project[] = [
   {
     id: 'p1',
     name: 'AI 图像识别训练',
-    tenantId: 't1',
-    tenantName: '北京深智科技有限公司',
-    tenantType: 'B',
+    customerId: 't1',
+    customerName: '北京深智科技有限公司',
+    customerType: 'B',
+    primaryTenantId: 't1',
     stage: 'converted',
     status: 'active',
     preSalesManager: '陈思思',
@@ -125,9 +168,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p2',
     name: 'NLP 大模型微调',
-    tenantId: 't1',
-    tenantName: '北京深智科技有限公司',
-    tenantType: 'B',
+    customerId: 't1',
+    customerName: '北京深智科技有限公司',
+    customerType: 'B',
+    primaryTenantId: 't1',
     stage: 'testing',
     status: 'active',
     preSalesManager: '陈思思',
@@ -142,9 +186,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p3',
     name: '视频渲染加速',
-    tenantId: 't1',
-    tenantName: '北京深智科技有限公司',
-    tenantType: 'B',
+    customerId: 't1',
+    customerName: '北京深智科技有限公司',
+    customerType: 'B',
+    primaryTenantId: 't1',
     stage: 'lead',
     status: 'active',
     preSalesManager: '张伟',
@@ -159,9 +204,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p4',
     name: '分布式机器学习平台',
-    tenantId: 't2',
-    tenantName: '上海云算科技股份公司',
-    tenantType: 'B',
+    customerId: 't2',
+    customerName: '上海云算科技股份公司',
+    customerType: 'B',
+    primaryTenantId: 't2',
     stage: 'converted',
     status: 'active',
     preSalesManager: '李娜',
@@ -176,9 +222,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p5',
     name: '智能推荐系统',
-    tenantId: 't2',
-    tenantName: '上海云算科技股份公司',
-    tenantType: 'B',
+    customerId: 't2',
+    customerName: '上海云算科技股份公司',
+    customerType: 'B',
+    primaryTenantId: 't2',
     stage: 'testing',
     status: 'active',
     preSalesManager: '李娜',
@@ -193,9 +240,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p6',
     name: '个人 AI 助手开发',
-    tenantId: 't3',
-    tenantName: '王小明',
-    tenantType: 'C',
+    customerId: 't3',
+    customerName: '王小明',
+    customerType: 'C',
+    primaryTenantId: 't3',
     stage: 'testing',
     status: 'active',
     preSalesManager: '张伟',
@@ -210,9 +258,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p7',
     name: '数据分析平台',
-    tenantId: 't4',
-    tenantName: '杭州智图数据有限公司',
-    tenantType: 'B',
+    customerId: 't4',
+    customerName: '杭州智图数据有限公司',
+    customerType: 'B',
+    primaryTenantId: 't4',
     stage: 'converted',
     status: 'paused',
     preSalesManager: '陈思思',
@@ -228,9 +277,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p8',
     name: 'AIGC 创意生成',
-    tenantId: 't5',
-    tenantName: '成都创新视觉工作室',
-    tenantType: 'B',
+    customerId: 't5',
+    customerName: '成都创新视觉工作室',
+    customerType: 'B',
+    primaryTenantId: 't5',
     stage: 'converted',
     status: 'active',
     preSalesManager: '张伟',
@@ -245,9 +295,10 @@ export const mockProjects: Project[] = [
   {
     id: 'p9',
     name: '3D 模型渲染',
-    tenantId: 't5',
-    tenantName: '成都创新视觉工作室',
-    tenantType: 'B',
+    customerId: 't5',
+    customerName: '成都创新视觉工作室',
+    customerType: 'B',
+    primaryTenantId: 't5',
     stage: 'lead',
     status: 'active',
     preSalesManager: '张伟',
@@ -268,8 +319,9 @@ export const mockContracts: Contract[] = [
     contractNo: 'HT-2024-001',
     projectId: 'p1',
     projectName: 'AI 图像识别训练',
+    customerId: 't1',
+    customerName: '北京深智科技有限公司',
     tenantId: 't1',
-    tenantName: '北京深智科技有限公司',
     type: 'enterprise',
     status: 'active',
     startDate: '2024-02-01',
@@ -286,8 +338,9 @@ export const mockContracts: Contract[] = [
     contractNo: 'HT-2024-002',
     projectId: 'p4',
     projectName: '分布式机器学习平台',
+    customerId: 't2',
+    customerName: '上海云算科技股份公司',
     tenantId: 't2',
-    tenantName: '上海云算科技股份公司',
     type: 'enterprise',
     status: 'active',
     startDate: '2024-03-01',
@@ -304,8 +357,9 @@ export const mockContracts: Contract[] = [
     contractNo: 'HT-2024-003',
     projectId: 'p2',
     projectName: 'NLP 大模型微���',
+    customerId: 't1',
+    customerName: '北京深智科技有限公司',
     tenantId: 't1',
-    tenantName: '北京深智科技有限公司',
     type: 'standard',
     status: 'active',
     startDate: '2024-03-20',
@@ -322,8 +376,9 @@ export const mockContracts: Contract[] = [
     contractNo: 'HT-2024-004',
     projectId: 'p7',
     projectName: '数据分析平台',
+    customerId: 't4',
+    customerName: '杭州智图数据有限公司',
     tenantId: 't4',
-    tenantName: '杭州智图数据有限公司',
     type: 'standard',
     status: 'terminated',
     startDate: '2024-01-20',
@@ -340,8 +395,9 @@ export const mockContracts: Contract[] = [
     contractNo: 'HT-2024-005',
     projectId: 'p8',
     projectName: 'AIGC 创意生成',
+    customerId: 't5',
+    customerName: '成都创新视觉工作室',
     tenantId: 't5',
-    tenantName: '成都创新视觉工作室',
     type: 'custom',
     status: 'active',
     startDate: '2024-04-10',
@@ -575,6 +631,7 @@ export const mockCoupons: Coupon[] = [
 export const mockTasks: Task[] = [
   {
     id: 'task1',
+    tenantId: 't1',
     projectId: 'p1',
     title: 'ResNet-152 模型训练',
     description: '图像分类模型训练任务',
@@ -587,6 +644,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: 'task2',
+    tenantId: 't1',
     projectId: 'p1',
     title: 'YOLO 目标检测推理',
     description: '批量图片目标检测任务',
@@ -600,6 +658,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: 'task3',
+    tenantId: 't1',
     projectId: 'p2',
     title: 'LLaMA 模型微调',
     description: '大语言模型领域微调',
@@ -612,6 +671,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: 'task4',
+    tenantId: 't2',
     projectId: 'p4',
     title: '分布式训练集群任务',
     description: '多节点分布式训练',
@@ -624,6 +684,7 @@ export const mockTasks: Task[] = [
   },
   {
     id: 'task5',
+    tenantId: 't3',
     projectId: 'p6',
     title: '个人 AI 助手推理',
     description: '对话模型推理服务',
@@ -892,9 +953,37 @@ export const mockBills: Bill[] = [
   },
 ]
 
-// 辅助函数：根据客户ID获取项目
-export function getProjectsByTenantId(tenantId: string): Project[] {
-  return mockProjects.filter(p => p.tenantId === tenantId)
+export function getCustomerById(customerId: string): Customer | undefined {
+  return mockCustomers.find((c) => c.id === customerId)
+}
+
+export function getPlatformTenantsByCustomerId(customerId: string): PlatformTenant[] {
+  return mockPlatformTenants.filter((t) => t.customerId === customerId)
+}
+
+export function getBillingTenantIdsForCustomer(customerId: string): string[] {
+  return getPlatformTenantsByCustomerId(customerId).map((t) => t.id)
+}
+
+export function getBillingTenantIdsForProject(projectId: string): string[] {
+  const project = mockProjects.find((p) => p.id === projectId)
+  if (!project) return []
+  const ids = new Set<string>()
+  if (project.primaryTenantId) ids.add(project.primaryTenantId)
+  for (const link of mockProjectTenants.filter((l) => l.projectId === projectId)) {
+    ids.add(link.tenantId)
+  }
+  if (ids.size === 0) {
+    getBillingTenantIdsForCustomer(project.customerId).forEach((id) => ids.add(id))
+  }
+  return [...ids]
+}
+
+export const mockProjectTenants: ProjectTenant[] = []
+
+// 辅助函数：根据客户 ID 获取项目
+export function getProjectsByCustomerId(customerId: string): Project[] {
+  return mockProjects.filter((p) => p.customerId === customerId)
 }
 
 // 辅助函数：根据项目ID获取活动
@@ -904,14 +993,20 @@ export function getActivitiesByProjectId(projectId: string): Activity[] {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 }
 
-// 辅助函数：根据客户ID获取充值记录
-export function getRechargesByTenantId(tenantId: string): Recharge[] {
-  return mockRecharges.filter(r => r.tenantId === tenantId)
+function filterByTenantIds<T extends { tenantId: string }>(
+  rows: T[],
+  tenantIds: string[],
+): T[] {
+  const set = new Set(tenantIds)
+  return rows.filter((r) => set.has(r.tenantId))
 }
 
-// 辅助函数：根据客户ID获取消费记录
-export function getConsumptionsByTenantId(tenantId: string): Consumption[] {
-  return mockConsumptions.filter(c => c.tenantId === tenantId)
+export function getRechargesByCustomerId(customerId: string): Recharge[] {
+  return filterByTenantIds(mockRecharges, getBillingTenantIdsForCustomer(customerId))
+}
+
+export function getConsumptionsByCustomerId(customerId: string): Consumption[] {
+  return filterByTenantIds(mockConsumptions, getBillingTenantIdsForCustomer(customerId))
 }
 
 // 辅助函数：根据项目ID获取任务
@@ -924,9 +1019,8 @@ export function getOrdersByProjectId(projectId: string): Order[] {
   return mockOrders.filter(o => o.projectId === projectId)
 }
 
-// 辅助函数：根据客户ID获取算力券
-export function getCouponsByTenantId(tenantId: string): Coupon[] {
-  return mockCoupons.filter(c => c.tenantId === tenantId)
+export function getCouponsByCustomerId(customerId: string): Coupon[] {
+  return filterByTenantIds(mockCoupons, getBillingTenantIdsForCustomer(customerId))
 }
 
 // 辅助函数：根据项目ID获取账单
@@ -934,9 +1028,8 @@ export function getBillsByProjectId(projectId: string): Bill[] {
   return mockBills.filter(b => b.projectId === projectId)
 }
 
-// 辅助函数：根据客户ID获取合同
-export function getContractsByTenantId(tenantId: string): Contract[] {
-  return mockContracts.filter(c => c.tenantId === tenantId)
+export function getContractsByCustomerId(customerId: string): Contract[] {
+  return mockContracts.filter((c) => c.customerId === customerId)
 }
 
 // ========== 供应商相关数据 ==========

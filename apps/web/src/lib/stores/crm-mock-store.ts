@@ -10,14 +10,14 @@ import type {
   ConsumptionUsageDaily,
   ContractSnapshot,
   ConversionRecord,
+  Customer,
   EngagementComment,
   EngagementDocument,
   FollowUpTask,
   LifecycleMilestone,
   MilestoneEvidence,
+  ProjectTenant,
   RechargeOrder,
-  Tenant,
-  TenantBinding,
   TestVoucherIssue,
   UserStaff,
 } from "@/lib/types/crm"
@@ -28,10 +28,10 @@ function newId(prefix: string) {
 
 export type CrmMockState = typeof crmSeedState & {
   resetToSeed: () => void
-  upsertTenant: (row: Tenant) => void
-  removeTenant: (id: string) => void
-  upsertTenantBinding: (row: TenantBinding) => void
-  removeTenantBinding: (id: string) => void
+  upsertCustomer: (row: Customer) => void
+  removeCustomer: (id: string) => void
+  upsertProjectTenant: (row: ProjectTenant) => void
+  removeProjectTenant: (id: string) => void
   upsertUserStaff: (row: UserStaff) => void
   removeUserStaff: (id: string) => void
   upsertAssignment: (row: AccountManagerAssignment) => void
@@ -62,7 +62,7 @@ export type CrmMockState = typeof crmSeedState & {
   removeTask: (id: string) => void
   upsertComment: (row: EngagementComment) => void
   removeComment: (id: string) => void
-  createTenantId: () => string
+  createCustomerId: () => string
   createStaffId: () => string
   createGenericId: (prefix: string) => string
   ensureCalendarRowId: (row: Omit<CalendarWorkday, "id">) => CalendarWorkday
@@ -84,7 +84,7 @@ export const useCrmMockStore = create<CrmMockState>()(
       ...base,
       resetToSeed: () => set({ ...crmSeedState }),
 
-      createTenantId: () => newId("t"),
+      createCustomerId: () => newId("c"),
       createStaffId: () => newId("s"),
       createGenericId: (prefix) => newId(prefix),
 
@@ -96,38 +96,36 @@ export const useCrmMockStore = create<CrmMockState>()(
         }),
       }),
 
-      upsertTenant: (row) =>
-        set((s) => ({ tenants: replaceById(s.tenants, row) })),
-      upsertTenantBinding: (row) =>
+      upsertCustomer: (row) =>
+        set((s) => ({ customers: replaceById(s.customers, row) })),
+
+      upsertProjectTenant: (row) =>
         set((s) => ({
-          tenantBindings: replaceById(s.tenantBindings, row),
+          projectTenants: replaceById(s.projectTenants, row),
         })),
-      removeTenantBinding: (id) =>
+      removeProjectTenant: (id) =>
         set((s) => ({
-          tenantBindings: s.tenantBindings.filter((x) => x.id !== id),
+          projectTenants: s.projectTenants.filter((x) => x.id !== id),
         })),
 
-      removeTenant: (id) =>
+      removeCustomer: (id) =>
         set((s) => ({
-          tenants: s.tenants.filter((x) => x.id !== id),
-          tenantBindings: s.tenantBindings.filter((x) => x.tenant_id !== id),
+          customers: s.customers.filter((x) => x.id !== id),
           accountManagerAssignments: s.accountManagerAssignments.filter(
-            (x) => x.tenant_id !== id,
+            (x) => x.customer_id !== id,
           ),
-          testVoucherIssues: s.testVoucherIssues.filter((x) => x.tenant_id !== id),
-          lifecycleMilestones: s.lifecycleMilestones.filter((x) => x.tenant_id !== id),
+          testVoucherIssues: s.testVoucherIssues.filter((x) => x.customer_id !== id),
+          lifecycleMilestones: s.lifecycleMilestones.filter((x) => x.customer_id !== id),
           milestoneEvidence: s.milestoneEvidence.filter((me) => {
             const ms = s.lifecycleMilestones.find((m) => m.id === me.lifecycle_milestone_id)
-            return ms == null || ms.tenant_id !== id
+            return ms == null || ms.customer_id !== id
           }),
-          contractSnapshots: s.contractSnapshots.filter((x) => x.tenant_id !== id),
-          rechargeOrders: s.rechargeOrders.filter((x) => x.tenant_id !== id),
-          consumptionUsageDaily: s.consumptionUsageDaily.filter((x) => x.tenant_id !== id),
-          conversionRecords: s.conversionRecords.filter((x) => x.tenant_id !== id),
-          accountActivities: s.accountActivities.filter((x) => x.tenant_id !== id),
-          engagementDocuments: s.engagementDocuments.filter((x) => x.tenant_id !== id),
-          followUpTasks: s.followUpTasks.filter((x) => x.tenant_id !== id),
-          engagementComments: s.engagementComments.filter((x) => x.tenant_id !== id),
+          contractSnapshots: s.contractSnapshots.filter((x) => x.customer_id !== id),
+          conversionRecords: s.conversionRecords.filter((x) => x.customer_id !== id),
+          accountActivities: s.accountActivities.filter((x) => x.customer_id !== id),
+          engagementDocuments: s.engagementDocuments.filter((x) => x.customer_id !== id),
+          followUpTasks: s.followUpTasks.filter((x) => x.customer_id !== id),
+          engagementComments: s.engagementComments.filter((x) => x.customer_id !== id),
         })),
 
       upsertUserStaff: (row) =>
@@ -281,24 +279,9 @@ export const useCrmMockStore = create<CrmMockState>()(
         })),
     }),
     {
-      name: "crm-mock-store-v1",
-      version: 2,
-      migrate: (persisted, version) => {
-        const state = persisted as Record<string, unknown>
-        if (version < 2) {
-          return {
-            ...crmSeedState,
-            ...state,
-            tenantBindings: crmSeedState.tenantBindings,
-            tenants: (state.tenants as Tenant[] | undefined)?.map((t) => ({
-              ...t,
-              platform_tenant_id:
-                (t as Tenant).platform_tenant_id ?? null,
-            })) ?? crmSeedState.tenants,
-          }
-        }
-        return state as typeof crmSeedState
-      },
+      name: "crm-mock-store-v3",
+      version: 3,
+      migrate: () => ({ ...crmSeedState }),
     },
   ),
 )

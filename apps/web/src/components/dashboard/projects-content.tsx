@@ -51,7 +51,7 @@ import {
 } from '@workspace/ui/components/dialog'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { mockProjects, mockTenants } from '@/lib/data/mock-data'
+import { mockProjects, mockCustomers } from '@/lib/data/mock-data'
 
 export function ProjectsContent() {
   const [search, setSearch] = useState('')
@@ -61,7 +61,7 @@ export function ProjectsContent() {
 
   const filteredProjects = mockProjects.filter(project => {
     const matchesSearch = project.name.toLowerCase().includes(search.toLowerCase()) ||
-      project.tenantName.toLowerCase().includes(search.toLowerCase()) ||
+      project.customerName.toLowerCase().includes(search.toLowerCase()) ||
       project.accountManager.toLowerCase().includes(search.toLowerCase())
     const matchesStage = stageFilter === 'all' || project.stage === stageFilter
     const matchesStatus = statusFilter === 'all' || project.status === statusFilter
@@ -102,11 +102,11 @@ export function ProjectsContent() {
                     <SelectValue placeholder="请选择客户" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockTenants.map(tenant => (
-                      <SelectItem key={tenant.id} value={tenant.id}>
-                        {tenant.name}
+                    {mockCustomers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
                         <span className="text-muted-foreground ml-2">
-                          ({tenant.type === 'B' ? '企业' : '个人'})
+                          ({c.type === 'B' ? '企业' : '个人'})
                         </span>
                       </SelectItem>
                     ))}
@@ -298,13 +298,13 @@ export function ProjectsContent() {
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Link 
-                        href={`/crm/tenants/${project.tenantId}`}
+                        href={`/crm/customers/${project.customerId}`}
                         className="text-muted-foreground hover:text-primary transition-colors"
                       >
-                        {project.tenantName}
+                        {project.customerName}
                       </Link>
                       <Badge variant="outline" className="text-xs">
-                        {project.tenantType === 'B' ? '企业' : '个人'}
+                        {project.customerType === 'B' ? '企业' : '个人'}
                       </Badge>
                     </div>
                   </TableCell>

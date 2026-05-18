@@ -104,7 +104,7 @@ const data = {
     },
     {
       title: "客户",
-      url: "/crm/tenants",
+      url: "/crm/customers",
       icon: <Building2 className="size-4" />,
     },
     {

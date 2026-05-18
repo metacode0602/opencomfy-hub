@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { mockTenants, mockProjects, mockContracts, mockBills, mockActivities } from '@/lib/data/mock-data'
+import { mockCustomers, mockProjects, mockContracts, mockBills, mockActivities } from '@/lib/data/mock-data'
 import {
   AreaChart,
   Area,
@@ -56,8 +56,8 @@ const productLineData = [
 
 export function DashboardContent() {
   const activeProjects = mockProjects.filter(p => p.status === 'active').length
-  const totalConsumption = mockTenants.reduce((acc, t) => acc + t.totalConsumption, 0)
-  const totalBalance = mockTenants.reduce((acc, t) => acc + t.balance, 0)
+  const totalConsumption = mockCustomers.reduce((acc, t) => acc + t.totalConsumption, 0)
+  const totalBalance = mockCustomers.reduce((acc, t) => acc + t.balance, 0)
   const activeContracts = mockContracts.filter(c => c.status === 'active').length
 
   const recentProjects = mockProjects.slice(0, 5)
@@ -82,7 +82,7 @@ export function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="活跃客户"
-          value={mockTenants.filter(t => t.status === 'active').length}
+          value={mockCustomers.filter(t => t.status === 'active').length}
           description="较上月"
           icon={Building2}
           trend={{ value: 12, isPositive: true }}
@@ -244,9 +244,9 @@ export function DashboardContent() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <span className="text-muted-foreground">{project.tenantName}</span>
+                        <span className="text-muted-foreground">{project.customerName}</span>
                         <Badge variant="outline" className="text-xs">
-                          {project.tenantType === 'B' ? '企业' : '个人'}
+                          {project.customerType === 'B' ? '企业' : '个人'}
                         </Badge>
                       </div>
                     </TableCell>

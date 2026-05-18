@@ -1,14 +1,12 @@
-/** B 端客户经营与 CRM 域 — 前端 mock 模型（与 design/database-schema-structure §1 对齐） */
+/** B 端客户经营与 CRM 域 — 前端 mock 模型（v3.0 Customer / Project / PlatformTenant） */
 
 export type JsonObject = Record<string, unknown>
 
-export type Tenant = {
+export type Customer = {
   id: string
-  tenant_code: string
+  customer_code: string
   name: string
   account_name: string
-  /** 平台计费客户 ID（主客户）；与 commercial_account.primary_tenant 对齐 */
-  platform_tenant_id: string | null
   status: string
   type: string
   lifecycle_phase: string
@@ -22,11 +20,11 @@ export type Tenant = {
   updated_at: string
 }
 
-/** 额外计费客户绑定到同一客户组合（commercial_account） */
-export type TenantBinding = {
+/** 项目关联的平台计费租户 */
+export type ProjectTenant = {
   id: string
+  project_id: string
   tenant_id: string
-  bound_tenant_id: string
   binding_label: string
   binding_role: string | null
   sort_order: number
@@ -44,7 +42,7 @@ export type UserStaff = {
 
 export type AccountManagerAssignment = {
   id: string
-  tenant_id: string
+  customer_id: string
   user_staff_id: string
   role_type: string
   effective_from: string
@@ -54,7 +52,7 @@ export type AccountManagerAssignment = {
 
 export type TestVoucherIssue = {
   id: string
-  tenant_id: string
+  customer_id: string
   operator_id: string | null
   issued_at: string
   issue_status: string
@@ -65,7 +63,7 @@ export type TestVoucherIssue = {
 
 export type LifecycleMilestone = {
   id: string
-  tenant_id: string
+  customer_id: string
   milestone_type: string
   milestone_date: string
   filled_by: string | null
@@ -85,7 +83,7 @@ export type MilestoneEvidence = {
 
 export type ContractSnapshot = {
   id: string
-  tenant_id: string
+  customer_id: string
   contract_no: string | null
   contract_url: string | null
   signed_on: string | null
@@ -116,7 +114,7 @@ export type ConsumptionUsageDaily = {
 
 export type ConversionRecord = {
   id: string
-  tenant_id: string
+  customer_id: string
   conversion_date: string
   trigger_type: string
   candidate_signed_on: string | null
@@ -125,7 +123,6 @@ export type ConversionRecord = {
   computed_at: string
 }
 
-/** 业务主键：`region_code` + `calendar_date`，列表/路由用合成 id */
 export type CalendarWorkday = {
   id: string
   calendar_date: string
@@ -144,7 +141,8 @@ export type ActivityTypeDefinition = {
 
 export type AccountActivity = {
   id: string
-  tenant_id: string
+  customer_id: string
+  tenant_id: string | null
   activity_type_id: string | null
   occurred_at: string
   ref_domain: string | null
@@ -159,7 +157,7 @@ export type AccountActivity = {
 
 export type EngagementDocument = {
   id: string
-  tenant_id: string
+  customer_id: string
   uploaded_by: string
   title: string
   version_no: number
@@ -170,7 +168,8 @@ export type EngagementDocument = {
 
 export type FollowUpTask = {
   id: string
-  tenant_id: string
+  customer_id: string
+  project_id: string | null
   assignee_id: string | null
   source_account_activity_id: string | null
   title: string
@@ -182,7 +181,7 @@ export type FollowUpTask = {
 
 export type EngagementComment = {
   id: string
-  tenant_id: string
+  customer_id: string
   account_activity_id: string
   author_id: string
   parent_comment_id: string | null
@@ -190,7 +189,7 @@ export type EngagementComment = {
   created_at: string
 }
 
-export const tenantRelationKeys = [
+export const customerRelationKeys = [
   "bindings",
   "assignments",
   "vouchers",
@@ -206,10 +205,10 @@ export const tenantRelationKeys = [
   "comments",
 ] as const
 
-export type TenantRelationKey = (typeof tenantRelationKeys)[number]
+export type CustomerRelationKey = (typeof customerRelationKeys)[number]
 
-export function isTenantRelationKey(v: string): v is TenantRelationKey {
-  return (tenantRelationKeys as readonly string[]).includes(v)
+export function isCustomerRelationKey(v: string): v is CustomerRelationKey {
+  return (customerRelationKeys as readonly string[]).includes(v)
 }
 
 export function calendarWorkdayRecordId(w: Pick<CalendarWorkday, "region_code" | "calendar_date">) {

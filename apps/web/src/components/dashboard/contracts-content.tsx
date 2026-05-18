@@ -54,7 +54,7 @@ import {
   } from '@workspace/ui/components/dialog'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { mockContracts, mockProjects, mockTenants } from '@/lib/data/mock-data'
+import { mockContracts, mockProjects, mockCustomers } from '@/lib/data/mock-data'
 
 export function ContractsContent() {
   const [search, setSearch] = useState('')
@@ -64,7 +64,7 @@ export function ContractsContent() {
 
   const filteredContracts = mockContracts.filter(contract => {
     const matchesSearch = contract.contractNo.toLowerCase().includes(search.toLowerCase()) ||
-      contract.tenantName.toLowerCase().includes(search.toLowerCase()) ||
+      contract.customerName.toLowerCase().includes(search.toLowerCase()) ||
       contract.projectName.toLowerCase().includes(search.toLowerCase())
     const matchesType = typeFilter === 'all' || contract.type === typeFilter
     const matchesStatus = statusFilter === 'all' || contract.status === statusFilter
@@ -110,7 +110,7 @@ export function ContractsContent() {
                       <SelectItem key={project.id} value={project.id}>
                         {project.name}
                         <span className="text-muted-foreground ml-2">
-                          ({project.tenantName})
+                          ({project.customerName})
                         </span>
                       </SelectItem>
                     ))}
@@ -296,10 +296,10 @@ export function ContractsContent() {
                     </TableCell>
                     <TableCell>
                       <Link 
-                        href={`/crm/tenants/${contract.tenantId}`}
+                        href={`/crm/customers/${contract.customerId}`}
                         className="text-muted-foreground hover:text-primary transition-colors"
                       >
-                        {contract.tenantName}
+                        {contract.customerName}
                       </Link>
                     </TableCell>
                     <TableCell>

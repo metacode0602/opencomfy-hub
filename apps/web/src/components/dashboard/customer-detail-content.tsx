@@ -32,13 +32,13 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import type { Tenant } from '@/lib/data/types'
+import type { Customer } from '@/lib/data/types'
 import { 
-  getProjectsByTenantId, 
-  getRechargesByTenantId, 
-  getConsumptionsByTenantId,
-  getCouponsByTenantId,
-  getContractsByTenantId,
+  getProjectsByCustomerId, 
+  getRechargesByCustomerId, 
+  getConsumptionsByCustomerId,
+  getCouponsByCustomerId,
+  getContractsByCustomerId,
 } from '@/lib/data/mock-data'
 import { productLineNames } from '@/lib/data/types'
 import {
@@ -53,8 +53,8 @@ import {
   Cell,
 } from 'recharts'
 
-interface TenantDetailContentProps {
-  tenant: Tenant
+interface CustomerDetailContentProps {
+  customer: Customer
 }
 
 const consumptionByProduct = [
@@ -73,33 +73,33 @@ const monthlyConsumption = [
   { month: '5月', amount: 88000 },
 ]
 
-export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
+export function CustomerDetailContent({ customer }: CustomerDetailContentProps) {
   const [activeTab, setActiveTab] = useState('overview')
   
-  const projects = getProjectsByTenantId(tenant.id)
-  const recharges = getRechargesByTenantId(tenant.id)
-  const consumptions = getConsumptionsByTenantId(tenant.id)
-  const coupons = getCouponsByTenantId(tenant.id)
-  const contracts = getContractsByTenantId(tenant.id)
+  const projects = getProjectsByCustomerId(customer.id)
+  const recharges = getRechargesByCustomerId(customer.id)
+  const consumptions = getConsumptionsByCustomerId(customer.id)
+  const coupons = getCouponsByCustomerId(customer.id)
+  const contracts = getContractsByCustomerId(customer.id)
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/tenants">
+        <Link href="/crm/customers">
           <Button variant="ghost" size="icon">
             <ArrowLeft className="w-5 h-5" />
           </Button>
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{tenant.name}</h1>
+            <h1 className="text-2xl font-bold">{customer.name}</h1>
             <Badge variant="outline">
-              {tenant.type === 'B' ? '企业' : '个人'}
+              {customer.type === 'B' ? '企业' : '个人'}
             </Badge>
-            <StatusBadge status={tenant.status} />
+            <StatusBadge status={customer.status} />
           </div>
-          <p className="text-muted-foreground">{tenant.industry}</p>
+          <p className="text-muted-foreground">{customer.industry}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline">
@@ -123,7 +123,7 @@ export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">账户余额</p>
-                <p className="text-xl font-bold">¥{tenant.balance.toLocaleString()}</p>
+                <p className="text-xl font-bold">¥{customer.balance.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -136,7 +136,7 @@ export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">总充值</p>
-                <p className="text-xl font-bold">¥{tenant.totalRecharge.toLocaleString()}</p>
+                <p className="text-xl font-bold">¥{customer.totalRecharge.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -149,7 +149,7 @@ export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">总消费</p>
-                <p className="text-xl font-bold">¥{tenant.totalConsumption.toLocaleString()}</p>
+                <p className="text-xl font-bold">¥{customer.totalConsumption.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -162,7 +162,7 @@ export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">项目数量</p>
-                <p className="text-xl font-bold">{tenant.projectCount}</p>
+                <p className="text-xl font-bold">{customer.projectCount}</p>
               </div>
             </div>
           </CardContent>
@@ -180,28 +180,28 @@ export function TenantDetailContent({ tenant }: TenantDetailContentProps) {
               <User className="w-4 h-4 text-muted-foreground" />
               <div>
                 <p className="text-xs text-muted-foreground">联系人</p>
-                <p className="font-medium">{tenant.contactPerson}</p>
+                <p className="font-medium">{customer.contactPerson}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Phone className="w-4 h-4 text-muted-foreground" />
               <div>
                 <p className="text-xs text-muted-foreground">电话</p>
-                <p className="font-medium">{tenant.contactPhone}</p>
+                <p className="font-medium">{customer.contactPhone}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <Mail className="w-4 h-4 text-muted-foreground" />
               <div>
                 <p className="text-xs text-muted-foreground">邮箱</p>
-                <p className="font-medium">{tenant.contactEmail}</p>
+                <p className="font-medium">{customer.contactEmail}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <MapPin className="w-4 h-4 text-muted-foreground" />
               <div>
                 <p className="text-xs text-muted-foreground">地址</p>
-                <p className="font-medium">{tenant.address}</p>
+                <p className="font-medium">{customer.address}</p>
               </div>
             </div>
           </div>

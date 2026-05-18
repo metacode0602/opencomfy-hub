@@ -1,8 +1,8 @@
 import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
 
-export function useTenantName(tenantId: string | null | undefined) {
-  const t = useCrmMockStore((s) => s.tenants.find((x) => x.id === tenantId))
-  return t?.account_name ?? t?.name ?? tenantId ?? "—"
+export function useCustomerName(customerId: string | null | undefined) {
+  const c = useCrmMockStore((s) => s.customers.find((x) => x.id === customerId))
+  return c?.account_name ?? c?.name ?? customerId ?? "—"
 }
 
 export function useStaffName(staffId: string | null | undefined) {
