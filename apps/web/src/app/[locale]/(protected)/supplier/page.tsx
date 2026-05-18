@@ -1,5 +1,10 @@
-import { SupplierSuppliersListClient } from "./_components/supplier-suppliers-list-client"
+import { SuppliersContent } from "@/components/dashboard/suppliers-content";
+import { AppShell } from "@/components/dashboard/app-shell";
 
 export default function SupplierListPage() {
-  return <SupplierSuppliersListClient />
+  return (
+    <AppShell>
+      <SuppliersContent />
+    </AppShell>
+  )
 }

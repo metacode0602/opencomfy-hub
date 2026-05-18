@@ -1,5 +1,10 @@
-import { SupplierDevicesGlobalListClient } from "../_components/supplier-devices-global-list-client"
+import { AppShell } from "@/components/dashboard/app-shell";
+import { DevicesContent } from "../components/devices-content";
 
 export default function SupplierDevicesPage() {
-  return <SupplierDevicesGlobalListClient />
+  return (
+    <AppShell>
+      <DevicesContent />
+    </AppShell>
+  )
 }

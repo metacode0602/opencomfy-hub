@@ -15,6 +15,8 @@ import type {
   GPUCardType,
   DataCenterDevice,
   SupplierBill,
+  SupplierPricingRecord,
+  SupplierPricingHistory,
 } from './types'
 
 // 模拟租户数据
@@ -941,14 +943,14 @@ export function getContractsByTenantId(tenantId: string): Contract[] {
 
 // GPU卡型数据
 export const mockGPUCardTypes: GPUCardType[] = [
-  { id: 'card1', name: 'NVIDIA A100 80GB', manufacturer: 'NVIDIA', memoryGB: 80, tdpWatts: 400, computeCapability: '8.0' },
-  { id: 'card2', name: 'NVIDIA A100 40GB', manufacturer: 'NVIDIA', memoryGB: 40, tdpWatts: 400, computeCapability: '8.0' },
-  { id: 'card3', name: 'NVIDIA V100 32GB', manufacturer: 'NVIDIA', memoryGB: 32, tdpWatts: 300, computeCapability: '7.0' },
-  { id: 'card4', name: 'NVIDIA A10', manufacturer: 'NVIDIA', memoryGB: 24, tdpWatts: 150, computeCapability: '8.6' },
-  { id: 'card5', name: 'NVIDIA H100 80GB', manufacturer: 'NVIDIA', memoryGB: 80, tdpWatts: 700, computeCapability: '9.0' },
-  { id: 'card6', name: 'NVIDIA L40', manufacturer: 'NVIDIA', memoryGB: 48, tdpWatts: 300, computeCapability: '8.9' },
-  { id: 'card7', name: '华为昇腾 910B', manufacturer: 'Huawei', memoryGB: 64, tdpWatts: 400 },
-  { id: 'card8', name: 'AMD MI250X', manufacturer: 'AMD', memoryGB: 128, tdpWatts: 500 },
+  { id: 'card1', name: 'NVIDIA A100 80GB', manufacturer: 'NVIDIA', memoryGB: 80, tdpWatts: 400, computeCapability: '8.0', status: 'active' },
+  { id: 'card2', name: 'NVIDIA A100 40GB', manufacturer: 'NVIDIA', memoryGB: 40, tdpWatts: 400, computeCapability: '8.0', status: 'active' },
+  { id: 'card3', name: 'NVIDIA V100 32GB', manufacturer: 'NVIDIA', memoryGB: 32, tdpWatts: 300, computeCapability: '7.0', status: 'active' },
+  { id: 'card4', name: 'NVIDIA A10', manufacturer: 'NVIDIA', memoryGB: 24, tdpWatts: 150, computeCapability: '8.6', status: 'active' },
+  { id: 'card5', name: 'NVIDIA H100 80GB', manufacturer: 'NVIDIA', memoryGB: 80, tdpWatts: 700, computeCapability: '9.0', status: 'active' },
+  { id: 'card6', name: 'NVIDIA L40', manufacturer: 'NVIDIA', memoryGB: 48, tdpWatts: 300, computeCapability: '8.9', status: 'active' },
+  { id: 'card7', name: '华为昇腾 910B', manufacturer: 'Huawei', memoryGB: 64, tdpWatts: 400, status: 'active' },
+  { id: 'card8', name: 'AMD MI250X', manufacturer: 'AMD', memoryGB: 128, tdpWatts: 500, status: 'active' },
 ]
 
 // 供应商数据
@@ -1055,11 +1057,16 @@ export const mockSupplierContracts: SupplierContract[] = [
     type: 'cooperation',
     status: 'active',
     cooperationMode: 'card_time',
+    pricingMode: 'card_time',
+    unitPricePerHour: 42,
+    minCommitHours: 5000,
+    settlementCycle: 'monthly',
     startDate: '2023-07-01',
     endDate: '2025-06-30',
-    terms: '卡时模式合作，按实际使用卡时结算，月度对账',
+    terms: '卡时模式合作，按实际使用卡时结算，月度对账；基准单价以合同约定为准，机房差异见卡型单价配置。',
     signedAt: '2023-06-28',
     signerName: '王建国',
+    contractFileUrl: 'https://example.com/contracts/sup-2023-001.pdf',
     createdAt: '2023-06-15',
   },
   {
@@ -1070,12 +1077,15 @@ export const mockSupplierContracts: SupplierContract[] = [
     type: 'cooperation',
     status: 'active',
     cooperationMode: 'revenue_share',
+    pricingMode: 'revenue_share',
     revenueShareRatio: 35,
+    settlementCycle: 'monthly',
     startDate: '2023-09-01',
     endDate: '2025-08-31',
-    terms: '分成模式合作，按租户实际消费的35%进行分成结算',
+    terms: '分成模式合作，按租户实际消费的 35% 向供应商结算；不含网络与管控节点配套费用。',
     signedAt: '2023-08-25',
     signerName: '陈志远',
+    contractFileUrl: 'https://example.com/contracts/sup-2023-002.pdf',
     createdAt: '2023-08-20',
   },
   {
@@ -1086,11 +1096,20 @@ export const mockSupplierContracts: SupplierContract[] = [
     type: 'cooperation',
     status: 'active',
     cooperationMode: 'card_time',
+    pricingMode: 'tiered_card_time',
+    minCommitHours: 3000,
+    settlementCycle: 'monthly',
+    pricingTiers: [
+      { tierOrder: 1, thresholdFromHours: 0, thresholdToHours: 8000, unitPricePerHour: 46 },
+      { tierOrder: 2, thresholdFromHours: 8000, thresholdToHours: 20000, unitPricePerHour: 42 },
+      { tierOrder: 3, thresholdFromHours: 20000, thresholdToHours: null, unitPricePerHour: 38 },
+    ],
     startDate: '2023-11-01',
     endDate: '2025-10-31',
-    terms: '卡时模式合作，含网络和管控节点费用',
+    terms: '阶梯卡时计价：按自然月累计 GPU 卡时分档结算，用量越大单价越低；含网络和管控节点费用包干说明见附件。',
     signedAt: '2023-10-25',
     signerName: '林志强',
+    contractFileUrl: 'https://example.com/contracts/sup-2023-003.pdf',
     createdAt: '2023-10-10',
   },
   {
@@ -1101,11 +1120,70 @@ export const mockSupplierContracts: SupplierContract[] = [
     type: 'cooperation',
     status: 'pending',
     cooperationMode: 'revenue_share',
+    pricingMode: 'revenue_share',
     revenueShareRatio: 40,
     startDate: '2024-05-01',
     endDate: '2026-04-30',
-    terms: '分成模式合作，按租户实际消费的40%进行分成结算',
+    terms: '分成模式合作，按租户实际消费的 40% 进行分成结算，待双方完成用印后生效。',
     createdAt: '2024-03-01',
+  },
+  {
+    id: 'sc5',
+    contractNo: 'SUP-2024-002',
+    supplierId: 'sup2',
+    supplierName: '上海数算云科技股份有限公司',
+    type: 'supplement',
+    status: 'active',
+    cooperationMode: 'revenue_share',
+    pricingMode: 'tiered_revenue_share',
+    settlementCycle: 'quarterly',
+    pricingTiers: [
+      { tierOrder: 1, thresholdFromHours: 0, thresholdToHours: 5000, revenueSharePercent: 32 },
+      { tierOrder: 2, thresholdFromHours: 5000, thresholdToHours: 15000, revenueSharePercent: 35 },
+      { tierOrder: 3, thresholdFromHours: 15000, thresholdToHours: null, revenueSharePercent: 38 },
+    ],
+    startDate: '2024-01-01',
+    endDate: '2025-12-31',
+    terms: '补充协议：将原固定 35% 分成调整为按季度累计租户消费卡时分档分成，高档位激励增量合作。',
+    signedAt: '2023-12-20',
+    signerName: '陈志远',
+    contractFileUrl: 'https://example.com/contracts/sup-2024-002.pdf',
+    createdAt: '2023-12-01',
+  },
+  {
+    id: 'sc6',
+    contractNo: 'SUP-2024-003',
+    supplierId: 'sup1',
+    supplierName: '北京云智算力科技有限公司',
+    type: 'renewal',
+    status: 'draft',
+    cooperationMode: 'card_time',
+    pricingMode: 'tiered_card_time',
+    pricingTiers: [
+      { tierOrder: 1, thresholdFromHours: 0, thresholdToHours: 10000, unitPricePerHour: 44 },
+      { tierOrder: 2, thresholdFromHours: 10000, thresholdToHours: null, unitPricePerHour: 40 },
+    ],
+    startDate: '2025-07-01',
+    endDate: '2027-06-30',
+    terms: '续签草案：主合同到期后续签，拟采用两档阶梯卡时价；商务条款待评审。',
+    createdAt: '2024-04-15',
+  },
+  {
+    id: 'sc7',
+    contractNo: 'SUP-2023-004',
+    supplierId: 'sup5',
+    supplierName: '杭州数智港科技有限公司',
+    type: 'cooperation',
+    status: 'expired',
+    cooperationMode: 'card_time',
+    pricingMode: 'card_time',
+    unitPricePerHour: 36,
+    startDate: '2022-01-01',
+    endDate: '2023-12-31',
+    terms: '已到期卡时合同，固定单价 36 元/卡时。',
+    signedAt: '2021-12-15',
+    signerName: '赵敏',
+    createdAt: '2021-12-01',
   },
 ]
 
@@ -1384,10 +1462,148 @@ export function getDevicesBySupplierId(supplierId: string): DataCenterDevice[] {
   return mockDataCenterDevices.filter(d => d.supplierId === supplierId)
 }
 
+export function getDeviceById(deviceId: string): DataCenterDevice | undefined {
+  return mockDataCenterDevices.find(d => d.id === deviceId)
+}
+
 export function getSupplierContractsBySupplierId(supplierId: string): SupplierContract[] {
   return mockSupplierContracts.filter(c => c.supplierId === supplierId)
 }
 
+export function getSupplierContractById(id: string): SupplierContract | undefined {
+  return mockSupplierContracts.find((c) => c.id === id)
+}
+
 export function getSupplierBillsBySupplierId(supplierId: string): SupplierBill[] {
   return mockSupplierBills.filter(b => b.supplierId === supplierId)
+}
+
+function buildSupplierPricingRecords(): SupplierPricingRecord[] {
+  const seen = new Set<string>()
+  const records: SupplierPricingRecord[] = []
+  let seq = 1
+
+  for (const device of mockDataCenterDevices) {
+    const key = `${device.supplierId}:${device.dataCenterId}:${device.cardTypeId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const supplier = mockSuppliers.find((s) => s.id === device.supplierId)
+    if (!supplier) continue
+
+    const isCardTime = supplier.cooperationMode === 'card_time'
+    records.push({
+      id: `spr${seq++}`,
+      supplierId: device.supplierId,
+      supplierName: supplier.name,
+      dataCenterId: device.dataCenterId,
+      dataCenterName: device.dataCenterName,
+      cardTypeId: device.cardTypeId,
+      cardTypeName: device.cardTypeName,
+      cooperationMode: supplier.cooperationMode,
+      pricingMode: isCardTime ? 'card_time' : 'revenue_share',
+      unitPricePerHour: isCardTime ? device.cardTimeCostPerHour : undefined,
+      revenueSharePercent: !isCardTime ? supplier.revenueShareRatio : undefined,
+      effectiveFrom: '2024-01-01',
+      updatedAt: '2024-04-01T10:00:00.000Z',
+      updatedBy: '李明',
+    })
+  }
+
+  return records
+}
+
+export const mockSupplierPricingRecords: SupplierPricingRecord[] = buildSupplierPricingRecords()
+
+export const mockSupplierPricingHistory: SupplierPricingHistory[] = [
+  {
+    id: 'sph1',
+    pricingRecordId: 'spr1',
+    supplierId: 'sup1',
+    supplierName: '北京云智算力科技有限公司',
+    dataCenterId: 'dc1',
+    dataCenterName: '北京亦庄数据中心',
+    cardTypeId: 'card1',
+    cardTypeName: 'NVIDIA A100 80GB',
+    cooperationMode: 'card_time',
+    previousUnitPricePerHour: 48,
+    newUnitPricePerHour: 45,
+    changedAt: '2024-04-01T10:00:00.000Z',
+    changedBy: '李明',
+    reason: '季度商务调价，对齐市场均价',
+  },
+  {
+    id: 'sph2',
+    pricingRecordId: 'spr1',
+    supplierId: 'sup1',
+    supplierName: '北京云智算力科技有限公司',
+    dataCenterId: 'dc1',
+    dataCenterName: '北京亦庄数据中心',
+    cardTypeId: 'card1',
+    cardTypeName: 'NVIDIA A100 80GB',
+    cooperationMode: 'card_time',
+    previousUnitPricePerHour: 50,
+    newUnitPricePerHour: 48,
+    changedAt: '2024-01-15T09:30:00.000Z',
+    changedBy: '张华',
+    reason: '合同续签后首次调价',
+  },
+  {
+    id: 'sph3',
+    pricingRecordId: 'spr4',
+    supplierId: 'sup1',
+    supplierName: '北京云智算力科技有限公司',
+    dataCenterId: 'dc2',
+    dataCenterName: '北京怀来数据中心',
+    cardTypeId: 'card1',
+    cardTypeName: 'NVIDIA A100 80GB',
+    cooperationMode: 'card_time',
+    previousUnitPricePerHour: 44,
+    newUnitPricePerHour: 42,
+    changedAt: '2024-03-20T14:00:00.000Z',
+    changedBy: '李明',
+    reason: '怀来机房批量采购后单价下调',
+  },
+  {
+    id: 'sph4',
+    pricingRecordId: 'spr8',
+    supplierId: 'sup2',
+    supplierName: '上海数算云科技股份有限公司',
+    dataCenterId: 'dc4',
+    dataCenterName: '上海嘉定数据中心',
+    cardTypeId: 'card1',
+    cardTypeName: 'NVIDIA A100 80GB',
+    cooperationMode: 'revenue_share',
+    previousRevenueSharePercent: 32,
+    newRevenueSharePercent: 35,
+    changedAt: '2024-02-01T11:00:00.000Z',
+    changedBy: '张华',
+    reason: '补充协议调整分成比例',
+  },
+  {
+    id: 'sph5',
+    pricingRecordId: 'spr14',
+    supplierId: 'sup3',
+    supplierName: '深圳智云数据中心运营有限公司',
+    dataCenterId: 'dc6',
+    dataCenterName: '深圳坪山数据中心',
+    cardTypeId: 'card5',
+    cardTypeName: 'NVIDIA H100 80GB',
+    cooperationMode: 'card_time',
+    previousUnitPricePerHour: 92,
+    newUnitPricePerHour: 88,
+    changedAt: '2024-03-10T16:20:00.000Z',
+    changedBy: '李明',
+    reason: 'H100 产能扩充后让利',
+  },
+]
+
+export function getPricingHistoryByRecordId(pricingRecordId: string): SupplierPricingHistory[] {
+  return mockSupplierPricingHistory
+    .filter((h) => h.pricingRecordId === pricingRecordId)
+    .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
+}
+
+export function getPricingRecordById(id: string): SupplierPricingRecord | undefined {
+  return mockSupplierPricingRecords.find((r) => r.id === id)
 }

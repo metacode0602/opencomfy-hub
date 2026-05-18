@@ -52,7 +52,7 @@ const data = {
   navSupply: [
     {
       title: "供应商",
-      url: "/supplier",
+      url: "/supplier/suppliers",
       icon: <Factory className="size-4" />,
     },
     {

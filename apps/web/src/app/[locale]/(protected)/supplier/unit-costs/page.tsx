@@ -1,5 +1,10 @@
-import { SupplierUnitCostsGlobalListClient } from "../_components/supplier-unit-costs-global-list-client"
+import { AppShell } from "@/components/dashboard/app-shell";
+import { UnitCostsContent } from "../components/unitcosts-content";
 
 export default function SupplierUnitCostsPage() {
-  return <SupplierUnitCostsGlobalListClient />
+  return (
+    <AppShell>
+      <UnitCostsContent />
+    </AppShell>
+  )
 }

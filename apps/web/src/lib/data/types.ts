@@ -223,6 +223,25 @@ export const statusColors: Record<string, string> = {
 // 供应商相关类型
 export type CooperationMode = 'card_time' | 'revenue_share'
 
+/** 合同约定计价方式 */
+export type ContractPricingMode =
+  | 'card_time'
+  | 'revenue_share'
+  | 'tiered_card_time'
+  | 'tiered_revenue_share'
+
+export interface ContractPricingTier {
+  tierOrder: number
+  /** 阶梯起始累计卡时（含） */
+  thresholdFromHours: number
+  /** 阶梯结束累计卡时（不含），空表示无上限 */
+  thresholdToHours?: number | null
+  /** 卡时 / 阶梯卡时：元/小时 */
+  unitPricePerHour?: number
+  /** 分成 / 阶梯分成：供应商分成 % */
+  revenueSharePercent?: number
+}
+
 export interface Supplier {
   id: string
   name: string
@@ -250,13 +269,23 @@ export interface SupplierContract {
   supplierName: string
   type: 'cooperation' | 'supplement' | 'renewal'
   status: 'draft' | 'pending' | 'active' | 'expired' | 'terminated'
+  /** @deprecated 请优先使用 pricingMode；保留以兼容旧展示 */
   cooperationMode: CooperationMode
+  pricingMode: ContractPricingMode
+  /** 固定卡时价（元/小时） */
+  unitPricePerHour?: number
+  /** 固定分成比例 % */
   revenueShareRatio?: number
+  /** 阶梯卡时 / 阶梯分成档位 */
+  pricingTiers?: ContractPricingTier[]
+  minCommitHours?: number
+  settlementCycle?: 'monthly' | 'quarterly'
   startDate: string
   endDate: string
   terms: string
   signedAt?: string
   signerName?: string
+  contractFileUrl?: string
   createdAt: string
 }
 
@@ -276,13 +305,20 @@ export interface DataCenter {
   createdAt: string
 }
 
+export type GPUCardTypeManufacturer = 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'Other'
+
+export type GPUCardTypeStatus = 'active' | 'disabled'
+
 export interface GPUCardType {
   id: string
   name: string
-  manufacturer: 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'Other'
+  manufacturer: GPUCardTypeManufacturer
   memoryGB: number
   tdpWatts: number
   computeCapability?: string
+  status: GPUCardTypeStatus
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface DataCenterDevice {
@@ -299,6 +335,13 @@ export interface DataCenterDevice {
   // 分成模式成本
   revenueShareCostPerHour?: number
   status: 'online' | 'offline' | 'maintenance'
+  /** 是否划入内部测试池 */
+  isInternalTest?: boolean
+  /** 内部测试占用范围，如 GPU0-GPU3 */
+  internalTestScope?: string
+  /** 内部测试计划结束时间 */
+  internalTestUntil?: string | null
+  updatedAt?: string
 }
 
 export interface SupplierBill {
@@ -329,10 +372,59 @@ export interface SupplierBillDetail {
   tenantConsumption?: number // 租户实际消费（分成模式使用）
 }
 
+/** 供应商 × 机房 × 卡型 当前生效单价/分成配置 */
+export interface SupplierPricingRecord {
+  id: string
+  supplierId: string
+  supplierName: string
+  dataCenterId: string
+  dataCenterName: string
+  cardTypeId: string
+  cardTypeName: string
+  cooperationMode: CooperationMode
+  /** 固定卡时 / 阶梯卡时 / 固定分成 / 阶梯分成 */
+  pricingMode?: ContractPricingMode
+  /** 卡时模式：元/卡时（固定卡时） */
+  unitPricePerHour?: number
+  /** 分成模式：供应商分成比例 %（固定分成） */
+  revenueSharePercent?: number
+  /** 阶梯卡时 / 阶梯分成档位 */
+  pricingTiers?: ContractPricingTier[]
+  effectiveFrom: string
+  updatedAt: string
+  updatedBy?: string
+}
+
+/** 单价/分成变更历史，用于追溯 */
+export interface SupplierPricingHistory {
+  id: string
+  pricingRecordId: string
+  supplierId: string
+  supplierName: string
+  dataCenterId: string
+  dataCenterName: string
+  cardTypeId: string
+  cardTypeName: string
+  cooperationMode: CooperationMode
+  previousUnitPricePerHour?: number
+  newUnitPricePerHour?: number
+  previousRevenueSharePercent?: number
+  newRevenueSharePercent?: number
+  changedAt: string
+  changedBy: string
+  reason?: string
+}
+
 // 合作模式中文名称映射
-export const cooperationModeNames: Record<CooperationMode, string> = {
-  card_time: '卡时模式',
-  revenue_share: '分成模式',
+export const contractPricingModeNames: Record<ContractPricingMode, string> = {
+  card_time: '固定卡时价',
+  revenue_share: '固定分成',
+  tiered_card_time: '阶梯卡时价',
+  tiered_revenue_share: '阶梯分成',
+}
+
+export function isSharePricingMode(mode: ContractPricingMode): boolean {
+  return mode === 'revenue_share' || mode === 'tiered_revenue_share'
 }
 
 // 卡型制造商名称映射
