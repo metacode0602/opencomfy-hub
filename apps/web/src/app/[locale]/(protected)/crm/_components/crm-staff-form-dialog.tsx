@@ -19,8 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
-import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
-import type { UserStaff } from "@/lib/types/crm"
+import { trpc } from "@/lib/trpc/client"
 import { toast } from "sonner"
 
 const STATUS_OPTIONS = [
@@ -121,22 +120,20 @@ export function validateCrmStaffForm(values: CrmStaffFormValues): string | null 
   return null
 }
 
-export function crmStaffFormToRow(id: string, values: CrmStaffFormValues): UserStaff {
-  const email = values.email.trim()
-  const employeeNo = values.employee_no.trim()
+export function staffInputFromForm(values: CrmStaffFormValues) {
   return {
-    id,
-    employee_no: employeeNo || null,
-    display_name: values.display_name.trim(),
+    displayName: values.display_name.trim(),
     mobile: values.mobile.trim(),
-    email: email || null,
+    email: values.email.trim() || null,
+    employeeNo: values.employee_no.trim() || null,
     status: values.status,
   }
 }
 
 export function useCrmStaffFormState(staffId?: string) {
-  const existing = useCrmMockStore((s) =>
-    staffId ? s.userStaff.find((x) => x.id === staffId) : undefined,
+  const { data: existing } = trpc.crm.staff.getById.useQuery(
+    { id: staffId! },
+    { enabled: Boolean(staffId) },
   )
 
   const [values, setValues] = React.useState<CrmStaffFormValues>(crmStaffEmptyValues)
@@ -174,8 +171,25 @@ export function CrmStaffFormDialog({
   onSaved?: (id: string) => void
 }) {
   const mode = staffId ? "edit" : "create"
-  const upsert = useCrmMockStore((s) => s.upsertUserStaff)
-  const createStaffId = useCrmMockStore((s) => s.createStaffId)
+  const utils = trpc.useUtils()
+  const createMutation = trpc.crm.staff.create.useMutation({
+    onSuccess: (row) => {
+      toast.success("员工已创建")
+      void utils.crm.staff.list.invalidate()
+      onOpenChange(false)
+      onSaved?.(row.id)
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const updateMutation = trpc.crm.staff.update.useMutation({
+    onSuccess: (row) => {
+      toast.success("员工已更新")
+      void utils.crm.staff.list.invalidate()
+      onOpenChange(false)
+      onSaved?.(row.id)
+    },
+    onError: (e) => toast.error(e.message),
+  })
   const { values, patch, existing } = useCrmStaffFormState(staffId)
 
   React.useEffect(() => {
@@ -194,11 +208,12 @@ export function CrmStaffFormDialog({
       toast.error("员工不存在")
       return
     }
-    const id = mode === "edit" && staffId ? staffId : createStaffId()
-    upsert(crmStaffFormToRow(id, values))
-    toast.success(mode === "create" ? "员工已创建" : "员工已更新")
-    onOpenChange(false)
-    onSaved?.(id)
+    const input = staffInputFromForm(values)
+    if (mode === "edit" && staffId) {
+      updateMutation.mutate({ id: staffId, data: input })
+    } else {
+      createMutation.mutate(input)
+    }
   }
 
   if (mode === "edit" && staffId && !existing && open) {

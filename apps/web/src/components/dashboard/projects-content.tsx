@@ -39,21 +39,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
-import { mockProjects } from '@/lib/data/mock-data'
 import type { Project } from '@/lib/data/types'
-import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
-import { mapStoreBusinessLines } from './project-form-utils'
 
 export function ProjectsContent() {
-  const storeBusinessLines = useCrmMockStore((s) => s.businessLines)
-  const businessLines = useMemo(
-    () => mapStoreBusinessLines(storeBusinessLines),
-    [storeBusinessLines],
-  )
-
-  const [projects, setProjects] = useState<Project[]>(mockProjects)
+  const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -61,31 +53,23 @@ export function ProjectsContent() {
   const [editOpen, setEditOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
 
-  const filteredProjects = projects.filter((project) => {
-    const matchesSearch =
-      project.name.toLowerCase().includes(search.toLowerCase()) ||
-      project.customerName.toLowerCase().includes(search.toLowerCase()) ||
-      project.accountManager.toLowerCase().includes(search.toLowerCase())
-    const matchesStage = stageFilter === 'all' || project.stage === stageFilter
-    const matchesStatus = statusFilter === 'all' || project.status === statusFilter
-    return matchesSearch && matchesStage && matchesStatus
+  const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
+    search: search || undefined,
+    stage: stageFilter,
+    status: statusFilter,
   })
 
-  const leadCount = projects.filter((p) => p.stage === 'lead').length
-  const testingCount = projects.filter((p) => p.stage === 'testing').length
-  const convertedCount = projects.filter((p) => p.stage === 'converted').length
+  const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
+
+  const filteredProjects = projects
+
+  const leadCount = stageCounts?.lead ?? 0
+  const testingCount = stageCounts?.testing ?? 0
+  const convertedCount = stageCounts?.converted ?? 0
 
   const openEdit = (project: Project) => {
     setEditingProject(project)
     setEditOpen(true)
-  }
-
-  const handleCreated = (project: Project) => {
-    setProjects((prev) => [project, ...prev])
-  }
-
-  const handleUpdated = (project: Project) => {
-    setProjects((prev) => prev.map((p) => (p.id === project.id ? project : p)))
   }
 
   return (
@@ -105,7 +89,7 @@ export function ProjectsContent() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         businessLines={businessLines}
-        onCreated={handleCreated}
+        onCreated={() => void refetch()}
       />
 
       <EditProjectDialog
@@ -113,7 +97,7 @@ export function ProjectsContent() {
         onOpenChange={setEditOpen}
         project={editingProject}
         businessLines={businessLines}
-        onUpdated={handleUpdated}
+        onUpdated={() => void refetch()}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

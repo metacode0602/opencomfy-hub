@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { MoreHorizontal, Pause, Play, Plus } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -14,8 +13,8 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { StatusBadge } from '@/components/dashboard/status-badge'
-import { getTasksByProjectId } from '@/lib/data/mock-data'
-import type { Project, Task } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 import { productLineNames } from '@/lib/data/types'
 
 interface ProjectTasksPanelProps {
@@ -23,7 +22,9 @@ interface ProjectTasksPanelProps {
 }
 
 export function ProjectTasksPanel({ project }: ProjectTasksPanelProps) {
-  const [tasks] = useState<Task[]>(() => getTasksByProjectId(project.id))
+  const { data: tasks = [] } = trpc.crm.projects.listTasks.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

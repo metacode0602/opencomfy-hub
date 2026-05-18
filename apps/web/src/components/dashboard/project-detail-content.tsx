@@ -44,7 +44,7 @@ import {
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
 import type { Project } from '@/lib/data/types'
-import { getActivitiesByProjectId, getTasksByProjectId } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
 import {
   AreaChart,
@@ -68,8 +68,6 @@ import { ProjectCouponsPanel } from '@/components/dashboard/project-coupons-pane
 import { ProjectRechargesPanel } from '@/components/dashboard/project-recharges-panel'
 import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
 import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
-import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
-import { mapStoreBusinessLines } from '@/components/dashboard/project-form-utils'
 
 interface ProjectDetailContentProps {
   project: Project
@@ -81,14 +79,20 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
 
-  const storeBusinessLines = useCrmMockStore((s) => s.businessLines)
-  const businessLines = useMemo(
-    () => mapStoreBusinessLines(storeBusinessLines),
-    [storeBusinessLines],
-  )
-
-  const activities = getActivitiesByProjectId(project.id)
-  const tasks = getTasksByProjectId(project.id)
+  const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
+  const { data: activities = [] } = trpc.crm.projects.listActivities.useQuery({
+    projectId: project.id,
+  })
+  const { data: tasks = [] } = trpc.crm.projects.listTasks.useQuery({
+    projectId: project.id,
+  })
+  const utils = trpc.useUtils()
+  const updateStageMutation = trpc.crm.projects.updateStage.useMutation({
+    onSuccess: (updated) => {
+      setProject(updated)
+      void utils.crm.projects.getById.invalidate({ id: project.id })
+    },
+  })
   const currentStageIndex = stageSteps.findIndex((s) => s.key === project.stage)
 
   return (
@@ -225,7 +229,10 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         onOpenChange={setEditOpen}
         project={project}
         businessLines={businessLines}
-        onUpdated={setProject}
+        onUpdated={async () => {
+          const updated = await utils.crm.projects.getById.fetch({ id: project.id })
+          if (updated) setProject(updated)
+        }}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

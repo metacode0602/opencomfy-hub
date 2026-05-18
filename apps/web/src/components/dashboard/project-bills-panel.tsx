@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Download, Receipt } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -14,15 +13,17 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { StatusBadge } from '@/components/dashboard/status-badge'
-import { getBillsByProjectId } from '@/lib/data/mock-data'
-import type { Bill, Project } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 
 interface ProjectBillsPanelProps {
   project: Project
 }
 
 export function ProjectBillsPanel({ project }: ProjectBillsPanelProps) {
-  const [bills] = useState<Bill[]>(() => getBillsByProjectId(project.id))
+  const { data: bills = [] } = trpc.crm.projects.listBills.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

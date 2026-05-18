@@ -13,8 +13,8 @@ import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { Textarea } from '@workspace/ui/components/textarea'
 import { Avatar, AvatarFallback } from '@workspace/ui/components/avatar'
-import { getActivitiesByProjectId } from '@/lib/data/mock-data'
-import type { Activity, Project } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 import { getRoleLabel } from '@/components/dashboard/project-detail-constants'
 import { getActivityIcon } from '@/components/dashboard/project-detail-utils'
 
@@ -24,7 +24,9 @@ interface ProjectTimelinePanelProps {
 
 export function ProjectTimelinePanel({ project }: ProjectTimelinePanelProps) {
   const [comment, setComment] = useState('')
-  const [activities] = useState<Activity[]>(() => getActivitiesByProjectId(project.id))
+  const { data: activities = [] } = trpc.crm.projects.listActivities.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

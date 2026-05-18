@@ -1,6 +1,5 @@
 'use client'
 
-import { useMemo } from 'react'
 import { Input } from '@workspace/ui/components/input'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
@@ -12,11 +11,7 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import type { BusinessLine, PlatformTenant } from '@/lib/data/types'
-import {
-  getPlatformTenantsByCustomerId,
-  mockCustomers,
-  mockSalesManagers,
-} from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 
 export type ProjectFormValues = {
   customerId: string
@@ -61,10 +56,12 @@ export function ProjectFormFields({
   businessLines,
   idPrefix = 'project',
 }: ProjectFormFieldsProps) {
-  const customerTenants = useMemo(
-    () => (values.customerId ? getPlatformTenantsByCustomerId(values.customerId) : []),
-    [values.customerId],
+  const { data: customers = [] } = trpc.crm.customers.list.useQuery({})
+  const { data: customerTenants = [] } = trpc.crm.customers.listTenants.useQuery(
+    { customerId: values.customerId },
+    { enabled: Boolean(values.customerId) },
   )
+  const { data: staff = [] } = trpc.crm.staff.listActive.useQuery()
 
   const handleCustomerChange = (customerId: string) => {
     onChange({
@@ -84,7 +81,7 @@ export function ProjectFormFields({
             <SelectValue placeholder="请选择客户" />
           </SelectTrigger>
           <SelectContent>
-            {mockCustomers.map((c) => (
+            {customers.map((c) => (
               <SelectItem key={c.id} value={c.id}>
                 {c.name}
                 <span className="text-muted-foreground ml-2">
@@ -114,7 +111,7 @@ export function ProjectFormFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={NONE_TENANT}>不指定（使用客户默认账户）</SelectItem>
-            {customerTenants.map((t) => (
+            {customerTenants.map((t: PlatformTenant) => (
               <SelectItem key={t.id} value={t.id}>
                 {tenantLabel(t)}
               </SelectItem>
@@ -196,9 +193,9 @@ export function ProjectFormFields({
               <SelectValue placeholder="请选择" />
             </SelectTrigger>
             <SelectContent>
-              {mockSalesManagers.map((m) => (
+              {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
-                  {m.name}
+                  {m.display_name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -214,9 +211,9 @@ export function ProjectFormFields({
               <SelectValue placeholder="请选择" />
             </SelectTrigger>
             <SelectContent>
-              {mockSalesManagers.map((m) => (
+              {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
-                  {m.name}
+                  {m.display_name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -235,9 +232,9 @@ export function ProjectFormFields({
               <SelectValue placeholder="请选择" />
             </SelectTrigger>
             <SelectContent>
-              {mockSalesManagers.map((m) => (
+              {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
-                  {m.name}
+                  {m.display_name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -253,9 +250,9 @@ export function ProjectFormFields({
               <SelectValue placeholder="请选择" />
             </SelectTrigger>
             <SelectContent>
-              {mockSalesManagers.map((m) => (
+              {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
-                  {m.name}
+                  {m.display_name}
                 </SelectItem>
               ))}
             </SelectContent>

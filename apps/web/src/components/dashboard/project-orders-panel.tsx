@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Badge } from '@workspace/ui/components/badge'
 import { Button } from '@workspace/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
@@ -13,8 +12,8 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { StatusBadge } from '@/components/dashboard/status-badge'
-import { getOrdersByProjectId } from '@/lib/data/mock-data'
-import type { Order, Project } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 import { productLineNames } from '@/lib/data/types'
 
 interface ProjectOrdersPanelProps {
@@ -22,7 +21,9 @@ interface ProjectOrdersPanelProps {
 }
 
 export function ProjectOrdersPanel({ project }: ProjectOrdersPanelProps) {
-  const [orders] = useState<Order[]>(() => getOrdersByProjectId(project.id))
+  const { data: orders = [] } = trpc.crm.projects.listOrders.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

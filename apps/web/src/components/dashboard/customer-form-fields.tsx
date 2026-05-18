@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { emptyExpectedScale, type CustomerExpectedScale } from '@/lib/data/types'
-import { mockSalesManagers } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import { CustomerExpectedScaleFields } from './customer-expected-scale-fields'
 
 export type CustomerFormValues = {
@@ -58,6 +58,8 @@ export function CustomerFormFields({
   onChange,
   idPrefix = 'customer',
 }: CustomerFormFieldsProps) {
+  const { data: staff = [] } = trpc.crm.staff.listActive.useQuery()
+
   return (
     <div className="grid gap-4 py-2">
       <div className="grid grid-cols-2 gap-4">
@@ -168,9 +170,9 @@ export function CustomerFormFields({
             <SelectValue placeholder="请选择销售经理" />
           </SelectTrigger>
           <SelectContent>
-            {mockSalesManagers.map((m) => (
+            {staff.map((m) => (
               <SelectItem key={m.id} value={m.id}>
-                {m.name}
+                {m.display_name}
               </SelectItem>
             ))}
           </SelectContent>

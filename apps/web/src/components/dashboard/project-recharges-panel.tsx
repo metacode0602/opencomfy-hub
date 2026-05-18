@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import {
   Table,
@@ -11,7 +10,7 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { StatusBadge } from '@/components/dashboard/status-badge'
-import { mockRecharges } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import type { Project, Recharge } from '@/lib/data/types'
 
 interface ProjectRechargesPanelProps {
@@ -34,7 +33,9 @@ function paymentMethodLabel(method: Recharge['paymentMethod']) {
 }
 
 export function ProjectRechargesPanel({ project }: ProjectRechargesPanelProps) {
-  const [recharges] = useState<Recharge[]>(() => mockRecharges)
+  const { data: recharges = [] } = trpc.crm.projects.listRecharges.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

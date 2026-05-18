@@ -13,17 +13,18 @@ import {
 import type { BusinessLine, Project } from '@/lib/data/types'
 import { ProjectFormFields } from './project-form-fields'
 import {
-  formValuesToProject,
+  formValuesToProjectInput,
   projectToFormValues,
   validateProjectForm,
 } from './project-form-utils'
+import { trpc } from '@/lib/trpc/client'
 
 export type EditProjectDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   project: Project | null
   businessLines: BusinessLine[]
-  onUpdated: (project: Project) => void
+  onUpdated: () => void
 }
 
 export function EditProjectDialog({
@@ -35,17 +36,25 @@ export function EditProjectDialog({
 }: EditProjectDialogProps) {
   const [values, setValues] = useState<ReturnType<typeof projectToFormValues> | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const { data: staff = [] } = trpc.crm.staff.listActive.useQuery()
+  const updateMutation = trpc.crm.projects.update.useMutation({
+    onSuccess: () => {
+      onUpdated()
+      onOpenChange(false)
+    },
+    onError: (e) => setSubmitError(e.message),
+  })
 
   useEffect(() => {
     if (open && project) {
-      setValues(projectToFormValues(project))
+      setValues(projectToFormValues(project, staff))
       setSubmitError(null)
     }
     if (!open) {
       setValues(null)
       setSubmitError(null)
     }
-  }, [open, project])
+  }, [open, project, staff])
 
   const handleChange = (patch: Partial<NonNullable<typeof values>>) => {
     setValues((prev) => (prev ? { ...prev, ...patch } : prev))
@@ -61,17 +70,13 @@ export function EditProjectDialog({
       return
     }
 
-    onUpdated(
-      formValuesToProject(values, {
-        id: project.id,
+    updateMutation.mutate({
+      id: project.id,
+      data: {
+        ...formValuesToProjectInput(values),
         status: project.status,
-        createdAt: project.createdAt,
-        totalConsumption: project.totalConsumption,
-        balance: project.balance,
-        endDate: project.endDate,
-      }, businessLines),
-    )
-    onOpenChange(false)
+      },
+    })
   }
 
   return (
@@ -99,8 +104,8 @@ export function EditProjectDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!values}>
-            保存修改
+          <Button onClick={handleSubmit} disabled={!values || updateMutation.isPending}>
+            {updateMutation.isPending ? '保存中…' : '保存修改'}
           </Button>
         </DialogFooter>
       </DialogContent>

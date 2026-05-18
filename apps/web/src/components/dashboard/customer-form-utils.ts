@@ -76,6 +76,26 @@ export function formValuesToCustomer(
   }
 }
 
+export function formValuesToCustomerInput(values: CustomerFormValues) {
+  const scale = values.expectedScale
+  const cards = scale.cards.filter((c) => c.cardTypeId && c.cardCount > 0)
+
+  return {
+    name: values.name.trim(),
+    type: values.type,
+    contactPerson: values.contactPerson.trim(),
+    contactPhone: values.contactPhone.trim(),
+    contactEmail: values.contactEmail.trim(),
+    industry: values.industry,
+    address: values.address.trim(),
+    certCode: values.certCode.trim() || undefined,
+    salesManagerId: values.salesManagerId || undefined,
+    expectedScale: isExpectedScaleEmpty({ ...scale, cards })
+      ? null
+      : { ...scale, cards },
+  }
+}
+
 export function validateCustomerForm(values: CustomerFormValues): string | null {
   if (!values.name.trim()) return '请填写客户名称'
   if (!values.contactPerson.trim()) return '请填写联系人'

@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import {
@@ -11,8 +10,8 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { mockConsumptions } from '@/lib/data/mock-data'
-import type { Consumption, Project } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 import { productLineNames } from '@/lib/data/types'
 
 interface ProjectConsumptionPanelProps {
@@ -20,9 +19,9 @@ interface ProjectConsumptionPanelProps {
 }
 
 export function ProjectConsumptionPanel({ project }: ProjectConsumptionPanelProps) {
-  const [consumptions] = useState<Consumption[]>(() =>
-    mockConsumptions.filter((c) => c.projectId === project.id),
-  )
+  const { data: consumptions = [] } = trpc.crm.projects.listConsumptions.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

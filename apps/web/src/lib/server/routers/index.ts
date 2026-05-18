@@ -5,6 +5,7 @@ import { dashboardRouter } from './web/dashboard'
 import { firstLoginRouter } from './web/first-login'
 import { invitationRouter } from './invitation'
 import { newslettersRouter } from './web/newsletters'
+import { crmRouter } from './crm'
 
 export * from './trpc'
 export type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
@@ -15,6 +16,7 @@ export const appRouter = router({
   firstLogin: firstLoginRouter,
   invitation: invitationRouter,
   newsletters: newslettersRouter,
+  crm: crmRouter,
   // Admin routes
   admin: router({
   }),

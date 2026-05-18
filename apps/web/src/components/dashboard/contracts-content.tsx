@@ -54,7 +54,7 @@ import {
   } from '@workspace/ui/components/dialog'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { mockContracts, mockProjects, mockCustomers } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 
 export function ContractsContent() {
   const [search, setSearch] = useState('')
@@ -62,7 +62,10 @@ export function ContractsContent() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
-  const filteredContracts = mockContracts.filter(contract => {
+  const { data: contracts = [] } = trpc.crm.contracts.list.useQuery()
+  const { data: projects = [] } = trpc.crm.projects.list.useQuery()
+
+  const filteredContracts = contracts.filter(contract => {
     const matchesSearch = contract.contractNo.toLowerCase().includes(search.toLowerCase()) ||
       contract.customerName.toLowerCase().includes(search.toLowerCase()) ||
       contract.projectName.toLowerCase().includes(search.toLowerCase())
@@ -71,10 +74,10 @@ export function ContractsContent() {
     return matchesSearch && matchesType && matchesStatus
   })
 
-  const totalAmount = mockContracts.reduce((acc, c) => acc + c.totalAmount, 0)
-  const paidAmount = mockContracts.reduce((acc, c) => acc + c.paidAmount, 0)
-  const activeCount = mockContracts.filter(c => c.status === 'active').length
-  const pendingCount = mockContracts.filter(c => c.status === 'pending').length
+  const totalAmount = contracts.reduce((acc, c) => acc + c.totalAmount, 0)
+  const paidAmount = contracts.reduce((acc, c) => acc + c.paidAmount, 0)
+  const activeCount = contracts.filter(c => c.status === 'active').length
+  const pendingCount = contracts.filter(c => c.status === 'pending').length
 
   return (
     <div className="space-y-6">
@@ -106,7 +109,7 @@ export function ContractsContent() {
                     <SelectValue placeholder="请选择项目" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockProjects.map(project => (
+                    {projects.map((project) => (
                       <SelectItem key={project.id} value={project.id}>
                         {project.name}
                         <span className="text-muted-foreground ml-2">

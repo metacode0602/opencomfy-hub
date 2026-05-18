@@ -20,12 +20,7 @@ import {
 } from '@workspace/ui/components/dialog'
 import { cn } from '@workspace/ui/lib/utils'
 import { LocaleLink } from '@/lib/i18n/navigation'
-import {
-  useActivityTypeName,
-  useStaffName,
-  useCustomerName,
-} from '@/lib/crm/crm-lookups'
-import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { trpc } from '@/lib/trpc/client'
 import type { AccountActivity } from '@/lib/types/crm'
 
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -80,18 +75,33 @@ function isSameDay(a: Date, b: Date) {
   )
 }
 
+type CalendarActivity = AccountActivity & { customerName?: string }
+
 function ActivityDetailDialog({
   activity,
+  activityTypes,
+  staff,
   open,
   onOpenChange,
 }: {
-  activity: AccountActivity | null
+  activity: CalendarActivity | null
+  activityTypes: { id: string; display_name: string }[]
+  staff: { id: string; display_name: string }[]
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const customerName = useCustomerName(activity?.customer_id)
-  const typeName = useActivityTypeName(activity?.activity_type_id)
-  const actor = useStaffName(activity?.actor_user_id)
+  const customerName =
+    activity?.customerName ??
+    activity?.customer_id ??
+    '—'
+  const typeName =
+    activityTypes.find((t) => t.id === activity?.activity_type_id)?.display_name ??
+    activity?.activity_type_id ??
+    '—'
+  const actor =
+    staff.find((s) => s.id === activity?.actor_user_id)?.display_name ??
+    activity?.actor_user_id ??
+    '—'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -150,8 +160,8 @@ function DayActivityItem({
   activity,
   onSelect,
 }: {
-  activity: AccountActivity
-  onSelect: (activity: AccountActivity) => void
+  activity: CalendarActivity
+  onSelect: (activity: CalendarActivity) => void
 }) {
   return (
     <button
@@ -172,10 +182,12 @@ function DayActivityItem({
 export function CalendarContent() {
   const today = useMemo(() => new Date(), [])
   const [viewMonth, setViewMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
-  const [selectedActivity, setSelectedActivity] = useState<AccountActivity | null>(null)
+  const [selectedActivity, setSelectedActivity] = useState<CalendarActivity | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  const activities = useCrmMockStore((s) => s.accountActivities)
+  const { data: activities = [] } = trpc.crm.calendar.listActivities.useQuery()
+  const { data: activityTypes = [] } = trpc.crm.calendar.listActivityTypes.useQuery()
+  const { data: staff = [] } = trpc.crm.staff.listActive.useQuery()
 
   const activitiesByDay = useMemo(() => {
     const map = new Map<string, AccountActivity[]>()
@@ -311,6 +323,8 @@ export function CalendarContent() {
 
       <ActivityDetailDialog
         activity={selectedActivity}
+        activityTypes={activityTypes}
+        staff={staff}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
       />

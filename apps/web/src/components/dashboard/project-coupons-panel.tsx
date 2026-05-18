@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { Ticket } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -14,17 +13,17 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { StatusBadge } from '@/components/dashboard/status-badge'
-import { mockCoupons } from '@/lib/data/mock-data'
-import type { Coupon, Project } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import type { Project } from '@/lib/data/types'
 
 interface ProjectCouponsPanelProps {
   project: Project
 }
 
 export function ProjectCouponsPanel({ project }: ProjectCouponsPanelProps) {
-  const [coupons] = useState<Coupon[]>(() =>
-    mockCoupons.filter((c) => c.projectId === project.id),
-  )
+  const { data: coupons = [] } = trpc.crm.projects.listCoupons.useQuery({
+    projectId: project.id,
+  })
 
   return (
     <Card>

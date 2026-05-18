@@ -18,8 +18,8 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
-import { useCustomerName } from "@/lib/crm/crm-lookups"
-import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
+import { trpc } from "@/lib/trpc/client"
+import { toast } from "sonner"
 import { CrmDeleteDialog } from "./crm-delete-dialog"
 import { CrmStaffFormDialog } from "./crm-staff-form-dialog"
 import { CrmStaffStatusBadge } from "./crm-staff-status-badge"
@@ -30,15 +30,6 @@ function Row({ label, value }: { label: string; value: string }) {
       <div className="text-muted-foreground mb-0.5 text-xs">{label}</div>
       <div className="text-sm break-all">{value}</div>
     </div>
-  )
-}
-
-function AssignmentCustomerCell({ customerId }: { customerId: string }) {
-  const name = useCustomerName(customerId)
-  return (
-    <Button variant="link" className="h-auto p-0 font-normal" asChild>
-      <LocaleLink href={`/crm/customers/${customerId}`}>{name}</LocaleLink>
-    </Button>
   )
 }
 
@@ -53,20 +44,24 @@ function formatDateTime(iso: string | null) {
 
 export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
   const router = useLocaleRouter()
-  const staff = useCrmMockStore((s) => s.userStaff.find((x) => x.id === staffId))
-  const allAssignments = useCrmMockStore((s) => s.accountManagerAssignments)
-  const removeUserStaff = useCrmMockStore((s) => s.removeUserStaff)
+  const utils = trpc.useUtils()
+  const { data: staff, isLoading } = trpc.crm.staff.getById.useQuery({ id: staffId })
+  const { data: assignments = [] } = trpc.crm.staff.listAssignments.useQuery({ staffId })
+  const deleteMutation = trpc.crm.staff.delete.useMutation({
+    onSuccess: () => {
+      toast.success("员工已删除")
+      void utils.crm.staff.list.invalidate()
+      router.push("/crm/staff")
+    },
+    onError: (e) => toast.error(e.message),
+  })
 
   const [editOpen, setEditOpen] = React.useState(false)
   const [delOpen, setDelOpen] = React.useState(false)
 
-  const sortedAssignments = React.useMemo(
-    () =>
-      allAssignments
-        .filter((a) => a.user_staff_id === staffId)
-        .sort((a, b) => b.effective_from.localeCompare(a.effective_from)),
-    [allAssignments, staffId],
-  )
+  if (isLoading) {
+    return <p className="text-muted-foreground p-6 text-sm">加载中…</p>
+  }
 
   if (!staff) {
     return (
@@ -111,7 +106,7 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
         <Card>
           <CardHeader>
             <CardTitle>基本信息</CardTitle>
-            <CardDescription>只读展示（mock）</CardDescription>
+            <CardDescription>内部员工主数据</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
             <Row label="主键" value={staff.id} />
@@ -134,7 +129,7 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {sortedAssignments.length === 0 ? (
+            {assignments.length === 0 ? (
               <p className="text-muted-foreground text-sm">暂无分配记录。</p>
             ) : (
               <div className="overflow-x-auto rounded-md border">
@@ -148,10 +143,14 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedAssignments.map((a) => (
+                    {assignments.map((a) => (
                       <TableRow key={a.id}>
                         <TableCell>
-                          <AssignmentCustomerCell customerId={a.customer_id} />
+                          <Button variant="link" className="h-auto p-0 font-normal" asChild>
+                            <LocaleLink href={`/crm/customers/${a.customer_id}`}>
+                              {a.customer_name || a.customer_id}
+                            </LocaleLink>
+                          </Button>
                         </TableCell>
                         <TableCell>{a.role_type}</TableCell>
                         <TableCell className="text-muted-foreground text-xs whitespace-nowrap">
@@ -170,21 +169,14 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
         </Card>
       </div>
 
-      <CrmStaffFormDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        staffId={staffId}
-      />
+      <CrmStaffFormDialog open={editOpen} onOpenChange={setEditOpen} staffId={staffId} />
 
       <CrmDeleteDialog
         open={delOpen}
         onOpenChange={setDelOpen}
         title="确认删除员工"
-        description={`确定删除「${label}」吗？将同时移除其客户经理分配记录（mock）。`}
-        onConfirm={() => {
-          removeUserStaff(staff.id)
-          router.push("/crm/staff")
-        }}
+        description={`确定删除「${label}」吗？将同时结束其客户经理分配记录。`}
+        onConfirm={() => deleteMutation.mutate({ id: staff.id })}
       />
     </div>
   )

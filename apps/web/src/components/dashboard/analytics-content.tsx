@@ -51,9 +51,12 @@ import {
   Line,
   Legend,
 } from 'recharts'
+import { trpc } from '@/lib/trpc/client'
 
-// 消费趋势数据
-const consumptionTrend = [
+const CHART_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
+
+// 消费趋势数据（多产品线 mock，总览 Tab 仍用日趋势 mock）
+const consumptionTrendMock = [
   { month: '1月', serverless: 45000, cloud_vm: 85000, job: 65000, bare_metal: 120000, storage: 25000 },
   { month: '2月', serverless: 52000, cloud_vm: 92000, job: 78000, bare_metal: 135000, storage: 28000 },
   { month: '3月', serverless: 68000, cloud_vm: 115000, job: 95000, bare_metal: 180000, storage: 32000 },
@@ -61,17 +64,13 @@ const consumptionTrend = [
   { month: '5月', serverless: 85000, cloud_vm: 145000, job: 125000, bare_metal: 250000, storage: 45000 },
 ]
 
-// 产品线分布数据
-const productLineData = [
-  { name: 'Serverless', value: 328000, color: '#6366f1', icon: Zap, change: 12.5 },
-  { name: '云主机', value: 565000, color: '#22c55e', icon: Cloud, change: 8.3 },
-  { name: 'Job 计算', value: 468000, color: '#f59e0b', icon: Cpu, change: 15.2 },
-  { name: '裸金属短租', value: 895000, color: '#ef4444', icon: Server, change: -3.5 },
-  { name: '线下订单', value: 85000, color: '#8b5cf6', icon: Package, change: 5.0 },
-  { name: '镜像仓库', value: 45000, color: '#06b6d4', icon: Layers, change: 22.1 },
-  { name: '共享存储卷', value: 125000, color: '#ec4899', icon: HardDrive, change: 18.7 },
-  { name: '对象存储加速', value: 78000, color: '#14b8a6', icon: Database, change: 25.3 },
-]
+const PRODUCT_LINE_ICONS: Record<string, typeof Zap> = {
+  serverless: Zap,
+  cloud_vm: Cloud,
+  job: Cpu,
+  bare_metal: Server,
+  storage: HardDrive,
+}
 
 // 客户消费排名
 const topTenants = [
@@ -102,8 +101,20 @@ const dailyConsumption = [
 
 export function AnalyticsContent() {
   const [period, setPeriod] = useState('month')
-  
-  const totalConsumption = productLineData.reduce((acc, p) => acc + p.value, 0)
+  const { data: summary } = trpc.crm.dashboard.summary.useQuery()
+  const { data: productLineRaw = [] } = trpc.crm.analytics.productLineBreakdown.useQuery()
+  const { data: monthlyTrend = [] } = trpc.crm.analytics.consumptionTrend.useQuery()
+
+  const productLineData = productLineRaw.map((p, i) => ({
+    name: p.name,
+    value: p.value,
+    color: CHART_COLORS[i % CHART_COLORS.length]!,
+    icon: PRODUCT_LINE_ICONS[p.name] ?? Zap,
+    change: 0,
+  }))
+
+  const totalConsumption =
+    productLineData.reduce((acc, p) => acc + p.value, 0) || summary?.totalConsumption || 0
 
   return (
     <div className="space-y-6">
@@ -168,7 +179,7 @@ export function AnalyticsContent() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">活跃客户</p>
-                <p className="text-2xl font-bold">5</p>
+                <p className="text-2xl font-bold">{summary?.customerCount ?? 0}</p>
               </div>
               <div className="flex items-center text-green-500 text-sm">
                 <TrendingUp className="w-4 h-4 mr-1" />
@@ -182,7 +193,7 @@ export function AnalyticsContent() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">活跃项目</p>
-                <p className="text-2xl font-bold">8</p>
+                <p className="text-2xl font-bold">{summary?.activeProjectCount ?? 0}</p>
               </div>
               <div className="flex items-center text-red-500 text-sm">
                 <TrendingDown className="w-4 h-4 mr-1" />
@@ -236,7 +247,7 @@ export function AnalyticsContent() {
                         borderRadius: '8px',
                       }}
                       labelStyle={{ color: '#fafafa' }}
-                      formatter={(value: number) => [`¥${value.toLocaleString()}`, '消费金额']}
+                      formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
                     />
                     <Area
                       type="monotone"
@@ -282,7 +293,7 @@ export function AnalyticsContent() {
                           border: '1px solid #27272a',
                           borderRadius: '8px',
                         }}
-                        formatter={(value: number) => [`¥${value.toLocaleString()}`, '消费金额']}
+                        formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -355,7 +366,7 @@ export function AnalyticsContent() {
             <CardContent>
               <div className="h-[350px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={consumptionTrend}>
+                  <LineChart data={monthlyTrend}>
                     <XAxis 
                       dataKey="month" 
                       axisLine={false}
@@ -375,14 +386,17 @@ export function AnalyticsContent() {
                         borderRadius: '8px',
                       }}
                       labelStyle={{ color: '#fafafa' }}
-                      formatter={(value: number) => [`¥${value.toLocaleString()}`, '']}
+                      formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费']}
                     />
                     <Legend />
-                    <Line type="monotone" dataKey="serverless" name="Serverless" stroke="#6366f1" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="cloud_vm" name="云主机" stroke="#22c55e" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="job" name="Job 计算" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="bare_metal" name="裸金属" stroke="#ef4444" strokeWidth={2} dot={false} />
-                    <Line type="monotone" dataKey="storage" name="存储服务" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                    <Line
+                      type="monotone"
+                      dataKey="consumption"
+                      name="总消费"
+                      stroke="#6366f1"
+                      strokeWidth={2}
+                      dot={false}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -490,7 +504,7 @@ export function AnalyticsContent() {
                       <TableCell>
                         <div className="flex items-center gap-2 min-w-[120px]">
                           <Progress 
-                            value={(tenant.consumption / topTenants[0].consumption) * 100} 
+                            value={(tenant.consumption / (topTenants[0]?.consumption ?? 1)) * 100} 
                             className="h-1.5 flex-1" 
                           />
                         </div>

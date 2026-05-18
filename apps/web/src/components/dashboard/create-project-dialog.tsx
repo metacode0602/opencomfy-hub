@@ -14,15 +14,16 @@ import type { BusinessLine, Project } from '@/lib/data/types'
 import { ProjectFormFields } from './project-form-fields'
 import {
   emptyProjectFormValues,
-  formValuesToProject,
+  formValuesToProjectInput,
   validateProjectForm,
 } from './project-form-utils'
+import { trpc } from '@/lib/trpc/client'
 
 export type CreateProjectDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   businessLines: BusinessLine[]
-  onCreated: (project: Project) => void
+  onCreated: () => void
 }
 
 export function CreateProjectDialog({
@@ -33,6 +34,13 @@ export function CreateProjectDialog({
 }: CreateProjectDialogProps) {
   const [values, setValues] = useState(emptyProjectFormValues)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const createMutation = trpc.crm.projects.create.useMutation({
+    onSuccess: () => {
+      onCreated()
+      onOpenChange(false)
+    },
+    onError: (e) => setSubmitError(e.message),
+  })
 
   useEffect(() => {
     if (!open) {
@@ -53,17 +61,7 @@ export function CreateProjectDialog({
       return
     }
 
-    const project = formValuesToProject(
-      values,
-      {
-        id: `p-${Date.now()}`,
-        totalConsumption: 0,
-        balance: 0,
-      },
-      businessLines,
-    )
-    onCreated(project)
-    onOpenChange(false)
+    createMutation.mutate(formValuesToProjectInput(values))
   }
 
   return (
@@ -87,7 +85,9 @@ export function CreateProjectDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit}>创建项目</Button>
+          <Button onClick={handleSubmit} disabled={createMutation.isPending}>
+            {createMutation.isPending ? '创建中…' : '创建项目'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -1,14 +1,10 @@
-import {
-  getBusinessLineById,
-  getStaffNameById,
-  mockCustomers,
-  mockSalesManagers,
-} from '@/lib/data/mock-data'
+import { getBusinessLineById } from '@/lib/data/mock-data'
+import type { UserStaff } from '@/lib/types/crm'
 import type { BusinessLine, Project } from '@/lib/data/types'
 import type { ProjectFormValues } from './project-form-fields'
 
-export function getStaffIdByName(name: string): string | undefined {
-  return mockSalesManagers.find((m) => m.name === name)?.id
+export function getStaffIdByName(name: string, staff: UserStaff[]): string | undefined {
+  return staff.find((m) => m.display_name === name)?.id
 }
 
 export const emptyProjectFormValues: ProjectFormValues = {
@@ -26,7 +22,7 @@ export const emptyProjectFormValues: ProjectFormValues = {
   startDate: '',
 }
 
-export function projectToFormValues(project: Project): ProjectFormValues {
+export function projectToFormValues(project: Project, staff: UserStaff[] = []): ProjectFormValues {
   return {
     customerId: project.customerId,
     primaryTenantId: project.primaryTenantId ?? '',
@@ -34,10 +30,10 @@ export function projectToFormValues(project: Project): ProjectFormValues {
     description: project.description,
     stage: project.stage,
     businessLineId: project.businessLineId,
-    preSalesStaffId: getStaffIdByName(project.preSalesManager) ?? '',
-    accountManagerStaffId: getStaffIdByName(project.accountManager) ?? '',
-    deliveryManagerStaffId: getStaffIdByName(project.deliveryManager) ?? '',
-    projectManagerStaffId: getStaffIdByName(project.projectManager) ?? '',
+    preSalesStaffId: getStaffIdByName(project.preSalesManager, staff) ?? '',
+    accountManagerStaffId: getStaffIdByName(project.accountManager, staff) ?? '',
+    deliveryManagerStaffId: getStaffIdByName(project.deliveryManager, staff) ?? '',
+    projectManagerStaffId: getStaffIdByName(project.projectManager, staff) ?? '',
     monthlyBudget: project.monthlyBudget > 0 ? String(project.monthlyBudget) : '',
     startDate: project.startDate,
   }
@@ -48,28 +44,25 @@ export function formValuesToProject(
   base: Pick<Project, 'id'> & Partial<Project>,
   businessLines: BusinessLine[],
 ): Project {
-  const customer = mockCustomers.find((c) => c.id === values.customerId)
   const line =
     businessLines.find((b) => b.id === values.businessLineId) ??
     getBusinessLineById(values.businessLineId)
-
-  const resolveName = (staffId: string) => getStaffNameById(staffId) ?? ''
 
   return {
     id: base.id,
     name: values.name.trim(),
     customerId: values.customerId,
-    customerName: customer?.name ?? base.customerName ?? '',
-    customerType: customer?.type ?? base.customerType ?? 'B',
+    customerName: base.customerName ?? '',
+    customerType: base.customerType ?? 'B',
     primaryTenantId: values.primaryTenantId || undefined,
     businessLineId: values.businessLineId,
     businessLineName: line?.name ?? base.businessLineName ?? '',
     stage: values.stage,
     status: base.status ?? 'active',
-    preSalesManager: resolveName(values.preSalesStaffId),
-    accountManager: resolveName(values.accountManagerStaffId),
-    deliveryManager: resolveName(values.deliveryManagerStaffId),
-    projectManager: resolveName(values.projectManagerStaffId),
+    preSalesManager: base.preSalesManager ?? '',
+    accountManager: base.accountManager ?? '',
+    deliveryManager: base.deliveryManager ?? '',
+    projectManager: base.projectManager ?? '',
     description: values.description.trim(),
     createdAt: base.createdAt ?? new Date().toISOString().slice(0, 10),
     startDate: values.startDate,
@@ -77,6 +70,25 @@ export function formValuesToProject(
     monthlyBudget: values.monthlyBudget ? Number(values.monthlyBudget) : 0,
     totalConsumption: base.totalConsumption ?? 0,
     balance: base.balance ?? 0,
+  }
+}
+
+export function formValuesToProjectInput(values: ProjectFormValues) {
+  return {
+    customerId: values.customerId,
+    primaryTenantId: values.primaryTenantId || undefined,
+    name: values.name.trim(),
+    description: values.description.trim(),
+    stage: values.stage,
+    businessLineId: values.businessLineId,
+    monthlyBudget: values.monthlyBudget ? Number(values.monthlyBudget) : undefined,
+    startDate: values.startDate,
+    staff: {
+      preSalesStaffId: values.preSalesStaffId,
+      accountManagerStaffId: values.accountManagerStaffId,
+      deliveryManagerStaffId: values.deliveryManagerStaffId,
+      projectManagerStaffId: values.projectManagerStaffId,
+    },
   }
 }
 

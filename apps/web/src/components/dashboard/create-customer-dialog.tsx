@@ -10,18 +10,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@workspace/ui/components/dialog'
-import type { Customer } from '@/lib/data/types'
 import {
   CustomerFormFields,
   emptyCustomerFormValues,
   type CustomerFormValues,
 } from './customer-form-fields'
-import { formValuesToCustomer, validateCustomerForm } from './customer-form-utils'
+import { formValuesToCustomerInput, validateCustomerForm } from './customer-form-utils'
+import { trpc } from '@/lib/trpc/client'
 
 export type CreateCustomerDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreated: (customer: Customer) => void
+  onCreated: () => void
 }
 
 export function CreateCustomerDialog({
@@ -31,6 +31,13 @@ export function CreateCustomerDialog({
 }: CreateCustomerDialogProps) {
   const [values, setValues] = useState<CustomerFormValues>(emptyCustomerFormValues)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const createMutation = trpc.crm.customers.create.useMutation({
+    onSuccess: () => {
+      onCreated()
+      onOpenChange(false)
+    },
+    onError: (e) => setSubmitError(e.message),
+  })
 
   useEffect(() => {
     if (!open) {
@@ -51,11 +58,7 @@ export function CreateCustomerDialog({
       return
     }
 
-    const customer = formValuesToCustomer(values, {
-      id: `t-${Date.now()}`,
-    })
-    onCreated(customer)
-    onOpenChange(false)
+    createMutation.mutate(formValuesToCustomerInput(values))
   }
 
   return (
@@ -74,7 +77,9 @@ export function CreateCustomerDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit}>创建客户</Button>
+          <Button onClick={handleSubmit} disabled={createMutation.isPending}>
+            {createMutation.isPending ? '创建中…' : '创建客户'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

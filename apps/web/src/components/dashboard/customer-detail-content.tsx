@@ -33,13 +33,7 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import type { Customer } from '@/lib/data/types'
-import { 
-  getProjectsByCustomerId, 
-  getRechargesByCustomerId, 
-  getConsumptionsByCustomerId,
-  getCouponsByCustomerId,
-  getContractsByCustomerId,
-} from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
 import {
   AreaChart,
@@ -76,11 +70,21 @@ const monthlyConsumption = [
 export function CustomerDetailContent({ customer }: CustomerDetailContentProps) {
   const [activeTab, setActiveTab] = useState('overview')
   
-  const projects = getProjectsByCustomerId(customer.id)
-  const recharges = getRechargesByCustomerId(customer.id)
-  const consumptions = getConsumptionsByCustomerId(customer.id)
-  const coupons = getCouponsByCustomerId(customer.id)
-  const contracts = getContractsByCustomerId(customer.id)
+  const { data: projects = [] } = trpc.crm.customers.listProjects.useQuery({
+    customerId: customer.id,
+  })
+  const { data: recharges = [] } = trpc.crm.customers.listRecharges.useQuery({
+    customerId: customer.id,
+  })
+  const { data: consumptions = [] } = trpc.crm.customers.listConsumptions.useQuery({
+    customerId: customer.id,
+  })
+  const { data: coupons = [] } = trpc.crm.customers.listCoupons.useQuery({
+    customerId: customer.id,
+  })
+  const { data: contracts = [] } = trpc.crm.customers.listContracts.useQuery({
+    customerId: customer.id,
+  })
 
   return (
     <div className="space-y-6">
@@ -254,7 +258,7 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                           border: '1px solid #27272a',
                           borderRadius: '8px',
                         }}
-                        formatter={(value: number | undefined) => [`¥${value?.toLocaleString()}`, '消费金额']}
+                        formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
                       />
                       <Area
                         type="monotone"
@@ -298,7 +302,7 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                           border: '1px solid #27272a',
                           borderRadius: '8px',
                         }}
-                        formatter={(value: number | undefined) => [`${value?.toLocaleString()}%`, '占比']}
+                        formatter={(value) => [`${Number(value ?? 0).toLocaleString()}%`, '占比']}
                       />
                     </PieChart>
                   </ResponsiveContainer>

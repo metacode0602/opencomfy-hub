@@ -17,15 +17,16 @@ import {
 } from './customer-form-fields'
 import {
   customerToFormValues,
-  formValuesToCustomer,
+  formValuesToCustomerInput,
   validateCustomerForm,
 } from './customer-form-utils'
+import { trpc } from '@/lib/trpc/client'
 
 export type EditCustomerDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   customer: Customer | null
-  onUpdated: (customer: Customer) => void
+  onUpdated: () => void
 }
 
 export function EditCustomerDialog({
@@ -36,6 +37,13 @@ export function EditCustomerDialog({
 }: EditCustomerDialogProps) {
   const [values, setValues] = useState<CustomerFormValues | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const updateMutation = trpc.crm.customers.update.useMutation({
+    onSuccess: () => {
+      onUpdated()
+      onOpenChange(false)
+    },
+    onError: (e) => setSubmitError(e.message),
+  })
 
   useEffect(() => {
     if (open && customer) {
@@ -62,18 +70,13 @@ export function EditCustomerDialog({
       return
     }
 
-    onUpdated(
-      formValuesToCustomer(values, {
-        id: customer.id,
+    updateMutation.mutate({
+      id: customer.id,
+      data: {
+        ...formValuesToCustomerInput(values),
         status: customer.status,
-        createdAt: customer.createdAt,
-        projectCount: customer.projectCount,
-        totalRecharge: customer.totalRecharge,
-        totalConsumption: customer.totalConsumption,
-        balance: customer.balance,
-      }),
-    )
-    onOpenChange(false)
+      },
+    })
   }
 
   return (
@@ -96,8 +99,8 @@ export function EditCustomerDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!values}>
-            保存修改
+          <Button onClick={handleSubmit} disabled={!values || updateMutation.isPending}>
+            {updateMutation.isPending ? '保存中…' : '保存修改'}
           </Button>
         </DialogFooter>
       </DialogContent>

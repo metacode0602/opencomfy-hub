@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { mockCustomers, mockProjects, mockContracts, mockBills, mockActivities } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import {
   AreaChart,
   Area,
@@ -36,15 +36,6 @@ import {
   Cell,
 } from 'recharts'
 
-// 消费趋势数据
-const consumptionTrend = [
-  { month: '1月', consumption: 280000 },
-  { month: '2月', consumption: 320000 },
-  { month: '3月', consumption: 450000 },
-  { month: '4月', consumption: 520000 },
-  { month: '5月', consumption: 380000 },
-]
-
 // 产品线消费数据
 const productLineData = [
   { name: 'Serverless', value: 125000, color: '#6366f1' },
@@ -55,14 +46,17 @@ const productLineData = [
 ]
 
 export function DashboardContent() {
-  const activeProjects = mockProjects.filter(p => p.status === 'active').length
-  const totalConsumption = mockCustomers.reduce((acc, t) => acc + t.totalConsumption, 0)
-  const totalBalance = mockCustomers.reduce((acc, t) => acc + t.balance, 0)
-  const activeContracts = mockContracts.filter(c => c.status === 'active').length
+  const { data: summary } = trpc.crm.dashboard.summary.useQuery()
+  const { data: recentProjects = [] } = trpc.crm.dashboard.recentProjects.useQuery()
+  const { data: recentActivities = [] } = trpc.crm.dashboard.recentActivities.useQuery()
+  const { data: pendingBills = [] } = trpc.crm.dashboard.pendingBills.useQuery()
+  const { data: consumptionTrend = [] } = trpc.crm.analytics.consumptionTrend.useQuery()
 
-  const recentProjects = mockProjects.slice(0, 5)
-  const recentActivities = mockActivities.slice(0, 6)
-  const pendingBills = mockBills.filter(b => b.status === 'pending' || b.status === 'overdue')
+  const activeProjects = summary?.activeProjectCount ?? 0
+  const totalConsumption = summary?.totalConsumption ?? 0
+  const totalBalance = summary?.totalBalance ?? 0
+  const activeContracts = summary?.activeContractCount ?? 0
+  const customerCount = summary?.customerCount ?? 0
 
   return (
     <div className="space-y-6">
@@ -82,7 +76,7 @@ export function DashboardContent() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="活跃客户"
-          value={mockCustomers.filter(t => t.status === 'active').length}
+          value={customerCount}
           description="较上月"
           icon={Building2}
           trend={{ value: 12, isPositive: true }}
@@ -120,7 +114,12 @@ export function DashboardContent() {
           <CardContent>
             <div className="h-[240px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={consumptionTrend}>
+                <AreaChart
+                  data={consumptionTrend.map((row) => ({
+                    month: row.month.slice(5),
+                    consumption: row.consumption,
+                  }))}
+                >
                   <defs>
                     <linearGradient id="colorConsumption" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
@@ -146,7 +145,7 @@ export function DashboardContent() {
                       borderRadius: '8px',
                     }}
                     labelStyle={{ color: '#fafafa' }}
-                    formatter={(value: number | undefined) => [`¥${value?.toLocaleString()}`, '消费金额']}
+                    formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
                   />
                   <Area
                     type="monotone"
@@ -193,7 +192,7 @@ export function DashboardContent() {
                       borderRadius: '8px',
                     }}
                     labelStyle={{ color: '#fafafa' }}
-                    formatter={(value: number | undefined) => [`¥${value?.toLocaleString()}`, '消费金额']}
+                    formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
                   />
                   <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                     {productLineData.map((entry, index) => (
@@ -274,7 +273,7 @@ export function DashboardContent() {
           <CardContent>
             <div className="space-y-4">
               {recentActivities.map((activity) => {
-                const project = mockProjects.find(p => p.id === activity.projectId)
+                const project = recentProjects.find((p) => p.id === activity.projectId)
                 return (
                   <div key={activity.id} className="flex gap-3">
                     <div className="w-2 h-2 mt-2 rounded-full bg-primary flex-shrink-0" />

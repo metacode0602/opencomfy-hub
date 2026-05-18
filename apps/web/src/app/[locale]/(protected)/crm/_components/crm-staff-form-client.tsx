@@ -1,6 +1,5 @@
 "use client"
 
-import * as React from "react"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -11,11 +10,11 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
-import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
+import { trpc } from "@/lib/trpc/client"
 import { toast } from "sonner"
 import {
   CrmStaffFormFields,
-  crmStaffFormToRow,
+  staffInputFromForm,
   useCrmStaffFormState,
   validateCrmStaffForm,
 } from "./crm-staff-form-dialog"
@@ -23,8 +22,22 @@ import {
 export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
   const router = useLocaleRouter()
   const mode = staffId ? "edit" : "create"
-  const upsert = useCrmMockStore((s) => s.upsertUserStaff)
-  const createStaffId = useCrmMockStore((s) => s.createStaffId)
+  const utils = trpc.useUtils()
+  const createMutation = trpc.crm.staff.create.useMutation({
+    onSuccess: (row) => {
+      toast.success("员工已创建")
+      router.push(`/crm/staff/${row.id}`)
+    },
+    onError: (e) => toast.error(e.message),
+  })
+  const updateMutation = trpc.crm.staff.update.useMutation({
+    onSuccess: (row) => {
+      toast.success("员工已更新")
+      void utils.crm.staff.getById.invalidate({ id: row.id })
+      router.push(`/crm/staff/${row.id}`)
+    },
+    onError: (e) => toast.error(e.message),
+  })
   const { values, patch, existing } = useCrmStaffFormState(staffId)
 
   if (mode === "edit" && staffId && !existing) {
@@ -44,41 +57,41 @@ export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
       toast.error(err)
       return
     }
-    const id = mode === "edit" && staffId ? staffId : createStaffId()
-    upsert(crmStaffFormToRow(id, values))
-    toast.success(mode === "create" ? "员工已创建" : "员工已更新")
-    router.push(`/crm/staff/${id}`)
+    const input = staffInputFromForm(values)
+    if (mode === "edit" && staffId) {
+      updateMutation.mutate({ id: staffId, data: input })
+    } else {
+      createMutation.mutate(input)
+    }
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
-      <Card className="mx-auto max-w-lg">
-        <CardHeader>
-          <CardTitle>{mode === "create" ? "新建员工" : "编辑员工"}</CardTitle>
-          <CardDescription>内部员工基本信息（mock）</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <CrmStaffFormFields
-            values={values}
-            onChange={patch}
-            idPrefix={mode === "create" ? "staff-page-new" : `staff-page-edit-${staffId}`}
-          />
-        </CardContent>
-        <CardFooter className="flex flex-wrap gap-2">
-          <Button type="button" onClick={onSave}>
-            保存
-          </Button>
-          <Button variant="outline" type="button" asChild>
-            <LocaleLink
-              href={
-                mode === "edit" && staffId ? `/crm/staff/${staffId}` : "/crm/staff"
-              }
-            >
-              取消
-            </LocaleLink>
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
+    <Card className="max-w-lg">
+      <CardHeader>
+        <CardTitle>{mode === "create" ? "新建员工" : "编辑员工"}</CardTitle>
+        <CardDescription>内部员工主数据</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <CrmStaffFormFields
+          values={values}
+          onChange={patch}
+          idPrefix={mode === "create" ? "staff-page-new" : `staff-page-edit-${staffId}`}
+        />
+      </CardContent>
+      <CardFooter className="flex justify-between">
+        <Button variant="outline" asChild>
+          <LocaleLink href={mode === "edit" && staffId ? `/crm/staff/${staffId}` : "/crm/staff"}>
+            取消
+          </LocaleLink>
+        </Button>
+        <Button
+          type="button"
+          onClick={onSave}
+          disabled={createMutation.isPending || updateMutation.isPending}
+        >
+          {mode === "create" ? "创建" : "保存"}
+        </Button>
+      </CardFooter>
+    </Card>
   )
 }

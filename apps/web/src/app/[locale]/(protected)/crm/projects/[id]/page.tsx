@@ -1,16 +1,17 @@
 import { AppShell } from '@/components/dashboard/app-shell'
 import { ProjectDetailContent } from '@/components/dashboard/project-detail-content'
-import { mockProjects } from '@/lib/data/mock-data'
+import { createServerCaller } from '@/lib/trpc/server'
 import { notFound } from 'next/navigation'
 
-export default async function ProjectDetailPage({ 
-  params 
-}: { 
-  params: Promise<{ id: string }> 
+export default async function ProjectDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  const project = mockProjects.find(p => p.id === id)
-  
+  const caller = await createServerCaller()
+  const project = await caller.crm.projects.getById({ id })
+
   if (!project) {
     notFound()
   }

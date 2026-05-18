@@ -44,13 +44,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
-import { mockCustomers } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import type { Customer } from '@/lib/data/types'
 import { CreateCustomerDialog } from './create-customer-dialog'
 import { EditCustomerDialog } from './edit-customer-dialog'
 
 export function CustomersContent() {
-  const [customers, setCustomers] = useState<Customer[]>(mockCustomers)
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -58,15 +57,13 @@ export function CustomersContent() {
   const [editOpen, setEditOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
 
-  const filteredCustomers = customers.filter((c) => {
-    const matchesSearch =
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.contactPerson.toLowerCase().includes(search.toLowerCase()) ||
-      (c.certCode?.toLowerCase().includes(search.toLowerCase()) ?? false)
-    const matchesType = typeFilter === 'all' || c.type === typeFilter
-    const matchesStatus = statusFilter === 'all' || c.status === statusFilter
-    return matchesSearch && matchesType && matchesStatus
+  const { data: customers = [], isLoading, refetch } = trpc.crm.customers.list.useQuery({
+    search: search || undefined,
+    type: typeFilter as 'B' | 'C' | 'all',
+    status: statusFilter,
   })
+
+  const filteredCustomers = customers
 
   const totalRecharge = customers.reduce((acc, t) => acc + t.totalRecharge, 0)
   const totalConsumption = customers.reduce((acc, t) => acc + t.totalConsumption, 0)
@@ -94,16 +91,14 @@ export function CustomersContent() {
       <CreateCustomerDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={(customer) => setCustomers((prev) => [customer, ...prev])}
+        onCreated={() => void refetch()}
       />
 
       <EditCustomerDialog
         open={editOpen}
         onOpenChange={setEditOpen}
         customer={editingCustomer}
-        onUpdated={(updated) =>
-          setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-        }
+        onUpdated={() => void refetch()}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -194,6 +189,9 @@ export function CustomersContent() {
 
       <Card>
         <CardContent className="p-0">
+          {isLoading ? (
+            <p className="p-8 text-center text-muted-foreground">加载中…</p>
+          ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -285,6 +283,7 @@ export function CustomersContent() {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
     </div>
