@@ -17,6 +17,7 @@ import type {
   MilestoneEvidence,
   RechargeOrder,
   Tenant,
+  TenantBinding,
   TestVoucherIssue,
   UserStaff,
 } from "@/lib/types/crm"
@@ -29,6 +30,8 @@ export type CrmMockState = typeof crmSeedState & {
   resetToSeed: () => void
   upsertTenant: (row: Tenant) => void
   removeTenant: (id: string) => void
+  upsertTenantBinding: (row: TenantBinding) => void
+  removeTenantBinding: (id: string) => void
   upsertUserStaff: (row: UserStaff) => void
   removeUserStaff: (id: string) => void
   upsertAssignment: (row: AccountManagerAssignment) => void
@@ -95,9 +98,19 @@ export const useCrmMockStore = create<CrmMockState>()(
 
       upsertTenant: (row) =>
         set((s) => ({ tenants: replaceById(s.tenants, row) })),
+      upsertTenantBinding: (row) =>
+        set((s) => ({
+          tenantBindings: replaceById(s.tenantBindings, row),
+        })),
+      removeTenantBinding: (id) =>
+        set((s) => ({
+          tenantBindings: s.tenantBindings.filter((x) => x.id !== id),
+        })),
+
       removeTenant: (id) =>
         set((s) => ({
           tenants: s.tenants.filter((x) => x.id !== id),
+          tenantBindings: s.tenantBindings.filter((x) => x.tenant_id !== id),
           accountManagerAssignments: s.accountManagerAssignments.filter(
             (x) => x.tenant_id !== id,
           ),
@@ -269,7 +282,23 @@ export const useCrmMockStore = create<CrmMockState>()(
     }),
     {
       name: "crm-mock-store-v1",
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => {
+        const state = persisted as Record<string, unknown>
+        if (version < 2) {
+          return {
+            ...crmSeedState,
+            ...state,
+            tenantBindings: crmSeedState.tenantBindings,
+            tenants: (state.tenants as Tenant[] | undefined)?.map((t) => ({
+              ...t,
+              platform_tenant_id:
+                (t as Tenant).platform_tenant_id ?? null,
+            })) ?? crmSeedState.tenants,
+          }
+        }
+        return state as typeof crmSeedState
+      },
     },
   ),
 )

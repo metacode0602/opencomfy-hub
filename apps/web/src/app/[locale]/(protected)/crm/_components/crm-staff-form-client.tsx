@@ -10,107 +10,74 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { Input } from "@workspace/ui/components/input"
-import { Label } from "@workspace/ui/components/label"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
 import { useCrmMockStore } from "@/lib/stores/crm-mock-store"
-import type { UserStaff } from "@/lib/types/crm"
+import { toast } from "sonner"
+import {
+  CrmStaffFormFields,
+  crmStaffFormToRow,
+  useCrmStaffFormState,
+  validateCrmStaffForm,
+} from "./crm-staff-form-dialog"
 
 export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
   const router = useLocaleRouter()
-  const rows = useCrmMockStore((s) => s.userStaff)
-  const upsertUserStaff = useCrmMockStore((s) => s.upsertUserStaff)
+  const mode = staffId ? "edit" : "create"
+  const upsert = useCrmMockStore((s) => s.upsertUserStaff)
   const createStaffId = useCrmMockStore((s) => s.createStaffId)
+  const { values, patch, existing } = useCrmStaffFormState(staffId)
 
-  const existing = staffId ? rows.find((x) => x.id === staffId) : undefined
-  const isEdit = Boolean(staffId && existing)
+  if (mode === "edit" && staffId && !existing) {
+    return (
+      <div className="p-6">
+        <p className="text-muted-foreground">未找到员工。</p>
+        <Button className="mt-4" variant="outline" asChild>
+          <LocaleLink href="/crm/staff">返回列表</LocaleLink>
+        </Button>
+      </div>
+    )
+  }
 
-  const [form, setForm] = React.useState<UserStaff>(() =>
-    existing ?? {
-      id: createStaffId(),
-      employee_no: "",
-      display_name: "",
-      mobile: "",
-      email: "",
-      status: "active",
-    },
-  )
-
-  React.useEffect(() => {
-    if (existing) setForm(existing)
-  }, [existing])
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.display_name.trim() || !form.mobile.trim()) return
-    upsertUserStaff({
-      ...form,
-      employee_no: form.employee_no || null,
-      email: form.email || null,
-    })
-    router.push(`/crm/staff/${form.id}`)
+  const onSave = () => {
+    const err = validateCrmStaffForm(values)
+    if (err) {
+      toast.error(err)
+      return
+    }
+    const id = mode === "edit" && staffId ? staffId : createStaffId()
+    upsert(crmStaffFormToRow(id, values))
+    toast.success(mode === "create" ? "员工已创建" : "员工已更新")
+    router.push(`/crm/staff/${id}`)
   }
 
   return (
     <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
       <Card className="mx-auto max-w-lg">
         <CardHeader>
-          <CardTitle>{isEdit ? "编辑员工" : "新建员工"}</CardTitle>
-          <CardDescription>字段与 `user_staff` 对齐（mock）</CardDescription>
+          <CardTitle>{mode === "create" ? "新建员工" : "编辑员工"}</CardTitle>
+          <CardDescription>内部员工基本信息（mock）</CardDescription>
         </CardHeader>
-        <form onSubmit={submit}>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="employee_no">工号</Label>
-              <Input
-                id="employee_no"
-                value={form.employee_no ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, employee_no: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="display_name">显示姓名</Label>
-              <Input
-                id="display_name"
-                value={form.display_name}
-                onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="mobile">手机号</Label>
-              <Input
-                id="mobile"
-                value={form.mobile}
-                onChange={(e) => setForm((f) => ({ ...f, mobile: e.target.value }))}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">邮箱</Label>
-              <Input
-                id="email"
-                type="email"
-                value={form.email ?? ""}
-                onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="status">状态</Label>
-              <Input
-                id="status"
-                value={form.status}
-                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
-              />
-            </div>
-          </CardContent>
-          <CardFooter className="flex justify-end gap-2">
-            <Button type="button" variant="outline" asChild>
-              <LocaleLink href={isEdit ? `/crm/staff/${form.id}` : "/crm/staff"}>取消</LocaleLink>
-            </Button>
-            <Button type="submit">保存</Button>
-          </CardFooter>
-        </form>
+        <CardContent>
+          <CrmStaffFormFields
+            values={values}
+            onChange={patch}
+            idPrefix={mode === "create" ? "staff-page-new" : `staff-page-edit-${staffId}`}
+          />
+        </CardContent>
+        <CardFooter className="flex flex-wrap gap-2">
+          <Button type="button" onClick={onSave}>
+            保存
+          </Button>
+          <Button variant="outline" type="button" asChild>
+            <LocaleLink
+              href={
+                mode === "edit" && staffId ? `/crm/staff/${staffId}` : "/crm/staff"
+              }
+            >
+              取消
+            </LocaleLink>
+          </Button>
+        </CardFooter>
       </Card>
     </div>
   )

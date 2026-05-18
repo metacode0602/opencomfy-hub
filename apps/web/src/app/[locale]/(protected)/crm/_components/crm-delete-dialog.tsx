@@ -1,8 +1,8 @@
 "use client"
 
-import { Button } from "@workspace/ui/components/button"
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -11,21 +11,19 @@ import {
   AlertDialogTitle,
 } from "@workspace/ui/components/alert-dialog"
 
-type CrmDeleteDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  title: string
-  description: string
-  onConfirm: () => void
-}
-
 export function CrmDeleteDialog({
   open,
   onOpenChange,
   title,
   description,
   onConfirm,
-}: CrmDeleteDialogProps) {
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description: string
+  onConfirm: () => void
+}) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -34,17 +32,14 @@ export function CrmDeleteDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>取消</AlertDialogCancel>
-          <Button
-            variant="destructive"
+          <AlertDialogCancel type="button">取消</AlertDialogCancel>
+          <AlertDialogAction
             type="button"
-            onClick={() => {
-              onConfirm()
-              onOpenChange(false)
-            }}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={onConfirm}
           >
-            确认删除
-          </Button>
+            删除
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

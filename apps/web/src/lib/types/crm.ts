@@ -7,6 +7,8 @@ export type Tenant = {
   tenant_code: string
   name: string
   account_name: string
+  /** 平台计费租户 ID（主租户）；与 commercial_account.primary_tenant 对齐 */
+  platform_tenant_id: string | null
   status: string
   type: string
   lifecycle_phase: string
@@ -18,6 +20,17 @@ export type Tenant = {
   conversion_trigger: string | null
   created_at: string
   updated_at: string
+}
+
+/** 额外计费租户绑定到同一客户组合（commercial_account） */
+export type TenantBinding = {
+  id: string
+  tenant_id: string
+  bound_tenant_id: string
+  binding_label: string
+  binding_role: string | null
+  sort_order: number
+  created_at: string
 }
 
 export type UserStaff = {
@@ -178,6 +191,7 @@ export type EngagementComment = {
 }
 
 export const tenantRelationKeys = [
+  "bindings",
   "assignments",
   "vouchers",
   "milestones",

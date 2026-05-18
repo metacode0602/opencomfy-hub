@@ -20,7 +20,6 @@ import {
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { useSupplierDomainMockStore } from "@/lib/stores/supplier-domain-mock-store"
 import { IconPlus } from "@tabler/icons-react"
-import { CrmDeleteDialog } from "../../crm/_components/crm-delete-dialog"
 import { Input } from "@workspace/ui/components/input"
 
 export function SupplierSuppliersListClient() {
@@ -97,20 +96,6 @@ export function SupplierSuppliersListClient() {
           </div>
         </CardContent>
       </Card>
-
-      <CrmDeleteDialog
-        open={del != null}
-        onOpenChange={(o) => !o && setDel(null)}
-        title="确认删除供应商"
-        description={
-          del
-            ? `确定删除「${del.label}」吗？将级联删除其下属合同、设备、节点等 mock 数据。`
-            : ""
-        }
-        onConfirm={() => {
-          if (del) removeSupplier(del.id)
-        }}
-      />
     </div>
   )
 }

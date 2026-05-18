@@ -14,6 +14,7 @@ import type {
   MilestoneEvidence,
   RechargeOrder,
   Tenant,
+  TenantBinding,
   TestVoucherIssue,
   UserStaff,
 } from "@/lib/types/crm"
@@ -24,6 +25,7 @@ export const crmMockTenants: Tenant[] = [
     tenant_code: "ACME-BJ",
     name: "北京某某科技有限公司",
     account_name: "ACME 算力（华北）",
+    platform_tenant_id: "8405",
     status: "active",
     type: "B端",
     lifecycle_phase: "已转正",
@@ -41,6 +43,7 @@ export const crmMockTenants: Tenant[] = [
     tenant_code: "START-SH",
     name: "上海初创智能有限公司",
     account_name: "星拓 AI 实验室",
+    platform_tenant_id: "14829",
     status: "trial",
     type: "B端",
     lifecycle_phase: "测试中",
@@ -52,6 +55,45 @@ export const crmMockTenants: Tenant[] = [
     conversion_trigger: "",
     created_at: "2026-03-28T09:30:00.000Z",
     updated_at: "2026-05-12T06:00:00.000Z",
+  },
+  {
+    id: "t-003",
+    tenant_code: "ORIGINFLOW",
+    name: "Originflow",
+    account_name: "Originflow",
+    platform_tenant_id: "10290",
+    status: "active",
+    type: "B端",
+    lifecycle_phase: "试用完成",
+    expected_scale: null,
+    observed_scale_summary: null,
+    test_started_on: "2026-02-01",
+    test_completed_on: "2026-04-15",
+    conversion_date: null,
+    conversion_trigger: "",
+    created_at: "2026-02-01T08:00:00.000Z",
+    updated_at: "2026-05-15T10:00:00.000Z",
+  },
+]
+
+export const crmMockTenantBindings: TenantBinding[] = [
+  {
+    id: "tb-001",
+    tenant_id: "t-003",
+    bound_tenant_id: "12724",
+    binding_label: "兰天游账号",
+    binding_role: "子商户",
+    sort_order: 1,
+    created_at: "2026-03-01T09:00:00.000Z",
+  },
+  {
+    id: "tb-002",
+    tenant_id: "t-003",
+    bound_tenant_id: "15052",
+    binding_label: "originflow独立商户",
+    binding_role: "子商户",
+    sort_order: 2,
+    created_at: "2026-03-15T09:00:00.000Z",
   },
 ]
 
@@ -381,6 +423,7 @@ export const crmMockComments: EngagementComment[] = [
 /** zustand 初始快照（与 store 字段一致） */
 export const crmSeedState = {
   tenants: crmMockTenants,
+  tenantBindings: crmMockTenantBindings,
   userStaff: crmMockUserStaff,
   accountManagerAssignments: crmMockAssignments,
   testVoucherIssues: crmMockVouchers,
