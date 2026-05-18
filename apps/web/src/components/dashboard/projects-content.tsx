@@ -1,14 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { 
-  Plus, 
-  Search, 
+import {
+  Plus,
+  Search,
   MoreHorizontal,
   ArrowUpRight,
   GitBranch,
-  Users,
   Edit,
   Eye,
   Trash,
@@ -16,7 +15,7 @@ import {
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import { Badge } from '@workspace/ui/components/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
+import { Card, CardContent } from '@workspace/ui/components/card'
 import { StatusBadge } from '@/components/dashboard/status-badge'
 import {
   Table,
@@ -40,27 +39,31 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@workspace/ui/components/dialog'
-import { Label } from '@workspace/ui/components/label'
-import { Textarea } from '@workspace/ui/components/textarea'
-import { mockProjects, mockCustomers } from '@/lib/data/mock-data'
+import { mockProjects } from '@/lib/data/mock-data'
+import type { Project } from '@/lib/data/types'
+import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { CreateProjectDialog } from './create-project-dialog'
+import { EditProjectDialog } from './edit-project-dialog'
+import { mapStoreBusinessLines } from './project-form-utils'
 
 export function ProjectsContent() {
+  const storeBusinessLines = useCrmMockStore((s) => s.businessLines)
+  const businessLines = useMemo(
+    () => mapStoreBusinessLines(storeBusinessLines),
+    [storeBusinessLines],
+  )
+
+  const [projects, setProjects] = useState<Project[]>(mockProjects)
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
 
-  const filteredProjects = mockProjects.filter(project => {
-    const matchesSearch = project.name.toLowerCase().includes(search.toLowerCase()) ||
+  const filteredProjects = projects.filter((project) => {
+    const matchesSearch =
+      project.name.toLowerCase().includes(search.toLowerCase()) ||
       project.customerName.toLowerCase().includes(search.toLowerCase()) ||
       project.accountManager.toLowerCase().includes(search.toLowerCase())
     const matchesStage = stageFilter === 'all' || project.stage === stageFilter
@@ -68,112 +71,51 @@ export function ProjectsContent() {
     return matchesSearch && matchesStage && matchesStatus
   })
 
-  const leadCount = mockProjects.filter(p => p.stage === 'lead').length
-  const testingCount = mockProjects.filter(p => p.stage === 'testing').length
-  const convertedCount = mockProjects.filter(p => p.stage === 'converted').length
+  const leadCount = projects.filter((p) => p.stage === 'lead').length
+  const testingCount = projects.filter((p) => p.stage === 'testing').length
+  const convertedCount = projects.filter((p) => p.stage === 'converted').length
+
+  const openEdit = (project: Project) => {
+    setEditingProject(project)
+    setEditOpen(true)
+  }
+
+  const handleCreated = (project: Project) => {
+    setProjects((prev) => [project, ...prev])
+  }
+
+  const handleUpdated = (project: Project) => {
+    setProjects((prev) => prev.map((p) => (p.id === project.id ? project : p)))
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">项目管理</h1>
           <p className="text-muted-foreground">管理所有项目，跟踪项目阶段和进度</p>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              新建项目
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
-            <DialogHeader>
-              <DialogTitle>新建项目</DialogTitle>
-              <DialogDescription>
-                创建新项目并关联客户
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label>选择客户</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="请选择客户" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {mockCustomers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                        <span className="text-muted-foreground ml-2">
-                          ({c.type === 'B' ? '企业' : '个人'})
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>项目名称</Label>
-                <Input placeholder="请输入项目名称" />
-              </div>
-              <div className="grid gap-2">
-                <Label>项目描述</Label>
-                <Textarea placeholder="请输入项目描述" rows={3} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>售前经理</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="请选择" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="chen">陈思思</SelectItem>
-                      <SelectItem value="zhang">张伟</SelectItem>
-                      <SelectItem value="li">李娜</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>客户经理</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="请选择" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="wang">王磊</SelectItem>
-                      <SelectItem value="zhou">周明</SelectItem>
-                      <SelectItem value="zhao">赵敏</SelectItem>
-                      <SelectItem value="liq">李强</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>月度预算</Label>
-                  <Input type="number" placeholder="¥" />
-                </div>
-                <div className="grid gap-2">
-                  <Label>开始日期</Label>
-                  <Input type="date" />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                取消
-              </Button>
-              <Button onClick={() => setIsDialogOpen(false)}>
-                创建项目
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => setCreateOpen(true)}>
+          <Plus className="w-4 h-4 mr-2" />
+          新建项目
+        </Button>
       </div>
 
-      {/* Stage Stats */}
+      <CreateProjectDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        businessLines={businessLines}
+        onCreated={handleCreated}
+      />
+
+      <EditProjectDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={editingProject}
+        businessLines={businessLines}
+        onUpdated={handleUpdated}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-l-4 border-l-yellow-500">
           <CardContent className="p-4">
@@ -186,9 +128,7 @@ export function ProjectsContent() {
                 <GitBranch className="w-5 h-5 text-yellow-500" />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              需完成需求确认、技术评估
-            </p>
+            <p className="text-xs text-muted-foreground mt-2">需完成需求确认、技术评估</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-blue-500">
@@ -202,9 +142,7 @@ export function ProjectsContent() {
                 <GitBranch className="w-5 h-5 text-blue-500" />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              需完成 POC、性能测试、签订合同
-            </p>
+            <p className="text-xs text-muted-foreground mt-2">需完成 POC、性能测试、签订合同</p>
           </CardContent>
         </Card>
         <Card className="border-l-4 border-l-green-500">
@@ -218,14 +156,11 @@ export function ProjectsContent() {
                 <GitBranch className="w-5 h-5 text-green-500" />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              正式运营，持续维护跟进
-            </p>
+            <p className="text-xs text-muted-foreground mt-2">正式运营，持续维护跟进</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-4">
@@ -266,7 +201,6 @@ export function ProjectsContent() {
         </CardContent>
       </Card>
 
-      {/* Project List */}
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -274,6 +208,7 @@ export function ProjectsContent() {
               <TableRow>
                 <TableHead>项目名称</TableHead>
                 <TableHead>客户</TableHead>
+                <TableHead>业务线</TableHead>
                 <TableHead>阶段</TableHead>
                 <TableHead>售前</TableHead>
                 <TableHead>客户经理</TableHead>
@@ -287,7 +222,7 @@ export function ProjectsContent() {
               {filteredProjects.map((project) => (
                 <TableRow key={project.id}>
                   <TableCell>
-                    <Link 
+                    <Link
                       href={`/crm/projects/${project.id}`}
                       className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                     >
@@ -297,7 +232,7 @@ export function ProjectsContent() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Link 
+                      <Link
                         href={`/crm/customers/${project.customerId}`}
                         className="text-muted-foreground hover:text-primary transition-colors"
                       >
@@ -307,6 +242,9 @@ export function ProjectsContent() {
                         {project.customerType === 'B' ? '企业' : '个人'}
                       </Badge>
                     </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {project.businessLineName}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={project.stage} />
@@ -338,7 +276,7 @@ export function ProjectsContent() {
                             查看详情
                           </Link>
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openEdit(project)}>
                           <Edit className="w-4 h-4 mr-2" />
                           编辑项目
                         </DropdownMenuItem>

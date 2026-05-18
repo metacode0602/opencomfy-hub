@@ -130,15 +130,25 @@
 | 算力券 | 券列表 | `coupon` | 同上 |
 | 合同 | 合同列表 | `contract` | `customer_id` 或下属 tenant / project |
 
-### 2.3 新建/编辑项目（`ProjectsContent` 对话框）
+### 2.3 新建/编辑项目（`CreateProjectDialog` / `EditProjectDialog`）
+
+列表页 `ProjectsContent` 与详情页 `ProjectDetailContent` 通过独立弹窗组件管理表单状态：
+
+| 组件 | 文件 | 对外接口 |
+|------|------|----------|
+| 新建 | `create-project-dialog.tsx` | `open`、`onOpenChange`、`businessLines`、`onCreated` |
+| 编辑 | `edit-project-dialog.tsx` | `open`、`onOpenChange`、`project`、`businessLines`、`onUpdated` |
+| 表单字段 | `project-form-fields.tsx` | `values`、`onChange`、`businessLines` |
 
 创建项目时与 `project` **同事务** 写入四条 `project_staff_assignment`；并处理 **Customer / Tenant 关联**：
 
 | 表单项 | 落库 |
 |--------|------|
 | 所属客户 | `project.customer_id`（必选） |
-| 主计费账户 | `project.primary_tenant_id`（可选，默认 Customer 的 `is_default` Tenant） |
+| 主计费账户（租户 ID） | `project.primary_tenant_id`（可选；不选则使用 Customer 的 `is_default` Tenant） |
 | 附加计费账户 | `project_tenant` 多选（可选；须满足 R1.3） |
+| 当前阶段 | `project.stage`（`lead` / `testing` / `converted`） |
+| 业务线 | `project.business_line_id` → `business_line.id`（单选，必填） |
 
 表单字段与 `role_type` 映射：
 
@@ -262,6 +272,7 @@
 | `id` | text | PK | `Project.id` |
 | `customer_id` | text | FK→customer, NOT NULL | `customerId` |
 | `primary_tenant_id` | text | FK→tenant, 可空 | `primaryTenantId`；空则用 Customer 默认 Tenant |
+| `business_line_id` | text | FK→business_line, NOT NULL | `businessLineId`；单选业务线 |
 | `name` | varchar | NOT NULL | `name` |
 | `description` | text | | `description` |
 | `stage` | varchar | NOT NULL | `lead` / `testing` / `converted` |
@@ -273,11 +284,40 @@
 | `created_at` | timestamptz | NOT NULL | `createdAt` |
 | `updated_at` | timestamptz | | |
 
-索引：`(customer_id)`、`(primary_tenant_id)`、`(stage)`、`(status)`。
+索引：`(customer_id)`、`(primary_tenant_id)`、`(business_line_id)`、`(stage)`、`(status)`。
 
 **迁移说明**：原 `commercial_project.tenant_id` 拆为 `customer_id` + `primary_tenant_id`（原 tenant 行需先挂到 customer）。
 
-**项目人员**：见 `project_staff_assignment`（§3.8）。
+**项目人员**：见 `project_staff_assignment`（§3.8）；`delivery_manager`、`project_manager` 与售前/客户经理同为四人组，不在 `project` 表存姓名字符串。
+
+#### `business_line`（业务线主数据）
+
+经营项目归属的业务线字典表；支持 CRUD（Mock：`crm-mock-store.upsertBusinessLine` / `removeBusinessLine`）。
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | text | PK | |
+| `code` | varchar | UK, NOT NULL | 稳定编码，如 `short_rent`、`delivery_project` |
+| `name` | varchar | NOT NULL | 展示名 |
+| `description` | text | 可空 | |
+| `sort_order` | int | DEFAULT 0 | 下拉排序 |
+| `status` | varchar | NOT NULL | `active` / `inactive` |
+| `created_at` | timestamptz | NOT NULL | |
+| `updated_at` | timestamptz | | |
+
+**首版种子数据**（`status = active`）：
+
+| code | name |
+|------|------|
+| `short_rent` | 短租业务 |
+| `full_rent` | 整租业务 |
+| `delivery_project` | 交付型项目 |
+| `merchant_project` | 商户类项目 |
+| `compute_derivative` | 算力衍生业务 |
+| `consumer_compute` | C端算力业务 |
+| `little_boy_plan` | 小男孩计划 |
+
+前端类型：`lib/data/types.BusinessLine`；表单组件：`ProjectFormFields`（业务线单选下拉）。
 
 #### `project_tenant`（项目关联计费账户）
 
@@ -640,7 +680,7 @@ WHERE psa.project_id = :project_id AND psa.effective_to IS NULL
   AND psa.role_type IN ('pre_sales','account_manager','delivery_manager','project_manager');
 ```
 
-**与 Mock 类型映射**：`lib/data/types.Project` 中的 `preSalesManager`、`accountManager` 为 **API 读模型** 字段（JOIN 聚合），实现后应从类型中改为 `*_staff_id` 或嵌套 `staff: { role, user_staff_id, display_name }[]`，不再作为持久化列。
+**与 Mock 类型映射**：`lib/data/types.Project` 中的 `preSalesManager`、`accountManager`、`deliveryManager`、`projectManager` 为 **API 读模型** 字段（JOIN 聚合），实现后应从类型中改为 `*_staff_id` 或嵌套 `staff: { role, user_staff_id, display_name }[]`，不再作为持久化列。`businessLineName` 同理，由 `business_line_id` JOIN 得出。
 
 索引：`(project_id)` WHERE `effective_to IS NULL`；`(user_staff_id)` WHERE `effective_to IS NULL`（统计员工负责项目数）。
 
@@ -792,6 +832,7 @@ erDiagram
 | `customer` | 客户主体 | `/crm/customers`（目标）、当前 `/crm/tenants` |
 | `tenant` | 平台计费租户 | 客户详情·计费账户 Tab |
 | `project` | 经营项目 | `/crm/projects`、客户详情·项目 Tab |
+| `business_line` | 业务线字典 | 新建/编辑项目（下拉）；Store CRUD |
 | `project_tenant` | 项目–计费账户 | 新建/编辑项目 |
 | `user_staff` | 内部员工 | `/crm/staff` |
 | `project_staff_assignment` | 项目四人组（售前/客户/交付/项目经理） | 新建项目对话框、项目列表/详情 |

@@ -1,4 +1,5 @@
 import type {
+  BusinessLine,
   Customer,
   PlatformTenant,
   Project,
@@ -31,6 +32,31 @@ export const mockSalesManagers = [
   { id: 'sm-6', name: '陈思思' },
   { id: 'sm-7', name: '李娜' },
 ] as const
+
+/** 业务线主数据（对应 business_line 表，支持 CRUD） */
+export const mockBusinessLines: BusinessLine[] = [
+  { id: 'bl-1', code: 'short_rent', name: '短租业务', sortOrder: 1, status: 'active' },
+  { id: 'bl-2', code: 'full_rent', name: '整租业务', sortOrder: 2, status: 'active' },
+  { id: 'bl-3', code: 'delivery_project', name: '交付型项目', sortOrder: 3, status: 'active' },
+  { id: 'bl-4', code: 'merchant_project', name: '商户类项目', sortOrder: 4, status: 'active' },
+  {
+    id: 'bl-5',
+    code: 'compute_derivative',
+    name: '算力衍生业务',
+    sortOrder: 5,
+    status: 'active',
+  },
+  { id: 'bl-6', code: 'consumer_compute', name: 'C端算力业务', sortOrder: 6, status: 'active' },
+  { id: 'bl-7', code: 'little_boy_plan', name: '小男孩计划', sortOrder: 7, status: 'active' },
+]
+
+export function getBusinessLineById(id: string): BusinessLine | undefined {
+  return mockBusinessLines.find((b) => b.id === id)
+}
+
+export function getStaffNameById(staffId: string): string | undefined {
+  return mockSalesManagers.find((m) => m.id === staffId)?.name
+}
 
 // CRM 客户主体
 export const mockCustomers: Customer[] = [
@@ -135,15 +161,26 @@ export const mockCustomers: Customer[] = [
   },
 ]
 
-// 平台计费租户（默认与客户 1:1，id 与 customer 相同）
-export const mockPlatformTenants: PlatformTenant[] = mockCustomers.map((c) => ({
-  id: c.id,
-  customerId: c.id,
-  name: c.name,
-  isDefault: true,
-  status: c.status,
-  balance: c.balance,
-}))
+// 平台计费租户（默认与客户 1:1；部分客户可有多个计费账户）
+export const mockPlatformTenants: PlatformTenant[] = [
+  ...mockCustomers.map((c) => ({
+    id: c.id,
+    customerId: c.id,
+    name: c.name,
+    isDefault: true,
+    status: c.status,
+    balance: c.balance,
+  })),
+  {
+    id: 't1-sub',
+    customerId: 't1',
+    name: '北京深智科技（华东分部）',
+    platformTenantId: 'PT-T1-SUB',
+    isDefault: false,
+    status: 'active' as const,
+    balance: 28000,
+  },
+]
 
 // 模拟项目数据
 export const mockProjects: Project[] = [
@@ -154,10 +191,14 @@ export const mockProjects: Project[] = [
     customerName: '北京深智科技有限公司',
     customerType: 'B',
     primaryTenantId: 't1',
+    businessLineId: 'bl-5',
+    businessLineName: '算力衍生业务',
     stage: 'converted',
     status: 'active',
     preSalesManager: '陈思思',
     accountManager: '王磊',
+    deliveryManager: '周明',
+    projectManager: '李强',
     description: '基于深度学习的图像识别模型训练项目，使用 GPU 集群进行大规模训练',
     createdAt: '2024-01-20',
     startDate: '2024-02-01',
@@ -172,10 +213,14 @@ export const mockProjects: Project[] = [
     customerName: '北京深智科技有限公司',
     customerType: 'B',
     primaryTenantId: 't1',
+    businessLineId: 'bl-6',
+    businessLineName: 'C端算力业务',
     stage: 'testing',
     status: 'active',
     preSalesManager: '陈思思',
     accountManager: '王磊',
+    deliveryManager: '赵敏',
+    projectManager: '周明',
     description: '针对垂直领域的大语言模型微调训练',
     createdAt: '2024-03-15',
     startDate: '2024-03-20',
@@ -189,11 +234,15 @@ export const mockProjects: Project[] = [
     customerId: 't1',
     customerName: '北京深智科技有限公司',
     customerType: 'B',
-    primaryTenantId: 't1',
+    primaryTenantId: 't1-sub',
+    businessLineId: 'bl-3',
+    businessLineName: '交付型项目',
     stage: 'lead',
     status: 'active',
     preSalesManager: '张伟',
     accountManager: '王磊',
+    deliveryManager: '李娜',
+    projectManager: '张伟',
     description: '4K/8K 视频批量渲染处理项目',
     createdAt: '2024-05-01',
     startDate: '2024-05-10',
@@ -208,10 +257,14 @@ export const mockProjects: Project[] = [
     customerName: '上海云算科技股份公司',
     customerType: 'B',
     primaryTenantId: 't2',
+    businessLineId: 'bl-2',
+    businessLineName: '整租业务',
     stage: 'converted',
     status: 'active',
     preSalesManager: '李娜',
     accountManager: '周明',
+    deliveryManager: '王磊',
+    projectManager: '赵敏',
     description: '企业级分布式机器学习训练平台搭建',
     createdAt: '2024-02-25',
     startDate: '2024-03-01',
@@ -226,10 +279,14 @@ export const mockProjects: Project[] = [
     customerName: '上海云算科技股份公司',
     customerType: 'B',
     primaryTenantId: 't2',
+    businessLineId: 'bl-1',
+    businessLineName: '短租业务',
     stage: 'testing',
     status: 'active',
     preSalesManager: '李娜',
     accountManager: '周明',
+    deliveryManager: '李强',
+    projectManager: '王磊',
     description: '电商场景的智能推荐算法训练',
     createdAt: '2024-04-10',
     startDate: '2024-04-15',
@@ -244,10 +301,14 @@ export const mockProjects: Project[] = [
     customerName: '王小明',
     customerType: 'C',
     primaryTenantId: 't3',
+    businessLineId: 'bl-7',
+    businessLineName: '小男孩计划',
     stage: 'testing',
     status: 'active',
     preSalesManager: '张伟',
     accountManager: '张伟',
+    deliveryManager: '陈思思',
+    projectManager: '李娜',
     description: '个人项目，开发定制化 AI 助手应用',
     createdAt: '2024-03-12',
     startDate: '2024-03-15',
@@ -262,10 +323,14 @@ export const mockProjects: Project[] = [
     customerName: '杭州智图数据有限公司',
     customerType: 'B',
     primaryTenantId: 't4',
+    businessLineId: 'bl-4',
+    businessLineName: '商户类项目',
     stage: 'converted',
     status: 'paused',
     preSalesManager: '陈思思',
     accountManager: '李强',
+    deliveryManager: '周明',
+    projectManager: '王磊',
     description: '大数据分析处理平台',
     createdAt: '2024-01-10',
     startDate: '2024-01-20',
@@ -281,10 +346,14 @@ export const mockProjects: Project[] = [
     customerName: '成都创新视觉工作室',
     customerType: 'B',
     primaryTenantId: 't5',
+    businessLineId: 'bl-5',
+    businessLineName: '算力衍生业务',
     stage: 'converted',
     status: 'active',
     preSalesManager: '张伟',
     accountManager: '赵敏',
+    deliveryManager: '李强',
+    projectManager: '周明',
     description: 'AI 生成创意图像和视频内容',
     createdAt: '2024-04-05',
     startDate: '2024-04-10',
@@ -299,10 +368,14 @@ export const mockProjects: Project[] = [
     customerName: '成都创新视觉工作室',
     customerType: 'B',
     primaryTenantId: 't5',
+    businessLineId: 'bl-3',
+    businessLineName: '交付型项目',
     stage: 'lead',
     status: 'active',
     preSalesManager: '张伟',
     accountManager: '赵敏',
+    deliveryManager: '王磊',
+    projectManager: '李强',
     description: '3D 建模和渲染加速项目',
     createdAt: '2024-05-05',
     startDate: '2024-05-10',

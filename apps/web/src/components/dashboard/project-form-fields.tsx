@@ -1,0 +1,289 @@
+'use client'
+
+import { useMemo } from 'react'
+import { Input } from '@workspace/ui/components/input'
+import { Label } from '@workspace/ui/components/label'
+import { Textarea } from '@workspace/ui/components/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@workspace/ui/components/select'
+import type { BusinessLine, PlatformTenant } from '@/lib/data/types'
+import {
+  getPlatformTenantsByCustomerId,
+  mockCustomers,
+  mockSalesManagers,
+} from '@/lib/data/mock-data'
+
+export type ProjectFormValues = {
+  customerId: string
+  /** 空字符串表示不指定，使用客户默认计费账户 */
+  primaryTenantId: string
+  name: string
+  description: string
+  stage: 'lead' | 'testing' | 'converted'
+  businessLineId: string
+  preSalesStaffId: string
+  accountManagerStaffId: string
+  deliveryManagerStaffId: string
+  projectManagerStaffId: string
+  monthlyBudget: string
+  startDate: string
+}
+
+const STAGE_OPTIONS = [
+  { value: 'lead' as const, label: '线索孵化' },
+  { value: 'testing' as const, label: '测试中' },
+  { value: 'converted' as const, label: '已转正' },
+]
+
+const NONE_TENANT = '__none__'
+
+type ProjectFormFieldsProps = {
+  values: ProjectFormValues
+  onChange: (patch: Partial<ProjectFormValues>) => void
+  businessLines: BusinessLine[]
+  idPrefix?: string
+}
+
+function tenantLabel(t: PlatformTenant) {
+  const suffix = t.isDefault ? '（默认）' : ''
+  const platform = t.platformTenantId ? ` · ${t.platformTenantId}` : ''
+  return `${t.name}${suffix}${platform}`
+}
+
+export function ProjectFormFields({
+  values,
+  onChange,
+  businessLines,
+  idPrefix = 'project',
+}: ProjectFormFieldsProps) {
+  const customerTenants = useMemo(
+    () => (values.customerId ? getPlatformTenantsByCustomerId(values.customerId) : []),
+    [values.customerId],
+  )
+
+  const handleCustomerChange = (customerId: string) => {
+    onChange({
+      customerId,
+      primaryTenantId: '',
+    })
+  }
+
+  const tenantSelectValue = values.primaryTenantId || NONE_TENANT
+
+  return (
+    <div className="grid gap-4 py-4">
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-customer`}>选择客户</Label>
+        <Select value={values.customerId || undefined} onValueChange={handleCustomerChange}>
+          <SelectTrigger id={`${idPrefix}-customer`} className="w-full">
+            <SelectValue placeholder="请选择客户" />
+          </SelectTrigger>
+          <SelectContent>
+            {mockCustomers.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+                <span className="text-muted-foreground ml-2">
+                  ({c.type === 'B' ? '企业' : '个人'})
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-tenant`}>租户 ID（计费账户）</Label>
+        <Select
+          value={tenantSelectValue}
+          onValueChange={(v) =>
+            onChange({ primaryTenantId: v === NONE_TENANT ? '' : v })
+          }
+          disabled={!values.customerId}
+        >
+          <SelectTrigger id={`${idPrefix}-tenant`} className="w-full">
+            <SelectValue
+              placeholder={
+                values.customerId ? '不选择则使用客户默认账户' : '请先选择客户'
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE_TENANT}>不指定（使用客户默认账户）</SelectItem>
+            {customerTenants.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {tenantLabel(t)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-name`}>项目名称</Label>
+        <Input
+          id={`${idPrefix}-name`}
+          placeholder="请输入项目名称"
+          value={values.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-description`}>项目描述</Label>
+        <Textarea
+          id={`${idPrefix}-description`}
+          placeholder="请输入项目描述"
+          rows={3}
+          value={values.description}
+          onChange={(e) => onChange({ description: e.target.value })}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-stage`}>当前阶段</Label>
+          <Select
+            value={values.stage}
+            onValueChange={(v) =>
+              onChange({ stage: v as ProjectFormValues['stage'] })
+            }
+          >
+            <SelectTrigger id={`${idPrefix}-stage`} className="w-full">
+              <SelectValue placeholder="请选择阶段" />
+            </SelectTrigger>
+            <SelectContent>
+              {STAGE_OPTIONS.map((s) => (
+                <SelectItem key={s.value} value={s.value}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-business-line`}>业务线</Label>
+          <Select
+            value={values.businessLineId || undefined}
+            onValueChange={(v) => onChange({ businessLineId: v })}
+          >
+            <SelectTrigger id={`${idPrefix}-business-line`} className="w-full">
+              <SelectValue placeholder="请选择业务线" />
+            </SelectTrigger>
+            <SelectContent>
+              {businessLines.map((bl) => (
+                <SelectItem key={bl.id} value={bl.id}>
+                  {bl.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-pre-sales`}>售前经理</Label>
+          <Select
+            value={values.preSalesStaffId || undefined}
+            onValueChange={(v) => onChange({ preSalesStaffId: v })}
+          >
+            <SelectTrigger id={`${idPrefix}-pre-sales`} className="w-full">
+              <SelectValue placeholder="请选择" />
+            </SelectTrigger>
+            <SelectContent>
+              {mockSalesManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-account-manager`}>客户经理</Label>
+          <Select
+            value={values.accountManagerStaffId || undefined}
+            onValueChange={(v) => onChange({ accountManagerStaffId: v })}
+          >
+            <SelectTrigger id={`${idPrefix}-account-manager`} className="w-full">
+              <SelectValue placeholder="请选择" />
+            </SelectTrigger>
+            <SelectContent>
+              {mockSalesManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-delivery-manager`}>交付经理</Label>
+          <Select
+            value={values.deliveryManagerStaffId || undefined}
+            onValueChange={(v) => onChange({ deliveryManagerStaffId: v })}
+          >
+            <SelectTrigger id={`${idPrefix}-delivery-manager`} className="w-full">
+              <SelectValue placeholder="请选择" />
+            </SelectTrigger>
+            <SelectContent>
+              {mockSalesManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-project-manager`}>项目经理</Label>
+          <Select
+            value={values.projectManagerStaffId || undefined}
+            onValueChange={(v) => onChange({ projectManagerStaffId: v })}
+          >
+            <SelectTrigger id={`${idPrefix}-project-manager`} className="w-full">
+              <SelectValue placeholder="请选择" />
+            </SelectTrigger>
+            <SelectContent>
+              {mockSalesManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-budget`}>月度预算</Label>
+          <Input
+            id={`${idPrefix}-budget`}
+            type="number"
+            placeholder="¥"
+            value={values.monthlyBudget}
+            onChange={(e) => onChange({ monthlyBudget: e.target.value })}
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-start-date`}>开始日期</Label>
+          <Input
+            id={`${idPrefix}-start-date`}
+            type="date"
+            value={values.startDate}
+            onChange={(e) => onChange({ startDate: e.target.value })}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}

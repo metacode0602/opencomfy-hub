@@ -6,6 +6,7 @@ import type {
   AccountActivity,
   AccountManagerAssignment,
   ActivityTypeDefinition,
+  BusinessLine,
   CalendarWorkday,
   ConsumptionUsageDaily,
   ContractSnapshot,
@@ -32,6 +33,8 @@ export type CrmMockState = typeof crmSeedState & {
   removeCustomer: (id: string) => void
   upsertProjectTenant: (row: ProjectTenant) => void
   removeProjectTenant: (id: string) => void
+  upsertBusinessLine: (row: BusinessLine) => void
+  removeBusinessLine: (id: string) => void
   upsertUserStaff: (row: UserStaff) => void
   removeUserStaff: (id: string) => void
   upsertAssignment: (row: AccountManagerAssignment) => void
@@ -106,6 +109,15 @@ export const useCrmMockStore = create<CrmMockState>()(
       removeProjectTenant: (id) =>
         set((s) => ({
           projectTenants: s.projectTenants.filter((x) => x.id !== id),
+        })),
+
+      upsertBusinessLine: (row) =>
+        set((s) => ({
+          businessLines: replaceById(s.businessLines, row),
+        })),
+      removeBusinessLine: (id) =>
+        set((s) => ({
+          businessLines: s.businessLines.filter((x) => x.id !== id),
         })),
 
       removeCustomer: (id) =>
@@ -280,7 +292,7 @@ export const useCrmMockStore = create<CrmMockState>()(
     }),
     {
       name: "crm-mock-store-v3",
-      version: 3,
+      version: 4,
       migrate: () => ({ ...crmSeedState }),
     },
   ),

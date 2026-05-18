@@ -1,4 +1,3 @@
-import "@workspace/ui/globals.css"
 import { SidebarInset, SidebarProvider } from "@workspace/ui/components/sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { AppSidebar } from "@/components/app-sidebar"

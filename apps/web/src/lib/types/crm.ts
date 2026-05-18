@@ -20,6 +20,18 @@ export type Customer = {
   updated_at: string
 }
 
+/** 业务线主数据 */
+export type BusinessLine = {
+  id: string
+  code: string
+  name: string
+  description: string | null
+  sort_order: number
+  status: 'active' | 'inactive'
+  created_at: string
+  updated_at: string
+}
+
 /** 项目关联的平台计费租户 */
 export type ProjectTenant = {
   id: string

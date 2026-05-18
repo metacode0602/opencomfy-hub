@@ -3,6 +3,7 @@ import type {
   AccountActivity,
   AccountManagerAssignment,
   ActivityTypeDefinition,
+  BusinessLine,
   CalendarWorkday,
   ConsumptionUsageDaily,
   ContractSnapshot,
@@ -91,6 +92,81 @@ export const crmMockProjectTenants: ProjectTenant[] = [
     binding_role: "子商户",
     sort_order: 2,
     created_at: "2026-03-15T09:00:00.000Z",
+  },
+]
+
+const now = "2026-05-18T00:00:00.000Z"
+
+export const crmMockBusinessLines: BusinessLine[] = [
+  {
+    id: "bl-1",
+    code: "short_rent",
+    name: "短租业务",
+    description: null,
+    sort_order: 1,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-2",
+    code: "full_rent",
+    name: "整租业务",
+    description: null,
+    sort_order: 2,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-3",
+    code: "delivery_project",
+    name: "交付型项目",
+    description: null,
+    sort_order: 3,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-4",
+    code: "merchant_project",
+    name: "商户类项目",
+    description: null,
+    sort_order: 4,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-5",
+    code: "compute_derivative",
+    name: "算力衍生业务",
+    description: null,
+    sort_order: 5,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-6",
+    code: "consumer_compute",
+    name: "C端算力业务",
+    description: null,
+    sort_order: 6,
+    status: "active",
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: "bl-7",
+    code: "little_boy_plan",
+    name: "小男孩计划",
+    description: null,
+    sort_order: 7,
+    status: "active",
+    created_at: now,
+    updated_at: now,
   },
 ]
 
@@ -427,6 +503,7 @@ export const crmMockComments: EngagementComment[] = [
 /** zustand 初始快照（与 store 字段一致） */
 export const crmSeedState = {
   customers: crmMockCustomers,
+  businessLines: crmMockBusinessLines,
   projectTenants: crmMockProjectTenants,
   userStaff: crmMockUserStaff,
   accountManagerAssignments: crmMockAssignments,

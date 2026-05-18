@@ -93,17 +93,33 @@ export interface ProjectTenant {
   sortOrder: number
 }
 
+/** 业务线主数据（对应 business_line 表） */
+export interface BusinessLine {
+  id: string
+  code: string
+  name: string
+  description?: string
+  sortOrder: number
+  status: 'active' | 'inactive'
+}
+
 export interface Project {
   id: string
   name: string
   customerId: string
   customerName: string
   customerType: 'B' | 'C'
-  primaryTenantId: string
+  /** 主计费租户；空则使用客户默认 tenant */
+  primaryTenantId?: string
+  businessLineId: string
+  businessLineName: string
   stage: 'lead' | 'testing' | 'converted'
   status: 'active' | 'paused' | 'completed'
+  /** API 读模型：来自 project_staff_assignment JOIN user_staff */
   preSalesManager: string
   accountManager: string
+  deliveryManager: string
+  projectManager: string
   description: string
   createdAt: string
   startDate: string

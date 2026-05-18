@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -67,14 +67,25 @@ import { ProjectOrdersPanel } from '@/components/dashboard/project-orders-panel'
 import { ProjectCouponsPanel } from '@/components/dashboard/project-coupons-panel'
 import { ProjectRechargesPanel } from '@/components/dashboard/project-recharges-panel'
 import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
+import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
+import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { mapStoreBusinessLines } from '@/components/dashboard/project-form-utils'
 
 interface ProjectDetailContentProps {
   project: Project
 }
 
-export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
+export function ProjectDetailContent({ project: initialProject }: ProjectDetailContentProps) {
+  const [project, setProject] = useState(initialProject)
   const [activeTab, setActiveTab] = useState('overview')
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+
+  const storeBusinessLines = useCrmMockStore((s) => s.businessLines)
+  const businessLines = useMemo(
+    () => mapStoreBusinessLines(storeBusinessLines),
+    [storeBusinessLines],
+  )
 
   const activities = getActivitiesByProjectId(project.id)
   const tasks = getTasksByProjectId(project.id)
@@ -93,10 +104,14 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
             <h1 className="text-2xl font-bold">{project.name}</h1>
             <StatusBadge status={project.stage} />
             <StatusBadge status={project.status} />
+            <Badge variant="secondary">{project.businessLineName}</Badge>
           </div>
           <p className="text-muted-foreground">{project.description}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setEditOpen(true)}>
+            编辑项目
+          </Button>
           <Dialog open={isStageDialogOpen} onOpenChange={setIsStageDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">阶段转换</Button>
@@ -205,7 +220,15 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <EditProjectDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={project}
+        businessLines={businessLines}
+        onUpdated={setProject}
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -240,6 +263,28 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
               <div>
                 <p className="text-xs text-muted-foreground">客户经理</p>
                 <p className="font-medium">{project.accountManager}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <User className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">交付经理</p>
+                <p className="font-medium">{project.deliveryManager}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <User className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">项目经理</p>
+                <p className="font-medium">{project.projectManager}</p>
               </div>
             </div>
           </CardContent>
