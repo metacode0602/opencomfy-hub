@@ -19,7 +19,7 @@ import type {
   SupplierPricingHistory,
 } from './types'
 
-// 模拟租户数据
+// 模拟客户数据
 export const mockTenants: Tenant[] = [
   {
     id: 't1',
@@ -892,7 +892,7 @@ export const mockBills: Bill[] = [
   },
 ]
 
-// 辅助函数：根据租户ID获取项目
+// 辅助函数：根据客户ID获取项目
 export function getProjectsByTenantId(tenantId: string): Project[] {
   return mockProjects.filter(p => p.tenantId === tenantId)
 }
@@ -904,12 +904,12 @@ export function getActivitiesByProjectId(projectId: string): Activity[] {
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 }
 
-// 辅助函数：根据租户ID获取充值记录
+// 辅助函数：根据客户ID获取充值记录
 export function getRechargesByTenantId(tenantId: string): Recharge[] {
   return mockRecharges.filter(r => r.tenantId === tenantId)
 }
 
-// 辅助函数：根据租户ID获取消费记录
+// 辅助函数：根据客户ID获取消费记录
 export function getConsumptionsByTenantId(tenantId: string): Consumption[] {
   return mockConsumptions.filter(c => c.tenantId === tenantId)
 }
@@ -924,7 +924,7 @@ export function getOrdersByProjectId(projectId: string): Order[] {
   return mockOrders.filter(o => o.projectId === projectId)
 }
 
-// 辅助函数：根据租户ID获取算力券
+// 辅助函数：根据客户ID获取算力券
 export function getCouponsByTenantId(tenantId: string): Coupon[] {
   return mockCoupons.filter(c => c.tenantId === tenantId)
 }
@@ -934,7 +934,7 @@ export function getBillsByProjectId(projectId: string): Bill[] {
   return mockBills.filter(b => b.projectId === projectId)
 }
 
-// 辅助函数：根据租户ID获取合同
+// 辅助函数：根据客户ID获取合同
 export function getContractsByTenantId(tenantId: string): Contract[] {
   return mockContracts.filter(c => c.tenantId === tenantId)
 }
@@ -1082,7 +1082,7 @@ export const mockSupplierContracts: SupplierContract[] = [
     settlementCycle: 'monthly',
     startDate: '2023-09-01',
     endDate: '2025-08-31',
-    terms: '分成模式合作，按租户实际消费的 35% 向供应商结算；不含网络与管控节点配套费用。',
+    terms: '分成模式合作，按客户实际消费的 35% 向供应商结算；不含网络与管控节点配套费用。',
     signedAt: '2023-08-25',
     signerName: '陈志远',
     contractFileUrl: 'https://example.com/contracts/sup-2023-002.pdf',
@@ -1124,7 +1124,7 @@ export const mockSupplierContracts: SupplierContract[] = [
     revenueShareRatio: 40,
     startDate: '2024-05-01',
     endDate: '2026-04-30',
-    terms: '分成模式合作，按租户实际消费的 40% 进行分成结算，待双方完成用印后生效。',
+    terms: '分成模式合作，按客户实际消费的 40% 进行分成结算，待双方完成用印后生效。',
     createdAt: '2024-03-01',
   },
   {
@@ -1144,7 +1144,7 @@ export const mockSupplierContracts: SupplierContract[] = [
     ],
     startDate: '2024-01-01',
     endDate: '2025-12-31',
-    terms: '补充协议：将原固定 35% 分成调整为按季度累计租户消费卡时分档分成，高档位激励增量合作。',
+    terms: '补充协议：将原固定 35% 分成调整为按季度累计客户消费卡时分档分成，高档位激励增量合作。',
     signedAt: '2023-12-20',
     signerName: '陈志远',
     contractFileUrl: 'https://example.com/contracts/sup-2024-002.pdf',

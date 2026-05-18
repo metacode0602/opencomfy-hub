@@ -211,7 +211,7 @@ export function ProjectDetailContent({ project }: ProjectDetailContentProps) {
             <div className="flex items-center gap-3">
               <Building2 className="w-4 h-4 text-muted-foreground" />
               <div>
-                <p className="text-xs text-muted-foreground">所属租户</p>
+                <p className="text-xs text-muted-foreground">所属客户</p>
                 <Link
                   href={`/tenants/${project.tenantId}`}
                   className="font-medium hover:text-primary transition-colors"

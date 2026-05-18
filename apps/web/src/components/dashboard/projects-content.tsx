@@ -91,15 +91,15 @@ export function ProjectsContent() {
             <DialogHeader>
               <DialogTitle>新建项目</DialogTitle>
               <DialogDescription>
-                创建新项目并关联租户
+                创建新项目并关联客户
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>选择租户</Label>
+                <Label>选择客户</Label>
                 <Select>
                   <SelectTrigger>
-                    <SelectValue placeholder="请选择租户" />
+                    <SelectValue placeholder="请选择客户" />
                   </SelectTrigger>
                   <SelectContent>
                     {mockTenants.map(tenant => (
@@ -232,7 +232,7 @@ export function ProjectsContent() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="搜索项目名称、租户、客户经理..."
+                placeholder="搜索项目名称、客户、客户经理..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
@@ -273,7 +273,7 @@ export function ProjectsContent() {
             <TableHeader>
               <TableRow>
                 <TableHead>项目名称</TableHead>
-                <TableHead>租户</TableHead>
+                <TableHead>客户</TableHead>
                 <TableHead>阶段</TableHead>
                 <TableHead>售前</TableHead>
                 <TableHead>客户经理</TableHead>

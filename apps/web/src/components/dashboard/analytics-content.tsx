@@ -73,7 +73,7 @@ const productLineData = [
   { name: '对象存储加速', value: 78000, color: '#14b8a6', icon: Database, change: 25.3 },
 ]
 
-// 租户消费排名
+// 客户消费排名
 const topTenants = [
   { name: '上海云算科技股份公司', consumption: 650000, change: 12.5 },
   { name: '北京深智科技有限公司', consumption: 328000, change: 8.3 },
@@ -167,7 +167,7 @@ export function AnalyticsContent() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">活跃租户</p>
+                <p className="text-sm text-muted-foreground">活跃客户</p>
                 <p className="text-2xl font-bold">5</p>
               </div>
               <div className="flex items-center text-green-500 text-sm">
@@ -198,7 +198,7 @@ export function AnalyticsContent() {
         <TabsList>
           <TabsTrigger value="overview">总览</TabsTrigger>
           <TabsTrigger value="products">产品线分析</TabsTrigger>
-          <TabsTrigger value="tenants">租户分析</TabsTrigger>
+          <TabsTrigger value="tenants">客户分析</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
@@ -307,7 +307,7 @@ export function AnalyticsContent() {
             {/* Top Tenants */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">租户消费排名</CardTitle>
+                <CardTitle className="text-base">客户消费排名</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
@@ -436,14 +436,14 @@ export function AnalyticsContent() {
           {/* Tenant Consumption Table */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">租户消费明细</CardTitle>
+              <CardTitle className="text-base">客户消费明细</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>排名</TableHead>
-                    <TableHead>租户名称</TableHead>
+                    <TableHead>客户名称</TableHead>
                     <TableHead>类型</TableHead>
                     <TableHead>消费金额</TableHead>
                     <TableHead>占比</TableHead>

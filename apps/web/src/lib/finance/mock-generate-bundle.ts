@@ -74,9 +74,9 @@ export function generateMockFinanceBundle(input: {
 
   const tenants = [
     { name: "华东弹性算力客户 A", id: "984" },
-    { name: "华北裸金属租户 B", id: "4583" },
+    { name: "华北裸金属客户 B", id: "4583" },
     { name: "华南云主机客户 C", id: "338" },
-    { name: "西南混合消费租户 D", id: "3018" },
+    { name: "西南混合消费客户 D", id: "3018" },
   ]
 
   const income: PlatformIncomeMonthly[] = tenants.map((t, idx) => {

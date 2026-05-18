@@ -81,7 +81,7 @@ export function DashboardContent() {
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="活跃租户"
+          title="活跃客户"
           value={mockTenants.filter(t => t.status === 'active').length}
           description="较上月"
           icon={Building2}
@@ -225,7 +225,7 @@ export function DashboardContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>项目名称</TableHead>
-                  <TableHead>租户</TableHead>
+                  <TableHead>客户</TableHead>
                   <TableHead>阶段</TableHead>
                   <TableHead>客户经理</TableHead>
                   <TableHead className="text-right">本月消费</TableHead>

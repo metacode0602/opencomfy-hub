@@ -369,7 +369,7 @@ export interface SupplierBillDetail {
   usageHours: number
   unitCost: number
   amount: number
-  tenantConsumption?: number // 租户实际消费（分成模式使用）
+  tenantConsumption?: number // 客户实际消费（分成模式使用）
 }
 
 /** 供应商 × 机房 × 卡型 当前生效单价/分成配置 */

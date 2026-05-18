@@ -616,7 +616,7 @@ function PricingTermsBody({ contract }: { contract: SupplierContract }) {
           {contract.revenueShareRatio != null ? `${contract.revenueShareRatio}%` : '—'}
         </p>
         <p className="text-xs text-muted-foreground mt-2">
-          按租户实际消费金额 × 分成比例结算
+          按客户实际消费金额 × 分成比例结算
         </p>
       </div>
     )

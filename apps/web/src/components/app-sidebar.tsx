@@ -103,7 +103,7 @@ const data = {
       icon: <BarChart3 className="size-4" />,
     },
     {
-      title: "租户",
+      title: "客户",
       url: "/crm/tenants",
       icon: <Building2 className="size-4" />,
     },

@@ -38,17 +38,17 @@ const SLOT_LABEL: Record<
 > = {
   customer: {
     title: "客户消费明细",
-    hint: "Excel：租户ID、类型、总消费、券消费、余额消费等列",
+    hint: "Excel：客户ID、类型、总消费、券消费、余额消费等列",
     accept: ".xlsx,.xls,.csv",
   },
   baremetal: {
     title: "裸金属消费订单列表",
-    hint: "Excel：订单ID、租户ID、订单金额、最终总额、下单时间等列",
+    hint: "Excel：订单ID、客户ID、订单金额、最终总额、下单时间等列",
     accept: ".xlsx,.xls,.csv",
   },
   tenantBill: {
-    title: "租户账单详情（除 CPU 任务）",
-    hint: "Excel 或 CSV：租户ID、总消费、卡时、GPU 型号、区域等列",
+    title: "客户账单详情（除 CPU 任务）",
+    hint: "Excel 或 CSV：客户ID、总消费、卡时、GPU 型号、区域等列",
     accept: ".xlsx,.xls,.csv",
   },
 }

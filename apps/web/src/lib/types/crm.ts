@@ -7,7 +7,7 @@ export type Tenant = {
   tenant_code: string
   name: string
   account_name: string
-  /** 平台计费租户 ID（主租户）；与 commercial_account.primary_tenant 对齐 */
+  /** 平台计费客户 ID（主客户）；与 commercial_account.primary_tenant 对齐 */
   platform_tenant_id: string | null
   status: string
   type: string
@@ -22,7 +22,7 @@ export type Tenant = {
   updated_at: string
 }
 
-/** 额外计费租户绑定到同一客户组合（commercial_account） */
+/** 额外计费客户绑定到同一客户组合（commercial_account） */
 export type TenantBinding = {
   id: string
   tenant_id: string

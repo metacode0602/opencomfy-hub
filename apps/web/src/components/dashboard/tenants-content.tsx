@@ -82,26 +82,26 @@ export function TenantsContent() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">租户管理</h1>
-          <p className="text-muted-foreground">管理所有 B 端和 C 端租户信息</p>
+          <h1 className="text-2xl font-bold">客户管理</h1>
+          <p className="text-muted-foreground">管理所有 B 端和 C 端客户信息</p>
         </div>
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
-              新建租户
+              新建客户
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
-              <DialogTitle>新建租户</DialogTitle>
+              <DialogTitle>新建客户</DialogTitle>
               <DialogDescription>
-                填写租户基本信息，创建新的租户账号
+                填写客户基本信息，创建新的客户账号
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label>租户类型</Label>
+                <Label>客户类型</Label>
                 <Select defaultValue="B">
                   <SelectTrigger>
                     <SelectValue />
@@ -113,8 +113,8 @@ export function TenantsContent() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>租户名称</Label>
-                <Input placeholder="请输入租户名称" />
+                <Label>客户名称</Label>
+                <Input placeholder="请输入客户名称" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -155,7 +155,7 @@ export function TenantsContent() {
                 取消
               </Button>
               <Button onClick={() => setIsDialogOpen(false)}>
-                创建租户
+                创建客户
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -168,7 +168,7 @@ export function TenantsContent() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <Building2 className="w-4 h-4" />
-              B 端租户
+              B 端客户
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -179,7 +179,7 @@ export function TenantsContent() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
               <User className="w-4 h-4" />
-              C 端租户
+              C 端客户
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -217,7 +217,7 @@ export function TenantsContent() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="搜索租户名称、联系人..."
+                placeholder="搜索客户名称、联系人..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
@@ -226,7 +226,7 @@ export function TenantsContent() {
             <div className="flex gap-2">
               <Select value={typeFilter} onValueChange={setTypeFilter}>
                 <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="租户类型" />
+                  <SelectValue placeholder="客户类型" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部类型</SelectItem>
@@ -256,7 +256,7 @@ export function TenantsContent() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>租户名称</TableHead>
+                <TableHead>客户名称</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>联系人</TableHead>
                 <TableHead>行业</TableHead>
@@ -333,7 +333,7 @@ export function TenantsContent() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem className="text-destructive">
                           <Pause className="w-4 h-4 mr-2" />
-                          暂停租户
+                          暂停客户
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

@@ -381,7 +381,7 @@ export function CreateCardPricingDialog({
                 value="revenue_share"
                 id="pricing-category-revenue-share"
                 title="分成"
-                description="按租户消费分成，约定供应商分成比例"
+                description="按客户消费分成，约定供应商分成比例"
                 selected={category === 'revenue_share'}
               />
             </RadioGroup>

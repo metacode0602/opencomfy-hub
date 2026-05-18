@@ -223,7 +223,7 @@ export function ContractsContent() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="搜索合同编号、租户、项目..."
+                placeholder="搜索合同编号、客户、项目..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
@@ -267,7 +267,7 @@ export function ContractsContent() {
               <TableRow>
                 <TableHead>合同编号</TableHead>
                 <TableHead>项目</TableHead>
-                <TableHead>租户</TableHead>
+                <TableHead>客户</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>合同金额</TableHead>
                 <TableHead>已支付</TableHead>

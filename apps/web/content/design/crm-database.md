@@ -1,6 +1,6 @@
 # CRM 模块数据库设计
 
-**依据**：`apps/web/src/app/[locale]/(protected)/crm` 路由及子组件、`apps/web/src/components/dashboard/*` 业务面板、`lib/data/types.ts`（租户/项目主流程）、`lib/types/crm.ts`（员工/日历/经营扩展）、`lib/stores/crm-mock-store.ts`。
+**依据**：`apps/web/src/app/[locale]/(protected)/crm` 路由及子组件、`apps/web/src/components/dashboard/*` 业务面板、`lib/data/types.ts`（客户/项目主流程）、`lib/types/crm.ts`（员工/日历/经营扩展）、`lib/stores/crm-mock-store.ts`。
 
 **文档性质**：CRM 域逻辑表结构（PostgreSQL 风格类型）；物理实现可拆 schema，外键语义与唯一约束应保持一致。
 
@@ -14,10 +14,10 @@
 
 | 数据源 | 路径 | 使用页面 |
 |--------|------|----------|
-| **经营主流程 Mock** | `lib/data/mock-data.ts` + `lib/data/types.ts` | 工作台、租户、项目、合同、数据看板 |
+| **经营主流程 Mock** | `lib/data/mock-data.ts` + `lib/data/types.ts` | 工作台、客户、项目、合同、数据看板 |
 | **CRM Store Mock** | `lib/data/crm-mock.ts` + `lib/types/crm.ts` + `crm-mock-store` | 员工、日历（客户动态） |
 
-合并实现时：租户/项目页迁移至统一 API；`user_staff`、`account_activity`、`calendar_workday` 等可复用 CRM Store 已有形状。
+合并实现时：客户/项目页迁移至统一 API；`user_staff`、`account_activity`、`calendar_workday` 等可复用 CRM Store 已有形状。
 
 ---
 
@@ -25,12 +25,12 @@
 
 | 决策 | 说明 |
 |------|------|
-| **租户 + 项目两级** | 侧边栏与页面以 **租户**（计费/联系主体）与 **项目**（经营跟踪单元）为主轴；一个租户可有多个项目（`TenantsContent` / `ProjectsContent`）。 |
+| **客户 + 项目两级** | 侧边栏与页面以 **客户**（计费/联系主体）与 **项目**（经营跟踪单元）为主轴；一个客户可有多个项目（`TenantsContent` / `ProjectsContent`）。 |
 | **`commercial_account` 可选合并** | 若需与全产品逻辑模型对齐，可将 `tenant` 与 `commercial_account` 保持 1:1（`primary_tenant_id`）；本 CRM UI 当前以 `tenant` 单表承载列表字段。 |
 | **项目四人组** | 创建项目时 **必须** 指定售前经理、客户经理、交付经理、项目经理，均通过 `user_staff` 选择，落库 `project_staff_assignment`（四种 `role_type` 各一条当前有效记录）。不在 `commercial_project` 上存姓名字符串。 |
 | **员工主数据** | `user_staff` 为选人唯一来源；项目列表/详情通过 JOIN 分配表展示姓名。 |
-| **两类「活动」** | `project_activity`：项目时间线（评论/会议/阶段变更等）；`account_activity`：客户动态投影（日历页，可跨租户聚合）。 |
-| **两类「任务」** | `compute_task`：算力运行任务（GPU/Job）；`follow_up_task`：协作跟进待办（CRM Store，待租户 Hub 接入）。 |
+| **两类「活动」** | `project_activity`：项目时间线（评论/会议/阶段变更等）；`account_activity`：客户动态投影（日历页，可跨客户聚合）。 |
+| **两类「任务」** | `compute_task`：算力运行任务（GPU/Job）；`follow_up_task`：协作跟进待办（CRM Store，待客户 Hub 接入）。 |
 | **合同** | CRM 合同页为 **完整商务合同**（`contract`）；`contract_snapshot` 保留为摘要/外链形态，供未来轻量录入。 |
 | **分析页只读** | `/crm/analytics` 读计费域月结汇总，非 CRM 写表。 |
 
@@ -54,7 +54,7 @@
 | `/crm/contracts` | `crm/contracts/page.tsx` | `ContractsContent` | `contract` |
 | `/crm/calendar` | `crm/calendar/page.tsx` | `CalendarContent` | `account_activity`、`activity_type_definition`；可选 `calendar_workday` |
 
-### 2.2 租户详情 Tab（`TenantDetailContent`）
+### 2.2 客户详情 Tab（`TenantDetailContent`）
 
 | Tab | 组件逻辑 | 表名 | 说明 |
 |-----|----------|------|------|
@@ -95,11 +95,11 @@
 
 ### 2.5 CRM Store 扩展（待 UI 接入，表结构保留）
 
-`crm-mock-store` 已建模、**尚无独立路由页**，供租户经营 Hub / 后续迭代：
+`crm-mock-store` 已建模、**尚无独立路由页**，供客户经营 Hub / 后续迭代：
 
 | 概念 | 表名 | 前端类型 |
 |------|------|----------|
-| 多租户绑定 | `tenant_binding` | `TenantBinding` |
+| 多客户绑定 | `tenant_binding` | `TenantBinding` |
 | 客户经理分配 | `account_manager_assignment` | `AccountManagerAssignment` |
 | 测试券发放 | `test_voucher_issue` | `TestVoucherIssue` |
 | 生命周期里程碑 | `lifecycle_milestone` | `LifecycleMilestone` |
@@ -128,7 +128,7 @@
 
 ### 3.2 主数据
 
-#### `tenant`（租户 — 计费与联系主体）
+#### `tenant`（客户 — 计费与联系主体）
 
 对应 `lib/data/types.Tenant`；与 `lib/types/crm.Tenant` 生命周期字段可合并到同表或 `commercial_account` 扩展表。
 
@@ -139,7 +139,7 @@
 | `cert_code` | varchar | | `cert_code`；社会统一信用编码 |
 | `type` | varchar | NOT NULL | `type`：`B` / `C` |
 | `status` | varchar | NOT NULL | `status`：`active` / `inactive` / `suspended` |
-| `contact_person` | varchar | | `contactPerson`；新建租户表单 |
+| `contact_person` | varchar | | `contactPerson`；新建客户表单 |
 | `contact_phone` | varchar | | `contactPhone` |
 | `contact_email` | varchar | | `contactEmail` |
 | `industry` | varchar | | `industry` |
@@ -149,7 +149,7 @@
 | `updated_at` | timestamptz | | |
 | `tenant_code` | varchar | UK 可选 | `crm.Tenant.tenant_code`（Store） |
 | `account_name` | varchar | | `crm.Tenant.account_name` |
-| `platform_tenant_id` | varchar | UK 可选 | 平台计费租户 ID |
+| `platform_tenant_id` | varchar | UK 可选 | 平台计费客户 ID |
 | `lifecycle_phase` | varchar | | `crm.Tenant.lifecycle_phase` |
 | `expected_scale` | jsonb | | `expected_scale` |
 | `observed_scale_summary` | jsonb | | `observed_scale_summary` |
@@ -204,7 +204,7 @@
 
 #### `contract`（项目合同 — CRM 全量）
 
-对应 `lib/data/types.Contract`；`/crm/contracts` 与租户/项目详情 Tab。
+对应 `lib/data/types.Contract`；`/crm/contracts` 与客户/项目详情 Tab。
 
 | 列名 | 类型 | 约束 | 前端字段 |
 |------|------|------|----------|
@@ -416,7 +416,7 @@
 | 列名 | 类型 | 约束 | 前端字段 |
 |------|------|------|----------|
 | `id` | text | PK | |
-| `tenant_id` | text | FK→tenant | `tenant_id`（CRM 类型；事实租户） |
+| `tenant_id` | text | FK→tenant | `tenant_id`（CRM 类型；事实客户） |
 | `commercial_account_id` | text | FK 可空 | 与 tenant 1:1 时可同 id |
 | `activity_type_id` | text | FK | `activity_type_id` |
 | `occurred_at` | timestamptz | NOT NULL | `occurred_at` |
@@ -447,8 +447,8 @@
 
 以下表结构同 v1.2；外键 `tenant_id` 落库建议 **`tenant.id`** 或 **`commercial_account_id`**（与全产品模型对齐时）。
 
-- `tenant_binding` — 多计费租户绑定
-- `account_manager_assignment` — 组合/租户级 AM（`role_type`、`effective_from` / `effective_to`）
+- `tenant_binding` — 多计费客户绑定
+- `account_manager_assignment` — 组合/客户级 AM（`role_type`、`effective_from` / `effective_to`）
 - `test_voucher_issue`、`lifecycle_milestone`、`milestone_evidence`
 - `contract_snapshot` — 轻量合同摘要（与 `contract` 并存时：`contract` 为主，`contract_snapshot` 可存外链）
 - `recharge_order`、`consumption_usage_daily`、`conversion_record`
@@ -460,7 +460,7 @@
 
 ### 3.8 项目人员分配
 
-项目侧四类经营角色均引用 `user_staff`；与租户级 `account_manager_assignment`（组合/租户维度、可多人多角色）分离。
+项目侧四类经营角色均引用 `user_staff`；与客户级 `account_manager_assignment`（组合/客户维度、可多人多角色）分离。
 
 #### `project_role_type`（角色枚举 — 应用常量）
 
@@ -512,7 +512,7 @@ WHERE psa.project_id = :project_id AND psa.effective_to IS NULL
 
 ## 4. ER 图
 
-### 4.1 租户、项目与员工
+### 4.1 客户、项目与员工
 
 ```mermaid
 erDiagram
@@ -528,7 +528,7 @@ erDiagram
   commercial_project ||--o{ project_activity : "时间线"
   commercial_project ||--o{ project_staff_assignment : "人员"
   user_staff ||--o{ project_staff_assignment : "员工"
-  user_staff ||--o{ account_manager_assignment : "租户级AM"
+  user_staff ||--o{ account_manager_assignment : "客户级AM"
 
   tenant {
     text id PK
@@ -636,11 +636,11 @@ erDiagram
 | 阶段转换 | 更新 `commercial_project.stage` + 插入 `project_activity`（`type = stage_change`） |
 | **创建项目** | 单事务：`commercial_project` + 4×`project_staff_assignment`；缺任一角色则 400 |
 | **更换项目角色** | 对原行 SET `effective_to = now()`，INSERT 新行；禁止无历史地 UPDATE `user_staff_id` |
-| 删除租户 | 级联 `commercial_project` 及项目子表（含 `project_staff_assignment`），或软删除 |
-| 员工列表「负责客户数」 | COUNT `account_manager_assignment` WHERE `effective_to IS NULL`（租户级） |
+| 删除客户 | 级联 `commercial_project` 及项目子表（含 `project_staff_assignment`），或软删除 |
+| 员工列表「负责客户数」 | COUNT `account_manager_assignment` WHERE `effective_to IS NULL`（客户级） |
 | 员工列表「负责项目数」 | COUNT DISTINCT `project_id` FROM `project_staff_assignment` WHERE `user_staff_id = ?` AND `effective_to IS NULL` |
 | 分析页 | 读计费域 `tenant_consumption_monthly` 等，非 CRM 写模型 |
-| Mock 合并 | `mock-data` 租户 ID（如 `t1`）与 `crm-mock`（如 `t-001`）需在 API 层统一后再接 Store |
+| Mock 合并 | `mock-data` 客户 ID（如 `t1`）与 `crm-mock`（如 `t-001`）需在 API 层统一后再接 Store |
 
 ---
 
@@ -648,14 +648,14 @@ erDiagram
 
 | 表名 | 中文 | 页面入口 |
 |------|------|----------|
-| `tenant` | 租户 | `/crm/tenants`、租户详情 |
-| `commercial_project` | 经营项目 | `/crm/projects`、项目详情、租户详情·项目 Tab |
+| `tenant` | 客户 | `/crm/tenants`、客户详情 |
+| `commercial_project` | 经营项目 | `/crm/projects`、项目详情、客户详情·项目 Tab |
 | `user_staff` | 内部员工 | `/crm/staff` |
 | `project_staff_assignment` | 项目四人组（售前/客户/交付/项目经理） | 新建项目对话框、项目列表/详情 |
-| `contract` | 项目合同 | `/crm/contracts`、租户/项目详情 |
-| `recharge` | 充值 | 租户/项目详情 |
-| `consumption_record` | 消费明细 | 租户/项目详情 |
-| `coupon` | 算力券 | 租户/项目详情 |
+| `contract` | 项目合同 | `/crm/contracts`、客户/项目详情 |
+| `recharge` | 充值 | 客户/项目详情 |
+| `consumption_record` | 消费明细 | 客户/项目详情 |
+| `coupon` | 算力券 | 客户/项目详情 |
 | `compute_task` | 算力任务 | 项目详情·任务 |
 | `commerce_order` | 产品订单 | 项目详情·订单 |
 | `commerce_order_item` | 订单行 | 同上 |
@@ -666,7 +666,7 @@ erDiagram
 | `account_activity` | 客户动态 | `/crm/calendar` |
 | `activity_type_definition` | 动态类型 | 系统配置 |
 | `calendar_workday` | 工作日历 | 待接日历 CRUD |
-| `account_manager_assignment` | 租户级 AM | 员工详情统计（Store） |
+| `account_manager_assignment` | 客户级 AM | 员工详情统计（Store） |
 | `tenant_binding` 等 | 经营扩展 | Store 待接 Hub |
 
 ---
@@ -675,4 +675,4 @@ erDiagram
 
 - 页面或 `lib/data/types.ts` / `lib/types/crm.ts` 字段变更时，同步本节表定义。
 - 统一 Mock 后，删除本文 §0 双源说明，并将 `tenant_id` / `commercial_account_id` 命名在 API 层定稿。
-- 全产品逻辑模型若有 `database-schema-structure.md`，CRM 写模型以 **租户 + 项目 + 本文件 §3.3–3.5** 为准；§3.7 与全产品 §1 对齐。
+- 全产品逻辑模型若有 `database-schema-structure.md`，CRM 写模型以 **客户 + 项目 + 本文件 §3.3–3.5** 为准；§3.7 与全产品 §1 对齐。

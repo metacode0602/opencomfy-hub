@@ -106,7 +106,7 @@ function ActivityDetailDialog({
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <DetailRow label="业务发生时间" value={formatDateTime(activity.occurred_at)} />
-              <DetailRow label="租户" value={tenantName} />
+              <DetailRow label="客户" value={tenantName} />
               <DetailRow label="动态类型" value={typeName} />
               <DetailRow label="关联业务域" value={activity.ref_domain ?? '—'} />
               <DetailRow label="关联记录 ID" value={activity.ref_id ?? '—'} />
@@ -126,7 +126,7 @@ function ActivityDetailDialog({
               )}
               <Button variant="link" className="h-auto px-0" asChild>
                 <LocaleLink href={`/crm/tenants/${activity.tenant_id}`}>
-                  进入租户详情
+                  进入客户详情
                 </LocaleLink>
               </Button>
             </div>

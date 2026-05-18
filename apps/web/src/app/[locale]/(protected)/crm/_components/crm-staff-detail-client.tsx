@@ -130,7 +130,7 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
           <CardHeader>
             <CardTitle>客户经理分配</CardTitle>
             <CardDescription>
-              该员工在客户组合上的 AM 记录；可在租户详情中维护分配。
+              该员工在客户组合上的 AM 记录；可在客户详情中维护分配。
             </CardDescription>
           </CardHeader>
           <CardContent>

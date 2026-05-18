@@ -107,7 +107,7 @@ export function SupplierBillsPanel({ supplier }: SupplierBillsPanelProps) {
                   <TableHead className="text-muted-foreground">使用卡时</TableHead>
                   <TableHead className="text-muted-foreground">单价</TableHead>
                   {bill.cooperationMode === 'revenue_share' && (
-                    <TableHead className="text-muted-foreground">租户消费</TableHead>
+                    <TableHead className="text-muted-foreground">客户消费</TableHead>
                   )}
                   <TableHead className="text-muted-foreground">金额</TableHead>
                 </TableRow>
