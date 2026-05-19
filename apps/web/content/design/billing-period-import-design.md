@@ -1,10 +1,12 @@
 # 账期导入与经营核算实现方案
 
-> 版本：v1.3（设计稿）  
+> 版本：v1.4（设计稿）  
 > 日期：2026-05-19  
 > 变更：v1.1 — 账单详情 Excel 不再含客户经理/项目名称；改由租户反查项目并补全 AM；支持一租户多项目成本分成配置  
 > 变更：v1.2 — §6.4 增加「卡时价阶梯分成」：按成交卡时/刊例价落档后取档内分成比例计算售出成本  
 > 变更：v1.3 — §5.3 增加 Step I0：客户消费明细按租户跨「类型」汇总后再参与收入计算  
+> 变更：v1.4 — 支持账期「重新生成」：清理本账期全部导入与计算产物后重算，不保留历史批次，避免旧数据干扰  
+> 变更：v1.4.1 — §4.6 同步数据库表结构（`packages/db/src/finance-schema.ts`）  
 > 状态：**设计稿 — 确认后再实施代码**  
 > 关联：`apps/web/src/lib/types/finance.ts`、`cost-row-utils.ts`、`income-row-utils.ts`、`/finance/create` 页面
 
@@ -17,7 +19,8 @@
 | # | 目标 | 说明 |
 |---|------|------|
 | G1 | 添加账期 | 用户填写账期编码与起止日期，上传三类 Excel，系统计算并生成收入/成本结果 |
-| G2 | 原始数据可追溯 | 上传文件与解析行 **只追加、不覆盖**；计算结果可追溯到具体导入批次与源行号 |
+| G2 | 当前导入可溯源 | 计算结果可追溯到 **当前** 导入批次的源行号；**不提供**跨次「重新生成」的历史版本查阅 |
+| G7 | 支持重新生成 | 同一账期允许重新生成；**先清理**本账期全部导入与计算数据，再导入/计算，避免历史数据影响结果 |
 | G3 | 规则自动计算 | 汇总、含税/不含税换算、卡时成本、毛利等由规则引擎生成，人工仅做 **调账**（沿用现有 override 机制） |
 | G4 | B/C 分轨收入 | 「月度经营收入账单」按 **客户类型（B端 / C端）** 分别产出 |
 | G5 | B端成本按 AM 汇总 | 「月度经营成本」仅统计 **B端** 租户账单；按 **项目 AM** → 区域 × 卡型 两级展示；一租户多项目时按 **成本分成比例** 拆分后归因 |
@@ -28,13 +31,15 @@
 - 不解析 CPU 任务类消费（输入表已声明「除 CPU 任务外」）
 - 不在本方案中实现供应商账单结算（仅消费 **机房 × 卡型** 的采购单价配置）
 - 不替代 CRM 域 `tenant_bill` 的日常出账流程；本账期为 **财务经营月结** 专用
+- 不提供导入/计算 **历史版本** 归档、对比或回滚（仅保留当前有效数据）
 
 ### 1.3 设计原则
 
-1. **不可变原始层（Immutable Raw）**：Excel → 解析行表，禁止 UPDATE 业务字段，仅允许软删/作废导入批次。
-2. **可重算派生层（Derived）**：`platform_income_monthly`、`platform_cost_monthly` 由计算任务根据原始层 + 主数据 **覆盖写入**（同一 `billing_period_id` + `calc_version`）。
-3. **主数据外置**：项目名、客户经理、机房卡价、**成本分成比例** 来自 CRM/配置表；账单 Excel 仅含消费与卡时事实列（§3.3）。
-4. **金额精度**：内部计算用 `decimal(15,4)`；展示四舍五入到分；与现有 `toMoneyString`（4 位小数）对齐。
+1. **账期内可替换（Replace-in-Period）**：同一 `billing_period_id` 下，重新上传或「重新生成」时 **物理删除** 旧 Raw / 中间表 / 派生结果，再写入新数据；禁止与旧批次并存。
+2. **派生层全量重建（Derived Rebuild）**：`platform_income_monthly`、`platform_cost_monthly` 每次计算前 **DELETE** 本账期既有行，再 INSERT 新结果；不保留上一版计算快照。
+3. **重新生成优先清理**：任何「重新生成」入口必须先执行 §7.4 清理范围，再解析/计算，保证无残留行参与汇总。
+4. **主数据外置**：项目名、客户经理、机房卡价、**成本分成比例** 来自 CRM/配置表；账单 Excel 仅含消费与卡时事实列（§3.3）。
+5. **金额精度**：内部计算用 `decimal(15,4)`；展示四舍五入到分；与现有 `toMoneyString`（4 位小数）对齐。
 
 ---
 
@@ -70,8 +75,10 @@ flowchart TB
   subgraph review [复核阶段]
     O --> P[预览收入 + 成本表]
     P --> Q{确认写入?}
-    Q -->|是| R[固化 calc_version + 发布账期]
+    Q -->|是| R[发布账期]
     Q -->|否| S[调整 Excel / 分成 / 重新计算]
+    S --> T[重新生成: purge 本账期数据]
+    T --> B
   end
 ```
 
@@ -84,7 +91,15 @@ flowchart TB
 | `pending_allocation` | 存在「一租户多项目」且本账期尚未确认成本分成比例（阻塞计算） |
 | `computed` | 已计算，待人工复核（对应 UI「计算结果（未写入）」） |
 | `published` | 已发布，对外可见；允许调账 override，调账后标记 `adjusted` |
-| `void` | 作废；Raw 保留，派生层不再用于报表 |
+| `void` | 作废；执行与「重新生成」相同的清理（§7.4），账期元数据保留，不再参与报表 |
+
+**重新生成与状态**
+
+| 操作 | 允许状态 | 清理后状态 |
+|------|----------|------------|
+| 重新上传（单类 Excel） | `draft` / `imported` / `pending_allocation` / `computed` | 清理该文件类型及下游产物后 → `imported` 或 `draft`（视三类是否齐全） |
+| 重新生成（整账期） | 同上；`published` / `adjusted` 须先 **撤回发布** | `draft`（需重新上传三类文件）或 `imported`（若 UI 保留文件并自动重解析） |
+| 作废 | 任意非 `void` | `void` |
 
 ---
 
@@ -189,14 +204,15 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 
 ---
 
-## 4. 数据模型（可追溯）
+## 4. 数据模型
 
-### 4.1 原始层（只追加）
+### 4.1 原始层（账期内可替换）
 
 ```
 billing_period_import_batch
   id, billing_period_id, file_type, file_name, file_sha256,
-  row_count, uploaded_by, uploaded_at, status
+  row_count, uploaded_by, uploaded_at
+  -- UNIQUE(billing_period_id, file_type)；无 status/superseded
 
 billing_period_raw_customer_consumption
   id, batch_id, row_no, tenant_platform_id, product_type,
@@ -244,9 +260,10 @@ tenant_project_cost     -- 预置：同一租户多项目默认分成
   remark, created_by, created_at
 ```
 
-- `raw_json`：保留原始行对象，便于审计。
+- `raw_json`：保留原始行对象，便于对 **当前批次** 审计。
 - `row_no`：Excel 物理行号（含表头偏移），支持「定位到源表第 N 行」。
-- 重新上传：新建 `batch_id`，旧 batch 标记 `superseded`；计算默认取 **最新有效 batch**。
+- **重新上传（单类）**：`DELETE` 本账期该 `file_type` 下既有 `batch` 及关联 raw 行 → 新建 `batch_id` 并写入；每账期每 `file_type` **至多一组** 有效 batch。
+- **重新生成（整账期）**：按 §7.4 删除本账期全部 batch 与 raw 行后，再重新导入或重解析。
 
 ### 4.2 派生层（与现有类型对齐）
 
@@ -254,12 +271,55 @@ tenant_project_cost     -- 预置：同一租户多项目默认分成
 
 | 字段 | 说明 |
 |------|------|
-| `billing_period.calc_version` | 单调递增，每次重算 +1 |
+| `billing_period.last_computed_at` | 最近一次成功计算时间（可选） |
 | `billing_period.customer_type` | 收入表分轨：`B` / `C`（账期级可各生成一套 income，或 income 行带 `customer_type`） |
 | `platform_income_monthly.customer_type` | 建议增加，便于同账期 B/C 两行并存 |
 | `platform_cost_monthly.source_raw_ids` | JSON：贡献的 raw 行 id 列表（可选，用于钻取） |
 | `platform_cost_monthly.project_id` | 建议增加：多项目拆分后的项目归因 |
 | `platform_cost_monthly.allocation_percent` | 建议增加：该行占原 Raw 行的比例（审计） |
+
+### 4.6 数据库表结构（PostgreSQL / Drizzle）
+
+实现文件：`packages/db/src/finance-schema.ts`（与本文同步）。
+
+**v1.4 相对 v1.3 的库表变更**
+
+| 变更 | 说明 |
+|------|------|
+| 删除 `billing_period.calc_version` | 不再存计算版本快照 |
+| 新增 `billing_period.last_computed_at`、`voided_at` | 最近计算时间；作废时间 |
+| `billing_period` 汇总金额字段改为 **可 NULL** | `purge` 后置 NULL，计算完成后写入 |
+| 删除 `billing_period_import_batch.status` | 取消 `superseded`；重新上传前 **DELETE** 旧 batch |
+| **唯一约束** `(billing_period_id, file_type)` | 每账期每类 Excel 仅一组 batch |
+| 新增 `billing_period_reconciliation_report` | 对账报告；`UNIQUE(billing_period_id)`，purge 派生层时删除 |
+| 新增 `billing_period_operation_log` | 操作审计（purge/regenerate/compute 等），**不**存被删业务行 |
+
+**级联删除（支持 purge，无需软删）**
+
+```
+billing_period
+  ├─ billing_period_import_batch  ON DELETE CASCADE
+  │    └─ billing_period_raw_*     ON DELETE CASCADE
+  ├─ billing_period_agg_customer_consumption
+  ├─ billing_period_tenant_project_enrichment
+  ├─ billing_tenant_cost_allocation
+  ├─ platform_income_monthly
+  │    └─ income_adjustment_history / supplementary_consumption_history
+  ├─ platform_cost_monthly
+  │    └─ voucher_card_hours_adjustment_history
+  ├─ billing_period_reconciliation_report
+  └─ billing_period_operation_log
+```
+
+**purge 与表操作映射**
+
+| scope | SQL 要点 |
+|-------|----------|
+| `file_type` | `DELETE FROM billing_period_import_batch WHERE billing_period_id=? AND file_type=?`（cascade raw）；并按类型删 agg / enrichment；再删派生 + 对账报告 |
+| `derived` | `DELETE` income/cost（cascade 调账历史）、`DELETE` reconciliation_report；重置账期汇总列为 NULL |
+| `full` | 删本账期全部子表（含三类 batch、agg、enrichment、allocation）+ `derived` 范围 |
+
+**调账历史**：挂在 `platform_income_monthly` / `platform_cost_monthly` 上，`ON DELETE CASCADE`；`purge(derived)` 时随派生行一并物理删除，与「不保留历史」一致。
 
 ### 4.3 主数据依赖
 
@@ -926,7 +986,8 @@ billing_period.total_cost = Σ gross_profit 的 record 层毛利
 ```typescript
 async function computeBillingPeriod(periodId: string) {
   const period = await loadPeriod(periodId)
-  const raw = await loadLatestRawBatches(periodId)
+  await purgeDerivedArtifacts(periodId)   // 计算前再次确保派生层为空，见 §7.4
+  const raw = await loadCurrentRawBatches(periodId)
 
   const tenants = await resolveTenants(raw)
   const enrichments = await resolveTenantProjects(periodId, raw.tenantBills)
@@ -942,7 +1003,7 @@ async function computeBillingPeriod(periodId: string) {
   const customerAgg = aggregateCustomerConsumptionByTenant(raw.customerConsumption)
   for (const ctype of ["B", "C"] as const) {
     const incomeRows = computeIncome({ customerAgg, raw, tenants, ctype })
-    await upsertIncome(periodId, ctype, incomeRows)
+    await replaceIncome(periodId, ctype, incomeRows)   // DELETE 本账期该 ctype 后 INSERT
   }
 
   const costRecords = computeCost({
@@ -951,7 +1012,7 @@ async function computeBillingPeriod(periodId: string) {
     filter: "B_with_project_and_AM",
   })
   const costWithSums = recomputeStaffSumRows(costRecords)
-  await upsertCost(periodId, costWithSums)
+  await replaceCost(periodId, costWithSums)          // DELETE 本账期全部 cost 后 INSERT
 
   await updatePeriodTotals(periodId)
   await writeReconciliationReport(periodId, raw, { enrichments, allocations })
@@ -971,11 +1032,55 @@ async function computeBillingPeriod(periodId: string) {
 | 总计行校验 | Excel 总计 vs 明细 SUM |
 | 拆分守恒 | 各租户拆分后金额/卡时之和 = Raw 原值 |
 
-### 7.3 重算与版本
+### 7.3 重新计算（同批 Raw）
 
-- 修改主数据单价 → 允许对 `computed` 状态账期 **重算**，`calc_version++`。
-- 重新上传 Excel → 新 batch，自动触发重算。
-- 人工调账（现有 store）→ 仅 override 派生层字段，**不回写 Raw**；记录 `income_adjustment_history` / `voucher_card_hours_adjustment_history`。
+在 **未更换 Excel** 且仅主数据（单价、项目 AM、预置分成等）变更时，允许对 `computed` 状态账期执行 `POST .../compute`：
+
+1. 按 §7.4 **仅清理派生层与中间表**（保留当前 Raw batch）。
+2. 重新跑 §7.1 Pipeline 并 `INSERT` 新结果。
+3. 状态保持 `computed`（若此前为 `adjusted`，清理时一并删除 override，状态回 `computed`）。
+
+人工调账（现有 store）→ 仅 override 派生层字段，**不回写 Raw**；记录 `income_adjustment_history` / `voucher_card_hours_adjustment_history`。**重新生成**或 §7.4 整账期清理时，上述调账记录一并删除。
+
+### 7.4 重新生成与数据清理
+
+**目标**：同一账期多次操作时，库内 **不存在** 上一轮的 Raw / 中间表 / 派生行，避免 JOIN、汇总或误用旧 batch。
+
+**清理函数**（建议 `purgeBillingPeriodArtifacts(periodId, scope)`，单事务）：
+
+| scope | 删除对象 | 典型触发 |
+|-------|----------|----------|
+| `file_type` | 指定类型的 `billing_period_import_batch` + 对应 `raw_*`；若为客户消费则含 `billing_period_agg_customer_consumption`；若为账单详情则含 `billing_period_tenant_project_enrichment`；并清理派生层 + 对账报告 | 单类 Excel 重新上传 |
+| `derived` | `platform_income_monthly`、`platform_cost_monthly`、对账报告、override / 调账历史（本账期） | 仅重算（§7.3） |
+| `full` | 上表全部 + 三类 batch 与全部 raw + agg + enrichment + `billing_tenant_cost_allocation`（本账期） | 「重新生成」按钮、作废 `void` |
+
+**执行顺序**（`full` / `file_type`）：子表 → batch → 派生 → 重置 `billing_period` 汇总字段（`total_income`、`total_cost` 等置 NULL）。
+
+**重新生成（`POST .../regenerate`）流程**
+
+```mermaid
+sequenceDiagram
+  participant U as 用户
+  participant API as API
+  participant DB as DB
+  U->>API: POST regenerate (confirm)
+  API->>DB: purgeBillingPeriodArtifacts(full)
+  API->>DB: status = draft
+  alt 保留已选文件
+    U->>API: 自动或手动重传三类 Excel
+    API->>DB: 解析写入新 batch
+  else 手动上传
+    U->>API: 上传三类 Excel
+  end
+  U->>API: POST compute
+  API->>DB: purge derived + pipeline + INSERT
+```
+
+**约束**
+
+- 清理与写入在同一数据库事务内完成；失败则整体回滚。
+- `published` / `adjusted` 账期调用 `regenerate` 返回 `409`，提示先撤回发布。
+- 审计日志仅记录操作事件（`regenerate`、`purge_scope`、操作者、时间戳），**不**保留被删行的业务副本。
 
 ---
 
@@ -984,14 +1089,16 @@ async function computeBillingPeriod(periodId: string) {
 | 动作 | 接口 / 页面 | 说明 |
 |------|-------------|------|
 | 创建账期 | `POST /finance/billing-periods` | 返回 `draft` |
-| 上传 Excel | `POST .../imports/{file_type}` | multipart，写 Raw + batch；账单表触发 §4.4 补全 |
+| 上传 Excel | `POST .../imports/{file_type}` | 先 `purge(scope=file_type)`，再 multipart 写 Raw + batch；账单表触发 §4.4 补全 |
+| 重新生成 | `POST .../regenerate` | `purge(scope=full)`，状态 → `draft`；需重新上传或重解析后计算 |
+| 撤回发布 | `POST .../unpublish` | `published`/`adjusted` → `computed`，便于修改后重算（不自动 purge） |
 | 查询租户项目组合 | `GET .../tenant-project-bindings` | 返回每租户的项目×AM 列表及预置分成 |
 | 保存成本分成 | `PUT .../cost-allocations` | 写入 `billing_tenant_cost_allocation`；可勾选「同步为预置」 |
 | 计算 | `POST .../compute` | 校验分成完备后执行；状态 → `computed` 或 `pending_allocation` |
 | 发布 | `POST .../publish` | 状态 → `published` |
 | 收入明细 | `/finance/[id]/income` | 分 B/C Tab；支持补充消费 / 调账 |
 | 成本明细 | `/finance/[id]/cost` | `CostGroupedTable`；券卡时调账 |
-| 钻取 Raw | `/finance/[id]/imports` | 展示 batch、行号、raw_json |
+| 钻取 Raw | `/finance/[id]/imports` | 展示 **当前** batch、行号、raw_json（无历史 batch 列表） |
 | 多项目分成 | `/finance/create` 或 `/finance/[id]/allocations` | 上传账单后展示待配置租户；表格编辑比例；阻断「计算」直至 100% |
 
 **`/finance/create` 页面增补（上传账单后）**
@@ -1001,6 +1108,12 @@ async function computeBillingPeriod(periodId: string) {
 3. 表格支持：加载预置、均分（100/N）、手动输入、合计实时校验 100%。  
 4. 「保存分成」≠「计算」：先持久化 `billing_tenant_cost_allocation`，再允许点击计算。  
 5. 单项目租户灰显 100%，不可编辑。
+
+**`/finance/[id]` 账期详情增补**
+
+1. 「重新生成」：二次确认文案说明将 **清空本账期已导入与计算结果**；成功后回到上传/计算流程。  
+2. 已发布账期：隐藏「重新生成」或引导先「撤回发布」。  
+3. 单类 Excel 重新选择文件：等价于该类型 `purge(file_type)` + 上传，不保留旧解析行。
 
 替换 `generateMockFinanceBundle`：改为真实 XLSX 解析（`sheetjs` / `exceljs`）+ 上述 pipeline。
 
@@ -1014,7 +1127,7 @@ async function computeBillingPeriod(periodId: string) {
 | AM | 只读已发布账期中 **本人** `staff_id` 的成本分项 |
 | 其他 | 不可见草稿账期 |
 
-审计日志：`import_batch`、`compute`（含 `calc_version`、规则版本号）、`publish`、`override` 操作人及时间戳。
+审计日志：`import_batch`、`purge`（含 `scope`）、`regenerate`、`compute`（含规则版本号）、`publish`、`unpublish`、`override` 操作人及时间戳（不存被删业务数据）。
 
 ---
 
@@ -1047,14 +1160,17 @@ async function computeBillingPeriod(periodId: string) {
 | C9 | 多项目未配置分成 | 状态 `pending_allocation`，`POST /compute` 返回 422 |
 | C10 | Excel 含「总计」行 | 不入 Raw；可选通过 V8 校验 |
 
-### 10.3 追溯
+### 10.3 溯源与重新生成
 
 | 用例 | 期望 |
 |------|------|
-| T1 | 任一分项成本可查到 `raw_tenant_bill.id` + `row_no` |
-| T2 | 重新上传后旧 batch `superseded`，历史仍可查 |
-| T3 | 任一分项成本可追溯到 `raw_tenant_bill.id` + `project_id` + `allocation_percent` |
-| T4 | 本账期分成覆盖预置后，审计日志记录操作者与变更前后比例 |
+| T1 | 任一分项成本可查到 **当前** `raw_tenant_bill.id` + `row_no` |
+| T2 | 重新上传某类 Excel 后，该 `file_type` 旧 batch 及 raw 行 **已物理删除**，仅存在新 batch |
+| T3 | `POST .../regenerate` 后，本账期 raw / agg / 派生 / 调账均为空，状态为 `draft` |
+| T4 | 重算后 `platform_income_monthly` 行数与当次 pipeline 输出一致，无上一版残留行 |
+| T5 | 任一分项成本可追溯到 `raw_tenant_bill.id` + `project_id` + `allocation_percent` |
+| T6 | 本账期分成覆盖预置后，审计日志记录操作者与变更前后比例 |
+| T7 | `published` 账期直接 `regenerate` 返回 409；`unpublish` 后可重新生成 |
 
 ---
 
@@ -1066,7 +1182,7 @@ async function computeBillingPeriod(periodId: string) {
 | P1b | 预置分成表 + 账期分成 UI + `pending_allocation` 状态 |
 | P2 | 收入 pipeline（B/C 分轨）+ 对账报告 |
 | P3 | 成本 pipeline（拆分后聚合）+ 单价主数据 + AM 汇总行 |
-| P4 | 发布/重算/审计 + 替换 mock 生成器 |
+| P4 | 发布/撤回/重新生成（purge）/重算/审计 + 替换 mock 生成器 |
 | P5 | 与 CRM `tenant_bill` 自动同步（可选，二期） |
 
 ---
@@ -1077,7 +1193,8 @@ async function computeBillingPeriod(periodId: string) {
 2. **分成成本是否含税**：本方案对 `balance_consumption` 先按分成比例再除 `1.06`；若合同为含税分成需去掉除税步骤。
 3. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**（`余额消费/总卡时` 再除以刊例价），**不按累计卡时划档**（见 §6.4.2；与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。  
 4. **租户 984 多区域两行账单**：收入按租户汇总；成本先按租户×项目分成拆分，再按 AM×区域×卡型分项。  
-5. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。
+5. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。  
+6. **重新生成后是否保留本账期成本分成**：默认 `full` purge 会清空 `billing_tenant_cost_allocation`，需重新配置；若财务希望保留，可改为 `full` 不删分成表（实施时二选一）。
 
 ---
 

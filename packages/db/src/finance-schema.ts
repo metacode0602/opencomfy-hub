@@ -1,11 +1,12 @@
 /**
  * 财务账期与经营月结域表结构（Drizzle ORM / PostgreSQL）
  *
- * 设计依据：apps/web/content/design/billing-period-import-design.md（v1.3）
+ * 设计依据：apps/web/content/design/billing-period-import-design.md（v1.4）
  *
  * 领域模型：
- * - 原始层（Raw）：Excel 导入批次与行级快照，只追加
- * - 派生层：platform_income_monthly / platform_cost_monthly，可重算
+ * - 原始层（Raw）：账期内可替换；每账期每 file_type 仅一组 batch（DB 唯一约束）
+ * - 派生层：platform_income_monthly / platform_cost_monthly，计算前 DELETE 再 INSERT
+ * - 重新生成：应用层 purge 后物理删除子表行；不保留历史 batch / calc 快照
  * - 主数据衔接：CRM tenant / project / user_staff；供应商 supplier_unit_cost
  *
  * 约定：
@@ -67,14 +68,16 @@ export const billingPeriod = pgTable(
     periodStart: date("period_start").notNull(),
     periodEnd: date("period_end").notNull(),
     status: varchar("status", { length: 32 }).notNull().default("draft"),
-    calcVersion: integer("calc_version").notNull().default(0),
-    totalIncome: money("total_income").notNull().default("0"),
-    totalCost: money("total_cost").notNull().default("0"),
+    /** purge / 重新生成后置 NULL，计算完成后写入 */
+    totalIncome: money("total_income"),
+    totalCost: money("total_cost"),
     totalGrossProfit: money("total_gross_profit"),
-    supplementary: money("supplementary").notNull().default("0"),
-    balanceIncome: money("balance_income").notNull().default("0"),
-    baremetalIncome: money("baremetal_income").notNull().default("0"),
+    supplementary: money("supplementary"),
+    balanceIncome: money("balance_income"),
+    baremetalIncome: money("baremetal_income"),
+    lastComputedAt: timestamp("last_computed_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
     ...financeTimestamps,
   },
   (table) => [
@@ -186,8 +189,9 @@ export const platformCostMonthly = pgTable(
 
 /**
  * 导入批次 billing_period_import_batch
- * file_type: customer | baremetal | tenant_bill
- * status: active | superseded | failed
+ * file_type: customer_consumption | baremetal_order | tenant_bill
+ *
+ * v1.4：每账期每 file_type 至多一条（唯一约束）；重新上传前先 DELETE 旧 batch（cascade raw）。
  */
 export const billingPeriodImportBatch = pgTable(
   "billing_period_import_batch",
@@ -200,18 +204,17 @@ export const billingPeriodImportBatch = pgTable(
     fileName: varchar("file_name", { length: 512 }).notNull(),
     fileSha256: varchar("file_sha256", { length: 64 }).notNull(),
     rowCount: integer("row_count").notNull().default(0),
-    status: varchar("status", { length: 32 }).notNull().default("active"),
     uploadedBy: text("uploaded_by").references(() => userStaff.id, {
       onDelete: "set null",
     }),
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    index("billing_period_import_batch_period_id_idx").on(table.billingPeriodId),
-    index("billing_period_import_batch_period_file_type_idx").on(
+    uniqueIndex("billing_period_import_batch_period_file_type_uk").on(
       table.billingPeriodId,
       table.fileType,
     ),
+    index("billing_period_import_batch_period_id_idx").on(table.billingPeriodId),
   ],
 )
 
@@ -450,7 +453,58 @@ export const billingTenantCostAllocation = pgTable(
 )
 
 // ---------------------------------------------------------------------------
-// 调账与审计历史（应用层 override，不回写 Raw）
+// 对账报告与操作审计（v1.4：不保留被 purge 的业务行副本）
+// ---------------------------------------------------------------------------
+
+/** 对账报告 §7.2；每账期仅保留当前一份，purge(derived|full) 时删除 */
+export const billingPeriodReconciliationReport = pgTable(
+  "billing_period_reconciliation_report",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    /** 检查项列表、diff、警告等，结构见设计 §7.2 */
+    reportJson: jsonb("report_json").notNull(),
+    ruleVersion: varchar("rule_version", { length: 32 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_reconciliation_report_period_uk").on(
+      table.billingPeriodId,
+    ),
+  ],
+)
+
+/**
+ * 账期操作审计 billing_period_operation_log
+ * operation: import_batch | purge | regenerate | compute | publish | unpublish | override
+ */
+export const billingPeriodOperationLog = pgTable(
+  "billing_period_operation_log",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    operation: varchar("operation", { length: 32 }).notNull(),
+    /** purge 时：file_type | derived | full */
+    purgeScope: varchar("purge_scope", { length: 32 }),
+    actorId: text("actor_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("billing_period_operation_log_period_id_idx").on(table.billingPeriodId),
+    index("billing_period_operation_log_operation_idx").on(table.operation),
+    index("billing_period_operation_log_created_at_idx").on(table.createdAt),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// 调账与审计历史（应用层 override，不回写 Raw；purge(derived) 时随派生行 cascade 删除）
 // ---------------------------------------------------------------------------
 
 /** 补充消费修改历史 */
@@ -528,13 +582,15 @@ export const voucherCardHoursAdjustmentHistory = pgTable(
 // Relations
 // ---------------------------------------------------------------------------
 
-export const billingPeriodRelations = relations(billingPeriod, ({ many }) => ({
+export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) => ({
   importBatches: many(billingPeriodImportBatch),
   aggCustomerConsumptions: many(billingPeriodAggCustomerConsumption),
   tenantProjectEnrichments: many(billingPeriodTenantProjectEnrichment),
   tenantCostAllocations: many(billingTenantCostAllocation),
   incomeRows: many(platformIncomeMonthly),
   costRows: many(platformCostMonthly),
+  reconciliationReport: one(billingPeriodReconciliationReport),
+  operationLogs: many(billingPeriodOperationLog),
 }))
 
 export const billingPeriodImportBatchRelations = relations(
@@ -608,6 +664,30 @@ export const billingTenantCostAllocationRelations = relations(
   }),
 )
 
+export const billingPeriodReconciliationReportRelations = relations(
+  billingPeriodReconciliationReport,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodReconciliationReport.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+  }),
+)
+
+export const billingPeriodOperationLogRelations = relations(
+  billingPeriodOperationLog,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodOperationLog.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    actor: one(userStaff, {
+      fields: [billingPeriodOperationLog.actorId],
+      references: [userStaff.id],
+    }),
+  }),
+)
+
 export const tenantProjectCostRelations = relations(tenantProjectCost, ({ one }) => ({
   tenant: one(billingTenant, {
     fields: [tenantProjectCost.tenantId],
@@ -639,3 +719,6 @@ export type BillingPeriodTenantProjectEnrichmentRow =
   typeof billingPeriodTenantProjectEnrichment.$inferSelect
 export type BillingTenantCostAllocationRow = typeof billingTenantCostAllocation.$inferSelect
 export type TenantProjectCostRow = typeof tenantProjectCost.$inferSelect
+export type BillingPeriodReconciliationReportRow =
+  typeof billingPeriodReconciliationReport.$inferSelect
+export type BillingPeriodOperationLogRow = typeof billingPeriodOperationLog.$inferSelect
