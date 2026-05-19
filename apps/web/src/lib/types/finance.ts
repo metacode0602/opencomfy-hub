@@ -26,6 +26,64 @@ export type PlatformIncomeMonthly = {
   updated_at: string | null
 }
 
+/** 补充消费调整类型 */
+export type SupplementaryConsumptionType =
+  | "offline_order"
+  | "manual_correction"
+  | "promotion"
+  | "compensation"
+  | "other"
+
+export const SUPPLEMENTARY_CONSUMPTION_TYPE_LABELS: Record<
+  SupplementaryConsumptionType,
+  string
+> = {
+  offline_order: "线下订单",
+  manual_correction: "人工修正",
+  promotion: "促销优惠",
+  compensation: "补偿",
+  other: "其他",
+}
+
+/** 补充消费修改历史 */
+export type SupplementaryConsumptionHistoryEntry = {
+  id: string
+  income_id: string
+  previous_value: string | null
+  new_value: string
+  type: SupplementaryConsumptionType
+  remark: string
+  created_at: string
+}
+
+/** 调账历史（余额消费、裸金属消费分别记录原值与调整后值） */
+export type IncomeAdjustmentHistoryEntry = {
+  id: string
+  income_id: string
+  balance_consumption_before: string | null
+  balance_consumption_after: string | null
+  bare_metal_consumption_before: string | null
+  bare_metal_consumption_after: string | null
+  reason: string
+  created_at: string
+}
+
+/** 券卡时调账历史 */
+export type VoucherCardHoursAdjustmentHistoryEntry = {
+  id: string
+  cost_id: string
+  voucher_card_hours_before: string | null
+  voucher_card_hours_after: string | null
+  adjustment_hours: string
+  gifted_duration_cost_excl_tax_before: string | null
+  gifted_duration_cost_excl_tax_after: string | null
+  gross_profit_before: string | null
+  gross_profit_after: string | null
+  unit_price_per_hour: string
+  reason: string
+  created_at: string
+}
+
 /** 平台月度成本 platform_cost_monthly — type: record 分项 / sum 汇总 */
 export type PlatformCostMonthlyType = "record" | "sum"
 

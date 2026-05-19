@@ -58,7 +58,17 @@ function groupCostByStaff(rows: PlatformCostMonthly[]): StaffCostGroup[] {
   )
 }
 
-function CostRowCells({ r }: { r: PlatformCostMonthly }) {
+function CostRowCells({
+  r,
+  editable,
+  onVoucherAdjust,
+  voucherAdjustmentHistoryCount,
+}: {
+  r: PlatformCostMonthly
+  editable?: boolean
+  onVoucherAdjust?: (row: PlatformCostMonthly) => void
+  voucherAdjustmentHistoryCount?: (costId: string) => number
+}) {
   return (
     <>
       <TableCell className="font-mono text-xs">{r.billing_period_id}</TableCell>
@@ -108,13 +118,48 @@ function CostRowCells({ r }: { r: PlatformCostMonthly }) {
       <TableCell className="whitespace-nowrap text-xs tabular-nums">
         {formatDate(r.updated_at)}
       </TableCell>
+      {editable && (
+        <TableCell className="text-right">
+          {r.type === "record" ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => onVoucherAdjust?.(r)}
+            >
+              券卡时调账
+              {(voucherAdjustmentHistoryCount?.(r.id) ?? 0) > 0 && (
+                <span className="ml-1 text-muted-foreground">
+                  ({voucherAdjustmentHistoryCount!(r.id)})
+                </span>
+              )}
+            </Button>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </TableCell>
+      )}
     </>
   )
 }
 
-const COL_COUNT = 17
+const BASE_COL_COUNT = 17
 
-export function CostGroupedTable({ rows }: { rows: PlatformCostMonthly[] }) {
+type CostGroupedTableProps = {
+  rows: PlatformCostMonthly[]
+  editable?: boolean
+  onVoucherAdjust?: (row: PlatformCostMonthly) => void
+  voucherAdjustmentHistoryCount?: (costId: string) => number
+}
+
+export function CostGroupedTable({
+  rows,
+  editable = false,
+  onVoucherAdjust,
+  voucherAdjustmentHistoryCount,
+}: CostGroupedTableProps) {
+  const colCount = BASE_COL_COUNT + (editable ? 1 : 0)
   const groups = React.useMemo(() => groupCostByStaff(rows), [rows])
   const [openStaff, setOpenStaff] = React.useState<Set<string>>(() => new Set())
 
@@ -134,7 +179,7 @@ export function CostGroupedTable({ rows }: { rows: PlatformCostMonthly[] }) {
           <TableBody>
             <TableRow>
               <TableCell
-                colSpan={COL_COUNT}
+                colSpan={colCount}
                 className="text-center text-muted-foreground"
               >
                 本期暂无成本明细
@@ -174,6 +219,9 @@ export function CostGroupedTable({ rows }: { rows: PlatformCostMonthly[] }) {
             <TableHead className="whitespace-nowrap text-right">毛利</TableHead>
             <TableHead className="whitespace-nowrap">创建时间</TableHead>
             <TableHead className="whitespace-nowrap">更新时间</TableHead>
+            {editable && (
+              <TableHead className="whitespace-nowrap text-right">操作</TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -209,10 +257,20 @@ export function CostGroupedTable({ rows }: { rows: PlatformCostMonthly[] }) {
                     )}
                   </TableCell>
                   {parentRow ? (
-                    <CostRowCells r={parentRow} />
+                    <CostRowCells
+                      r={parentRow}
+                      editable={editable}
+                      onVoucherAdjust={onVoucherAdjust}
+                      voucherAdjustmentHistoryCount={
+                        voucherAdjustmentHistoryCount
+                      }
+                    />
                   ) : (
                     <>
-                      <TableCell colSpan={16} className="text-muted-foreground">
+                      <TableCell
+                        colSpan={BASE_COL_COUNT - 1 + (editable ? 1 : 0)}
+                        className="text-muted-foreground"
+                      >
                         <span className="font-medium text-foreground">
                           {g.accountManager}
                         </span>
@@ -232,7 +290,14 @@ export function CostGroupedTable({ rows }: { rows: PlatformCostMonthly[] }) {
                       className="border-l-2 border-l-primary/40 bg-muted/30"
                     >
                       <TableCell />
-                      <CostRowCells r={r} />
+                      <CostRowCells
+                        r={r}
+                        editable={editable}
+                        onVoucherAdjust={onVoucherAdjust}
+                        voucherAdjustmentHistoryCount={
+                          voucherAdjustmentHistoryCount
+                        }
+                      />
                     </TableRow>
                   ))}
               </React.Fragment>

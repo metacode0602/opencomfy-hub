@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { IncomeDetailTable } from "../../_components/income-detail-table"
+import { IncomeDetailEditable } from "../../_components/income-detail-editable"
 import { useParams } from "next/navigation"
 import { useMemo } from "react"
 
@@ -60,7 +60,7 @@ export default function FinancePeriodIncomePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <IncomeDetailTable rows={rows} />
+          <IncomeDetailEditable baseRows={rows} showPeriodColumn={false} />
         </CardContent>
       </Card>
     </div>

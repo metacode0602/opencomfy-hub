@@ -1,6 +1,8 @@
 "use client"
 
 import type { PlatformIncomeMonthly } from "@/lib/types/finance"
+import { Badge } from "@workspace/ui/components/badge"
+import { Button } from "@workspace/ui/components/button"
 import {
   Table,
   TableBody,
@@ -14,13 +16,23 @@ import { formatDate, formatMoney, formatText } from "../_lib/display"
 type IncomeDetailTableProps = {
   rows: PlatformIncomeMonthly[]
   showPeriodColumn?: boolean
+  editable?: boolean
+  onSupplementary?: (row: PlatformIncomeMonthly) => void
+  onAdjust?: (row: PlatformIncomeMonthly) => void
+  supplementaryHistoryCount?: (incomeId: string) => number
+  adjustmentHistoryCount?: (incomeId: string) => number
 }
 
 export function IncomeDetailTable({
   rows,
   showPeriodColumn = true,
+  editable = false,
+  onSupplementary,
+  onAdjust,
+  supplementaryHistoryCount,
+  adjustmentHistoryCount,
 }: IncomeDetailTableProps) {
-  const colSpan = showPeriodColumn ? 8 : 7
+  const colSpan = (showPeriodColumn ? 8 : 7) + (editable ? 1 : 0)
 
   return (
     <div className="overflow-x-auto rounded-md border">
@@ -45,6 +57,9 @@ export function IncomeDetailTable({
               总消费金额
             </TableHead>
             <TableHead className="whitespace-nowrap">创建时间</TableHead>
+            {editable && (
+              <TableHead className="whitespace-nowrap text-right">操作</TableHead>
+            )}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -68,7 +83,14 @@ export function IncomeDetailTable({
                 <TableCell>{formatText(r.project_name)}</TableCell>
                 <TableCell className="max-w-[200px]">{r.tenant_name}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {formatMoney(r.supplementary_consumption)}
+                  <span className="inline-flex items-center justify-end gap-1.5">
+                    {formatMoney(r.supplementary_consumption)}
+                    {(supplementaryHistoryCount?.(r.id) ?? 0) > 0 && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        {supplementaryHistoryCount!(r.id)} 次
+                      </Badge>
+                    )}
+                  </span>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatMoney(r.balance_consumption)}
@@ -82,6 +104,35 @@ export function IncomeDetailTable({
                 <TableCell className="whitespace-nowrap text-xs tabular-nums">
                   {formatDate(r.created_at)}
                 </TableCell>
+                {editable && (
+                  <TableCell className="text-right">
+                    <div className="flex flex-wrap justify-end gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => onSupplementary?.(r)}
+                      >
+                        补充消费
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => onAdjust?.(r)}
+                      >
+                        调账
+                        {(adjustmentHistoryCount?.(r.id) ?? 0) > 0 && (
+                          <span className="ml-1 text-muted-foreground">
+                            ({adjustmentHistoryCount!(r.id)})
+                          </span>
+                        )}
+                      </Button>
+                    </div>
+                  </TableCell>
+                )}
               </TableRow>
             ))
           )}

@@ -13,7 +13,7 @@ import {
 } from "@workspace/ui/components/card"
 import { useParams } from "next/navigation"
 import { useMemo } from "react"
-import { CostGroupedTable } from "./_components/cost-grouped-table"
+import { CostGroupedEditable } from "./_components/cost-grouped-editable"
 
 export default function FinancePeriodCostPage() {
   const params = useParams<{ id: string }>()
@@ -60,7 +60,7 @@ export default function FinancePeriodCostPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <CostGroupedTable rows={rows} />
+          <CostGroupedEditable baseRows={rows} />
         </CardContent>
       </Card>
     </div>
