@@ -1,0 +1,641 @@
+/**
+ * 财务账期与经营月结域表结构（Drizzle ORM / PostgreSQL）
+ *
+ * 设计依据：apps/web/content/design/billing-period-import-design.md（v1.3）
+ *
+ * 领域模型：
+ * - 原始层（Raw）：Excel 导入批次与行级快照，只追加
+ * - 派生层：platform_income_monthly / platform_cost_monthly，可重算
+ * - 主数据衔接：CRM tenant / project / user_staff；供应商 supplier_unit_cost
+ *
+ * 约定：
+ * - 主键 text；金额 numeric(15,4)；卡时 numeric(15,4)；分成比例 numeric(7,4)
+ * - 扩展与追溯字段 jsonb
+ */
+
+import { relations, sql } from "drizzle-orm"
+import {
+  date,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  varchar,
+} from "drizzle-orm/pg-core"
+
+import { billingTenant, crmProject, userStaff } from "./crm-schema"
+import { supplierUnitCost } from "./supply-schema"
+
+/** 金额 decimal(15,4) */
+const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
+
+/** 卡时 decimal(15,4) */
+const cardHours = (name: string) => numeric(name, { precision: 15, scale: 4 })
+
+/** 成本分成比例 0~100，decimal(7,4) */
+const allocationPercent = (name: string) =>
+  numeric(name, { precision: 7, scale: 4 })
+
+/** 成交/刊例比例 decimal(9,6) */
+const dealToListRatio = (name: string) => numeric(name, { precision: 9, scale: 6 })
+
+const financeTimestamps = {
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+}
+
+// ---------------------------------------------------------------------------
+// §4.2 派生层 — 账期主表
+// ---------------------------------------------------------------------------
+
+/**
+ * 账期 billing_period
+ * status: draft | imported | pending_allocation | computed | published | void
+ */
+export const billingPeriod = pgTable(
+  "billing_period",
+  {
+    id: text("id").primaryKey(),
+    periodCode: varchar("period_code", { length: 32 }).notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("draft"),
+    calcVersion: integer("calc_version").notNull().default(0),
+    totalIncome: money("total_income").notNull().default("0"),
+    totalCost: money("total_cost").notNull().default("0"),
+    totalGrossProfit: money("total_gross_profit"),
+    supplementary: money("supplementary").notNull().default("0"),
+    balanceIncome: money("balance_income").notNull().default("0"),
+    baremetalIncome: money("baremetal_income").notNull().default("0"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    ...financeTimestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_period_period_code_uk").on(table.periodCode),
+    index("billing_period_status_idx").on(table.status),
+    index("billing_period_period_start_idx").on(table.periodStart),
+  ],
+)
+
+/** 平台月度收入明细 platform_income_monthly */
+export const platformIncomeMonthly = pgTable(
+  "platform_income_monthly",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    /** B | C */
+    customerType: varchar("customer_type", { length: 8 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantName: varchar("tenant_name", { length: 255 }).notNull(),
+    projectName: varchar("project_name", { length: 255 }),
+    customerFullName: varchar("customer_full_name", { length: 255 }),
+    supplementaryConsumption: money("supplementary_consumption"),
+    balanceConsumption: money("balance_consumption"),
+    bareMetalConsumption: money("bare_metal_consumption"),
+    totalConsumption: money("total_consumption").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("platform_income_monthly_period_tenant_type_uk").on(
+      table.billingPeriodId,
+      table.tenantId,
+      table.customerType,
+    ),
+    index("platform_income_monthly_billing_period_id_idx").on(table.billingPeriodId),
+    index("platform_income_monthly_tenant_platform_id_idx").on(table.tenantPlatformId),
+  ],
+)
+
+/**
+ * 平台月度成本 platform_cost_monthly
+ * type: record | sum
+ */
+export const platformCostMonthly = pgTable(
+  "platform_cost_monthly",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 16 }).notNull(), // record | sum
+    staffId: text("staff_id")
+      .notNull()
+      .references(() => userStaff.id, { onDelete: "restrict" }),
+    accountManager: varchar("account_manager", { length: 128 }).notNull(),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    supplierUnitCostId: text("supplier_unit_cost_id").references(
+      () => supplierUnitCost.id,
+      { onDelete: "set null" },
+    ),
+    idcName: varchar("idc_name", { length: 255 }),
+    idcCode: varchar("idc_code", { length: 64 }),
+    cardType: varchar("card_type", { length: 128 }),
+    balanceConsumption: money("balance_consumption"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours"),
+    confirmedRevenueExclTax: money("confirmed_revenue_excl_tax"),
+    soldDurationCostExclTax: money("sold_duration_cost_excl_tax"),
+    giftedDurationCostExclTax: money("gifted_duration_cost_excl_tax"),
+    grossProfit: money("gross_profit"),
+    /** 多项目拆分行占原 Raw 的比例（审计） */
+    allocationPercent: allocationPercent("allocation_percent"),
+    sourceRawIds: jsonb("source_raw_ids").$type<string[]>(),
+    /** 阶梯分成落档审计（§6.4.2） */
+    listPricePerHour: money("list_price_per_hour"),
+    dealUnitPricePerHour: money("deal_unit_price_per_hour"),
+    dealToListRatio: dealToListRatio("deal_to_list_ratio"),
+    matchedTierOrder: integer("matched_tier_order"),
+    revenueSharePercentApplied: numeric("revenue_share_percent_applied", {
+      precision: 7,
+      scale: 4,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("platform_cost_monthly_billing_period_id_idx").on(table.billingPeriodId),
+    index("platform_cost_monthly_staff_id_idx").on(table.staffId),
+    index("platform_cost_monthly_billing_period_type_idx").on(
+      table.billingPeriodId,
+      table.type,
+    ),
+    index("platform_cost_monthly_supplier_unit_cost_id_idx").on(
+      table.supplierUnitCostId,
+    ),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// §4.1 原始层 — 导入批次与 Raw 行
+// ---------------------------------------------------------------------------
+
+/**
+ * 导入批次 billing_period_import_batch
+ * file_type: customer | baremetal | tenant_bill
+ * status: active | superseded | failed
+ */
+export const billingPeriodImportBatch = pgTable(
+  "billing_period_import_batch",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    fileType: varchar("file_type", { length: 32 }).notNull(),
+    fileName: varchar("file_name", { length: 512 }).notNull(),
+    fileSha256: varchar("file_sha256", { length: 64 }).notNull(),
+    rowCount: integer("row_count").notNull().default(0),
+    status: varchar("status", { length: 32 }).notNull().default("active"),
+    uploadedBy: text("uploaded_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("billing_period_import_batch_period_id_idx").on(table.billingPeriodId),
+    index("billing_period_import_batch_period_file_type_idx").on(
+      table.billingPeriodId,
+      table.fileType,
+    ),
+  ],
+)
+
+/** Raw：客户消费明细 */
+export const billingPeriodRawCustomerConsumption = pgTable(
+  "billing_period_raw_customer_consumption",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => billingPeriodImportBatch.id, { onDelete: "cascade" }),
+    rowNo: integer("row_no").notNull(),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    productType: varchar("product_type", { length: 128 }),
+    tenantType: varchar("tenant_type", { length: 32 }),
+    customerType: varchar("customer_type", { length: 8 }).notNull(),
+    projectNameExcel: varchar("project_name_excel", { length: 255 }),
+    totalConsumption: money("total_consumption").notNull(),
+    voucherConsumption: money("voucher_consumption").notNull().default("0"),
+    balanceConsumption: money("balance_consumption").notNull(),
+    rawJson: jsonb("raw_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("billing_period_raw_customer_consumption_batch_id_idx").on(table.batchId),
+    index("billing_period_raw_customer_consumption_tenant_idx").on(
+      table.tenantPlatformId,
+    ),
+  ],
+)
+
+/** Step I0：客户消费按租户×客户类型预汇总 */
+export const billingPeriodAggCustomerConsumption = pgTable(
+  "billing_period_agg_customer_consumption",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    customerType: varchar("customer_type", { length: 8 }).notNull(),
+    totalConsumption: money("total_consumption").notNull(),
+    voucherConsumption: money("voucher_consumption").notNull().default("0"),
+    balanceConsumption: money("balance_consumption").notNull(),
+    sourceRawIds: jsonb("source_raw_ids").$type<string[]>().notNull(),
+    rowCountByType: integer("row_count_by_type").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_agg_customer_consumption_uk").on(
+      table.billingPeriodId,
+      table.tenantPlatformId,
+      table.customerType,
+    ),
+    index("billing_period_agg_customer_consumption_period_id_idx").on(
+      table.billingPeriodId,
+    ),
+  ],
+)
+
+/** Raw：裸金属消费订单 */
+export const billingPeriodRawBaremetalOrder = pgTable(
+  "billing_period_raw_baremetal_order",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => billingPeriodImportBatch.id, { onDelete: "cascade" }),
+    rowNo: integer("row_no").notNull(),
+    orderId: varchar("order_id", { length: 128 }).notNull(),
+    orderNo: varchar("order_no", { length: 128 }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    idcName: varchar("idc_name", { length: 128 }),
+    deviceModel: varchar("device_model", { length: 128 }),
+    payStatus: varchar("pay_status", { length: 32 }).notNull(),
+    deviceStatus: varchar("device_status", { length: 32 }),
+    purchaseQtyText: varchar("purchase_qty_text", { length: 128 }),
+    deviceQty: integer("device_qty"),
+    orderAmount: money("order_amount"),
+    refundAmount: money("refund_amount").default("0"),
+    finalAmount: money("final_amount").notNull(),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }).notNull(),
+    rawJson: jsonb("raw_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("billing_period_raw_baremetal_order_batch_id_idx").on(table.batchId),
+    index("billing_period_raw_baremetal_order_tenant_idx").on(table.tenantPlatformId),
+    index("billing_period_raw_baremetal_order_ordered_at_idx").on(table.orderedAt),
+  ],
+)
+
+/** Raw：客户账单详情（除 CPU 任务外） */
+export const billingPeriodRawTenantBill = pgTable(
+  "billing_period_raw_tenant_bill",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => billingPeriodImportBatch.id, { onDelete: "cascade" }),
+    rowNo: integer("row_no").notNull(),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    totalConsumption: money("total_consumption").notNull(),
+    voucherConsumption: money("voucher_consumption").notNull().default("0"),
+    balanceConsumption: money("balance_consumption").notNull(),
+    totalCardHours: cardHours("total_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours").default("0"),
+    balanceCardHours: cardHours("balance_card_hours").notNull(),
+    gpuModel: varchar("gpu_model", { length: 128 }).notNull(),
+    regionCode: varchar("region_code", { length: 64 }).notNull(),
+    rawJson: jsonb("raw_json").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("billing_period_raw_tenant_bill_batch_id_idx").on(table.batchId),
+    index("billing_period_raw_tenant_bill_tenant_idx").on(table.tenantPlatformId),
+    index("billing_period_raw_tenant_bill_region_gpu_idx").on(
+      table.regionCode,
+      table.gpuModel,
+    ),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// §4.4 / §4.5 租户项目补全与成本分成
+// ---------------------------------------------------------------------------
+
+/**
+ * 账期内租户→项目→AM 补全结果
+ * source: auto_single | auto_preset | manual_period
+ */
+export const billingPeriodTenantProjectEnrichment = pgTable(
+  "billing_period_tenant_project_enrichment",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "restrict" }),
+    projectName: varchar("project_name", { length: 255 }).notNull(),
+    staffId: text("staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    accountManagerName: varchar("account_manager_name", { length: 128 }),
+    source: varchar("source", { length: 32 }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_tenant_project_enrichment_uk").on(
+      table.billingPeriodId,
+      table.tenantPlatformId,
+      table.projectId,
+    ),
+    index("billing_period_tenant_project_enrichment_period_id_idx").on(
+      table.billingPeriodId,
+    ),
+    index("billing_period_tenant_project_enrichment_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
+/**
+ * 预置：同一租户多项目默认成本分成 tenant_project_cost
+ * effective_to NULL = 当前生效
+ */
+export const tenantProjectCost = pgTable(
+  "tenant_project_cost",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    allocationPercent: allocationPercent("allocation_percent").notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    remark: text("remark"),
+    createdBy: text("created_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("tenant_project_cost_current_uk")
+      .on(table.tenantId, table.projectId)
+      .where(sql`${table.effectiveTo} IS NULL`),
+    index("tenant_project_cost_tenant_id_idx").on(table.tenantId),
+    index("tenant_project_cost_project_id_idx").on(table.projectId),
+  ],
+)
+
+/** 本账期租户多项目成本分成 billing_tenant_cost_allocation */
+export const billingTenantCostAllocation = pgTable(
+  "billing_tenant_cost_allocation",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "restrict" }),
+    allocationPercent: allocationPercent("allocation_percent").notNull(),
+    presetId: text("preset_id").references(() => tenantProjectCost.id, {
+      onDelete: "set null",
+    }),
+    createdBy: text("created_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_tenant_cost_allocation_uk").on(
+      table.billingPeriodId,
+      table.tenantId,
+      table.projectId,
+    ),
+    index("billing_tenant_cost_allocation_period_id_idx").on(table.billingPeriodId),
+    index("billing_tenant_cost_allocation_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// 调账与审计历史（应用层 override，不回写 Raw）
+// ---------------------------------------------------------------------------
+
+/** 补充消费修改历史 */
+export const supplementaryConsumptionHistory = pgTable(
+  "supplementary_consumption_history",
+  {
+    id: text("id").primaryKey(),
+    incomeId: text("income_id")
+      .notNull()
+      .references(() => platformIncomeMonthly.id, { onDelete: "cascade" }),
+    previousValue: money("previous_value"),
+    newValue: money("new_value").notNull(),
+    /** offline_order | manual_correction | promotion | compensation | other */
+    type: varchar("type", { length: 32 }).notNull(),
+    remark: text("remark").notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("supplementary_consumption_history_income_id_idx").on(table.incomeId),
+  ],
+)
+
+/** 收入调账历史（余额消费、裸金属消费） */
+export const incomeAdjustmentHistory = pgTable(
+  "income_adjustment_history",
+  {
+    id: text("id").primaryKey(),
+    incomeId: text("income_id")
+      .notNull()
+      .references(() => platformIncomeMonthly.id, { onDelete: "cascade" }),
+    balanceConsumptionBefore: money("balance_consumption_before"),
+    balanceConsumptionAfter: money("balance_consumption_after"),
+    bareMetalConsumptionBefore: money("bare_metal_consumption_before"),
+    bareMetalConsumptionAfter: money("bare_metal_consumption_after"),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("income_adjustment_history_income_id_idx").on(table.incomeId)],
+)
+
+/** 券卡时调账历史 */
+export const voucherCardHoursAdjustmentHistory = pgTable(
+  "voucher_card_hours_adjustment_history",
+  {
+    id: text("id").primaryKey(),
+    costId: text("cost_id")
+      .notNull()
+      .references(() => platformCostMonthly.id, { onDelete: "cascade" }),
+    voucherCardHoursBefore: cardHours("voucher_card_hours_before"),
+    voucherCardHoursAfter: cardHours("voucher_card_hours_after"),
+    adjustmentHours: cardHours("adjustment_hours").notNull(),
+    giftedDurationCostExclTaxBefore: money("gifted_duration_cost_excl_tax_before"),
+    giftedDurationCostExclTaxAfter: money("gifted_duration_cost_excl_tax_after"),
+    grossProfitBefore: money("gross_profit_before"),
+    grossProfitAfter: money("gross_profit_after"),
+    unitPricePerHour: money("unit_price_per_hour").notNull(),
+    reason: text("reason").notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("voucher_card_hours_adjustment_history_cost_id_idx").on(table.costId),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// Relations
+// ---------------------------------------------------------------------------
+
+export const billingPeriodRelations = relations(billingPeriod, ({ many }) => ({
+  importBatches: many(billingPeriodImportBatch),
+  aggCustomerConsumptions: many(billingPeriodAggCustomerConsumption),
+  tenantProjectEnrichments: many(billingPeriodTenantProjectEnrichment),
+  tenantCostAllocations: many(billingTenantCostAllocation),
+  incomeRows: many(platformIncomeMonthly),
+  costRows: many(platformCostMonthly),
+}))
+
+export const billingPeriodImportBatchRelations = relations(
+  billingPeriodImportBatch,
+  ({ one, many }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodImportBatch.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    customerConsumptionRows: many(billingPeriodRawCustomerConsumption),
+    baremetalOrderRows: many(billingPeriodRawBaremetalOrder),
+    tenantBillRows: many(billingPeriodRawTenantBill),
+  }),
+)
+
+export const platformIncomeMonthlyRelations = relations(
+  platformIncomeMonthly,
+  ({ one, many }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [platformIncomeMonthly.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    tenant: one(billingTenant, {
+      fields: [platformIncomeMonthly.tenantId],
+      references: [billingTenant.id],
+    }),
+    supplementaryHistories: many(supplementaryConsumptionHistory),
+    adjustmentHistories: many(incomeAdjustmentHistory),
+  }),
+)
+
+export const platformCostMonthlyRelations = relations(platformCostMonthly, ({ one, many }) => ({
+  billingPeriod: one(billingPeriod, {
+    fields: [platformCostMonthly.billingPeriodId],
+    references: [billingPeriod.id],
+  }),
+  staff: one(userStaff, {
+    fields: [platformCostMonthly.staffId],
+    references: [userStaff.id],
+  }),
+  project: one(crmProject, {
+    fields: [platformCostMonthly.projectId],
+    references: [crmProject.id],
+  }),
+  supplierUnitCost: one(supplierUnitCost, {
+    fields: [platformCostMonthly.supplierUnitCostId],
+    references: [supplierUnitCost.id],
+  }),
+  voucherCardHoursHistories: many(voucherCardHoursAdjustmentHistory),
+}))
+
+export const billingTenantCostAllocationRelations = relations(
+  billingTenantCostAllocation,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingTenantCostAllocation.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    tenant: one(billingTenant, {
+      fields: [billingTenantCostAllocation.tenantId],
+      references: [billingTenant.id],
+    }),
+    project: one(crmProject, {
+      fields: [billingTenantCostAllocation.projectId],
+      references: [crmProject.id],
+    }),
+    preset: one(tenantProjectCost, {
+      fields: [billingTenantCostAllocation.presetId],
+      references: [tenantProjectCost.id],
+    }),
+  }),
+)
+
+export const tenantProjectCostRelations = relations(tenantProjectCost, ({ one }) => ({
+  tenant: one(billingTenant, {
+    fields: [tenantProjectCost.tenantId],
+    references: [billingTenant.id],
+  }),
+  project: one(crmProject, {
+    fields: [tenantProjectCost.projectId],
+    references: [crmProject.id],
+  }),
+}))
+
+// ---------------------------------------------------------------------------
+// 类型导出
+// ---------------------------------------------------------------------------
+
+export type BillingPeriodRow = typeof billingPeriod.$inferSelect
+export type NewBillingPeriodRow = typeof billingPeriod.$inferInsert
+export type PlatformIncomeMonthlyRow = typeof platformIncomeMonthly.$inferSelect
+export type PlatformCostMonthlyRow = typeof platformCostMonthly.$inferSelect
+export type BillingPeriodImportBatchRow = typeof billingPeriodImportBatch.$inferSelect
+export type BillingPeriodRawCustomerConsumptionRow =
+  typeof billingPeriodRawCustomerConsumption.$inferSelect
+export type BillingPeriodAggCustomerConsumptionRow =
+  typeof billingPeriodAggCustomerConsumption.$inferSelect
+export type BillingPeriodRawBaremetalOrderRow =
+  typeof billingPeriodRawBaremetalOrder.$inferSelect
+export type BillingPeriodRawTenantBillRow = typeof billingPeriodRawTenantBill.$inferSelect
+export type BillingPeriodTenantProjectEnrichmentRow =
+  typeof billingPeriodTenantProjectEnrichment.$inferSelect
+export type BillingTenantCostAllocationRow = typeof billingTenantCostAllocation.$inferSelect
+export type TenantProjectCostRow = typeof tenantProjectCost.$inferSelect
