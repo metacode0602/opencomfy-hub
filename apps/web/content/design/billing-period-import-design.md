@@ -1,8 +1,10 @@
 # 账期导入与经营核算实现方案
 
-> 版本：v1.1（设计稿）  
+> 版本：v1.3（设计稿）  
 > 日期：2026-05-19  
 > 变更：v1.1 — 账单详情 Excel 不再含客户经理/项目名称；改由租户反查项目并补全 AM；支持一租户多项目成本分成配置  
+> 变更：v1.2 — §6.4 增加「卡时价阶梯分成」：按成交卡时/刊例价落档后取档内分成比例计算售出成本  
+> 变更：v1.3 — §5.3 增加 Step I0：客户消费明细按租户跨「类型」汇总后再参与收入计算  
 > 状态：**设计稿 — 确认后再实施代码**  
 > 关联：`apps/web/src/lib/types/finance.ts`、`cost-row-utils.ts`、`income-row-utils.ts`、`/finance/create` 页面
 
@@ -57,7 +59,8 @@ flowchart TB
   end
   subgraph calc [计算阶段]
     F --> J[按分成比例拆分账单量]
-    J --> K[收入 pipeline]
+    C --> K0[客户消费按租户跨类型汇总 Step I0]
+    K0 --> K[收入 pipeline]
     J --> L[成本 pipeline + 单价]
     K --> M[platform_income_monthly]
     L --> N[platform_cost_monthly]
@@ -102,7 +105,9 @@ flowchart TB
 | 券消费 | money | 否 | 默认 0 |
 | 余额消费 | money | 是 | 余额账户消费 |
 
-**粒度**：一行 = 某租户在某产品类型下的一条消费汇总（同一租户可有多行，计算前需按租户 + 客户类型聚合）。
+**粒度**：一行 = 某租户在某一 **类型**（产品线）下的一条消费汇总。
+
+**重要**：同一 `租户ID` 可在表中出现 **多行**（不同类型分开统计，如「弹性服务部署」「镜像仓库」「Other」）。收入计算前 **必须** 先按 `租户ID + 客户类型` 将多行 **加总为一条租户消费**（见 §5.3 Step I0），不得按「类型」分别产出收入行。
 
 ### 3.2 裸金属消费订单列表（`baremetal_order`）
 
@@ -179,6 +184,8 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 | V9 | 单租户关联项目数 = 0 → 不阻断导入，但进入「无法补全项目」清单 |
 | V10 | 单租户关联项目数 ≥ 2 且无预置/本账期分成 → 状态 `pending_allocation`，**阻断成本计算** |
 | V11 | 同一租户分成比例之和 = 100%（±0.0001 容差）；每项 &gt; 0 |
+| V12 | 同一 `租户ID` 在客户消费明细中 `客户类型` 唯一（若 B/C 混用 → 警告或阻断，见 §5.3） |
+| V13 | Step I0 后：每个 `(租户ID, 客户类型)` 仅一条 agg 记录；`row_count_by_type` ≥ 1 |
 
 ---
 
@@ -196,6 +203,13 @@ billing_period_raw_customer_consumption
   tenant_type, customer_type, project_name_excel,
   total_consumption, voucher_consumption, balance_consumption,
   raw_json
+  -- product_type 即 Excel「类型」；收入计算前按租户汇总，见 agg 表
+
+billing_period_agg_customer_consumption
+  id, billing_period_id, tenant_platform_id, customer_type,
+  total_consumption, voucher_consumption, balance_consumption,
+  source_raw_ids, row_count_by_type, created_at
+  -- Step I0 产出；一行 = 一租户×客户类型（跨类型已加总）
 
 billing_period_raw_baremetal_order
   id, batch_id, row_no, order_id, order_no, tenant_platform_id,
@@ -361,8 +375,12 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 
 | 模式 | 售出时长成本（含税口径前） | 不含税售出时长成本 |
 |------|---------------------------|-------------------|
-| **卡时** `card_time` | `unit_price_per_hour × balance_card_hours` | 见 §6.3 公式 |
-| **分成** `revenue_share` | `balance_consumption × revenue_share_percent / 100` | 见 §6.3 公式 |
+| **卡时** `card_time` | `unit_price_per_hour × balance_card_hours` | 见 §6.3 / §6.4 |
+| **固定分成** `revenue_share` | `balance_consumption × revenue_share_percent / 100` | 见 §6.3 / §6.4 |
+| **卡时价阶梯分成** `tiered_revenue_share` | 先算成交/刊例比例落档，再 `balance_consumption × 档内分成% / 100` | 见 §6.3 Step C4、§6.4 |
+| **卡时价阶梯卡时** `tiered_card_time` | 落档后 `list_price × list_price_multiplier × balance_card_hours` | 见 §6.4（可选，与供应商合同 `tier_basis=multiplier` 一致） |
+
+主数据与档位定义对齐 [`supplier-database.md`](./supplier-database.md) §3.2.1：`supplier_card_list_price`（刊例价）、`supplier_pricing_tier` / `supplier_unit_cost.tier_json`（`deal_to_list_ratio_min/max` 或 `list_price_multiplier`）。
 
 ---
 
@@ -382,19 +400,71 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 
 ### 5.2 分轨规则
 
-- **B端 pipeline**：`客户消费明细.customer_type = B` 的租户集合。
-- **C端 pipeline**：`客户消费明细.customer_type = C` 的租户集合。
-- 两套 pipeline **独立聚合、独立落表**（或同一表用 `customer_type` 区分）。
+- **先汇总、再分轨**：全部 Raw 客户消费行经 **§5.3 Step I0** 按 `(租户ID, 客户类型)` 合并为租户级消费后，再进入 B/C pipeline。
+- **B端 pipeline**：Step I0 结果中 `customer_type = B` 的租户集合。
+- **C端 pipeline**：Step I0 结果中 `customer_type = C` 的租户集合。
+- 两套 pipeline **独立计算、独立落表**（或同一表用 `customer_type` 区分）；**每个租户在每条 pipeline 中至多一行收入**。
 - 仅出现在 `账单详情` / `裸金属` 但未出现在 `客户消费明细` 的租户：归入 **对账差异报告**，不自动进入收入表（可配置为阻断）。
 
 ### 5.3 计算步骤（按租户 *t*、客户类型 *ctype*）
 
-**Step I1 — 客户消费侧汇总（源：Raw 客户消费明细）**
+收入侧以 **租户** 为输出粒度（每个 `租户ID + 客户类型` 对应 `platform_income_monthly` 一行）。在套用账单、裸金属与补充消费公式 **之前**，须先将客户消费明细中同一租户下的多「类型」行合并。
+
+#### Step I0 — 客户消费按租户预汇总（跨「类型」加总）
+
+**分组键**：`(tenant_platform_id, customer_type)` — 即平台租户 ID + B端/C端。
+
+**聚合规则**（对 Raw `customer_consumption` 中分组内 **所有** 行求和，**忽略** `类型` / `租户类型` / Excel 内 `项目名称` 差异）：
 
 ```
-C_total(t)   = Σ row.total_consumption      -- 同租户同 ctype
-C_voucher(t) = Σ row.voucher_consumption
-C_balance(t) = Σ row.balance_consumption
+C_total(t, ctype)   = Σ row.total_consumption
+C_voucher(t, ctype) = Σ row.voucher_consumption
+C_balance(t, ctype) = Σ row.balance_consumption
+```
+
+其中求和范围：`row.tenant_platform_id = t` 且 `normalize(row.customer_type) = ctype`。
+
+**示例（租户 984，B端）**
+
+Excel 原始行（节选）：
+
+| 租户ID | 类型 | 客户类型 | 总消费 | 券消费 | 余额消费 |
+|--------|------|----------|--------|--------|----------|
+| 984 | 弹性服务部署 | B端 | 80,000.00 | 0 | 80,000.00 |
+| 984 | 镜像仓库 | B端 | 5,047.47 | 0 | 5,047.47 |
+| 984 | Other | B端 | 25,000.00 | 0 | 25,000.00 |
+
+预汇总后 **一条** 租户消费（写入中间表或内存 DTO，供 Step I1 使用）：
+
+| 租户ID | 客户类型 | C_total | C_voucher | C_balance |
+|--------|----------|---------|-----------|-----------|
+| 984 | B | 110,047.47 | 0 | **110,047.47** |
+
+> 此后 Step I1～I5 中的 `t` 均指该 **已汇总** 的租户消费，不再区分「弹性服务部署 / 镜像仓库 / Other」。
+
+**一致性与校验**
+
+| 规则 | 说明 |
+|------|------|
+| 客户类型一致 | 同一 `租户ID` 下若出现不同 `客户类型`（如既有 B 又有 C），**分别** 进入 B/C pipeline，**不得** 混加 |
+| 可选阻断 | 同一 `租户ID` 仅允许一种 `客户类型`；若违反则导入警告（可配置为阻断） |
+| 行级追溯 | 中间结果 `billing_period_agg_customer_consumption` 记录 `source_raw_ids[]`，可下钻至各「类型」源行 |
+
+**中间表（建议）**
+
+```
+billing_period_agg_customer_consumption
+  id, billing_period_id, tenant_platform_id, customer_type,
+  total_consumption, voucher_consumption, balance_consumption,
+  source_raw_ids, row_count_by_type, created_at
+```
+
+#### Step I1 — 客户消费侧（使用 Step I0 结果）
+
+```
+C_total(t)   = agg.total_consumption      -- 已含多类型加总
+C_voucher(t) = agg.voucher_consumption
+C_balance(t) = agg.balance_consumption
 ```
 
 **Step I2 — 账单侧汇总（源：Raw 账单详情）**
@@ -448,7 +518,7 @@ total_consumption(t) = C_balance(t)
 
 | 来源 | 值 |
 |------|-----|
-| 客户消费 `C_balance` | 110,047.47 |
+| 客户消费 `C_balance` | 110,047.47（= 弹性服务部署 80,000 + 镜像仓库 5,047.47 + Other 25,000，见 §5.3 Step I0） |
 | 账单 `B_balance`（两行合计） | 49,190.86 + 38,225.85 = **87,416.71** |
 | 裸金属 `M_bare` | 0 |
 | `supplementary` | 110,047.47 − 87,416.71 − 0 = **22,630.76** |
@@ -531,6 +601,7 @@ balance_consumption[a,r,g] = Σ row_p.balance_consumption
   WHERE staff_id(row_p) = a AND region = r AND gpu = g
 
 balance_card_hours[a,r,g]  = Σ row_p.balance_card_hours
+total_card_hours[a,r,g]    = Σ row_p.total_card_hours      -- 阶梯分成落档用（§6.4）
 voucher_card_hours[a,r,g]  = Σ row_p.voucher_card_hours
 ```
 
@@ -558,26 +629,53 @@ confirmed_revenue_excl_tax = balance_consumption / TAX_DIVISOR
 
 ```
 pricing = resolve_unit_cost(idc_code=r, card_type=g, as_of=period_end)
-mode    = pricing.pricing_mode   -- card_time | revenue_share | tiered_*
-unit    = pricing.unit_price_per_hour        -- 卡时：元/卡时
-ratio   = pricing.revenue_share_percent      -- 分成：%，如 35 表示 35%
+mode    = pricing.pricing_mode
+        -- card_time | revenue_share | tiered_revenue_share | tiered_card_time
+
+list_price = pricing.list_price_per_hour     -- 刊例价（元/卡时），阶梯模式必填
+unit       = pricing.unit_price_per_hour      -- 固定卡时模式
+ratio      = pricing.revenue_share_percent    -- 固定分成模式，%
+tiers      = pricing.tier_json.tiers          -- 阶梯档列表（按 tier_order 排序）
+tier_basis = pricing.tier_json.tier_basis     -- ratio_band | multiplier
 ```
 
 **Step C4 — 售出时长成本（不含税）**
 
-**卡时模式：**
+**模式 A — 卡时 `card_time`**
 
 ```
 sold_duration_cost_excl_tax = (unit × balance_card_hours) / TAX_DIVISOR
 ```
 
-**分成模式（§ 用户要求：分成比例 × 余额消费）：**
+**模式 B — 固定分成 `revenue_share`**
 
 ```
 sold_duration_cost_excl_tax = (ratio / 100 × balance_consumption) / TAX_DIVISOR
 ```
 
-> 注：分成模式下 **不使用** `balance_card_hours` 参与售出成本；卡时模式 **不使用** `balance_consumption` 直接乘单价。
+**模式 C — 卡时价阶梯分成 `tiered_revenue_share`（§6.4）**
+
+```
+IF total_card_hours[a,r,g] <= 0:
+  -- 无法计算成交卡时价 → 记入对账报告，售出成本 = 0 或阻断（可配置）
+  sold_duration_cost_excl_tax = 0
+ELSE:
+  deal_unit_price = balance_consumption / total_card_hours
+  deal_to_list_ratio = deal_unit_price / list_price
+  tier = match_tier(tiers, deal_to_list_ratio, tier_basis)   -- 见 §6.4
+  sold_duration_cost_excl_tax = (tier.revenue_share_percent / 100 × balance_consumption) / TAX_DIVISOR
+```
+
+**模式 D — 卡时价阶梯卡时 `tiered_card_time`（`tier_basis = multiplier`）**
+
+```
+deal_to_list_ratio = (balance_consumption / total_card_hours) / list_price   -- total_card_hours > 0
+tier = match_tier_by_multiplier(tiers, deal_to_list_ratio)
+tier_unit = list_price × tier.list_price_multiplier
+sold_duration_cost_excl_tax = (tier_unit × balance_card_hours) / TAX_DIVISOR
+```
+
+> **模式边界**：固定分成 / 阶梯分成 **不使用** `balance_card_hours` 乘单价；固定卡时 / 阶梯卡时 **不使用** `balance_consumption` 直接乘固定分成比例。阶梯模式 **必须** 能解析 `list_price_per_hour` 与 `tiers`。
 
 **样例验算（henan-xc-p1 · 4090）**
 
@@ -617,24 +715,184 @@ field_sum = Σ record.field   -- field ∈ {balance_consumption, balance_card_ho
 
 ### 6.4 卡时成本与分成成本对照表
 
-| 模式 | 业务含义 | 售出时长成本（不含税） |
-|------|----------|------------------------|
-| 卡时 | 按采购卡时单价结算 | `(机房卡时单价 × 余额卡时) / 1.06` |
-| 分成 | 按供应商分成比例结算 | `(分成比例 × 余额消费) / 1.06` |
-| 赠送 | 券卡时部分 | `(机房卡时单价 × 券卡时) / 1.06` |
+#### 6.4.1 模式总览
 
-**完整公式卡片**
+| 模式 | `pricing_mode` | 业务含义 | 售出时长成本（不含税） |
+|------|----------------|----------|------------------------|
+| 固定卡时 | `card_time` | 按采购卡时单价结算 | `(成交卡时单价 × 余额卡时) / 1.06` |
+| 固定分成 | `revenue_share` | 按固定供应商分成比例 | `(分成比例% × 余额消费) / 1.06` |
+| **卡时价阶梯分成** | `tiered_revenue_share` | 按 **实际成交卡时相对刊例价** 落档，取该档 **分成比例** | 见 §6.4.2 |
+| 卡时价阶梯卡时 | `tiered_card_time` | 按成交/刊例比例落档，取该档 **刊例倍数** 作为结算单价 | 见 §6.4.3 |
+| 赠送 | — | 券卡时部分（与主模式共用刊例/成交单价） | `(结算单价 × 券卡时) / 1.06` |
+
+#### 6.4.2 卡时价阶梯分成（`tiered_revenue_share`）
+
+**适用场景**：供应商合同约定——客户实际支付的卡时单价（相对刊例的折扣深度）不同，供应商 **分成比例** 不同。档位由 **成交/刊例比例** 划分，**不按累计用量（卡时）划档**（与 `supplier-database.md` R-S2.4 一致）。
+
+**输入量（分项 `(a,r,g)` 聚合后）**
+
+| 符号 | 来源 | 说明 |
+|------|------|------|
+| `B` | `balance_consumption` | 余额消费（元，含税） |
+| `H_total` | `total_card_hours` | **总卡时**（Excel「总卡时」列，拆分后按 §6.4 汇总） |
+| `L` | `list_price_per_hour` | **刊例价**（元/卡时），`supplier_card_list_price` |
+| `Tiers[]` | `supplier_unit_cost.tier_json` 或 `supplier_pricing_tier` | 各档 `deal_to_list_ratio_min/max`、`revenue_share_percent` |
+
+**Step T1 — 成交卡时价（元/卡时，含税口径与余额消费一致）**
 
 ```
-确认收入(不含税)     = 余额消费 / 1.06
+deal_unit_price_per_hour = B / H_total        （要求 H_total > 0）
+```
 
-售出时长成本(不含税) = IF 卡时模式
-                        THEN (unit_price_per_hour × 余额卡时) / 1.06
-                        ELSE (revenue_share_percent% × 余额消费) / 1.06
+**Step T2 — 成交/刊例比例**
 
-赠送时长成本(不含税) = (unit_price_per_hour × 券卡时) / 1.06
+```
+deal_to_list_ratio = deal_unit_price_per_hour / L
+```
 
-毛利               = 确认收入 - 售出时长成本 - 赠送时长成本
+也可写为：`deal_to_list_ratio = B / (H_total × L)`。
+
+**比例展示**：UI 与报告可用百分比，如 `87%` 表示 `deal_to_list_ratio = 0.87`。
+
+**Step T3 — 档位匹配（`tier_basis = ratio_band`）**
+
+在 `Tiers` 中查找满足下列条件的 **唯一** 档位 `tier`（推荐 **左闭右开** `[min, max)`）：
+
+```
+deal_to_list_ratio_min ≤ deal_to_list_ratio < deal_to_list_ratio_max
+```
+
+**示例档位表**
+
+| tier_order | 成交/刊例区间（比例） | 成交/刊例区间（% 展示） | 档内分成 `revenue_share_percent` |
+|------------|----------------------|-------------------------|----------------------------------|
+| 1 | [0.95, 1.00) | [95%, 100%) | 25% |
+| 2 | [0.90, 0.95) | [90%, 95%) | 28% |
+| 3 | [0.80, 0.90) | [80%, 90%) | 32% |
+| 4 | [0.00, 0.80) | [0%, 80%) | 35% |
+
+**数值样例（与用户描述一致）**
+
+```
+B = 49,190.86 元
+H_total = 25,312.97 卡时
+L = 2.30 元/卡时（刊例价）
+
+deal_unit_price = 49,190.86 / 25,312.97 ≈ 1.9434 元/卡时
+deal_to_list_ratio = 1.9434 / 2.30 ≈ 0.8449  →  展示约 84.5%
+
+落档：0.80 ≤ 0.8449 < 0.90  →  命中 tier_order = 3，分成 32%
+
+售出时长成本(不含税) = (32% × 49,190.86) / 1.06 ≈ 14,850.83 元
+```
+
+若 `deal_to_list_ratio = 0.87`（87%），则 `0.80 ≤ 0.87 < 0.90`，仍命中 **80%–90%** 档，按该档 `revenue_share_percent` 计算（与用户举例一致）。
+
+**Step T4 — 售出时长成本（不含税）**
+
+```
+sold_duration_cost_excl_tax = (tier.revenue_share_percent / 100 × B) / TAX_DIVISOR
+```
+
+**Step T5 — 审计字段（建议写入成本分项或计算日志）**
+
+| 字段 | 示例 |
+|------|------|
+| `list_price_per_hour` | 2.30 |
+| `deal_unit_price_per_hour` | 1.9434 |
+| `deal_to_list_ratio` | 0.8449 |
+| `matched_tier_order` | 3 |
+| `revenue_share_percent_applied` | 32 |
+
+**边界与异常**
+
+| 情况 | 处理 |
+|------|------|
+| `H_total = 0` | 无法计算成交卡时价；**阻断该分项** 或售出成本 = 0 并记入「阶梯落档失败」报告（可配置） |
+| 比例落在所有区间外 | 默认：取 **最接近** 的档位；或按合同 `overflow_policy`：`use_highest_tier` / `use_lowest_tier` / `block` |
+| 多档区间重叠 | 导入合同时校验互斥；运行时取 `tier_order` 最小者并记 warning |
+| 缺少刊例价或阶梯档 | 阻断计算，提示维护 `supplier_card_list_price` + `tier_json` |
+| `tier_basis = multiplier` 且模式为 `tiered_revenue_share` | 先将 `list_price_multiplier` 视为目标成交/刊例比例，再按 §6.4.3 选档；或要求合同显式配置 `ratio_band`（推荐） |
+
+**伪代码**
+
+```typescript
+function soldCostTieredRevenueShare(input: {
+  balanceConsumption: number
+  totalCardHours: number
+  listPricePerHour: number
+  tiers: TierRow[]
+  taxDivisor?: number
+}): SoldCostResult {
+  const TAX = input.taxDivisor ?? 1.06
+  if (input.totalCardHours <= 0 || input.listPricePerHour <= 0) {
+    return { soldExclTax: 0, error: "INVALID_HOURS_OR_LIST_PRICE" }
+  }
+  const dealUnit = input.balanceConsumption / input.totalCardHours
+  const ratio = dealUnit / input.listPricePerHour
+  const tier = input.tiers.find(
+    (t) =>
+      t.dealToListRatioMin <= ratio &&
+      ratio < (t.dealToListRatioMax ?? Number.POSITIVE_INFINITY),
+  )
+  if (!tier?.revenueSharePercent) {
+    return { soldExclTax: 0, error: "NO_TIER_MATCH", dealUnit, ratio }
+  }
+  const soldExclTax =
+    (tier.revenueSharePercent / 100) * input.balanceConsumption / TAX
+  return {
+    soldExclTax,
+    dealUnit,
+    ratio,
+    tierOrder: tier.tierOrder,
+    sharePercent: tier.revenueSharePercent,
+  }
+}
+```
+
+#### 6.4.3 卡时价阶梯卡时（`tiered_card_time`，可选）
+
+当合同约定按落档后的 **卡时结算单价**（而非分成比例）计费时使用：
+
+```
+deal_to_list_ratio = (B / H_total) / L
+tier = match_tier(Tiers, deal_to_list_ratio, tier_basis)
+tier_unit_price = L × tier.list_price_multiplier     -- 或 tier.tier_deal_unit_price_per_hour
+sold_duration_cost_excl_tax = (tier_unit_price × balance_card_hours) / TAX_DIVISOR
+```
+
+> 阶梯卡时模式用 **余额卡时** 计数量；阶梯分成模式用 **余额消费** 计金额。二者勿混用。
+
+#### 6.4.4 赠送时长成本
+
+```
+gifted_duration_cost_excl_tax = (settlement_unit_price × voucher_card_hours) / TAX_DIVISOR
+```
+
+`settlement_unit_price` 取值：
+
+- 固定卡时 / 阶梯卡时：与售出成本相同逻辑的 `unit` 或 `tier_unit_price`；
+- 固定分成 / 阶梯分成：一般用 `deal_unit_price_per_hour`（Step T1），或合同约定的赠送结算价。
+
+#### 6.4.5 完整公式卡片
+
+```
+确认收入(不含税) = 余额消费 / 1.06
+
+售出时长成本(不含税) =
+  IF pricing_mode = card_time
+    THEN (unit_price_per_hour × 余额卡时) / 1.06
+  ELSE IF pricing_mode = revenue_share
+    THEN (revenue_share_percent% × 余额消费) / 1.06
+  ELSE IF pricing_mode = tiered_revenue_share
+    THEN (档内revenue_share_percent% × 余额消费) / 1.06
+         其中 档内% 由 (余额消费/总卡时)/刊例价 落档得到
+  ELSE IF pricing_mode = tiered_card_time
+    THEN (档内结算卡时单价 × 余额卡时) / 1.06
+
+赠送时长成本(不含税) = (赠送结算单价 × 券卡时) / 1.06
+
+毛利 = 确认收入 - 售出时长成本 - 赠送时长成本
 ```
 
 ### 6.5 区域与机房映射
@@ -681,8 +939,9 @@ async function computeBillingPeriod(periodId: string) {
   const pricing = await loadPricingAsOf(period.period_end)
   const splitRows = applyCostAllocation(raw.tenantBills, allocations)
 
+  const customerAgg = aggregateCustomerConsumptionByTenant(raw.customerConsumption)
   for (const ctype of ["B", "C"] as const) {
-    const incomeRows = computeIncome({ raw, tenants, ctype })
+    const incomeRows = computeIncome({ customerAgg, raw, tenants, ctype })
     await upsertIncome(periodId, ctype, incomeRows)
   }
 
@@ -705,7 +964,8 @@ async function computeBillingPeriod(periodId: string) {
 |--------|------|
 | 租户覆盖率 | 客户消费 vs 账单 vs 裸金属 租户集合 diff |
 | 金额守恒 | `Σ C_balance` vs `Σ income.total` 按 ctype |
-| 单价缺失 | 分项成本无法 resolve 单价时列出行 |
+| 单价缺失 | 分项成本无法 resolve 单价/刊例价/阶梯档时列出行 |
+| 阶梯落档失败 | `总卡时=0` 或 `deal_to_list_ratio` 无匹配档位 |
 | AM 缺失 | B 端关联项目无 `account_manager` 指派 |
 | 分成未配 | 多项目租户缺少 100% 分成配置 |
 | 总计行校验 | Excel 总计 vs 明细 SUM |
@@ -765,7 +1025,8 @@ async function computeBillingPeriod(periodId: string) {
 | 用例 | 输入 | 期望 |
 |------|------|------|
 | E1 | 租户 4583 单行消费+账单 | `sup=0`, `balance=94301.97`, `total=94301.97` |
-| E2 | 租户 984 一行消费+两行账单 | `total=C_balance=110047.47`, `sup=C_balance-B_balance` |
+| E1b | 租户 984 三行不同类型消费 | Step I0 加总后 `C_balance=110047.47`；收入表仅 **1 行** / 租户 |
+| E2 | 租户 984 汇总消费+两行账单 | `total=C_balance=110047.47`, `sup=C_balance-B_balance` |
 | E3 | 账期内裸金属 268.80 | 对应租户 `bare=268.80`，`sup` 相应减少 |
 | E4 | 仅 C 端租户 | 只出现在 C 端收入表 |
 
@@ -775,7 +1036,9 @@ async function computeBillingPeriod(periodId: string) {
 |------|------|------|
 | C1 | henan-xc-p1 + 4090 分项 | `confirmed = balance/1.06`（误差 &lt; 0.01） |
 | C2 | 卡时单价已知 | `sold = unit×hours/1.06` |
-| C3 | 分成模式 | `sold = ratio×balance/1.06` |
+| C3 | 固定分成模式 | `sold = ratio×balance/1.06` |
+| C3b | 阶梯分成：ratio=87% 落在 [80%,90%) | 取该档 `revenue_share_percent`；`sold = pct×balance/1.06` |
+| C3c | 阶梯分成：`H_total=0` | 落档失败报告或阻断 |
 | C4 | 券卡时 &gt; 0 | `gifted &gt; 0`，毛利减少 |
 | C5 | C 端租户 | 不出现在 cost 表 |
 | C6 | 无 AM 的 B 端 | 进入未纳入清单，不出现在 cost 表 |
@@ -799,7 +1062,7 @@ async function computeBillingPeriod(periodId: string) {
 
 | 阶段 | 内容 |
 |------|------|
-| P1 | Raw 表 + Excel 解析（含总计行过滤）+ §4.4 项目/AM 补全 |
+| P1 | Raw 表 + Excel 解析（含总计行过滤）+ Step I0 agg 表 + §4.4 项目/AM 补全 |
 | P1b | 预置分成表 + 账期分成 UI + `pending_allocation` 状态 |
 | P2 | 收入 pipeline（B/C 分轨）+ 对账报告 |
 | P3 | 成本 pipeline（拆分后聚合）+ 单价主数据 + AM 汇总行 |
@@ -812,7 +1075,7 @@ async function computeBillingPeriod(periodId: string) {
 
 1. **收入对账锚点**：本方案采用 `C_balance`（客户消费余额）为 `total` 锚点；样例海绵智能数据若为准绳，需调整 Step I4 公式。
 2. **分成成本是否含税**：本方案对 `balance_consumption` 先按分成比例再除 `1.06`；若合同为含税分成需去掉除税步骤。
-3. **阶梯卡时 / 阶梯分成**：本期按账期累计小时数套档（需账单侧提供或可汇总卡时）；否则回退首档。
+3. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**（`余额消费/总卡时` 再除以刊例价），**不按累计卡时划档**（见 §6.4.2；与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。  
 4. **租户 984 多区域两行账单**：收入按租户汇总；成本先按租户×项目分成拆分，再按 AM×区域×卡型分项。  
 5. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。
 
@@ -856,7 +1119,8 @@ async function computeBillingPeriod(periodId: string) {
 | `gifted = unit × voucher_hours / 1.06` | `computeGiftedDurationCostExclTax` |
 | `gross = confirmed - sold - gifted` | `computeGrossProfit` |
 | AM 汇总行 | `recomputeStaffSumRows` |
-| 单价解析 | `resolveUnitPricePerHour` |
+| 单价解析 | `resolveUnitPricePerHour`（待扩展刊例价 + `tier_json`） |
+| 阶梯分成 | §6.4.2 `soldCostTieredRevenueShare` |
 
 ---
 
