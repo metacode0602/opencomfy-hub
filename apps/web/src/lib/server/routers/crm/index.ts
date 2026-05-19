@@ -8,6 +8,7 @@ import { billingDataAccess } from '@/lib/server/dataaccess/crm/billing'
 import { dashboardDataAccess } from '@/lib/server/dataaccess/crm/dashboard'
 import { calendarDataAccess } from '@/lib/server/dataaccess/crm/calendar'
 import { businessLinesDataAccess } from '@/lib/server/dataaccess/crm/business-lines'
+import { projectTagsDataAccess } from '@/lib/server/dataaccess/crm/project-tags'
 import {
   customerUpsertSchema,
   projectUpsertSchema,
@@ -98,6 +99,21 @@ export const crmRouter = createTRPCRouter({
     listBills: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listBillsByProject(input.projectId)),
+  }),
+
+  projectTags: createTRPCRouter({
+    list: protectedProcedure.query(() => projectTagsDataAccess.listAll()),
+    listByProject: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(({ input }) => projectTagsDataAccess.listByProjectId(input.projectId)),
+    create: adminProcedure
+      .input(z.object({ name: z.string().min(1).max(128) }))
+      .mutation(({ input }) => projectTagsDataAccess.create(input.name)),
+    setForProject: adminProcedure
+      .input(z.object({ projectId: z.string(), tagIds: z.array(z.string()) }))
+      .mutation(({ input }) =>
+        projectTagsDataAccess.setForProject(input.projectId, input.tagIds),
+      ),
   }),
 
   staff: createTRPCRouter({

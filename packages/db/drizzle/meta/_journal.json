@@ -15,6 +15,13 @@
       "when": 1779119131483,
       "tag": "0001_eager_blizzard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779161467475,
+      "tag": "0002_orange_robin_chapel",
+      "breakpoints": true
     }
   ]
 }

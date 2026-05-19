@@ -154,6 +154,36 @@ export const crmProject = pgTable(
   ],
 )
 
+/** 项目标签字典 */
+export const projectTag = pgTable(
+  "project_tag",
+  {
+    id: text("id").primaryKey(),
+    name: varchar("name", { length: 128 }).notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("project_tag_name_uk").on(table.name)],
+)
+
+/** 项目与标签关联 */
+export const projectTagAssignment = pgTable(
+  "project_tag_assignment",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => projectTag.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.tagId] }),
+    index("project_tag_assignment_tag_id_idx").on(table.tagId),
+  ],
+)
+
 /** 项目关联计费账户（多 tenant 归因）；须满足 R1.3 同 customer */
 export const projectTenant = pgTable(
   "project_tenant",
@@ -784,8 +814,24 @@ export const crmProjectRelations = relations(crmProject, ({ one, many }) => ({
   }),
   staffAssignments: many(projectStaffAssignment),
   tenantLinks: many(projectTenant),
+  tagAssignments: many(projectTagAssignment),
   activities: many(projectActivity),
   bills: many(tenantBill),
+}))
+
+export const projectTagRelations = relations(projectTag, ({ many }) => ({
+  assignments: many(projectTagAssignment),
+}))
+
+export const projectTagAssignmentRelations = relations(projectTagAssignment, ({ one }) => ({
+  project: one(crmProject, {
+    fields: [projectTagAssignment.projectId],
+    references: [crmProject.id],
+  }),
+  tag: one(projectTag, {
+    fields: [projectTagAssignment.tagId],
+    references: [projectTag.id],
+  }),
 }))
 
 export const projectStaffAssignmentRelations = relations(projectStaffAssignment, ({ one }) => ({
@@ -823,4 +869,5 @@ export type CustomerRow = typeof customer.$inferSelect
 export type NewCustomerRow = typeof customer.$inferInsert
 export type BillingTenantRow = typeof billingTenant.$inferSelect
 export type CrmProjectRow = typeof crmProject.$inferSelect
+export type ProjectTagRow = typeof projectTag.$inferSelect
 export type UserStaffRow = typeof userStaff.$inferSelect

@@ -11,6 +11,7 @@ import {
   Edit,
   Eye,
   Trash,
+  Tag,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -43,6 +44,7 @@ import type { Project } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
+import { ProjectTagsDialog } from './project-tags-dialog'
 
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
@@ -52,6 +54,8 @@ export function ProjectsContent() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [tagsOpen, setTagsOpen] = useState(false)
+  const [taggingProject, setTaggingProject] = useState<Project | null>(null)
 
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
@@ -70,6 +74,11 @@ export function ProjectsContent() {
   const openEdit = (project: Project) => {
     setEditingProject(project)
     setEditOpen(true)
+  }
+
+  const openTags = (project: Project) => {
+    setTaggingProject(project)
+    setTagsOpen(true)
   }
 
   return (
@@ -98,6 +107,13 @@ export function ProjectsContent() {
         project={editingProject}
         businessLines={businessLines}
         onUpdated={() => void refetch()}
+      />
+
+      <ProjectTagsDialog
+        open={tagsOpen}
+        onOpenChange={setTagsOpen}
+        project={taggingProject}
+        onSaved={() => void refetch()}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -264,6 +280,11 @@ export function ProjectsContent() {
                           <Edit className="w-4 h-4 mr-2" />
                           编辑项目
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openTags(project)}>
+                          <Tag className="w-4 h-4 mr-2" />
+                          设置标签
+                        </DropdownMenuItem>
+
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>转为测试中</DropdownMenuItem>
                         <DropdownMenuItem>转为已转正</DropdownMenuItem>

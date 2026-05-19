@@ -258,6 +258,7 @@ CRM 前端已按 **Customer / Project / PlatformTenant** 完成类型与路由�
 | `name` | varchar | NOT NULL | 计费账户显示名（可与 customer.name 相同） |
 | `platform_tenant_id` | varchar | UK | `platformTenantId` |
 | `is_default` | boolean | NOT NULL DEFAULT false | `isDefault` |
+| `type` | varchar | NOT NULL DEFAULT external | `internal` / `external` |
 | `status` | varchar | NOT NULL | `active` / `inactive` / `suspended` |
 | `balance` | decimal(15,4) | NOT NULL DEFAULT 0 | `balance` |
 | `created_at` | timestamptz | NOT NULL | |
