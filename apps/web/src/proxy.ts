@@ -77,7 +77,7 @@ export function proxy(request: NextRequest) {
     pathForAuth === "/" ||
     // pathForAuth.startsWith("/login") ||
     pathForAuth.startsWith("/signin") ||
-    pathForAuth.startsWith("/register") ||
+    pathForAuth.startsWith("/signup") ||
     pathForAuth.startsWith("/forgot-password") ||
     pathForAuth.startsWith("/reset-password") ||
     pathForAuth.startsWith("/error")
