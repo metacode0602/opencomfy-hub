@@ -21,5 +21,5 @@ export default async function CrmPage({
     localeRedirect({ href: '/crm/workbench', locale })
   }
 
-  localeRedirect({ href: '/login', locale })
+  localeRedirect({ href: '/signin', locale })
 }

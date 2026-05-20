@@ -76,6 +76,7 @@ export function proxy(request: NextRequest) {
   const isPublicRoute =
     pathForAuth === "/" ||
     pathForAuth.startsWith("/login") ||
+    pathForAuth.startsWith("/signin") ||
     pathForAuth.startsWith("/register") ||
     pathForAuth.startsWith("/forgot-password") ||
     pathForAuth.startsWith("/reset-password") ||
