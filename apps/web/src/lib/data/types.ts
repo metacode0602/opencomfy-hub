@@ -452,6 +452,19 @@ export interface DataCenterDevice {
   updatedAt?: string
 }
 
+/** L1 聚合库存变更记录（Mock） */
+export interface InventoryChangeLog {
+  id: string
+  inventoryId: string
+  changeType: 'status' | 'quantity' | 'internal_test' | 'sync'
+  summary: string
+  fromValue: string
+  toValue: string
+  operatorName: string
+  reasonCode: string
+  occurredAt: string
+}
+
 export interface SupplierBill {
   id: string
   supplierId: string

@@ -17,6 +17,7 @@ import type {
   DataCenter,
   GPUCardType,
   DataCenterDevice,
+  InventoryChangeLog,
   SupplierBill,
   SupplierPricingRecord,
   SupplierPricingHistory,
@@ -1555,6 +1556,53 @@ export const mockDataCenterDevices: DataCenterDevice[] = [
   { id: 'dcd16', dataCenterId: 'dc7', dataCenterName: '东莞松山湖数据中心', supplierId: 'sup3', cardTypeId: 'card3', cardTypeName: 'NVIDIA V100 32GB', quantity: 90, onlineQuantity: 0, cardTimeCostPerHour: 24, status: 'maintenance' },
 ]
 
+export const mockInventoryChangeLogs: InventoryChangeLog[] = [
+  {
+    id: 'icl-dcd1-001',
+    inventoryId: 'dcd1',
+    changeType: 'sync',
+    summary: '物理机汇总同步',
+    fromValue: '74 在线',
+    toValue: '75 在线',
+    operatorName: '系统',
+    reasonCode: 'INVENTORY_SYNC',
+    occurredAt: '2026-05-18T08:00:00.000Z',
+  },
+  {
+    id: 'icl-dcd1-002',
+    inventoryId: 'dcd1',
+    changeType: 'status',
+    summary: '运行状态变更',
+    fromValue: 'offline',
+    toValue: 'online',
+    operatorName: '张三（运营）',
+    reasonCode: 'OPS_STATUS_CHANGE',
+    occurredAt: '2026-04-02T10:30:00.000Z',
+  },
+  {
+    id: 'icl-dcd1-003',
+    inventoryId: 'dcd1',
+    changeType: 'quantity',
+    summary: '总量调整',
+    fromValue: '78',
+    toValue: '80',
+    operatorName: '李四（运营）',
+    reasonCode: 'BATCH_COMMITTED',
+    occurredAt: '2026-03-15T14:20:00.000Z',
+  },
+  {
+    id: 'icl-dcd4-001',
+    inventoryId: 'dcd4',
+    changeType: 'internal_test',
+    summary: '内部测试占用',
+    fromValue: '未开启',
+    toValue: 'GPU0-GPU3',
+    operatorName: '王五（运维）',
+    reasonCode: 'INTERNAL_TEST_HOLD',
+    occurredAt: '2026-05-10T09:00:00.000Z',
+  },
+]
+
 // 供应商账单数据
 export const mockSupplierBills: SupplierBill[] = [
   {
@@ -1666,6 +1714,12 @@ export function getDevicesBySupplierId(supplierId: string): DataCenterDevice[] {
 
 export function getDeviceById(deviceId: string): DataCenterDevice | undefined {
   return mockDataCenterDevices.find(d => d.id === deviceId)
+}
+
+export function getInventoryChangeLogsByInventoryId(inventoryId: string): InventoryChangeLog[] {
+  return mockInventoryChangeLogs
+    .filter((log) => log.inventoryId === inventoryId)
+    .sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1))
 }
 
 export function getSupplierContractsBySupplierId(supplierId: string): SupplierContract[] {

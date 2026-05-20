@@ -46,6 +46,12 @@ import { SupplierDevicesPanel } from '@/components/dashboard/supplier-devices-pa
 import { SupplierContractsPanel } from '@/components/dashboard/supplier-contracts-panel'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { SupplierBillsPanel } from '@/components/dashboard/supplier-bills-panel'
+import {
+  SupplierActivityTimelinePanel,
+  SupplierOnboardingBatchesPanel,
+} from '@/components/dashboard/supplier-activity-timeline-panel'
+import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
+import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 
 interface SupplierDetailContentProps {
   supplier: Supplier
@@ -53,6 +59,7 @@ interface SupplierDetailContentProps {
 
 export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) {
   const [activeTab, setActiveTab] = useState('overview')
+  const domainSupplierId = resolveDomainSupplierId(supplier.id)
 
   const dataCenters = getDataCentersBySupplierId(supplier.id)
   const devices = getDevicesBySupplierId(supplier.id)
@@ -205,6 +212,9 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
           <TabsTrigger value="contracts">合同管理</TabsTrigger>
           <TabsTrigger value="unit-costs">卡型成本</TabsTrigger>
           <TabsTrigger value="bills">账单结算</TabsTrigger>
+          <TabsTrigger value="batches">接入批次</TabsTrigger>
+          <TabsTrigger value="timeline">活动时间线</TabsTrigger>
+          <TabsTrigger value="machines">物理机</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -395,6 +405,18 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
 
         <TabsContent value="bills" className="space-y-4">
           <SupplierBillsPanel supplier={supplier} />
+        </TabsContent>
+
+        <TabsContent value="batches" className="space-y-4">
+          <SupplierOnboardingBatchesPanel supplierId={domainSupplierId} />
+        </TabsContent>
+
+        <TabsContent value="timeline" className="space-y-4">
+          <SupplierActivityTimelinePanel supplierId={domainSupplierId} />
+        </TabsContent>
+
+        <TabsContent value="machines" className="space-y-4">
+          <PhysicalDevicesContent supplierIdFilter={domainSupplierId} />
         </TabsContent>
       </Tabs>
     </div>

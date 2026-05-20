@@ -9,7 +9,9 @@ import type {
   OnboardingTask,
   ResourcePoolBinding,
   Supplier,
+  SupplierActivity,
   SupplierContract,
+  SupplierDataCenter,
   SupplierDevice,
   SupplierTermsVersion,
   SupplierUnitCost,
@@ -17,6 +19,9 @@ import type {
 
 const supA = "sup-huabei-01"
 const supB = "sup-huanan-01"
+const dcHbBj = "dc-hb-bj-1"
+const dcHbSh = "dc-hb-sh-2"
+const dcHnGz = "dc-hn-gz-1"
 const conA1 = "con-hb-2025-001"
 const conA2 = "con-hb-2025-002"
 const conB1 = "con-hn-2026-001"
@@ -26,13 +31,17 @@ const uc1 = "uc-hb-a100-80g"
 const acsA1v1 = "acs-hb-001-v1"
 const acsA1v2 = "acs-hb-001-v2"
 const batch1 = "batch-hb-2026-q1"
+const batch2 = "batch-hb-ord-2026-01"
 const dev1 = "dev-sn-8f2a91"
 const dev2 = "dev-sn-7c11aa"
 const node1 = "node-dev1-w01"
 const node2 = "node-dev2-cp"
 
+const now = "2026-05-18T10:00:00.000Z"
+
 export type SupplierDomainSeed = {
   suppliers: Supplier[]
+  dataCenters: SupplierDataCenter[]
   contracts: SupplierContract[]
   termsVersions: SupplierTermsVersion[]
   unitCosts: SupplierUnitCost[]
@@ -46,6 +55,7 @@ export type SupplierDomainSeed = {
   resourcePoolBindings: ResourcePoolBinding[]
   lifecycleStateDefinitions: LifecycleStateDefinition[]
   entityStateTransitionLogs: EntityStateTransitionLog[]
+  supplierActivities: SupplierActivity[]
 }
 
 export const supplierDomainSeed: SupplierDomainSeed = {
@@ -61,6 +71,33 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       code: "HN-DC-02",
       name: "华南云联数据中心有限公司",
       short_name: "华南云联",
+    },
+  ],
+
+  dataCenters: [
+    {
+      id: dcHbBj,
+      supplier_id: supA,
+      code: "HB-BJ-DC1",
+      name: "华北-北京 DC1",
+      location: "北京",
+      status: "online",
+    },
+    {
+      id: dcHbSh,
+      supplier_id: supA,
+      code: "HB-SH-DC2",
+      name: "华北-上海 DC2",
+      location: "上海",
+      status: "online",
+    },
+    {
+      id: dcHnGz,
+      supplier_id: supB,
+      code: "HN-GZ-DC1",
+      name: "华南-广州 DC1",
+      location: "广州",
+      status: "online",
     },
   ],
 
@@ -109,7 +146,7 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       supplier_id: null,
       contract_id: conA1,
       deal_mode: "阶梯分成",
-      terms_json: { tiers: [0.72, 0.75, 0.78], breakpoint_gpu_hours: [1000, 5000] },
+      terms_json: { tiers: [0.72, 0.75, 0.78] },
       effective_from: "2025-06-01T00:00:00.000Z",
       effective_to: null,
     },
@@ -156,11 +193,89 @@ export const supplierDomainSeed: SupplierDomainSeed = {
   onboardingBatches: [
     {
       id: batch1,
+      batch_kind: "online",
+      supplier_id: supA,
+      supplier_code: "HB-GPU-01",
+      supplier_name: "华北智算科技有限公司",
+      supplier_short_name: "华北智算",
+      data_center_id: dcHbBj,
+      idc_code: "HB-BJ-DC1",
+      data_center_name: "华北-北京 DC1",
+      idc_region: "华北-北京",
       contract_id: conA1,
       access_condition_sheet_id: acsA1v2,
       batch_code: "ONB-2026-Q1-HB",
       batch_status: "接入中",
       planned_ready_at: "2026-06-01T10:00:00.000Z",
+      access_method: "ssh_jump",
+      import_file_name: "上架清单-Q1.csv",
+      import_status: "committed",
+      parsed_row_count: 2,
+      parsed_success_count: 2,
+      parsed_rows_json: [
+        {
+          row_no: 2,
+          public_ip: "203.0.113.10",
+          private_ip: "10.20.30.40",
+          root_account: "root",
+          root_password: "***",
+          sn: "8F2A91C2",
+          asset_no: "AST-HB-00091",
+          parse_status: "ok",
+        },
+        {
+          row_no: 3,
+          public_ip: "203.0.113.11",
+          private_ip: "10.20.30.41",
+          root_account: "root",
+          root_password: "***",
+          sn: "7C11AA01",
+          asset_no: "AST-HB-00092",
+          parse_status: "ok",
+        },
+      ],
+      parsed_at: "2026-05-01T08:30:00.000Z",
+      committed_device_count: 2,
+      committed_at: "2026-05-01T09:00:00.000Z",
+      created_at: "2026-05-01T08:00:00.000Z",
+      updated_at: "2026-05-10T12:00:00.000Z",
+    },
+    {
+      id: batch2,
+      batch_kind: "order_access",
+      supplier_id: supA,
+      supplier_code: "HB-GPU-01",
+      supplier_name: "华北智算科技有限公司",
+      supplier_short_name: "华北智算",
+      data_center_id: dcHbBj,
+      idc_code: "HB-BJ-DC1",
+      data_center_name: "华北-北京 DC1",
+      idc_region: "华北-北京",
+      contract_id: conA1,
+      access_condition_sheet_id: acsA1v2,
+      batch_code: "ORD-202605-102",
+      batch_status: "待开始",
+      planned_ready_at: "2026-06-15T18:00:00.000Z",
+      access_method: "ipmi",
+      import_file_name: "订单接入-待入库.csv",
+      import_status: "parsed",
+      parsed_row_count: 1,
+      parsed_success_count: 1,
+      parsed_rows_json: [
+        {
+          row_no: 2,
+          public_ip: "203.0.113.21",
+          private_ip: "10.20.30.51",
+          root_account: "root",
+          root_password: "***",
+          parse_status: "ok",
+        },
+      ],
+      parsed_at: "2026-05-12T14:00:00.000Z",
+      committed_device_count: 0,
+      committed_at: null,
+      created_at: "2026-05-12T13:00:00.000Z",
+      updated_at: "2026-05-12T14:00:00.000Z",
     },
   ],
 
@@ -170,6 +285,7 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       supplier_id: supA,
       contract_id: conA1,
       onboarding_batch_id: batch1,
+      data_center_id: dcHbBj,
       asset_no: "AST-HB-00091",
       sn: "8F2A91C2",
       lifecycle_status: "接入中",
@@ -180,12 +296,14 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       card_type: "A100-80G",
       external_ip: "203.0.113.10",
       internal_ip: "10.20.30.40",
+      platform_resource_id: null,
     },
     {
       id: dev2,
       supplier_id: supA,
       contract_id: conA1,
       onboarding_batch_id: batch1,
+      data_center_id: dcHbBj,
       asset_no: "AST-HB-00092",
       sn: "7C11AA01",
       lifecycle_status: "在线",
@@ -196,6 +314,7 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       card_type: "A100-80G",
       external_ip: "203.0.113.11",
       internal_ip: "10.20.30.41",
+      platform_resource_id: "res-hb-a100-92",
     },
   ],
 
@@ -244,6 +363,8 @@ export const supplierDomainSeed: SupplierDomainSeed = {
   faultIncidents: [
     {
       id: "fault-001",
+      supplier_id: supA,
+      title: "A100 节点网络抖动",
       device_id: dev2,
       compute_node_id: null,
       severity: "P2",
@@ -254,6 +375,8 @@ export const supplierDomainSeed: SupplierDomainSeed = {
     },
     {
       id: "fault-002",
+      supplier_id: supA,
+      title: "Worker 节点 Agent 未注册",
       device_id: null,
       compute_node_id: node1,
       severity: "P3",
@@ -267,11 +390,23 @@ export const supplierDomainSeed: SupplierDomainSeed = {
   internalTestHolds: [
     {
       id: "hold-001",
+      supplier_id: supA,
       device_id: dev1,
       compute_node_id: null,
       scope: "GPU0-GPU3",
       hold_from: "2026-05-02T00:00:00.000Z",
       hold_until: "2026-05-09T23:59:59.000Z",
+      remark: "压测占用",
+    },
+    {
+      id: "hold-002",
+      supplier_id: supA,
+      device_id: dev2,
+      compute_node_id: null,
+      scope: "GPU4-GPU7",
+      hold_from: "2026-05-15T00:00:00.000Z",
+      hold_until: null,
+      remark: "推理回归",
     },
   ],
 
@@ -280,7 +415,7 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       id: "rpb-001",
       device_id: dev2,
       resource_pool_id: "pool-hb-gpu-a",
-      pool_code: null,
+      pool_code: "POOL-HB-A100",
       workload_profile: "JOB",
       is_exclusive_pool: false,
     },
@@ -301,16 +436,29 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       display_name: "接入中",
       sort_order: 20,
     },
-    {
-      id: "lsd-node-online",
-      domain: "compute_node",
-      state_code: "online",
-      display_name: "在线",
-      sort_order: 30,
-    },
   ],
 
   entityStateTransitionLogs: [
+    {
+      id: "esl-dev1-001",
+      entity_type: "device",
+      entity_id: dev1,
+      from_state: "待接入",
+      to_state: "接入中",
+      operator_id: "staff-mock-01",
+      reason_code: "BATCH_COMMITTED",
+      occurred_at: "2026-05-01T08:00:00.000Z",
+    },
+    {
+      id: "esl-dev1-002",
+      entity_type: "device",
+      entity_id: dev1,
+      from_state: "接入中",
+      to_state: "接入中",
+      operator_id: "staff-mock-02",
+      reason_code: "SUBSTAGE_RACKING",
+      occurred_at: "2026-05-05T11:30:00.000Z",
+    },
     {
       id: "esl-001",
       entity_type: "device",
@@ -330,6 +478,69 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       operator_id: "staff-mock-02",
       reason_code: "AGENT_REGISTERED",
       occurred_at: "2026-05-03T10:12:00.000Z",
+    },
+  ],
+
+  supplierActivities: [
+    {
+      id: "act-001",
+      supplier_id: supA,
+      type: "batch_started",
+      title: "接入批次 ONB-2026-Q1-HB 已启动",
+      description: "已入库 2 台物理机，进入施工阶段",
+      author_name: "系统",
+      author_role: "system",
+      ref_domain: "batch",
+      ref_id: batch1,
+      occurred_at: "2026-05-01T09:00:00.000Z",
+    },
+    {
+      id: "act-002",
+      supplier_id: supA,
+      type: "device_online",
+      title: "设备 7C11AA01 已上线",
+      description: "批次 ONB-2026-Q1-HB，资源池 POOL-HB-A100",
+      author_name: "张三（mock）",
+      author_role: "ops",
+      ref_domain: "device",
+      ref_id: dev2,
+      occurred_at: "2026-04-20T16:00:00.000Z",
+    },
+    {
+      id: "act-003",
+      supplier_id: supA,
+      type: "internal_test_hold",
+      title: "内部测试占用 GPU0-GPU3",
+      description: "设备 8F2A91C2，计划至 2026-05-09",
+      author_name: "李四（mock）",
+      author_role: "ops",
+      ref_domain: "device",
+      ref_id: dev1,
+      occurred_at: "2026-05-02T00:00:00.000Z",
+    },
+    {
+      id: "act-004",
+      supplier_id: supA,
+      type: "fault_opened",
+      title: "故障 P3：Worker Agent 未注册",
+      description: "节点 node-dev1-w01",
+      author_name: "系统",
+      author_role: "system",
+      ref_domain: "fault",
+      ref_id: "fault-002",
+      occurred_at: "2026-05-10T11:00:00.000Z",
+    },
+    {
+      id: "act-005",
+      supplier_id: supA,
+      type: "ops_import",
+      title: "订单接入清单解析完成",
+      description: "批次 ORD-202605-102，1 行待确认入库",
+      author_name: "李四（mock）",
+      author_role: "ops",
+      ref_domain: "batch",
+      ref_id: batch2,
+      occurred_at: now,
     },
   ],
 }

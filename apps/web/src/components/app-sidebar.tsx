@@ -52,6 +52,11 @@ const data = {
   ],
   navSupply: [
     {
+      title: "资源总览",
+      url: "/supplier/overview",
+      icon: <BarChart3 className="size-4" />,
+    },
+    {
       title: "供应商",
       url: "/supplier/suppliers",
       icon: <Factory className="size-4" />,
@@ -62,12 +67,17 @@ const data = {
       icon: <FileText className="size-4" />,
     },
     {
+      title: "平台定价",
+      url: "/supplier/platform-pricing",
+      icon: <Sparkles className="size-4" />,
+    },
+    {
       title: "卡型单价",
       url: "/supplier/unit-costs",
       icon: <DollarSignIcon className="size-4" />,
     },
     {
-      title: "设备",
+      title: "设备管理",
       url: "/supplier/devices",
       icon: <Computer className="size-4" />,
     },

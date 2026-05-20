@@ -12,7 +12,9 @@ import type {
   OnboardingTask,
   ResourcePoolBinding,
   Supplier,
+  SupplierActivity,
   SupplierContract,
+  SupplierDataCenter,
   SupplierDevice,
   SupplierTermsVersion,
   SupplierUnitCost,
@@ -77,6 +79,12 @@ export type SupplierDomainMockState = Base & {
 
   upsertEntityStateTransitionLog: (row: EntityStateTransitionLog) => void
   removeEntityStateTransitionLog: (id: string) => void
+
+  upsertDataCenter: (row: SupplierDataCenter) => void
+  removeDataCenter: (id: string) => void
+
+  upsertSupplierActivity: (row: SupplierActivity) => void
+  removeSupplierActivity: (id: string) => void
 }
 
 function collectCascadeForSupplier(
@@ -140,6 +148,7 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
                 (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
             ),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => !deviceIds.has(r.device_id)),
+            supplierActivities: s.supplierActivities.filter((a) => a.supplier_id !== id),
             entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
               (e) =>
                 !(
@@ -181,6 +190,7 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
                 (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
             ),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => !deviceIds.has(r.device_id)),
+            supplierActivities: s.supplierActivities.filter((a) => a.supplier_id !== id),
             entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
               (e) =>
                 !(
@@ -300,10 +310,16 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
         set((s) => ({ entityStateTransitionLogs: replaceById(s.entityStateTransitionLogs, row) })),
       removeEntityStateTransitionLog: (id) =>
         set((s) => ({ entityStateTransitionLogs: s.entityStateTransitionLogs.filter((x) => x.id !== id) })),
+
+      upsertDataCenter: (row) => set((s) => ({ dataCenters: replaceById(s.dataCenters, row) })),
+      removeDataCenter: (id) => set((s) => ({ dataCenters: s.dataCenters.filter((x) => x.id !== id) })),
+
+      upsertSupplierActivity: (row) => set((s) => ({ supplierActivities: replaceById(s.supplierActivities, row) })),
+      removeSupplierActivity: (id) => set((s) => ({ supplierActivities: s.supplierActivities.filter((x) => x.id !== id) })),
     }),
     {
-      name: "supplier-domain-mock-store-v1",
-      version: 1,
+      name: "supplier-domain-mock-store-v2",
+      version: 2,
     },
   ),
 )

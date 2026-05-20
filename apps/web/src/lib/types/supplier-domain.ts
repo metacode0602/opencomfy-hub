@@ -7,6 +7,15 @@ export type Supplier = {
   short_name: string
 }
 
+export type SupplierDataCenter = {
+  id: string
+  supplier_id: string
+  code: string
+  name: string
+  location: string
+  status: "online" | "offline" | "maintenance"
+}
+
 export type SupplierContract = {
   id: string
   supplier_id: string
@@ -46,13 +55,60 @@ export type AccessConditionSheet = {
   gpu_network_cpu_terms: Record<string, unknown>
 }
 
+export type OnboardingBatchKind = "online" | "order_access"
+
+export type OnboardingImportStatus =
+  | "draft"
+  | "uploaded"
+  | "parsing"
+  | "parsed"
+  | "parse_failed"
+  | "committing"
+  | "committed"
+  | "cancelled"
+
+export type OnboardingParsedRow = {
+  row_no: number
+  public_ip: string
+  private_ip: string
+  root_account: string
+  root_password: string
+  sn?: string
+  asset_no?: string
+  gpu_count?: number
+  card_type_code?: string
+  parse_status: "ok" | "warning" | "error"
+  parse_message?: string | null
+}
+
 export type OnboardingBatch = {
   id: string
+  batch_kind: OnboardingBatchKind
+  supplier_id: string
+  supplier_code: string
+  supplier_name: string
+  supplier_short_name: string
+  data_center_id: string
+  idc_code: string
+  data_center_name: string
+  idc_region: string
   contract_id: string
   access_condition_sheet_id: string
   batch_code: string
   batch_status: string
   planned_ready_at: string | null
+  access_method: string
+  import_file_name: string
+  import_status: OnboardingImportStatus
+  parse_error?: string | null
+  parsed_row_count: number
+  parsed_success_count: number
+  parsed_rows_json: OnboardingParsedRow[] | null
+  parsed_at: string | null
+  committed_device_count: number
+  committed_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type SupplierDevice = {
@@ -60,6 +116,7 @@ export type SupplierDevice = {
   supplier_id: string
   contract_id: string | null
   onboarding_batch_id: string
+  data_center_id: string
   asset_no: string
   sn: string
   lifecycle_status: string
@@ -70,6 +127,7 @@ export type SupplierDevice = {
   card_type: string
   external_ip: string
   internal_ip: string
+  platform_resource_id?: string | null
 }
 
 export type ComputeNode = {
@@ -94,6 +152,8 @@ export type OnboardingTask = {
 
 export type FaultIncident = {
   id: string
+  supplier_id: string
+  title: string
   device_id: string | null
   compute_node_id: string | null
   severity: string
@@ -105,11 +165,13 @@ export type FaultIncident = {
 
 export type InternalTestHold = {
   id: string
+  supplier_id: string
   device_id: string | null
   compute_node_id: string | null
   scope: string
   hold_from: string
-  hold_until: string
+  hold_until: string | null
+  remark?: string
 }
 
 export type ResourcePoolBinding = {
@@ -119,6 +181,19 @@ export type ResourcePoolBinding = {
   pool_code: string | null
   workload_profile: string
   is_exclusive_pool: boolean
+}
+
+export type SupplierActivity = {
+  id: string
+  supplier_id: string
+  type: string
+  title: string
+  description: string | null
+  author_name: string
+  author_role: "business" | "ops" | "system"
+  ref_domain: string | null
+  ref_id: string | null
+  occurred_at: string
 }
 
 export type LifecycleStateDefinition = {
@@ -154,6 +229,7 @@ export const SUPPLIER_RELATION_KEYS = [
   "pool-bindings",
   "state-definitions",
   "transition-logs",
+  "activities",
 ] as const
 
 export type SupplierRelationKey = (typeof SUPPLIER_RELATION_KEYS)[number]
@@ -176,4 +252,5 @@ export const SUPPLIER_RELATION_TITLES: Record<SupplierRelationKey, string> = {
   "pool-bindings": "资源池绑定",
   "state-definitions": "生命周期状态字典",
   "transition-logs": "状态变更审计",
+  activities: "活动时间线",
 }

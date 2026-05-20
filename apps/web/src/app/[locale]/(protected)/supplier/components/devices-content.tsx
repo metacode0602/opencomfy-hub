@@ -2,13 +2,11 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
-  ArrowLeft,
-  Building2,
   CheckCircle2,
   Cpu,
   Eye,
-  Factory,
   FlaskConical,
   MoreHorizontal,
   Plus,
@@ -19,7 +17,7 @@ import {
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import { Badge } from '@workspace/ui/components/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@workspace/ui/components/card'
+import { Card, CardContent } from '@workspace/ui/components/card'
 import {
   Table,
   TableBody,
@@ -52,9 +50,10 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Progress } from '@workspace/ui/components/progress'
 import { Switch } from '@workspace/ui/components/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
+import { PhysicalDevicesContent } from '../_components/physical-devices-content'
 import { mockDataCenterDevices, mockSuppliers } from '@/lib/data/mock-data'
 import type { ContractPricingMode, DataCenterDevice } from '@/lib/data/types'
-import { contractPricingModeNames } from '@/lib/data/types'
 
 type DeviceStatus = DataCenterDevice['status']
 
@@ -90,17 +89,6 @@ function unitCostLabel(device: DeviceRecord) {
   const cost = device.cardTimeCostPerHour ?? device.revenueShareCostPerHour ?? 0
   const mode = device.cooperationMode === 'card_time' ? '卡时成本' : '分成成本'
   return { cost, mode }
-}
-
-function formatDateTime(iso?: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
 }
 
 function StatusChangeDialog({
@@ -231,8 +219,9 @@ function InternalTestDialog({
 }
 
 export function DevicesContent() {
+  const router = useRouter()
   const [devices, setDevices] = useState<DeviceRecord[]>(buildDeviceRecords)
-  const [view, setView] = useState<'list' | 'detail'>('list')
+  const [listTab, setListTab] = useState<'aggregate' | 'physical'>('aggregate')
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -288,13 +277,7 @@ export function DevicesContent() {
   }
 
   const openDetail = (id: string) => {
-    setSelectedId(id)
-    setView('detail')
-  }
-
-  const backToList = () => {
-    setView('list')
-    setSelectedId(null)
+    router.push(`/supplier/devices/${id}`)
   }
 
   const openStatusDialog = (device: DeviceRecord) => {
@@ -352,205 +335,32 @@ export function DevicesContent() {
     deviceLabel,
   }
 
-  if (view === 'detail' && selectedDevice) {
-    const onlineRate =
-      selectedDevice.quantity > 0
-        ? (selectedDevice.onlineQuantity / selectedDevice.quantity) * 100
-        : 0
-    const { cost, mode } = unitCostLabel(selectedDevice)
-
-    return (
-      <div className="space-y-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-4">
-            <Button variant="ghost" size="icon" className="mt-1" onClick={backToList}>
-              <ArrowLeft className="w-4 h-4" />
-            </Button>
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="text-2xl font-semibold text-foreground">{selectedDevice.cardTypeName}</h1>
-                <Badge variant="outline" className={deviceStatusColors[selectedDevice.status]}>
-                  {statusNames[selectedDevice.status]}
-                </Badge>
-                {selectedDevice.isInternalTest && (
-                  <Badge
-                    variant="outline"
-                    className="bg-purple-500/10 text-purple-400 border-purple-500/30"
-                  >
-                    <FlaskConical className="w-3 h-3 mr-1" />
-                    内部测试中
-                  </Badge>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground mt-2 flex items-center gap-1">
-                <Building2 className="w-4 h-4" />
-                {selectedDevice.dataCenterName}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => openStatusDialog(selectedDevice)}>
-              <Settings2 className="w-4 h-4 mr-2" />
-              修改状态
-            </Button>
-            <Button variant="outline" onClick={() => openInternalTestDialog(selectedDevice)}>
-              <FlaskConical className="w-4 h-4 mr-2" />
-              内部测试
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-4 gap-4">
-          <Card className="bg-card border-border">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">设备数量</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">{selectedDevice.quantity}</p>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">在线数量</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">
-                {selectedDevice.onlineQuantity}
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">在线率</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">{onlineRate.toFixed(1)}%</p>
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">{mode}</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">¥{cost.toFixed(0)}/小时</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid grid-cols-2 gap-6">
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-base">基本信息</CardTitle>
-              <CardDescription>设备资源组标识与归属</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">资源 ID</span>
-                <code className="text-foreground">{selectedDevice.id}</code>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">供应商</span>
-                <Link
-                  href={`/supplier/suppliers/${selectedDevice.supplierId}`}
-                  className="text-primary hover:underline flex items-center gap-1"
-                >
-                  <Factory className="w-3.5 h-3.5" />
-                  {selectedDevice.supplierName}
-                </Link>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">合作模式</span>
-                <Badge variant="outline">{contractPricingModeNames[selectedDevice.cooperationMode]}</Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">机房 ID</span>
-                <span className="text-foreground">{selectedDevice.dataCenterId}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">卡型 ID</span>
-                <span className="text-foreground">{selectedDevice.cardTypeId}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">最近更新</span>
-                <span className="text-foreground">{formatDateTime(selectedDevice.updatedAt)}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-base">运行与测试</CardTitle>
-              <CardDescription>在线率与内部测试占用配置</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-muted-foreground">在线率</span>
-                  <span className="text-foreground font-medium">
-                    {selectedDevice.onlineQuantity}/{selectedDevice.quantity}
-                  </span>
-                </div>
-                <Progress value={onlineRate} className="h-2" />
-              </div>
-              <div className="pt-4 border-t border-border space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">内部测试</span>
-                  <span className="text-foreground">
-                    {selectedDevice.isInternalTest ? '已开启' : '未开启'}
-                  </span>
-                </div>
-                {selectedDevice.isInternalTest && (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">占用范围</span>
-                      <span className="text-foreground">
-                        {selectedDevice.internalTestScope ?? '全部'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">计划结束</span>
-                      <span className="text-foreground">
-                        {formatDateTime(selectedDevice.internalTestUntil)}
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <StatusChangeDialog
-          open={statusDialogOpen}
-          onOpenChange={setStatusDialogOpen}
-          pendingStatus={pendingStatus}
-          setPendingStatus={setPendingStatus}
-          onConfirm={confirmStatusChange}
-          deviceLabel={deviceLabel}
-        />
-        <InternalTestDialog
-          open={internalTestDialogOpen}
-          onOpenChange={setInternalTestDialogOpen}
-          enabled={internalTestEnabled}
-          setEnabled={setInternalTestEnabled}
-          scope={internalTestScope}
-          setScope={setInternalTestScope}
-          until={internalTestUntil}
-          setUntil={setInternalTestUntil}
-          onConfirm={confirmInternalTest}
-          deviceLabel={deviceLabel}
-        />
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">设备管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            管理各机房 GPU 设备资源、运行状态与内部测试占用
+            机房×卡型聚合库存与物理机 SN 台账（Mock）
           </p>
         </div>
-        <Button className="gap-2">
-          <Plus className="w-4 h-4" />
-          新增设备
-        </Button>
+        {listTab === 'aggregate' && (
+          <Button className="gap-2">
+            <Plus className="w-4 h-4" />
+            新增设备
+          </Button>
+        )}
       </div>
 
+      <Tabs value={listTab} onValueChange={(v) => setListTab(v as 'aggregate' | 'physical')}>
+        <TabsList>
+          <TabsTrigger value="aggregate">聚合库存（L1）</TabsTrigger>
+          <TabsTrigger value="physical">物理机台账（L2）</TabsTrigger>
+        </TabsList>
+        <TabsContent value="physical" className="mt-4">
+          <PhysicalDevicesContent />
+        </TabsContent>
+        <TabsContent value="aggregate" className="mt-4 space-y-6">
       <div className="grid grid-cols-4 gap-4">
         <Card className="bg-card border-border">
           <CardContent className="p-4">
@@ -793,6 +603,8 @@ export function DevicesContent() {
         onConfirm={dialogProps.onConfirmInternalTest}
         deviceLabel={dialogProps.deviceLabel}
       />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
