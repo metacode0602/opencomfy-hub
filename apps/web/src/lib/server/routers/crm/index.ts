@@ -1,4 +1,5 @@
 import { createTRPCRouter, protectedProcedure, adminProcedure } from '../trpc'
+import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { customersDataAccess } from '@/lib/server/dataaccess/crm/customers'
 import { projectsDataAccess } from '@/lib/server/dataaccess/crm/projects'
@@ -10,12 +11,29 @@ import { calendarDataAccess } from '@/lib/server/dataaccess/crm/calendar'
 import { businessLinesDataAccess } from '@/lib/server/dataaccess/crm/business-lines'
 import { projectTagsDataAccess } from '@/lib/server/dataaccess/crm/project-tags'
 import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-tenants'
+import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
+import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
+import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
   billingTenantUpdateSchema,
   customerUpsertSchema,
+  platformImportCommitItemSchema,
   projectUpsertSchema,
   staffUpsertSchema,
 } from './schemas'
+
+function mapPlatformImportError(e: unknown): never {
+  if (e instanceof SuanliOpenApiError) {
+    throw new TRPCError({
+      code: e.code === '401' || e.code === '403' ? 'UNAUTHORIZED' : 'BAD_REQUEST',
+      message: e.message,
+    })
+  }
+  if (e instanceof Error) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '平台租户导入失败' })
+}
 
 const listFilterSchema = z.object({
   search: z.string().optional(),
@@ -113,6 +131,31 @@ export const crmRouter = createTRPCRouter({
     update: adminProcedure
       .input(z.object({ id: z.string(), data: billingTenantUpdateSchema }))
       .mutation(({ input }) => billingTenantsDataAccess.update(input.id, input.data)),
+    previewPlatformImport: adminProcedure
+      .input(
+        z.object({
+          platformTenantIds: z
+            .array(z.string().regex(/^\d+$/))
+            .min(1)
+            .max(PLATFORM_TENANT_IMPORT_MAX_IDS),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await platformTenantImportDataAccess.preview(input.platformTenantIds)
+        } catch (e) {
+          mapPlatformImportError(e)
+        }
+      }),
+    commitPlatformImport: adminProcedure
+      .input(z.object({ items: z.array(platformImportCommitItemSchema).min(1) }))
+      .mutation(async ({ input }) => {
+        try {
+          return await platformTenantImportDataAccess.commit(input.items)
+        } catch (e) {
+          mapPlatformImportError(e)
+        }
+      }),
   }),
 
   projectTags: createTRPCRouter({

@@ -55,6 +55,8 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
 import { trpc } from '@/lib/trpc/client'
+import { useListPagination } from '@/hooks/use-list-pagination'
+import { ListPagination } from '@/components/shared/list-pagination'
 
 export function ContractsContent() {
   const [search, setSearch] = useState('')
@@ -72,6 +74,10 @@ export function ContractsContent() {
     const matchesType = typeFilter === 'all' || contract.type === typeFilter
     const matchesStatus = statusFilter === 'all' || contract.status === statusFilter
     return matchesSearch && matchesType && matchesStatus
+  })
+
+  const pagination = useListPagination(filteredContracts, {
+    resetDeps: [search, typeFilter, statusFilter],
   })
 
   const totalAmount = contracts.reduce((acc, c) => acc + c.totalAmount, 0)
@@ -281,7 +287,7 @@ export function ContractsContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredContracts.map((contract) => {
+              {pagination.items.map((contract) => {
                 const paymentProgress = (contract.paidAmount / contract.totalAmount) * 100
                 return (
                   <TableRow key={contract.id}>
@@ -370,6 +376,13 @@ export function ContractsContent() {
               })}
             </TableBody>
           </Table>
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+          />
         </CardContent>
       </Card>
     </div>

@@ -48,6 +48,8 @@ import { trpc } from '@/lib/trpc/client'
 import type { Customer } from '@/lib/data/types'
 import { CreateCustomerDialog } from './create-customer-dialog'
 import { EditCustomerDialog } from './edit-customer-dialog'
+import { useListPagination } from '@/hooks/use-list-pagination'
+import { ListPagination } from '@/components/shared/list-pagination'
 
 export function CustomersContent() {
   const [search, setSearch] = useState('')
@@ -63,7 +65,9 @@ export function CustomersContent() {
     status: statusFilter,
   })
 
-  const filteredCustomers = customers
+  const pagination = useListPagination(customers, {
+    resetDeps: [search, typeFilter, statusFilter],
+  })
 
   const totalRecharge = customers.reduce((acc, t) => acc + t.totalRecharge, 0)
   const totalConsumption = customers.reduce((acc, t) => acc + t.totalConsumption, 0)
@@ -209,7 +213,7 @@ export function CustomersContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredCustomers.map((row) => (
+              {pagination.items.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
                     <Link
@@ -284,6 +288,13 @@ export function CustomersContent() {
             </TableBody>
           </Table>
           )}
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+          />
         </CardContent>
       </Card>
     </div>

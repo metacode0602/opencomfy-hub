@@ -32,6 +32,8 @@ import { CrmDeleteDialog } from "./crm-delete-dialog"
 import { CrmStaffFormDialog } from "./crm-staff-form-dialog"
 import { CrmStaffStatusBadge } from "./crm-staff-status-badge"
 import { toast } from "sonner"
+import { useListPagination } from "@/hooks/use-list-pagination"
+import { ListPagination } from "@/components/shared/list-pagination"
 
 export function CrmStaffListClient() {
   const { data: userStaff = [], refetch } = trpc.crm.staff.list.useQuery({})
@@ -62,6 +64,10 @@ export function CrmStaffListClient() {
       )
     })
   }, [userStaff, search, statusFilter])
+
+  const pagination = useListPagination(filtered, {
+    resetDeps: [search, statusFilter],
+  })
 
   const activeCount = userStaff.filter((s) => s.status === "active").length
 
@@ -116,14 +122,14 @@ export function CrmStaffListClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.length === 0 ? (
+                {pagination.totalItems === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="text-muted-foreground text-center">
                       暂无匹配员工
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((s) => (
+                  pagination.items.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-mono text-xs">
                         {s.employee_no ?? "—"}
@@ -175,6 +181,14 @@ export function CrmStaffListClient() {
               </TableBody>
             </Table>
           </div>
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            className="border-t-0 px-0"
+          />
         </CardContent>
       </Card>
 

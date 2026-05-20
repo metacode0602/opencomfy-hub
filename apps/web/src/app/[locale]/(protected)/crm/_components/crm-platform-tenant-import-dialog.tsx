@@ -37,11 +37,10 @@ import { toast } from "sonner"
 
 import {
   defaultCreateCustomerFromPlatform,
-  mockCommitPlatformImport,
-  mockPreviewPlatformImport,
-  MOCK_IMPORT_CUSTOMERS,
   parsePlatformTenantIds,
-} from "@/lib/crm/platform-tenant-import-mock"
+  PLATFORM_TENANT_IMPORT_MAX_IDS,
+} from "@/lib/crm/platform-tenant-import-utils"
+import { trpc } from "@/lib/trpc/client"
 import type {
   PlatformImportCommitItem,
   PlatformImportCommitResult,
@@ -70,6 +69,66 @@ function buildInitialAssignments(preview: PlatformImportPreviewResult): RowAssig
     }))
 }
 
+function CustomerSearchSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (customerId: string) => void
+  disabled?: boolean
+}) {
+  const [search, setSearch] = React.useState("")
+  const [debouncedSearch, setDebouncedSearch] = React.useState("")
+
+  React.useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => window.clearTimeout(t)
+  }, [search])
+
+  const { data: customers = [], isFetching } = trpc.crm.customers.list.useQuery(
+    { search: debouncedSearch || undefined },
+    { enabled: !disabled },
+  )
+
+  const selectedLabel = customers.find((c) => c.id === value)?.name
+
+  return (
+    <div className="space-y-2">
+      <Input
+        placeholder="搜索客户名称、联系人…"
+        value={search}
+        disabled={disabled}
+        onChange={(e) => setSearch(e.target.value)}
+        className="h-8 text-sm"
+      />
+      <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger className="w-full">
+          <SelectValue placeholder={isFetching ? "加载中…" : "选择客户"}>
+            {value && !selectedLabel ? value : selectedLabel}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {customers.length === 0 ? (
+            <p className="text-muted-foreground px-2 py-4 text-center text-xs">
+              {debouncedSearch ? "未找到匹配客户" : "输入关键词搜索客户"}
+            </p>
+          ) : (
+            customers.slice(0, 50).map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+                <span className="text-muted-foreground ml-2">
+                  ({c.type === "B" ? "企业" : "个人"})
+                </span>
+              </SelectItem>
+            ))
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 export function CrmPlatformTenantImportDialog({
   open,
   onOpenChange,
@@ -81,16 +140,19 @@ export function CrmPlatformTenantImportDialog({
 }) {
   const [step, setStep] = React.useState<Step>("input")
   const [idsRaw, setIdsRaw] = React.useState("")
-  const [loading, setLoading] = React.useState(false)
   const [preview, setPreview] = React.useState<PlatformImportPreviewResult | null>(null)
   const [assignments, setAssignments] = React.useState<RowAssignment[]>([])
   const [confirmedNoCustomerUpdate, setConfirmedNoCustomerUpdate] = React.useState(false)
   const [commitResult, setCommitResult] = React.useState<PlatformImportCommitResult | null>(null)
 
+  const previewMutation = trpc.crm.tenants.previewPlatformImport.useMutation()
+  const commitMutation = trpc.crm.tenants.commitPlatformImport.useMutation()
+
+  const loading = previewMutation.isPending || commitMutation.isPending
+
   const reset = React.useCallback(() => {
     setStep("input")
     setIdsRaw("")
-    setLoading(false)
     setPreview(null)
     setAssignments([])
     setConfirmedNoCustomerUpdate(false)
@@ -125,6 +187,9 @@ export function CrmPlatformTenantImportDialog({
 
   const validationError = React.useMemo(() => {
     if (step !== "preview") return null
+    if (actionableItems.length === 0) {
+      return "没有可导入的租户，请检查平台 ID 或重新拉取"
+    }
     for (const item of needsCustomerChoice) {
       const a = assignmentById.get(item.platformTenantId)
       if (!a) return `请为平台租户 ${item.platformTenantId} 配置客户关联`
@@ -142,7 +207,7 @@ export function CrmPlatformTenantImportDialog({
       return "请勾选确认：不会修改已有客户的资料"
     }
     return null
-  }, [step, needsCustomerChoice, assignmentById, confirmedNoCustomerUpdate])
+  }, [step, actionableItems, needsCustomerChoice, assignmentById, confirmedNoCustomerUpdate])
 
   const updateAssignment = (
     platformTenantId: string,
@@ -174,10 +239,7 @@ export function CrmPlatformTenantImportDialog({
         const rest = prev.filter((a) => a.platformTenantId !== platformTenantId)
         return [
           ...rest,
-          {
-            platformTenantId,
-            customer: { mode: "existing", customerId: MOCK_IMPORT_CUSTOMERS[0]?.id ?? "" },
-          },
+          { platformTenantId, customer: { mode: "existing", customerId: "" } },
         ]
       })
     }
@@ -189,19 +251,22 @@ export function CrmPlatformTenantImportDialog({
       toast.error("请输入有效的平台租户 ID（纯数字）")
       return
     }
-    setLoading(true)
+    if (ids.length > PLATFORM_TENANT_IMPORT_MAX_IDS) {
+      toast.error(`单次最多 ${PLATFORM_TENANT_IMPORT_MAX_IDS} 个 ID`)
+      return
+    }
     try {
-      const result = await mockPreviewPlatformImport(ids)
+      const result = await previewMutation.mutateAsync({ platformTenantIds: ids })
       setPreview(result)
       setAssignments(buildInitialAssignments(result))
       setStep("preview")
       if (result.missingPlatformIds.length > 0) {
         toast.warning(`有 ${result.missingPlatformIds.length} 个 ID 平台未返回`)
+      } else if (result.items.filter((i) => !i.missingOnPlatform).length === 0) {
+        toast.error("平台未返回任何有效租户")
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "拉取失败")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -210,18 +275,24 @@ export function CrmPlatformTenantImportDialog({
       toast.error(validationError)
       return
     }
-    const commitItems: PlatformImportCommitItem[] = needsCustomerChoice.map((item) => ({
-      platformTenantId: item.platformTenantId,
-      customer: assignmentById.get(item.platformTenantId)!.customer,
-    }))
-    setLoading(true)
+    const commitItems: PlatformImportCommitItem[] = actionableItems.map((item) => {
+      if (item.local) {
+        return { platformTenantId: item.platformTenantId }
+      }
+      return {
+        platformTenantId: item.platformTenantId,
+        customer: assignmentById.get(item.platformTenantId)!.customer,
+      }
+    })
     try {
-      const result = await mockCommitPlatformImport(commitItems)
+      const result = await commitMutation.mutateAsync({ items: commitItems })
       setCommitResult(result)
       setStep("done")
       const fail = result.errors.length
       if (fail > 0) {
-        toast.warning(`导入完成，${fail} 条失败`)
+        toast.warning(
+          `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}，${fail} 条失败`,
+        )
       } else {
         toast.success(
           `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}，新建客户 ${result.createdCustomers}`,
@@ -229,8 +300,6 @@ export function CrmPlatformTenantImportDialog({
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "导入失败")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -238,6 +307,10 @@ export function CrmPlatformTenantImportDialog({
     if (!next && step === "done") onSuccess()
     onOpenChange(next)
   }
+
+  const previewSummary =
+    preview &&
+    `共 ${preview.items.length} 条，平台返回 ${preview.items.filter((i) => !i.missingOnPlatform).length} 条，本地已有 ${preview.items.filter((i) => i.local).length} 条`
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -250,10 +323,11 @@ export function CrmPlatformTenantImportDialog({
           </DialogTitle>
           <DialogDescription>
             {step === "input" &&
-              "输入平台租户 ID，多个可用逗号或换行分隔。当前为 Mock 数据预览（16462、16463、10001 可测）。"}
+              `输入平台租户 ID，多个可用逗号或换行分隔（最多 ${PLATFORM_TENANT_IMPORT_MAX_IDS} 个）。`}
             {step === "preview" &&
-              "核对平台数据并配置客户关联；已有本地租户仅更新计费账户，不修改客户资料。"}
-            {step === "done" && "以下为模拟写入结果，接入 API 后将写入数据库。"}
+              (previewSummary ??
+                "核对平台数据并配置客户关联；已有本地租户仅更新计费账户，不修改客户资料。")}
+            {step === "done" && "导入结果如下，关闭后将刷新租户列表。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -263,14 +337,14 @@ export function CrmPlatformTenantImportDialog({
               <Label htmlFor="platform-tenant-ids">平台租户 ID</Label>
               <Textarea
                 id="platform-tenant-ids"
-                placeholder={"16462\n16463, 10001\n99999"}
+                placeholder={"16462\n16463, 16464"}
                 rows={6}
                 value={idsRaw}
                 disabled={loading}
                 onChange={(e) => setIdsRaw(e.target.value)}
               />
               <p className="text-muted-foreground text-xs">
-                示例：16462（新租户）、10001（本地已存在）、99999（平台无数据）
+                支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。
               </p>
             </div>
           )}
@@ -368,7 +442,7 @@ export function CrmPlatformTenantImportDialog({
                 {loading ? (
                   <>
                     <IconLoader2 className="mr-2 size-4 animate-spin" />
-                    拉取中…
+                    正在从平台拉取…
                   </>
                 ) : (
                   "拉取并预览"
@@ -512,26 +586,12 @@ function PreviewRow({
           </RadioGroup>
 
           {mode === "existing" && customer?.mode === "existing" && (
-            <Select
-              value={customer.customerId || undefined}
-              onValueChange={(customerId) =>
+            <CustomerSearchSelect
+              value={customer.customerId}
+              onChange={(customerId) =>
                 onAssignmentChange(platformTenantId, { mode: "existing", customerId })
               }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="选择客户" />
-              </SelectTrigger>
-              <SelectContent>
-                {MOCK_IMPORT_CUSTOMERS.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                    <span className="text-muted-foreground ml-2">
-                      ({c.type === "B" ? "企业" : "个人"})
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           )}
 
           {mode === "create" && customer?.mode === "create" && (

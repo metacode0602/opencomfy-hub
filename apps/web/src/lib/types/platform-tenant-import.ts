@@ -17,7 +17,7 @@ export type PlatformTenantApiRecord = {
   admin_phone?: string | null
   admin_nickname?: string | null
   limit_coin?: number | null
-  insufficient_balance?: string | null
+  insufficient_balance?: string | boolean | number | null
   merchant_mark?: string | null
 }
 
@@ -51,8 +51,8 @@ export type PlatformImportCustomerCreate = {
   mode: 'create'
   name: string
   type: 'B' | 'C'
-  contactPerson: string
-  contactPhone: string
+  contactPerson?: string
+  contactPhone?: string
 }
 
 export type PlatformImportCustomerExisting = {
@@ -66,7 +66,8 @@ export type PlatformImportCustomerAssignment =
 
 export type PlatformImportCommitItem = {
   platformTenantId: string
-  customer: PlatformImportCustomerAssignment
+  /** 本地已存在租户时省略，服务端仅更新 tenant 字段 */
+  customer?: PlatformImportCustomerAssignment
 }
 
 export type PlatformImportCommitResult = {

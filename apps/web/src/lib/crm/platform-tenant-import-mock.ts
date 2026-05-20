@@ -7,7 +7,13 @@ import type {
   PlatformTenantPreviewItem,
 } from '@/lib/types/platform-tenant-import'
 
-const MAX_IDS = 50
+import {
+  defaultCreateCustomerFromPlatform,
+  parsePlatformTenantIds,
+  PLATFORM_TENANT_IMPORT_MAX_IDS,
+} from '@/lib/crm/platform-tenant-import-utils'
+
+const MAX_IDS = PLATFORM_TENANT_IMPORT_MAX_IDS
 
 /** 模拟「关联已有客户」下拉选项 */
 export const MOCK_IMPORT_CUSTOMERS: MockImportCustomerOption[] = [
@@ -78,21 +84,7 @@ const MOCK_LOCAL_BY_PLATFORM_ID: Record<
   },
 }
 
-export function parsePlatformTenantIds(raw: string): string[] {
-  const parts = raw
-    .split(/[,，\s\n\r]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const seen = new Set<string>()
-  const ids: string[] = []
-  for (const p of parts) {
-    if (!/^\d+$/.test(p)) continue
-    if (seen.has(p)) continue
-    seen.add(p)
-    ids.push(p)
-  }
-  return ids
-}
+export { parsePlatformTenantIds, defaultCreateCustomerFromPlatform }
 
 function mapApiToPreviewItem(
   record: PlatformTenantApiRecord,
@@ -112,24 +104,6 @@ function mapApiToPreviewItem(
       tenantType: record.tenant_type ?? undefined,
     },
     local,
-  }
-}
-
-export function defaultCreateCustomerFromPlatform(
-  item: PlatformTenantPreviewItem,
-): PlatformImportCommitItem['customer'] & { mode: 'create' } {
-  const p = item.platform
-  const name =
-    p.companyName?.trim() ||
-    p.adminPhone?.trim() ||
-    p.tenantName?.trim() ||
-    `租户-${item.platformTenantId}`
-  return {
-    mode: 'create',
-    name,
-    type: p.companyName ? 'B' : 'C',
-    contactPerson: p.contactUser?.trim() ?? '',
-    contactPhone: p.contactPhone?.trim() || p.adminPhone?.trim() || '',
   }
 }
 
@@ -189,6 +163,13 @@ export async function mockCommitPlatformImport(
     const local = MOCK_LOCAL_BY_PLATFORM_ID[item.platformTenantId]
     if (local) {
       updatedTenants++
+      continue
+    }
+    if (!item.customer) {
+      errors.push({
+        platformTenantId: item.platformTenantId,
+        message: '缺少客户关联配置',
+      })
       continue
     }
     if (item.customer.mode === 'create') {

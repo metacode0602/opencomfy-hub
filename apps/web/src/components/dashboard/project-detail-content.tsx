@@ -1,12 +1,14 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
   Building2,
   User,
   Wallet,
+  Banknote,
+  Receipt,
   CreditCard,
   Download,
   Ticket,
@@ -68,6 +70,7 @@ import { ProjectCouponsPanel } from '@/components/dashboard/project-coupons-pane
 import { ProjectRechargesPanel } from '@/components/dashboard/project-recharges-panel'
 import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
 import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
+import { ProjectMonthMetricCell } from '@/components/dashboard/project-month-metric-cell'
 
 interface ProjectDetailContentProps {
   project: Project
@@ -292,6 +295,34 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
               <div>
                 <p className="text-xs text-muted-foreground">项目经理</p>
                 <p className="font-medium">{project.projectManager}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <Banknote className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">充值（上月/本月）</p>
+                <ProjectMonthMetricCell
+                  lastMonth={project.lastMonthRecharge}
+                  thisMonth={project.thisMonthRecharge}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <Receipt className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">消费（上月/本月）</p>
+                <ProjectMonthMetricCell
+                  lastMonth={project.lastMonthConsumption}
+                  thisMonth={project.thisMonthConsumption}
+                />
               </div>
             </div>
           </CardContent>

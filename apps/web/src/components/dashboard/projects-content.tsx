@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   Plus,
@@ -46,6 +46,10 @@ import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
 import { ProjectTagsDialog } from './project-tags-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
+import { CrmProjectImportDialog } from './crm-project-import-dialog'
+import { IconUpload } from '@tabler/icons-react'
+import { useListPagination } from '@/hooks/use-list-pagination'
+import { ListPagination } from '@/components/shared/list-pagination'
 
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
@@ -57,6 +61,7 @@ export function ProjectsContent() {
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [tagsOpen, setTagsOpen] = useState(false)
   const [taggingProject, setTaggingProject] = useState<Project | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
@@ -66,7 +71,9 @@ export function ProjectsContent() {
 
   const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
 
-  const filteredProjects = projects
+  const pagination = useListPagination(projects, {
+    resetDeps: [search, stageFilter, statusFilter],
+  })
 
   const leadCount = stageCounts?.lead ?? 0
   const testingCount = stageCounts?.testing ?? 0
@@ -89,10 +96,22 @@ export function ProjectsContent() {
           <h1 className="text-2xl font-bold">项目管理</h1>
           <p className="text-muted-foreground">管理所有项目，跟踪项目阶段和进度</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          新建项目
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            type="button"
+            onClick={() => setImportOpen(true)}
+          >
+            <IconUpload className="size-4" />
+            导入项目
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            新建项目
+          </Button>
+        </div>
       </div>
 
       <CreateProjectDialog
@@ -115,6 +134,12 @@ export function ProjectsContent() {
         onOpenChange={setTagsOpen}
         project={taggingProject}
         onSaved={() => void refetch()}
+      />
+
+      <CrmProjectImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onSuccess={() => void refetch()}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -221,7 +246,7 @@ export function ProjectsContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredProjects.map((project) => (
+              {pagination.items.map((project) => (
                 <TableRow key={project.id}>
                   <TableCell>
                     <Link
@@ -316,6 +341,13 @@ export function ProjectsContent() {
               ))}
             </TableBody>
           </Table>
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+          />
         </CardContent>
       </Card>
     </div>

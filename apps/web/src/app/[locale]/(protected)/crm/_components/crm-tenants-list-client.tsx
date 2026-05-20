@@ -24,6 +24,8 @@ import { IconEye, IconPlus, IconUpload } from "@tabler/icons-react"
 import { CrmTenantImportDialog } from "./crm-tenant-import-dialog"
 import { CrmPlatformTenantImportDialog } from "./crm-platform-tenant-import-dialog"
 import { StatusBadge } from "@/components/dashboard/status-badge"
+import { useListPagination } from "@/hooks/use-list-pagination"
+import { ListPagination } from "@/components/shared/list-pagination"
 
 function formatMoney(n: number) {
   return `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -58,6 +60,10 @@ export function CrmTenantsListClient() {
   const onImportSuccess = React.useCallback(() => {
     void utils.crm.tenants.list.invalidate()
   }, [utils])
+
+  const pagination = useListPagination(tenants, {
+    resetDeps: [search],
+  })
 
   return (
     <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
@@ -131,7 +137,7 @@ export function CrmTenantsListClient() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  tenants.map((t) => (
+                  pagination.items.map((t) => (
                     <TableRow key={t.id}>
                       <TableCell className="font-mono text-sm">{t.platformTenantId ?? "—"}</TableCell>
                       <TableCell>{t.name}</TableCell>
@@ -171,6 +177,14 @@ export function CrmTenantsListClient() {
               </TableBody>
             </Table>
           </div>
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+            className="border-t-0 px-0"
+          />
         </CardContent>
       </Card>
 

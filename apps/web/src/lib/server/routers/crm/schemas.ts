@@ -17,6 +17,25 @@ const expectedScaleSchema = z
   .nullable()
   .optional()
 
+export const platformImportCustomerSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('existing'),
+    customerId: z.string().min(1),
+  }),
+  z.object({
+    mode: z.literal('create'),
+    name: z.string().min(1),
+    type: z.enum(['B', 'C']),
+    contactPerson: z.string().optional(),
+    contactPhone: z.string().optional(),
+  }),
+])
+
+export const platformImportCommitItemSchema = z.object({
+  platformTenantId: z.string().regex(/^\d+$/),
+  customer: platformImportCustomerSchema.optional(),
+})
+
 export const customerUpsertSchema = z
   .object({
     name: z.string(),
