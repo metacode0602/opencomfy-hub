@@ -260,6 +260,9 @@ CRM 前端已按 **Customer / Project / PlatformTenant** 完成类型与路由�
 | `is_default` | boolean | NOT NULL DEFAULT false | `isDefault` |
 | `type` | varchar | NOT NULL DEFAULT external | `internal` / `external` |
 | `status` | varchar | NOT NULL | `active` / `inactive` / `suspended` |
+| `phone` | varchar |  | 手机号 |
+| `overdue_at` | timestamp |  | 欠费日期 |
+| `credit_limit` | decimal(15,4) |  | 授信额度 |
 | `balance` | decimal(15,4) | NOT NULL DEFAULT 0 | `balance` |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | | |

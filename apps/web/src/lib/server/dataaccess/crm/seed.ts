@@ -157,6 +157,10 @@ export async function seedCrmFromMock(): Promise<void> {
         startDate: p.startDate,
         endDate: p.endDate ?? null,
         monthlyBudget: p.monthlyBudget ? String(p.monthlyBudget) : null,
+        lastMonthRecharge: String(p.lastMonthRecharge ?? 0),
+        thisMonthRecharge: String(p.thisMonthRecharge ?? 0),
+        lastMonthConsumption: String(p.lastMonthConsumption ?? 0),
+        thisMonthConsumption: String(p.thisMonthConsumption ?? 0),
         balance: p.balance ? String(p.balance) : null,
         createdAt: new Date(p.createdAt),
       })

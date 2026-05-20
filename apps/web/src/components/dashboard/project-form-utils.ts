@@ -68,6 +68,10 @@ export function formValuesToProject(
     startDate: values.startDate,
     endDate: base.endDate,
     monthlyBudget: values.monthlyBudget ? Number(values.monthlyBudget) : 0,
+    lastMonthRecharge: base.lastMonthRecharge ?? 0,
+    thisMonthRecharge: base.thisMonthRecharge ?? 0,
+    lastMonthConsumption: base.lastMonthConsumption ?? 0,
+    thisMonthConsumption: base.thisMonthConsumption ?? 0,
     totalConsumption: base.totalConsumption ?? 0,
     balance: base.balance ?? 0,
   }

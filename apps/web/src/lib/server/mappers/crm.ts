@@ -91,6 +91,7 @@ export function mapCustomerRow(
   return {
     id: row.id,
     name: row.name,
+    shortName: row.accountName ?? undefined,
     type: row.type as Customer['type'],
     status: row.status as Customer['status'],
     contactPerson: row.contactPerson ?? '',
@@ -116,9 +117,12 @@ export function mapBillingTenantRow(row: BillingTenantRow): PlatformTenant {
     customerId: row.customerId,
     name: row.name,
     platformTenantId: row.platformTenantId ?? undefined,
+    phone: row.phone ?? undefined,
     isDefault: row.isDefault,
     status: row.status as PlatformTenant['status'],
     balance: toNumber(row.balance),
+    overdueAt: row.overdue_at ? row.overdue_at.toISOString() : undefined,
+    creditLimit: row.credit_limit != null ? toNumber(row.credit_limit) : undefined,
   }
 }
 
@@ -154,6 +158,10 @@ export function mapProjectRow(
     startDate: toIsoDate(row.startDate),
     endDate: row.endDate ? toIsoDate(row.endDate) : undefined,
     monthlyBudget: toNumber(row.monthlyBudget),
+    lastMonthRecharge: toNumber(row.lastMonthRecharge),
+    thisMonthRecharge: toNumber(row.thisMonthRecharge),
+    lastMonthConsumption: toNumber(row.lastMonthConsumption),
+    thisMonthConsumption: toNumber(row.thisMonthConsumption),
     totalConsumption: row.totalConsumption,
     balance: toNumber(row.balance),
   }

@@ -6,6 +6,7 @@ import { firstLoginRouter } from './web/first-login'
 import { invitationRouter } from './invitation'
 import { newslettersRouter } from './web/newsletters'
 import { crmRouter } from './crm'
+import { financeRouter } from './finance'
 
 export * from './trpc'
 export type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
@@ -17,6 +18,7 @@ export const appRouter = router({
   invitation: invitationRouter,
   newsletters: newslettersRouter,
   crm: crmRouter,
+  finance: financeRouter,
   // Admin routes
   admin: router({
   }),

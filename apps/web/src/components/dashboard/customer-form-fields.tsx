@@ -16,6 +16,7 @@ import { CustomerExpectedScaleFields } from './customer-expected-scale-fields'
 export type CustomerFormValues = {
   type: 'B' | 'C'
   name: string
+  shortName: string
   contactPerson: string
   contactPhone: string
   contactEmail: string
@@ -29,6 +30,7 @@ export type CustomerFormValues = {
 export const emptyCustomerFormValues: CustomerFormValues = {
   type: 'B',
   name: '',
+  shortName: '',
   contactPerson: '',
   contactPhone: '',
   contactEmail: '',
@@ -98,14 +100,25 @@ export function CustomerFormFields({
           </Select>
         </div>
       </div>
-      <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-name`}>客户名称</Label>
-        <Input
-          id={`${idPrefix}-name`}
-          value={values.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="请输入客户名称"
-        />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-name`}>客户名称</Label>
+          <Input
+            id={`${idPrefix}-name`}
+            value={values.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder="请输入客户名称"
+          />
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-short-name`}>客户简称</Label>
+          <Input
+            id={`${idPrefix}-short-name`}
+            value={values.shortName}
+            onChange={(e) => onChange({ shortName: e.target.value })}
+            placeholder="请输入客户简称"
+          />
+        </div>
       </div>
 
       <div className="grid gap-2">

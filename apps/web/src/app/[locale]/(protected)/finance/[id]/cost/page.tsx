@@ -1,8 +1,7 @@
 "use client"
 
-import { listCostForPeriod, resolveBillingPeriod } from "@/lib/finance/merge-finance-data"
 import { LocaleLink } from "@/lib/i18n/navigation"
-import { useFinanceMockStore } from "@/lib/stores/finance-mock-store"
+import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -12,24 +11,37 @@ import {
   CardTitle,
 } from "@workspace/ui/components/card"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
 import { CostGroupedEditable } from "./_components/cost-grouped-editable"
 
 export default function FinancePeriodCostPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
-  const bundles = useFinanceMockStore((s) => s.bundles)
 
-  const period = useMemo(
-    () => (id ? resolveBillingPeriod(id, bundles) : undefined),
-    [id, bundles],
-  )
-  const rows = useMemo(
-    () => (id ? listCostForPeriod(id, bundles) : []),
-    [id, bundles],
+  const { data: bundle, isLoading } = trpc.finance.periods.getBundle.useQuery(
+    { id: id ?? "" },
+    { enabled: Boolean(id) },
   )
 
-  if (!id || !period) {
+  const period = bundle?.period
+  const rows = bundle?.cost ?? []
+
+  if (!id) {
+    return (
+      <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+        <p className="text-muted-foreground">无效账期 ID</p>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+        <p className="text-muted-foreground">加载中…</p>
+      </div>
+    )
+  }
+
+  if (!period) {
     return (
       <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
         <p className="text-muted-foreground">未找到该账期。</p>

@@ -45,6 +45,7 @@ import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
 import { ProjectTagsDialog } from './project-tags-dialog'
+import { ProjectMonthMetricCell } from './project-month-metric-cell'
 
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
@@ -212,7 +213,8 @@ export function ProjectsContent() {
                 <TableHead>阶段</TableHead>
                 <TableHead>售前</TableHead>
                 <TableHead>客户经理</TableHead>
-                <TableHead>月度预算</TableHead>
+                <TableHead>充值</TableHead>
+                <TableHead>消费</TableHead>
                 <TableHead>总消费</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead></TableHead>
@@ -255,7 +257,18 @@ export function ProjectsContent() {
                   <TableCell className="text-muted-foreground">
                     {project.accountManager}
                   </TableCell>
-                  <TableCell>¥{project.monthlyBudget.toLocaleString()}</TableCell>
+                  <TableCell>
+                    <ProjectMonthMetricCell
+                      lastMonth={project.lastMonthRecharge}
+                      thisMonth={project.thisMonthRecharge}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <ProjectMonthMetricCell
+                      lastMonth={project.lastMonthConsumption}
+                      thisMonth={project.thisMonthConsumption}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium">
                     ¥{project.totalConsumption.toLocaleString()}
                   </TableCell>

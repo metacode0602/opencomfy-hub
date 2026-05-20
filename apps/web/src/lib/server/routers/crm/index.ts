@@ -9,7 +9,9 @@ import { dashboardDataAccess } from '@/lib/server/dataaccess/crm/dashboard'
 import { calendarDataAccess } from '@/lib/server/dataaccess/crm/calendar'
 import { businessLinesDataAccess } from '@/lib/server/dataaccess/crm/business-lines'
 import { projectTagsDataAccess } from '@/lib/server/dataaccess/crm/project-tags'
+import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-tenants'
 import {
+  billingTenantUpdateSchema,
   customerUpsertSchema,
   projectUpsertSchema,
   staffUpsertSchema,
@@ -99,6 +101,18 @@ export const crmRouter = createTRPCRouter({
     listBills: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listBillsByProject(input.projectId)),
+  }),
+
+  tenants: createTRPCRouter({
+    list: protectedProcedure
+      .input(z.object({ search: z.string().optional() }).optional())
+      .query(({ input }) => billingTenantsDataAccess.list(input)),
+    getById: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .query(({ input }) => billingTenantsDataAccess.getById(input.id)),
+    update: adminProcedure
+      .input(z.object({ id: z.string(), data: billingTenantUpdateSchema }))
+      .mutation(({ input }) => billingTenantsDataAccess.update(input.id, input.data)),
   }),
 
   projectTags: createTRPCRouter({

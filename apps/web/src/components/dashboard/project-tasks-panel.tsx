@@ -28,12 +28,8 @@ export function ProjectTasksPanel({ project }: ProjectTasksPanelProps) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center">
         <CardTitle className="text-base">任务列表</CardTitle>
-        <Button size="sm">
-          <Plus className="w-4 h-4 mr-2" />
-          创建任务
-        </Button>
       </CardHeader>
       <CardContent className="p-0">
         <Table>

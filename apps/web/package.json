@@ -73,6 +73,7 @@
     "tencentcloud-sdk-nodejs": "^4.1.224",
     "tw-animate-css": "^1.4.0",
     "vaul": "^1.1.2",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6",
     "zustand": "^5.0.13"
   },

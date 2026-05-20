@@ -183,6 +183,8 @@ async function upsertStaffAssignments(
   }
 }
 
+export { refreshProjectMonthlyMetrics } from './project-monthly-metrics'
+
 export const projectsDataAccess = {
   getBillingTenantIdsForProject,
 

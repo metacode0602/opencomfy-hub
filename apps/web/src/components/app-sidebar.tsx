@@ -35,6 +35,7 @@ import {
   Settings,
   Sparkles,
   Users,
+  Wallet,
 } from "lucide-react"
 import Link from "next/link"
 import { websiteConfig } from "@/lib/config/website"
@@ -94,7 +95,7 @@ const data = {
   navCrm: [
     {
       title: "工作台",
-      url: "/crm",
+      url: "/crm/workbench",
       icon: <LayoutDashboard className="size-4" />,
     },
     {
@@ -103,12 +104,17 @@ const data = {
       icon: <BarChart3 className="size-4" />,
     },
     {
-      title: "客户",
+      title: "客户管理",
       url: "/crm/customers",
       icon: <Building2 className="size-4" />,
     },
     {
-      title: "项目",
+      title: "计费租户",
+      url: "/crm/tenants",
+      icon: <Wallet className="size-4" />,
+    },
+    {
+      title: "平台项目",
       url: "/crm/projects",
       icon: <FolderKanban className="size-4" />,
     },

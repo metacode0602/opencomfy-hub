@@ -29,6 +29,20 @@
       "when": 1779180164614,
       "tag": "0003_minor_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779182009417,
+      "tag": "0004_careless_frank_castle",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779184849150,
+      "tag": "0005_daily_beast",
+      "breakpoints": true
     }
   ]
 }

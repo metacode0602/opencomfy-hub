@@ -1,9 +1,7 @@
 "use client"
 
-import { generateMockFinanceBundle } from "@/lib/finance/mock-generate-bundle"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
-import type { FinanceMockBundle } from "@/lib/stores/finance-mock-store"
-import { useFinanceMockStore } from "@/lib/stores/finance-mock-store"
+import { trpc } from "@/lib/trpc/client"
 import { AppShell } from "@/components/dashboard/app-shell"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -61,17 +59,14 @@ function initialSlots(): Record<SlotKey, SlotState> {
   }
 }
 
-async function mockParseFile(file: File, slot: SlotKey): Promise<number> {
-  await new Promise((r) => setTimeout(r, 450 + (file.size % 400)))
-  const base =
-    12 +
-    (file.name.length % 40) +
-    (Math.min(file.size, 2_000_000) % 180) +
-    (slot === "customer" ? 120 : slot === "baremetal" ? 35 : 80)
-  if (file.size < 80) {
-    throw new Error("文件过小，疑似空表")
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let binary = ""
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!)
   }
-  return base
+  return btoa(binary)
 }
 
 function BillingPeriodFormCard({
@@ -110,7 +105,7 @@ function BillingPeriodFormCard({
       <CardHeader>
         <CardTitle>添加账期</CardTitle>
         <CardDescription>
-          填写账期信息并上传三类报表（mock：不读取真实表格内容），完成后点击「模拟计算」。
+          填写账期信息并上传三类 Excel，完成后点击「计算」生成收入与成本明细。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -217,7 +212,7 @@ function BillingPeriodFormCard({
               计算中…
             </>
           ) : (
-            "模拟计算"
+            "计算"
           )}
         </Button>
         <Button type="button" variant="outline" asChild disabled={persisting}>
@@ -234,13 +229,22 @@ function ComputeResultCard({
   canRunCompute,
   onRecompute,
 }: {
-  period: NonNullable<FinanceMockBundle["period"]>
+  period: {
+    period_code: string
+    period_start: string
+    period_end: string
+    total_income: string | null
+    total_cost: string | null
+    supplementary: string | null
+    balance_income: string | null
+    baremetal_income: string | null
+  }
   computing: boolean
   canRunCompute: boolean
   onRecompute: () => void
 }) {
   const grossProfit =
-    (Number(period.total_income) || 0) - (Number(period.total_cost) || 0)
+    (Number(period.total_income ?? 0) || 0) - (Number(period.total_cost ?? 0) || 0)
 
   return (
     <Card className="h-full border-l-4 border-l-primary">
@@ -255,13 +259,13 @@ function ComputeResultCard({
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">账期总收入</p>
             <p className="text-lg font-semibold tabular-nums">
-              {formatMoney(period.total_income)}
+              {formatMoney(period.total_income ?? "0")}
             </p>
           </div>
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">账期总成本</p>
             <p className="text-lg font-semibold tabular-nums">
-              {formatMoney(period.total_cost)}
+              {formatMoney(period.total_cost ?? "0")}
             </p>
           </div>
           <div className="rounded-md border p-3 sm:col-span-2">
@@ -275,19 +279,19 @@ function ComputeResultCard({
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">补充收入</p>
             <p className="tabular-nums font-medium">
-              {formatMoney(period.supplementary)}
+              {formatMoney(period.supplementary ?? "0")}
             </p>
           </div>
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">余额收入</p>
             <p className="tabular-nums font-medium">
-              {formatMoney(period.balance_income)}
+              {formatMoney(period.balance_income ?? "0")}
             </p>
           </div>
           <div className="rounded-md border p-3">
             <p className="text-xs text-muted-foreground">裸金属收入</p>
             <p className="tabular-nums font-medium">
-              {formatMoney(period.baremetal_income)}
+              {formatMoney(period.baremetal_income ?? "0")}
             </p>
           </div>
         </div>
@@ -318,18 +322,28 @@ function ComputeResultCard({
 
 export default function FinanceCreateBillingPeriodPage() {
   const router = useLocaleRouter()
-  const addBundle = useFinanceMockStore((s) => s.addBundle)
+  const utils = trpc.useUtils()
 
   const [periodCode, setPeriodCode] = useState("")
   const [periodStart, setPeriodStart] = useState("")
   const [periodEnd, setPeriodEnd] = useState("")
+  const [periodId, setPeriodId] = useState<string | null>(null)
   const [slots, setSlots] = useState<Record<SlotKey, SlotState>>(initialSlots)
-  const [draftBundle, setDraftBundle] = useState<FinanceMockBundle | null>(null)
   const [computing, setComputing] = useState(false)
   const [persisting, setPersisting] = useState(false)
 
+  const createPeriod = trpc.finance.periods.create.useMutation()
+  const importFile = trpc.finance.periods.importFile.useMutation()
+  const computePeriod = trpc.finance.periods.compute.useMutation()
+  const publishPeriod = trpc.finance.periods.publish.useMutation()
+
+  const { data: draftBundle } = trpc.finance.periods.getBundle.useQuery(
+    { id: periodId! },
+    { enabled: Boolean(periodId) },
+  )
+
   const clearPreview = useCallback(() => {
-    setDraftBundle(null)
+    setPeriodId(null)
   }, [])
 
   const allParsed =
@@ -337,9 +351,19 @@ export default function FinanceCreateBillingPeriodPage() {
     slots.baremetal.status === "done" &&
     slots.tenantBill.status === "done"
 
+  const ensurePeriod = useCallback(async (): Promise<string> => {
+    if (periodId) return periodId
+    const created = await createPeriod.mutateAsync({
+      periodCode: periodCode.trim(),
+      periodStart,
+      periodEnd,
+    })
+    setPeriodId(created.id)
+    return created.id
+  }, [createPeriod, periodCode, periodEnd, periodId, periodStart])
+
   const onPickFile = useCallback(
     async (slot: SlotKey, file: File | null) => {
-      clearPreview()
       if (!file) {
         setSlots((s) => ({
           ...s,
@@ -347,34 +371,47 @@ export default function FinanceCreateBillingPeriodPage() {
         }))
         return
       }
+      if (!periodCode.trim() || !periodStart || !periodEnd) {
+        toast.error("请先填写账期编码与起止日期")
+        return
+      }
       setSlots((s) => ({
         ...s,
-        [slot]: { file, status: "parsing", message: "正在模拟解析…", rowCount: 0 },
+        [slot]: { file, status: "parsing", message: "正在上传并解析…", rowCount: 0 },
       }))
       try {
-        const rowCount = await mockParseFile(file, slot)
+        const id = await ensurePeriod()
+        const fileBase64 = await fileToBase64(file)
+        const result = await importFile.mutateAsync({
+          billingPeriodId: id,
+          slot,
+          fileName: file.name,
+          fileBase64,
+        })
         setSlots((s) => ({
           ...s,
           [slot]: {
             file,
             status: "done",
-            message: `解析成功（mock ${rowCount} 行）`,
-            rowCount,
+            message: `解析成功（${result.rowCount} 行）`,
+            rowCount: result.rowCount,
           },
         }))
+        await utils.finance.periods.getBundle.invalidate({ id })
+        toast.success(`${SLOT_LABEL[slot].title} 导入成功`)
       } catch (e) {
         setSlots((s) => ({
           ...s,
           [slot]: {
             file,
             status: "error",
-            message: e instanceof Error ? e.message : "解析失败",
+            message: e instanceof Error ? e.message : "导入失败",
             rowCount: 0,
           },
         }))
       }
     },
-    [clearPreview],
+    [ensurePeriod, importFile, periodCode, periodEnd, periodStart, utils.finance.periods.getBundle],
   )
 
   const canRunCompute =
@@ -388,26 +425,13 @@ export default function FinanceCreateBillingPeriodPage() {
 
   const handleCompute = async () => {
     if (!canRunCompute) return
-    const c = slots.customer.file
-    const b = slots.baremetal.file
-    const t = slots.tenantBill.file
-    if (!c || !b || !t) return
-
     setComputing(true)
     try {
-      await new Promise((r) => setTimeout(r, 500))
-      const bundle = generateMockFinanceBundle({
-        period_code: periodCode.trim(),
-        period_start: periodStart,
-        period_end: periodEnd,
-        customer: { name: c.name, size: c.size },
-        baremetal: { name: b.name, size: b.size },
-        tenantBill: { name: t.name, size: t.size },
-      })
-      setDraftBundle(bundle)
-      toast.success("模拟计算完成，请核对汇总与下方明细")
+      const id = await ensurePeriod()
+      await computePeriod.mutateAsync({ billingPeriodId: id })
+      await utils.finance.periods.getBundle.invalidate({ id })
+      toast.success("计算完成，请核对汇总与下方明细")
     } catch (e) {
-      setDraftBundle(null)
       toast.error(e instanceof Error ? e.message : "计算失败")
     } finally {
       setComputing(false)
@@ -415,21 +439,24 @@ export default function FinanceCreateBillingPeriodPage() {
   }
 
   const handlePersist = async () => {
-    if (!draftBundle) return
+    if (!periodId || !draftBundle) return
     setPersisting(true)
     try {
-      addBundle(draftBundle)
-      toast.success("已写入账期（本地持久化）")
+      await publishPeriod.mutateAsync({ billingPeriodId: periodId })
+      await utils.finance.periods.list.invalidate()
+      toast.success("账期已发布")
       router.push("/finance")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "写入失败")
+      toast.error(e instanceof Error ? e.message : "发布失败")
     } finally {
       setPersisting(false)
     }
   }
 
   const p = draftBundle?.period
-  const hasResult = Boolean(draftBundle && p)
+  const hasResult =
+    draftBundle?.period?.status === "computed" ||
+    draftBundle?.period?.status === "published"
 
   const formCard = (
     <BillingPeriodFormCard
@@ -526,7 +553,7 @@ export default function FinanceCreateBillingPeriodPage() {
                       写入中…
                     </>
                   ) : (
-                    "写入本地并返回账期列表"
+                    "发布账期并返回列表"
                   )}
                 </Button>
               </div>

@@ -25,6 +25,7 @@ export type CustomerListFilters = {
 
 export type CustomerUpsertInput = {
   name: string
+  shortName?: string
   type: 'B' | 'C'
   status?: 'active' | 'inactive' | 'suspended'
   contactPerson: string
@@ -171,6 +172,7 @@ export const customersDataAccess = {
   async create(input: CustomerUpsertInput): Promise<Customer> {
     const id = newId()
     const tenantId = newId()
+    const displayName = input.shortName?.trim() || input.name.trim()
 
     await db.transaction(async (tx) => {
       await tx.insert(customer).values({
@@ -186,12 +188,12 @@ export const customersDataAccess = {
         certCode: input.certCode?.trim() || null,
         salesManagerId: input.salesManagerId || null,
         expectedScale: input.expectedScale ?? null,
-        accountName: input.name.trim(),
+        accountName: input.shortName?.trim() || null,
       })
       await tx.insert(billingTenant).values({
         id: tenantId,
         customerId: id,
-        name: input.name.trim(),
+        name: displayName,
         isDefault: true,
         status: input.status ?? 'active',
         balance: '0',
@@ -218,7 +220,7 @@ export const customersDataAccess = {
         certCode: input.certCode?.trim() || null,
         salesManagerId: input.salesManagerId || null,
         expectedScale: input.expectedScale ?? null,
-        accountName: input.name.trim(),
+        accountName: input.shortName?.trim() || null,
       })
       .where(eq(customer.id, id))
 

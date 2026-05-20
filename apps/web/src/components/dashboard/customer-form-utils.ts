@@ -29,10 +29,20 @@ function normalizeExpectedScale(
   return { ...emptyExpectedScale }
 }
 
+function resolveCustomerNames(values: CustomerFormValues) {
+  const trimmedName = values.name.trim()
+  const trimmedShortName = values.shortName.trim()
+  return {
+    name: trimmedName || trimmedShortName,
+    shortName: trimmedShortName,
+  }
+}
+
 export function customerToFormValues(customer: Customer): CustomerFormValues {
   return {
     type: customer.type,
     name: customer.name,
+    shortName: customer.shortName ?? '',
     contactPerson: customer.contactPerson,
     contactPhone: customer.contactPhone,
     contactEmail: customer.contactEmail,
@@ -52,9 +62,12 @@ export function formValuesToCustomer(
   const scale = values.expectedScale
   const cards = scale.cards.filter((c) => c.cardTypeId && c.cardCount > 0)
 
+  const { name, shortName } = resolveCustomerNames(values)
+
   return {
     id: base.id,
-    name: values.name.trim(),
+    name,
+    shortName: shortName || undefined,
     type: values.type,
     status: base.status ?? 'active',
     contactPerson: values.contactPerson.trim(),
@@ -79,9 +92,11 @@ export function formValuesToCustomer(
 export function formValuesToCustomerInput(values: CustomerFormValues) {
   const scale = values.expectedScale
   const cards = scale.cards.filter((c) => c.cardTypeId && c.cardCount > 0)
+  const { name, shortName } = resolveCustomerNames(values)
 
   return {
-    name: values.name.trim(),
+    name,
+    shortName: shortName || undefined,
     type: values.type,
     contactPerson: values.contactPerson.trim(),
     contactPhone: values.contactPhone.trim(),
@@ -97,7 +112,9 @@ export function formValuesToCustomerInput(values: CustomerFormValues) {
 }
 
 export function validateCustomerForm(values: CustomerFormValues): string | null {
-  if (!values.name.trim()) return '请填写客户名称'
+  if (!values.name.trim() && !values.shortName.trim()) {
+    return '客户名称与客户简称不能同时为空'
+  }
   if (!values.contactPerson.trim()) return '请填写联系人'
   if (!values.contactPhone.trim()) return '请填写联系电话'
   return null

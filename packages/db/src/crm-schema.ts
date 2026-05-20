@@ -93,6 +93,9 @@ export const billingTenant = pgTable(
     platformTenantId: varchar("platform_tenant_id", { length: 128 }),
     isDefault: boolean("is_default").notNull().default(false),
     status: varchar("status", { length: 32 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    overdue_at: timestamp("overdue_at", { withTimezone: true }),
+    credit_limit: numeric("credit_limit", { precision: 15, scale: 4 }),
     balance: money("balance").notNull().default("0"),
     ...crmTimestamps,
   },
@@ -141,6 +144,14 @@ export const crmProject = pgTable(
     startDate: date("start_date"),
     endDate: date("end_date"),
     monthlyBudget: money("monthly_budget"),
+    /** 上月充值快照，由月度数据同步更新 */
+    lastMonthRecharge: money("last_month_recharge").notNull().default("0"),
+    /** 本月充值快照，由月度数据同步更新 */
+    thisMonthRecharge: money("this_month_recharge").notNull().default("0"),
+    /** 上月消费快照，由月度数据同步更新 */
+    lastMonthConsumption: money("last_month_consumption").notNull().default("0"),
+    /** 本月消费快照，由月度数据同步更新 */
+    thisMonthConsumption: money("this_month_consumption").notNull().default("0"),
     /** 可选缓存，非财务真值 */
     balance: money("balance"),
     ...crmTimestamps,

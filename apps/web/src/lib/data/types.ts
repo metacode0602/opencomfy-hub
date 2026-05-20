@@ -49,6 +49,8 @@ export function isExpectedScaleEmpty(scale: CustomerExpectedScale): boolean {
 export interface Customer {
   id: string
   name: string
+  /** 客户简称，对应库表 account_name */
+  shortName?: string
   type: 'B' | 'C'
   status: 'active' | 'inactive' | 'suspended'
   contactPerson: string
@@ -78,9 +80,12 @@ export interface PlatformTenant {
   customerId: string
   name: string
   platformTenantId?: string
+  phone?: string
   isDefault: boolean
   status: 'active' | 'inactive' | 'suspended'
   balance: number
+  overdueAt?: string
+  creditLimit?: number
 }
 
 /** 项目–计费账户关联 */
@@ -125,6 +130,14 @@ export interface Project {
   startDate: string
   endDate?: string
   monthlyBudget: number
+  /** 上月充值（快照） */
+  lastMonthRecharge: number
+  /** 本月充值（快照） */
+  thisMonthRecharge: number
+  /** 上月消费（快照） */
+  lastMonthConsumption: number
+  /** 本月消费（快照） */
+  thisMonthConsumption: number
   totalConsumption: number
   balance: number
 }
