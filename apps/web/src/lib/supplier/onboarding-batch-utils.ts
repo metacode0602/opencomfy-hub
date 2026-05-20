@@ -97,5 +97,5 @@ export const LIFECYCLE_STATUS_COLORS: Record<string, string> = {
   在线: "bg-green-500/20 text-green-400 border-green-500/30",
   离线: "bg-gray-500/20 text-gray-400 border-gray-500/30",
   维护中: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  退役: "bg-red-500/20 text-red-400 border-red-500/30",
+  下线中: "bg-red-500/20 text-red-400 border-red-500/30",
 }

@@ -42,6 +42,8 @@ export type InventoryOverviewRow = {
   maintenanceQuantity: number
   internalTestGpu: number
   sellableQuantity: number
+  bareMetalQuantity: number
+  elasticServiceQuantity: number
   status: DataCenterDevice['status']
   poolCodes: string[]
 }
@@ -297,6 +299,8 @@ export function buildInventoryOverviewRows(
         maintenanceQuantity,
         internalTestGpu,
         sellableQuantity,
+        bareMetalQuantity: 0,
+        elasticServiceQuantity: 0,
         status: row.status,
         poolCodes: Array.from(new Set(poolCodes)),
       }
@@ -407,7 +411,7 @@ export function buildLifecycleFunnel(physicalDevices: SupplierDevice[]): Lifecyc
     在线: { gpu: 0, devices: 0 },
     维护中: { gpu: 0, devices: 0 },
     离线: { gpu: 0, devices: 0 },
-    退役: { gpu: 0, devices: 0 },
+    下线中: { gpu: 0, devices: 0 },
   }
 
   for (const device of physicalDevices) {
@@ -417,7 +421,7 @@ export function buildLifecycleFunnel(physicalDevices: SupplierDevice[]): Lifecyc
     bucket.devices += 1
   }
 
-  const order = ['待接入', '接入中', '在线', '维护中', '离线', '退役']
+  const order = ['待接入', '接入中', '在线', '维护中', '离线', '下线中']
   return order.map((stage) => ({
     stage,
     gpuCount: stages[stage]?.gpu ?? 0,

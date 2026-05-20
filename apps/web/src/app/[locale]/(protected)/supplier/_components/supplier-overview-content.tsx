@@ -376,12 +376,14 @@ export function SupplierOverviewContent() {
               <TableHeader>
                 <TableRow>
                   <TableHead>供应商</TableHead>
-                  <TableHead className="text-right">区域</TableHead>
+                  <TableHead className="text-right">机房</TableHead>
                   <TableHead className="text-right">总量</TableHead>
                   <TableHead className="text-right">在线</TableHead>
                   <TableHead className="text-right">可售</TableHead>
                   <TableHead className="text-right">批次</TableHead>
                   <TableHead className="text-right">故障</TableHead>
+                  <TableHead className="text-right">待上线</TableHead>
+                  <TableHead className="text-right">待下线</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -417,6 +419,24 @@ export function SupplierOverviewContent() {
                       {row.openFaults > 0 ? (
                         <Badge variant="outline" className="border-destructive/40 text-destructive">
                           {row.openFaults}
+                        </Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.onboardingGpu > 0 ? (
+                        <Badge variant="outline" className="border-chart-4/40 text-chart-4">
+                          {row.onboardingGpu}
+                        </Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.onboardingGpu > 0 ? (
+                        <Badge variant="outline" className="border-chart-4/40 text-chart-4">
+                          {row.onboardingGpu}
                         </Badge>
                       ) : (
                         '—'
@@ -465,6 +485,8 @@ export function SupplierOverviewContent() {
                 <TableHead className="text-right">维护</TableHead>
                 <TableHead className="text-right">测试占用</TableHead>
                 <TableHead className="text-right">可售</TableHead>
+                <TableHead className="text-right">裸金属</TableHead>
+                <TableHead className="text-right">弹性服务</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -484,6 +506,12 @@ export function SupplierOverviewContent() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {row.sellableQuantity}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.bareMetalQuantity}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.elasticServiceQuantity}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={statusColors[row.status]}>
