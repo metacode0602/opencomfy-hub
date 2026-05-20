@@ -75,7 +75,7 @@ export function proxy(request: NextRequest) {
 
   const isPublicRoute =
     pathForAuth === "/" ||
-    pathForAuth.startsWith("/login") ||
+    // pathForAuth.startsWith("/login") ||
     pathForAuth.startsWith("/signin") ||
     pathForAuth.startsWith("/register") ||
     pathForAuth.startsWith("/forgot-password") ||
@@ -83,7 +83,7 @@ export function proxy(request: NextRequest) {
     pathForAuth.startsWith("/error")
 
   if (!sessionCookie && !isPublicRoute) {
-    const signInHref = buildLocalizedHref(locale, "/login")
+    const signInHref = buildLocalizedHref(locale, "/signin")
     return NextResponse.redirect(new URL(signInHref, request.url))
   }
 
