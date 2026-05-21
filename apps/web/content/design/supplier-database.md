@@ -4,7 +4,7 @@
 
 **文档性质**：供应商域逻辑表结构（PostgreSQL 风格类型）；物理实现可独立 schema（如 `supplier`），外键语义与唯一约束应保持一致。与 CRM 域通过 `user_staff`、财务域通过 `supplier_unit_cost` / `platform_cost_monthly` 衔接。
 
-**版本**：v1.2（2026-05-19）
+**版本**：v1.3（2026-05-21）
 
 **核心目标**：
 
@@ -40,7 +40,9 @@
 | 决策 | 说明 |
 |------|------|
 | **供应商主数据** | `supplier` 为算力采购与合作主体；商务经理 FK `user_staff`，不在表内存姓名字符串。 |
-| **机房从属供应商** | `data_center.supplier_id` NOT NULL；`code` 在供应商内 UK（对接 `idc_code`）。 |
+| **机房从属供应商** | `data_center.supplier_id` NOT NULL；`code` 在供应商内 UK（对接 `idc_code`）；`region_tags` 供区域筛选与批次冗余。 |
+| **机房配套费** | `network_fee_monthly`、`mgmt_node_fee_monthly` 为 **jsonb** 结构化配置（计费模式、档位、节点类型等）；列表/概览展示 `summary.estimated_monthly_total`，月结账单仍落 **numeric 汇总**（见 §3.7）。 |
+| **合同 PDF** | `supplier_contract` 支持上传 PDF 至 OSS；元数据字段对齐 `onboarding_batch.import_file_*` 约定（`contract_file_uri` 存对象 URI，非公网直链）。 |
 | **卡型主数据** | `gpu_card_type` 全局字典；设备/库存/单价均 FK 卡型。 |
 | **合同与计价** | `supplier_contract` 存商务合同；计价细节拆为 `supplier_terms_version` + `supplier_card_list_price`（刊例价）+ `supplier_unit_cost`（成交价/财务基准）+ `supplier_pricing_tier`（**按成交/刊例比例**划档）；UI 当前价用 `supplier_pricing_record`（生效中快照）。 |
 | **刊例价与阶梯** | **刊例价**为供应商×机房×卡型的基准挂牌单价；**成交卡时价**为实际采购结算价；**阶梯档**由 `deal_to_list_ratio`（成交/刊例）区间或各档 `list_price_multiplier` 表达，**不以累计用量（卡时）划档**（见 §3.2.1）。 |
@@ -60,12 +62,14 @@
 | **R-S1.1** | `supplier.business_manager_staff_id` → `user_staff.id`；列表/详情展示 `display_name` 为 JOIN 读模型。 |
 | **R-S1.2** | `supplier.code` 全局 UK（供应商编码，如 `HB-GPU-01`）；`supplier.status` ∈ `negotiating` \| `cooperating` \| `suspended` \| `terminated`。 |
 | **R-S1.3** | 供应商级默认合作模式 `default_cooperation_mode` 仅作新建合同默认值；**生效计价以合同/条款版本为准**。 |
+| **R-S1.4** | `data_center.region_tags` 为非空标签数组（如 `华东`、`华南-广州`）；大盘/列表按标签筛选；写入 `onboarding_batch.idc_region` 时取 **首个标签** 或 `location`（应用层约定，须文档化）。 |
+| **R-S1.5** | `network_fee_monthly`、`mgmt_node_fee_monthly` 须含 `schema_version`、`billing_mode`、`summary.estimated_monthly_total`；未配置时用 `{ "schema_version": 1, "billing_mode": "fixed", "fixed": { "amount": "0" }, "summary": { "estimated_monthly_total": "0" } }` 默认值。 |
 
 #### 规则 2：合同与单价
 
 | 规则 | 说明 |
 |------|------|
-| **R-S2.1** | `supplier_contract.supplier_id` NOT NULL；`contract_no` 全局 UK。 |
+| **R-S2.1** | `supplier_contract.supplier_id` NOT NULL；`contract_no` 全局 UK；合同扫描件 PDF 须 `contract_file_mime_type = application/pdf`，`contract_file_uri` 为 OSS 对象 URI（如 `oss://{bucket}/supplier/contracts/{contract_id}/{filename}` 或等价内部 URI）。 |
 | **R-S2.2** | `pricing_mode` ∈ `card_time` \| `revenue_share` \| `tiered_card_time` \| `tiered_revenue_share`（与 `lib/data/types.ContractPricingMode` 一致）。 |
 | **R-S2.3** | **刊例价**存 `supplier_card_list_price`（供应商×机房×卡型×生效期）；结算与成本基准的 **成交卡时价** 存 `supplier_unit_cost.deal_unit_price_per_hour`（或固定模式下的 `unit_cost`）。 |
 | **R-S2.4** | **阶梯划档**以 **成交/刊例比例** 为准：`deal_to_list_ratio = deal_unit_price_per_hour / list_price_per_hour`（保留 6 位小数）；档位定义用 `supplier_pricing_tier.deal_to_list_ratio_min` / `deal_to_list_ratio_max` 或等价字段 `list_price_multiplier`（= 该档相对刊例的结算倍数）。**禁止**以累计卡时 `threshold_*_hours` 作为阶梯主键（与业务口径一致；前端 Mock 待迁移）。 |
@@ -129,7 +133,7 @@
 | Tab | 组件 | 表名 | 说明 |
 |-----|------|------|------|
 | 概览 | 内联卡片 + 近期账单表 | `supplier`、`data_center`、`supplier_gpu_inventory`、`supplier_bill` | 统计为聚合查询 |
-| 机房管理 | `SupplierDatacentersPanel` | `data_center` | 配套费 `network_fee_monthly`、`mgmt_node_fee_monthly` |
+| 机房管理 | `SupplierDatacentersPanel` | `data_center` | 区域标签 `region_tags`；配套费 jsonb `network_fee_monthly`、`mgmt_node_fee_monthly` |
 | 设备资源 | `SupplierDevicesPanel` | `supplier_gpu_inventory` | 按供应商过滤；卡时/分成成本来自定价读模型 |
 | 合同管理 | `SupplierContractsPanel` | `supplier_contract` | |
 | 卡型成本 | `SupplierUnitCostsPanel` | `supplier_pricing_record`、`supplier_pricing_history` | 嵌入 `UnitCostsContent`（`embedded` + `supplierId`） |
@@ -141,7 +145,8 @@
 | UI 能力 | 落库 |
 |---------|------|
 | 列表筛选（供应商/状态/计价模式/类型） | 查询 `supplier_contract` |
-| 详情：阶梯档、刊例价、成交/刊例比例、附件 | `supplier_card_list_price`、`supplier_pricing_tier`、`contract_file_uri`、`signed_at` |
+| 详情：阶梯档、刊例价、成交/刊例比例、PDF 附件 | `supplier_card_list_price`、`supplier_pricing_tier`、`contract_file_*`、`signed_at` |
+| 上传合同 PDF | 预签名 PUT → OSS → UPDATE `contract_file_uri` / `contract_file_name` / `contract_file_size_bytes` / `contract_file_uploaded_at`；可选写 `supplier_activity`（`file`） |
 | 新建合同 | INSERT `supplier_contract` + 刊例价 + 阶梯档（比例/multipier）；写 `supplier_activity`（`contract_created`） |
 
 ### 2.4 设备页（`DevicesContent`）
@@ -229,15 +234,119 @@
 | `supplier_id` | text | FK→`supplier`, NOT NULL | |
 | `code` | varchar(64) | NOT NULL | `code`（即 `idc_code`） |
 | `name` | varchar(255) | NOT NULL | `name` |
-| `location` | varchar(128) | | 城市/区域 |
+| `location` | varchar(128) | | 城市/物理位置（展示用） |
+| `region_tags` | text[] | NOT NULL DEFAULT '{}' | `regionTags`；区域标签，如 `{华东,上海}`，供筛选与批次冗余 |
 | `address` | text | | |
 | `status` | varchar(32) | NOT NULL | `online` / `offline` / `maintenance` |
-| `network_fee_monthly` | numeric(15,4) | DEFAULT 0 | `networkFee` |
-| `mgmt_node_fee_monthly` | numeric(15,4) | DEFAULT 0 | `managementNodeFee` |
+| `network_fee_monthly` | jsonb | NOT NULL | `networkFee`；网络配套费配置（结构 §3.1.1） |
+| `mgmt_node_fee_monthly` | jsonb | NOT NULL | `managementNodeFee`；管控节点配套费配置（结构 §3.1.1） |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | NOT NULL | |
 
-UK：`(supplier_id, code)`。索引：`(supplier_id)`、`(status)`。
+UK：`(supplier_id, code)`。索引：`(supplier_id)`、`(status)`、`GIN (region_tags)`。
+
+**列表/概览读模型**：`networkFee` / `managementNodeFee` 展示值取各自 jsonb 的 `summary.estimated_monthly_total`（numeric 解析）；复杂明细在机房编辑表单中按 `billing_mode` 渲染。
+
+---
+
+#### 3.1.1 机房配套费 JSON 结构（`network_fee_monthly` / `mgmt_node_fee_monthly`）
+
+两类配套费均为 **结构化 jsonb**，支持多种计费模式；金额字段统一用 **字符串 numeric**（与 `tier_json` 一致，避免浮点误差）。
+
+**公共字段**（两类 jsonb 均须包含）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `schema_version` | integer | 当前为 `1`；结构升级时递增 |
+| `currency` | string | 默认 `CNY` |
+| `billing_cycle` | string | 固定 `monthly` |
+| `billing_mode` | string | 见下表 |
+| `summary` | object | `{ "estimated_monthly_total": "15000.0000", "display_label": "固定 1.5 万/月" }` |
+| `remark` | string | 可空；商务备注 |
+
+**`network_fee_monthly.billing_mode`**：
+
+| 模式 | 含义 | 主要 payload |
+|------|------|----------------|
+| `fixed` | 固定月费 | `fixed.amount`；可选 `fixed.includes_bandwidth_gbps` |
+| `bandwidth_tier` | 按带宽档位 | `bandwidth_tiers[]`：`tier_order`、`min_gbps`、`max_gbps`（NULL=无上限）、`monthly_fee` |
+| `per_machine` | 按机器数 | `per_machine.fee_per_machine`、`included_machine_count`、可选 `cap_monthly` |
+| `hybrid` | 基础费 + 超额 | `hybrid.base_fee`、`extra_per_gbps` 或 `extra_per_machine` |
+
+**`network_fee_monthly` 示例**（带宽档位 + 固定保底）：
+
+```json
+{
+  "schema_version": 1,
+  "currency": "CNY",
+  "billing_cycle": "monthly",
+  "billing_mode": "bandwidth_tier",
+  "summary": {
+    "estimated_monthly_total": "15000.0000",
+    "display_label": "10G 基础包 + 超额按档"
+  },
+  "bandwidth_tiers": [
+    {
+      "tier_order": 1,
+      "min_gbps": 0,
+      "max_gbps": 10,
+      "monthly_fee": "12000.0000",
+      "remark": "基础带宽包"
+    },
+    {
+      "tier_order": 2,
+      "min_gbps": 10,
+      "max_gbps": null,
+      "monthly_fee": "800.0000",
+      "remark": "每超出 1G 单价（按月折算）"
+    }
+  ],
+  "remark": "内网互联含在基础包；公网 egress 另计"
+}
+```
+
+**`mgmt_node_fee_monthly.billing_mode`**：
+
+| 模式 | 含义 | 主要 payload |
+|------|------|----------------|
+| `fixed` | 固定月费 | `fixed.amount` |
+| `per_node` | 按节点类型×数量 | `per_node.node_types[]`：`node_type`、`label`、`count`、`unit_fee_monthly`；可选 `included_node_count` |
+| `tiered` | 按节点总数分档 | `tiered.tiers[]`：`tier_order`、`min_nodes`、`max_nodes`、`unit_fee_monthly` 或 `flat_fee_monthly` |
+
+**`mgmt_node_fee_monthly` 示例**（多类型管控节点）：
+
+```json
+{
+  "schema_version": 1,
+  "currency": "CNY",
+  "billing_cycle": "monthly",
+  "billing_mode": "per_node",
+  "summary": {
+    "estimated_monthly_total": "8000.0000",
+    "display_label": "3×Master + 2×Monitor"
+  },
+  "per_node": {
+    "included_node_count": 0,
+    "node_types": [
+      {
+        "node_type": "k8s_master",
+        "label": "K8s Master",
+        "count": 3,
+        "unit_fee_monthly": "2000.0000"
+      },
+      {
+        "node_type": "monitor",
+        "label": "监控采集",
+        "count": 2,
+        "unit_fee_monthly": "1000.0000"
+      }
+    ]
+  },
+  "remark": "含 Prometheus / 日志采集节点"
+}
+```
+
+**月结与 Mock 兼容**：`supplier_bill.network_fee` / `management_fee` 仍为 **numeric 汇总**（按账期实际用量或 `summary.estimated_monthly_total` 计算后写入）；前端 Mock 当前 `networkFee: number` 对应读模型 `estimated_monthly_total`，落库后 API 层做 jsonb → number 投影。
 
 ---
 
@@ -345,9 +454,23 @@ UK（部分唯一）：`(supplier_id, data_center_id, gpu_card_type_id)` WHERE `
 | `terms` | text | | |
 | `signed_at` | timestamptz | 可空 | |
 | `signer_name` | varchar(128) | 可空 | |
-| `contract_file_uri` | varchar(1024) | 可空 | `contractFileUrl` |
+| **合同 PDF（OSS）** | | | |
+| `contract_file_name` | varchar(255) | 可空 | 原始文件名，如 `HB-GPU-框架合同-2026.pdf` |
+| `contract_file_uri` | varchar(1024) | 可空 | OSS 对象 URI（**非**浏览器直链）；如 `oss://{bucket}/supplier/contracts/{contract_id}/{uuid}.pdf` |
+| `contract_file_mime_type` | varchar(128) | 可空 | 须为 `application/pdf` |
+| `contract_file_size_bytes` | bigint | 可空 | |
+| `contract_file_sha256` | varchar(64) | 可空 | 完整性校验（可选） |
+| `contract_file_uploaded_at` | timestamptz | 可空 | |
+| `contract_file_uploaded_by_staff_id` | text | FK→`user_staff`, 可空 | 上传人 |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | NOT NULL | |
+
+**PDF 上传流程**（与 `onboarding_batch` Excel 上传对齐）：
+
+1. 客户端请求 **预签名上传 URL**（或 STS 临时凭证），`Content-Type: application/pdf`
+2. 直传 OSS → 服务端校验 `mime_type`、大小上限（建议 ≤ 50MB）
+3. UPDATE 上述 `contract_file_*` 字段；下载时由服务端 **签名 GET** 或内网代理，**禁止**将 bucket 公网 ACL 设为 public-read
+4. 可选 INSERT `supplier_activity`（`type = file`，`ref_domain = contract`）
 
 索引：`(supplier_id)`、`(status)`、`(pricing_mode)`。
 
@@ -525,7 +648,7 @@ UK：`(contract_id, version_no)`；部分唯一索引：`(contract_id) WHERE is_
 | `data_center_id` | text | FK→`data_center`, NOT NULL | 本批次上架机房 |
 | `idc_code` | varchar(64) | NOT NULL | 冗余：`data_center.code` |
 | `data_center_name` | varchar(255) | NOT NULL | 冗余：机房名称 |
-| `idc_region` | varchar(64) | 可空 | 冗余：区域/城市 |
+| `idc_region` | varchar(64) | 可空 | 冗余：区域标签；默认取 `data_center.region_tags[1]` 或 `location` |
 | **合同与接入条件** | | | |
 | `contract_id` | text | FK→`supplier_contract`, NOT NULL | |
 | `access_condition_sheet_id` | text | FK→`access_condition_sheet`, NOT NULL | |
@@ -846,8 +969,8 @@ UK：`(domain, state_code)`。
 | `status` | varchar(32) | NOT NULL | pending / confirmed / paid |
 | `total_usage_hours` | numeric(15,4) | NOT NULL | |
 | `total_amount` | numeric(15,4) | NOT NULL | |
-| `network_fee` | numeric(15,4) | NOT NULL | |
-| `management_fee` | numeric(15,4) | NOT NULL | |
+| `network_fee` | numeric(15,4) | NOT NULL | 账期汇总；由机房 `network_fee_monthly` jsonb 按账期规则计算 |
+| `management_fee` | numeric(15,4) | NOT NULL | 账期汇总；由机房 `mgmt_node_fee_monthly` jsonb 按账期规则计算 |
 | `final_amount` | numeric(15,4) | NOT NULL | |
 | `due_date` | date | NOT NULL | |
 | `paid_at` | timestamptz | 可空 | |
@@ -986,6 +1109,14 @@ erDiagram
     varchar pricing_mode
     varchar tier_basis
     numeric deal_to_list_ratio
+    varchar contract_file_uri
+  }
+
+  data_center {
+    text id PK
+    text_array region_tags
+    jsonb network_fee_monthly
+    jsonb mgmt_node_fee_monthly
   }
 
   supplier_pricing_tier {
@@ -1078,7 +1209,7 @@ erDiagram
 | 维度 | 来源 |
 |------|------|
 | 供应商 | `supplier` |
-| 区域/机房 | `data_center.location`, `data_center.code` |
+| 区域/机房 | `data_center.region_tags`, `data_center.location`, `data_center.code` |
 | 卡型 | `gpu_card_type` |
 | 资源池 | `resource_pool_binding.pool_code` |
 | 接入批次 | `onboarding_batch.batch_code` |
@@ -1157,11 +1288,12 @@ GROUP BY 1, 2, 3;
 ### 7.2 合同生效 + 条款落价
 
 1. UPDATE `supplier_contract.status` → `active`
-2. INSERT/确认 `supplier_card_list_price`（按机房×卡型录入 **刊例价**）
-3. INSERT `supplier_terms_version` + `supplier_pricing_tier`（阶梯：填 `list_price_multiplier` 或 `deal_to_list_ratio_*`）
-4. INSERT `supplier_unit_cost`：写入 `list_price_per_hour`、`deal_unit_price_per_hour`、`deal_to_list_ratio`（= deal/list）
-5. UPSERT `supplier_pricing_record`（冗余刊例、成交价、比例）；INSERT `supplier_pricing_history`（若替换旧价）
-6. INSERT `supplier_activity`（`contract_signed` / `pricing_change`）
+2. （可选）上传合同 PDF → OSS → UPDATE `contract_file_*`
+3. INSERT/确认 `supplier_card_list_price`（按机房×卡型录入 **刊例价**）
+4. INSERT `supplier_terms_version` + `supplier_pricing_tier`（阶梯：填 `list_price_multiplier` 或 `deal_to_list_ratio_*`）
+5. INSERT `supplier_unit_cost`：写入 `list_price_per_hour`、`deal_unit_price_per_hour`、`deal_to_list_ratio`（= deal/list）
+6. UPSERT `supplier_pricing_record`（冗余刊例、成交价、比例）；INSERT `supplier_pricing_history`（若替换旧价）
+7. INSERT `supplier_activity`（`contract_signed` / `pricing_change`）
 
 ### 7.3 接入批次（Excel / CSV）
 
@@ -1244,3 +1376,4 @@ GROUP BY 1, 2, 3;
 | v1.0 | 2026-05-19 | 首版：基于 supplier 四路由 + 详情子组件 + supplier-domain/ops mock；新增 `supplier_activity` 时间线 |
 | v1.1 | 2026-05-19 | 阶梯计价改为成交/刊例比例；新增 `supplier_card_list_price` |
 | v1.2 | 2026-05-19 | `onboarding_batch` 增加 Excel 导入、解析状态及供应商/机房冗余字段；可选 `onboarding_batch_import_row` |
+| v1.3 | 2026-05-21 | `data_center`：`network_fee_monthly` / `mgmt_node_fee_monthly` 改为 jsonb 配套费配置；新增 `region_tags`；`supplier_contract` 增加 OSS PDF 上传元数据字段 |

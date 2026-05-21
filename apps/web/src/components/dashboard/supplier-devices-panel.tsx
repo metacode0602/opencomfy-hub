@@ -144,11 +144,11 @@ export function SupplierDevicesPanel({ supplier }: SupplierDevicesPanelProps) {
         </Table>
       </Card>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-6 gap-4">
         <Card className="bg-card border-border">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center"> 
                 <Server className="w-5 h-5 text-blue-500" />
               </div>
               <div>
@@ -180,6 +180,32 @@ export function SupplierDevicesPanel({ supplier }: SupplierDevicesPanelProps) {
               <div>
                 <p className="text-2xl font-semibold text-foreground">{devicesByCardType.length}</p>
                 <p className="text-xs text-muted-foreground">卡型种类</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-card border-border">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <Cpu className="w-5 h-5 text-purple-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-foreground">{devicesByCardType.length}</p>
+                <p className="text-xs text-muted-foreground">内部占用</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-card border-border">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <Cpu className="w-5 h-5 text-purple-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-semibold text-foreground">{devicesByCardType.length}</p>
+                <p className="text-xs text-muted-foreground">故障数量</p>
               </div>
             </div>
           </CardContent>
