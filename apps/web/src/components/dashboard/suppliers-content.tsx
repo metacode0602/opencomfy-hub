@@ -18,7 +18,6 @@ import {
   Eye,
   Edit,
   CreditCard,
-  Upload,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -54,6 +53,7 @@ import {
   CreateSupplierDialog,
   EditSupplierDialog,
 } from '@/components/dashboard/supplier-form-dialog'
+import { SupplierImportTrigger } from '@/components/dashboard/supplier-import-dialog'
 
 const statusNames: Record<string, string> = {
   negotiating: '洽谈中',
@@ -109,15 +109,16 @@ export function SuppliersContent() {
             管理算力供应商、机房和设备资源
           </p>
         </div>
-        <div>
-          <Button className="gap-2">
-            <Upload className="w-4 h-4 mr-2" />
-            导入供应商
-          </Button>
-        <CreateSupplierDialog
-          activeStaff={activeStaff}
-          onCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
-        />
+        <div className="flex items-center gap-2">
+          <SupplierImportTrigger
+            activeStaff={activeStaff}
+            existingSuppliers={suppliers}
+            onImported={setSuppliers}
+          />
+          <CreateSupplierDialog
+            activeStaff={activeStaff}
+            onCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+          />
         </div>
       </div>
 

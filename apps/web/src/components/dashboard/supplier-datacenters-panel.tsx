@@ -18,14 +18,21 @@ import {
 } from '@/lib/data/mock-data'
 import type { DataCenter, DataCenterDevice, Supplier } from '@/lib/data/types'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
+import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier-datacenter-import-dialog'
 
 interface SupplierDatacentersPanelProps {
   supplier: Supplier
 }
 
 export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelProps) {
-  const [dataCenters] = useState<DataCenter[]>(() => getDataCentersBySupplierId(supplier.id))
+  const [dataCenters, setDataCenters] = useState<DataCenter[]>(() =>
+    getDataCentersBySupplierId(supplier.id),
+  )
   const [devices] = useState<DataCenterDevice[]>(() => getDevicesBySupplierId(supplier.id))
+
+  const handleImported = (importedForSupplier: DataCenter[]) => {
+    setDataCenters(importedForSupplier)
+  }
 
   return (
     <div className="space-y-4">
@@ -34,10 +41,17 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
           <h2 className="text-lg font-medium text-foreground">机房管理</h2>
           <p className="text-sm text-muted-foreground">管理供应商的数据中心和配套费用</p>
         </div>
-        <Button className="gap-2">
-          <Plus className="w-4 h-4" />
-          新增机房
-        </Button>
+        <div className="flex gap-2">
+          <SupplierDatacenterImportTrigger
+            supplier={supplier}
+            existingDataCenters={dataCenters}
+            onImported={handleImported}
+          />
+          <Button className="gap-2">
+            <Plus className="w-4 h-4" />
+            新增机房
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -59,7 +73,7 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                     </div>
                     <CardDescription className="flex items-center gap-1 mt-1">
                       <MapPin className="w-3 h-3" />
-                      {dc.address}
+                      {dc.address || dc.location || '—'}
                     </CardDescription>
                   </div>
                   <DropdownMenu>
@@ -119,11 +133,15 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                 <div className="pt-3 border-t border-border">
                   <p className="text-xs text-muted-foreground mb-2">设备分布</p>
                   <div className="flex flex-wrap gap-1">
-                    {dcDevices.map((device) => (
-                      <Badge key={device.id} variant="secondary" className="text-xs">
-                        {device.cardTypeName}: {device.onlineQuantity}/{device.quantity}
-                      </Badge>
-                    ))}
+                    {dcDevices.length === 0 ? (
+                      <span className="text-muted-foreground text-xs">暂无设备</span>
+                    ) : (
+                      dcDevices.map((device) => (
+                        <Badge key={device.id} variant="secondary" className="text-xs">
+                          {device.cardTypeName}: {device.onlineQuantity}/{device.quantity}
+                        </Badge>
+                      ))
+                    )}
                   </div>
                 </div>
               </CardContent>

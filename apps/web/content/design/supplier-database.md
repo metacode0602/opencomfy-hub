@@ -4,9 +4,11 @@
 
 **文档性质**：供应商域逻辑表结构（PostgreSQL 风格类型）；物理实现可独立 schema（如 `supplier`），外键语义与唯一约束应保持一致。与 CRM 域通过 `user_staff`、财务域通过 `supplier_unit_cost` / `platform_cost_monthly` 衔接。
 
-**版本**：v1.4（2026-05-21）
+**版本**：v1.5（2026-05-21）
 
 **设备批量导入补充**：[supplier-device-import-schema.md](./supplier-device-import-schema.md)（`ops_status`、`device_inventory` / `device_changelog` 批次、`supplier_device_change_log`、故障 `fault_records` 导入；v1.1 起登录凭据阶段一明文）
+
+**供应商 Excel 导入补充**：[supplier-import-design.md](./supplier-import-design.md)（入驻导出 25 列 **直接映射 `supplier`**；无批次表、无入驻档案表；商务经理仅新建写入）
 
 **核心目标**：
 
@@ -202,10 +204,34 @@
 | `address` | text | | |
 | `bank_name` | varchar(255) | 可空 | |
 | `bank_account` | varchar(64) | 可空 | |
+| **`external_onboarding_id`** | varchar(64) | UK, 可空 | 入驻系统 ID（Excel「ID」）；导入幂等键 |
+| **`platform_tenant_id`** | varchar(32) | **UK**, 可空 | 平台租户 ID；**非空时全局唯一**（PostgreSQL 允许多行 NULL） |
+| **`onboarding_type`** | varchar(16) | 可空 | `enterprise` / `individual` |
+| **`identity_no`** | varchar(32) | 可空 | USCC 或身份证号；**可重复** |
+| **`business_scope`** | text | 可空 | 经营范围 |
+| **`business_license_uri`** | varchar(1024) | 可空 | 营业执照 URL |
+| **`id_card_front_uri`** | varchar(1024) | 可空 | 身份证正面 URL |
+| **`id_card_back_uri`** | varchar(1024) | 可空 | 身份证反面 URL |
+| **`bank_branch_name`** | varchar(255) | 可空 | 开户行名称 |
+| **`bank_branch_address`** | text | 可空 | 开户行地址 |
+| **`admin_phone`** | varchar(32) | 可空 | 管理员手机号 |
+| **`admin_email`** | varchar(255) | 可空 | 管理员邮箱 |
+| **`device_info_raw`** | text | 可空 | 设备信息原文（不解析为设备台账） |
+| **`audit_status`** | varchar(32) | 可空 | 审核状态（规范化或原文） |
+| **`audit_confirmed`** | boolean | NOT NULL DEFAULT false | 审核状态是否已确认 |
+| **`audit_remark`** | text | 可空 | 审核备注 |
 | `created_at` | timestamptz | NOT NULL | `createdAt` |
 | `updated_at` | timestamptz | NOT NULL | |
 
-索引：`(status)`、`(business_manager_staff_id)`。
+索引：`(status)`、`(business_manager_staff_id)`、`UNIQUE (platform_tenant_id)`、`(identity_no)`。
+
+**Excel 导入规则（[supplier-import-design.md](./supplier-import-design.md)）**：
+
+- 弹窗选择 **默认商务经理** → 仅 **新建** 行写入 `business_manager_staff_id`；**更新** 已有行 **不覆盖** 该字段。
+- 幂等匹配：`external_onboarding_id` → `platform_tenant_id`（非空）→ `name + contact_phone`（两者均非空）。
+- **`identity_no` 允许重复**；**联系人/电话允许为空**（warning）。
+- **`platform_tenant_id` 非空时须唯一**（同文件内及库内均不可冲突）；空值不限。
+- 更新时 **不修改** `code`、`created_at`、`business_manager_staff_id`。
 
 ---
 
@@ -243,10 +269,21 @@
 | `status` | varchar(32) | NOT NULL | `online` / `offline` / `maintenance` |
 | `network_fee_monthly` | jsonb | NOT NULL | `networkFee`；网络配套费配置（结构 §3.1.1） |
 | `mgmt_node_fee_monthly` | jsonb | NOT NULL | `managementNodeFee`；管控节点配套费配置（结构 §3.1.1） |
+| `external_onboarding_id` | varchar(64) | 可空、**非 UK** | 入驻系统机房 ID；导入辅助匹配，缺失/重复 **不报错** |
+| `platform_tenant_id` | varchar(32) | 可空 | 冗余平台租户 ID |
+| `container_instance_region` | varchar(128) | 可空 | 容器实例区域 |
+| `bare_metal_region` | varchar(128) | 可空 | 裸金属区域 |
+| `description` | text | 可空 | 描述 |
+| `scale` | varchar(64) | 可空 | 规模 |
+| `public_ip_count` | integer | 可空 | 公网 IP 数量 |
+| `internal_network_cidr` | varchar(64) | 可空 | 内网网段 |
+| `audit_status` | varchar(32) | 可空 | 源系统审核状态 |
+| `audit_remark` | text | 可空 | 审核备注 |
+| `source_deleted` | boolean | NOT NULL DEFAULT false | 源系统是否删除（导入时 skip，不联动本地删除） |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | NOT NULL | |
 
-UK：`(supplier_id, code)`。索引：`(supplier_id)`、`(status)`、`GIN (region_tags)`。
+UK：`(supplier_id, code)`。索引：`(supplier_id)`、`(status)`、`GIN (region_tags)`、`(supplier_id, external_onboarding_id)` WHERE `external_onboarding_id IS NOT NULL`（**非唯一**，仅查询）。
 
 **列表/概览读模型**：`networkFee` / `managementNodeFee` 展示值取各自 jsonb 的 `summary.estimated_monthly_total`（numeric 解析）；复杂明细在机房编辑表单中按 `billing_mode` 渲染。
 
@@ -1161,6 +1198,10 @@ erDiagram
     text_array region_tags
     jsonb network_fee_monthly
     jsonb mgmt_node_fee_monthly
+    varchar external_onboarding_id
+    varchar container_instance_region
+    varchar bare_metal_region
+    integer public_ip_count
   }
 
   supplier_pricing_tier {
@@ -1422,3 +1463,4 @@ GROUP BY 1, 2, 3;
 | v1.2 | 2026-05-19 | `onboarding_batch` 增加 Excel 导入、解析状态及供应商/机房冗余字段；可选 `onboarding_batch_import_row` |
 | v1.3 | 2026-05-21 | `data_center`：`network_fee_monthly` / `mgmt_node_fee_monthly` 改为 jsonb 配套费配置；新增 `region_tags`；`supplier_contract` 增加 OSS PDF 上传元数据字段 |
 | v1.4 | 2026-05-21 | `supplier_device` 扩展导入字段与 `login_username`/`login_password`（阶段一明文）；`onboarding_batch_import_row` 凭据列改为明文；新增 `supplier_device_change_log`；`batch_kind` 增加 `device_inventory`/`device_changelog`；关联 [supplier-device-import-schema.md](./supplier-device-import-schema.md) |
+| v1.5 | 2026-05-21 | `data_center` 增加 Excel 导入扩展列（`external_onboarding_id` 可空非 UK、`platform_tenant_id`、区域/描述/规模/IP/审核字段、`source_deleted`）；关联 [supplier-datacenter-import-design.md](./supplier-datacenter-import-design.md) |

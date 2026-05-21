@@ -331,6 +331,9 @@ export const statusColors: Record<string, string> = {
 // 供应商相关类型
 export type CooperationMode = 'card_time' | 'revenue_share'
 
+/** 入驻主体类型（Excel 导入 / supplier.onboarding_type） */
+export type SupplierOnboardingType = 'enterprise' | 'individual'
+
 /** 合同约定计价方式 */
 export type ContractPricingMode =
   | 'card_time'
@@ -352,6 +355,8 @@ export interface ContractPricingTier {
 
 export interface Supplier {
   id: string
+  /** 供应商编码，对应 DB supplier.code */
+  code?: string
   name: string
   shortName: string
   status: 'negotiating' | 'cooperating' | 'suspended' | 'terminated'
@@ -364,7 +369,25 @@ export interface Supplier {
   address: string
   bankAccount?: string
   bankName?: string
+  /** 入驻系统 ID（导入幂等） */
+  externalOnboardingId?: string
+  platformTenantId?: string
+  onboardingType?: SupplierOnboardingType
+  identityNo?: string
+  businessScope?: string
+  businessLicenseUri?: string
+  idCardFrontUri?: string
+  idCardBackUri?: string
+  bankBranchName?: string
+  bankBranchAddress?: string
+  adminPhone?: string
+  adminEmail?: string
+  deviceInfoRaw?: string
+  auditStatus?: string
+  auditConfirmed?: boolean
+  auditRemark?: string
   createdAt: string
+  updatedAt?: string
   dataCenterCount: number
   totalDeviceCount: number
   monthlySettlement: number // 月结算金额
@@ -411,6 +434,20 @@ export interface DataCenter {
   totalDeviceCount: number
   onlineDeviceCount: number
   createdAt: string
+  /** 入驻系统机房 ID（导入辅助，可空） */
+  externalOnboardingId?: string
+  platformTenantId?: string
+  regionTags?: string[]
+  containerInstanceRegion?: string
+  bareMetalRegion?: string
+  description?: string
+  scale?: string
+  publicIpCount?: number
+  internalNetworkCidr?: string
+  auditStatus?: string
+  auditRemark?: string
+  sourceDeleted?: boolean
+  updatedAt?: string
 }
 
 export type GPUCardTypeManufacturer = 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'Other'
