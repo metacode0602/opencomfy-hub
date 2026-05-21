@@ -53,6 +53,8 @@ import {
   EditSupplierDialog,
 } from '@/components/dashboard/supplier-form-dialog'
 import { SupplierImportTrigger } from '@/components/dashboard/supplier-import-dialog'
+import { PlatformSupplierImportTrigger } from '@/components/dashboard/platform-supplier-import-dialog'
+import { PlatformDatacenterImportTrigger } from '@/components/dashboard/platform-datacenter-import-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { SupplierDatacenterImportTrigger } from './supplier-datacenter-import-dialog'
@@ -112,13 +114,19 @@ export function SuppliersContent() {
             管理算力供应商、机房和设备资源
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <SupplierDatacenterImportTrigger
+        <div className="flex flex-wrap items-center gap-2">
+          <PlatformSupplierImportTrigger
+            activeStaff={activeStaff}
             onSuccess={() => void utils.supplier.list.invalidate()}
           />
-          
+          <PlatformDatacenterImportTrigger
+            onSuccess={() => void utils.supplier.list.invalidate()}
+          />
           <SupplierImportTrigger
             activeStaff={activeStaff}
+            onSuccess={() => void utils.supplier.list.invalidate()}
+          />
+          <SupplierDatacenterImportTrigger
             onSuccess={() => void utils.supplier.list.invalidate()}
           />
           <CreateSupplierDialog

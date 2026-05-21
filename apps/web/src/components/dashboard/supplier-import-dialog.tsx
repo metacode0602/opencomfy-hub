@@ -486,9 +486,9 @@ export function SupplierImportTrigger({
 
   return (
     <>
-      <Button className="gap-2" onClick={() => setOpen(true)}>
+      <Button className="gap-2" variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Upload className="h-4 w-4" />
-        导入供应商
+        Excel 导入供应商
       </Button>
       <SupplierImportDialog
         open={open}

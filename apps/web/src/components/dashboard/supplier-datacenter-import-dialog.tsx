@@ -428,9 +428,9 @@ export function SupplierDatacenterImportTrigger({
 
   return (
     <>
-      <Button className="gap-2" onClick={() => setOpen(true)}>
-        <Upload className="h-4 w-4 mr-2" />
-        导入机房
+      <Button className="gap-2" variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Upload className="h-4 w-4" />
+        Excel 导入机房
       </Button>
       <SupplierDatacenterImportDialog
         open={open}
