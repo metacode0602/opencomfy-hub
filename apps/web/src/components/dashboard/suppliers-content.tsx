@@ -53,6 +53,9 @@ import {
   EditSupplierDialog,
 } from '@/components/dashboard/supplier-form-dialog'
 import { SupplierImportTrigger } from '@/components/dashboard/supplier-import-dialog'
+import { useListPagination } from '@/hooks/use-list-pagination'
+import { ListPagination } from '@/components/shared/list-pagination'
+import { SupplierDatacenterImportTrigger } from './supplier-datacenter-import-dialog'
 
 const statusNames: Record<string, string> = {
   negotiating: '洽谈中',
@@ -87,6 +90,10 @@ export function SuppliersContent() {
     return matchesSearch && matchesStatus && matchesMode
   })
 
+  const pagination = useListPagination(filteredSuppliers, {
+    resetDeps: [searchTerm, statusFilter, modeFilter],
+  })
+
   const stats = {
     total: suppliers.length,
     cooperating: suppliers.filter((s) => s.status === 'cooperating').length,
@@ -106,6 +113,10 @@ export function SuppliersContent() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <SupplierDatacenterImportTrigger
+            onSuccess={() => void utils.supplier.list.invalidate()}
+          />
+          
           <SupplierImportTrigger
             activeStaff={activeStaff}
             onSuccess={() => void utils.supplier.list.invalidate()}
@@ -252,7 +263,7 @@ export function SuppliersContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredSuppliers.map((supplier) => (
+              {pagination.items.map((supplier) => (
                 <TableRow key={supplier.id} className="border-border">
                   <TableCell>
                     <Link href={`/supplier/suppliers/${supplier.id}`} className="block group">
@@ -338,10 +349,18 @@ export function SuppliersContent() {
               ))}
             </TableBody>
           </Table>
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+          />
         </Card>
       ) : (
+        <>
         <div className="grid grid-cols-2 gap-4">
-          {filteredSuppliers.map((supplier) => {
+          {pagination.items.map((supplier) => {
             return (
               <Link key={supplier.id} href={`/supplier/suppliers/${supplier.id}`}>
                 <Card className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer h-full">
@@ -426,6 +445,16 @@ export function SuppliersContent() {
             )
           })}
         </div>
+        <Card className="bg-card border-border">
+          <ListPagination
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            totalItems={pagination.totalItems}
+            pageSize={pagination.pageSize}
+            onPageChange={pagination.setPage}
+          />
+        </Card>
+        </>
       )}
 
       <EditSupplierDialog

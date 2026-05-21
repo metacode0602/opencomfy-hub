@@ -159,7 +159,7 @@ export const supplierRouter = createTRPCRouter({
 
   datacenterImport: createTRPCRouter({
     preview: adminProcedure
-      .input(importFileSchema.extend({ supplierId: z.string().min(1) }))
+      .input(importFileSchema.extend({ supplierId: z.string().min(1).optional() }))
       .mutation(async ({ input }) => {
         try {
           return await datacenterImportDataAccess.preview(input)
@@ -169,7 +169,7 @@ export const supplierRouter = createTRPCRouter({
       }),
 
     commit: adminProcedure
-      .input(importFileSchema.extend({ supplierId: z.string().min(1) }))
+      .input(importFileSchema.extend({ supplierId: z.string().min(1).optional() }))
       .mutation(async ({ input }) => {
         try {
           return await datacenterImportDataAccess.commit(input)

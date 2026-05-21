@@ -3,9 +3,13 @@ import { parseDatacenterImportFile } from '@/lib/supplier/parse-datacenter-impor
 import {
   buildDatacenterImportPreview,
   buildRegionTags,
+  buildSuppliersByPlatformTenantId,
   deriveDatacenterCode,
   deriveLocation,
+  groupDataCentersBySupplierId,
+  type DatacenterImportPreviewContext,
 } from '@/lib/supplier/datacenter-import-utils'
+import { normalizePlatformTenantId } from '@/lib/supplier/supplier-import-utils'
 import type {
   DatacenterImportCommitResult,
   DatacenterImportPreviewResult,
@@ -17,7 +21,6 @@ import {
 import { supplierLog, supplierWarn } from '@/lib/server/dataaccess/supplier/logger'
 import { suppliersDataAccess, newSupplierId } from '@/lib/server/dataaccess/supplier/suppliers'
 import { dataCenter } from '@workspace/db/schema'
-import { eq } from 'drizzle-orm'
 
 function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
@@ -45,17 +48,18 @@ function toPublicPreview(
   return rest
 }
 
-export const datacenterImportDataAccess = {
-  async preview(params: {
-    supplierId: string
-    fileName: string
-    fileBase64: string
-  }): Promise<Omit<DatacenterImportPreviewResult, 'parsedRows'>> {
-    const buffer = Buffer.from(params.fileBase64, 'base64')
-    assertImportFile(params.fileName, buffer)
+async function buildPreviewContext(params: {
+  supplierId?: string
+  fileName: string
+  buffer: Buffer
+}): Promise<{ preview: DatacenterImportPreviewResult; context: DatacenterImportPreviewContext }> {
+  const parsed = parseDatacenterImportFile(
+    bufferToArrayBuffer(params.buffer),
+    params.fileName,
+  )
 
+  if (params.supplierId) {
     await suppliersDataAccess.assertSupplierExists(params.supplierId)
-
     const supplierRow = await suppliersDataAccess.getById(params.supplierId)
     if (!supplierRow) throw new Error('供应商不存在')
 
@@ -63,24 +67,75 @@ export const datacenterImportDataAccess = {
       params.supplierId,
     )
 
-    supplierLog('datacenter-import', 'preview start', {
+    const context: DatacenterImportPreviewContext = {
+      mode: 'fixed',
       supplierId: params.supplierId,
-      fileName: params.fileName,
-      bytes: buffer.length,
-      existingCount: existingDataCenters.length,
-    })
+      supplier: supplierRow,
+      existingDataCenters,
+    }
 
-    const parsed = parseDatacenterImportFile(bufferToArrayBuffer(buffer), params.fileName)
     const preview = buildDatacenterImportPreview(
       parsed.rows,
       params.fileName,
       parsed.originalHeaders,
-      params.supplierId,
-      supplierRow,
-      existingDataCenters,
+      context,
     )
+    return { preview, context }
+  }
+
+  const allSuppliers = await suppliersDataAccess.list()
+  const suppliersByTenantId = buildSuppliersByPlatformTenantId(allSuppliers)
+
+  const supplierIds = new Set<string>()
+  for (const row of parsed.rows) {
+    const tid = normalizePlatformTenantId(row.platform_tenant_id)
+    const hit = tid ? suppliersByTenantId.get(tid) : undefined
+    if (hit) supplierIds.add(hit.id)
+  }
+
+  const existingDataCenters = await suppliersDataAccess.listDataCentersBySupplierIds([
+    ...supplierIds,
+  ])
+  const dataCentersBySupplierId = groupDataCentersBySupplierId(existingDataCenters)
+
+  const context: DatacenterImportPreviewContext = {
+    mode: 'auto',
+    suppliersByTenantId,
+    dataCentersBySupplierId,
+  }
+
+  const preview = buildDatacenterImportPreview(
+    parsed.rows,
+    params.fileName,
+    parsed.originalHeaders,
+    context,
+  )
+  return { preview, context }
+}
+
+export const datacenterImportDataAccess = {
+  async preview(params: {
+    supplierId?: string
+    fileName: string
+    fileBase64: string
+  }): Promise<Omit<DatacenterImportPreviewResult, 'parsedRows'>> {
+    const buffer = Buffer.from(params.fileBase64, 'base64')
+    assertImportFile(params.fileName, buffer)
+
+    supplierLog('datacenter-import', 'preview start', {
+      supplierId: params.supplierId ?? 'auto',
+      fileName: params.fileName,
+      bytes: buffer.length,
+    })
+
+    const { preview } = await buildPreviewContext({
+      supplierId: params.supplierId,
+      fileName: params.fileName,
+      buffer,
+    })
 
     supplierLog('datacenter-import', 'preview done', {
+      mode: preview.mode,
       total: preview.summary.total,
       create: preview.summary.create,
       skip: preview.summary.skip,
@@ -91,39 +146,26 @@ export const datacenterImportDataAccess = {
   },
 
   async commit(params: {
-    supplierId: string
+    supplierId?: string
     fileName: string
     fileBase64: string
   }): Promise<DatacenterImportCommitResult> {
     const buffer = Buffer.from(params.fileBase64, 'base64')
     assertImportFile(params.fileName, buffer)
 
-    await suppliersDataAccess.assertSupplierExists(params.supplierId)
-
-    const supplierRow = await suppliersDataAccess.getById(params.supplierId)
-    if (!supplierRow) throw new Error('供应商不存在')
-
-    const existingDataCenters = await suppliersDataAccess.listDataCentersBySupplier(
-      params.supplierId,
-    )
-
     supplierLog('datacenter-import', 'commit start', {
-      supplierId: params.supplierId,
+      supplierId: params.supplierId ?? 'auto',
       fileName: params.fileName,
     })
 
-    const parsed = parseDatacenterImportFile(bufferToArrayBuffer(buffer), params.fileName)
-    const preview = buildDatacenterImportPreview(
-      parsed.rows,
-      params.fileName,
-      parsed.originalHeaders,
-      params.supplierId,
-      supplierRow,
-      existingDataCenters,
-    )
+    const { preview } = await buildPreviewContext({
+      supplierId: params.supplierId,
+      fileName: params.fileName,
+      buffer,
+    })
 
-    const scoped = existingDataCenters.filter((dc) => dc.supplierId === params.supplierId)
-    const codeSet = new Set(scoped.map((dc) => dc.code))
+    const supplierCache = new Map<string, Awaited<ReturnType<typeof suppliersDataAccess.getById>>>()
+    const codeSets = new Map<string, Set<string>>()
 
     let created = 0
     let skipped = 0
@@ -152,7 +194,32 @@ export const datacenterImportDataAccess = {
         continue
       }
 
+      const targetSupplierId = previewRow.resolved_supplier_id ?? params.supplierId
+      if (!targetSupplierId) {
+        failed++
+        errors.push({ row_no: previewRow.row_no, message: '无法确定目标供应商' })
+        continue
+      }
+
       try {
+        let supplierRow = supplierCache.get(targetSupplierId)
+        if (supplierRow === undefined) {
+          supplierRow = await suppliersDataAccess.getById(targetSupplierId)
+          supplierCache.set(targetSupplierId, supplierRow)
+        }
+        if (!supplierRow) {
+          failed++
+          errors.push({ row_no: previewRow.row_no, message: '供应商不存在' })
+          continue
+        }
+
+        let codeSet = codeSets.get(targetSupplierId)
+        if (!codeSet) {
+          const existing = await suppliersDataAccess.listDataCentersBySupplier(targetSupplierId)
+          codeSet = new Set(existing.map((dc) => dc.code))
+          codeSets.set(targetSupplierId, codeSet)
+        }
+
         const code = previewRow.derived_code ?? deriveDatacenterCode(row, codeSet)
         if (codeSet.has(code)) {
           skipped++
@@ -166,12 +233,13 @@ export const datacenterImportDataAccess = {
           row.platform_tenant_id ?? supplierRow.platformTenantId ?? null
 
         if (
+          preview.mode === 'fixed' &&
           row.platform_tenant_id &&
           supplierRow.platformTenantId &&
           row.platform_tenant_id !== supplierRow.platformTenantId
         ) {
           supplierWarn('datacenter-import', 'tenant mismatch on create', {
-            supplierId: params.supplierId,
+            supplierId: targetSupplierId,
             row_no: row.row_no,
             excelTenant: row.platform_tenant_id,
             supplierTenant: supplierRow.platformTenantId,
@@ -180,7 +248,7 @@ export const datacenterImportDataAccess = {
 
         await db.insert(dataCenter).values({
           id,
-          supplierId: params.supplierId,
+          supplierId: targetSupplierId,
           code,
           name: row.name!,
           location: deriveLocation(row) || null,

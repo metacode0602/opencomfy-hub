@@ -50,6 +50,9 @@ export type DatacenterImportPreviewRow = {
   row_no: number
   name?: string
   external_onboarding_id?: string
+  platform_tenant_id?: string
+  resolved_supplier_id?: string
+  resolved_supplier_name?: string
   action: DatacenterImportAction
   skip_reason?: DatacenterImportSkipReason
   matched_data_center_id?: string
@@ -59,10 +62,13 @@ export type DatacenterImportPreviewRow = {
   field_warnings: string[]
 }
 
+export type DatacenterImportPreviewMode = 'fixed' | 'auto'
+
 export type DatacenterImportPreviewResult = {
   fileName: string
   originalHeaders: string[]
-  supplierId: string
+  mode: DatacenterImportPreviewMode
+  supplierId?: string
   rows: DatacenterImportPreviewRow[]
   parsedRows: DatacenterImportParsedRow[]
   summary: {

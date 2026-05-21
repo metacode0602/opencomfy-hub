@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { PlatformTenantApiRecord } from '@/lib/types/platform-tenant-import'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 
-const REQUEST_TIMEOUT_MS = 15_000
+import adminInstance from './request'
+
 const BATCH_SIZE = 100
 
 const platformTenantRecordSchema = z.object({
@@ -27,15 +28,9 @@ const platformTenantRecordSchema = z.object({
   merchant_mark: z.string().nullable().optional(),
 })
 
-const tenantListResponseSchema = z.object({
-  code: z.union([z.string(), z.number()]),
-  message: z.string().optional(),
-  data: z
-    .object({
-      results: z.array(platformTenantRecordSchema).optional(),
-      count: z.number().optional(),
-    })
-    .optional(),
+const tenantListDataSchema = z.object({
+  results: z.array(platformTenantRecordSchema).optional(),
+  count: z.number().optional(),
 })
 
 export class SuanliOpenApiError extends Error {
@@ -48,56 +43,11 @@ export class SuanliOpenApiError extends Error {
   }
 }
 
-function getBaseUrl(): string {
-  return (
-    process.env.SUANLI_OPENAPI_BASE_URL?.trim() || 'https://openapi.suanli.cn'
-  ).replace(/\/$/, '')
-}
-
-function buildAuthHeaders(): HeadersInit {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  }
-  const token = process.env.SUANLI_OPENAPI_TOKEN?.trim()
-  const cookie = process.env.SUANLI_OPENAPI_COOKIE?.trim()
-  if (token) {
-    headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`
-  }
-  if (cookie) {
-    headers.Cookie = cookie
-  }
-  return headers
-}
-
-function isApiSuccess(code: string | number): boolean {
-  return String(code) === '0000' || String(code) === '0'
-}
-
 async function fetchTenantBatch(
   ids: string[],
   traceId: string,
 ): Promise<PlatformTenantApiRecord[]> {
-  const baseUrl = getBaseUrl()
   const pageSize = Math.max(20, ids.length)
-  const params = new URLSearchParams({
-    tenant_type: '',
-    tenant_name: '',
-    remark: '',
-    tenant_tids: ids.join(','),
-    start_time: '',
-    end_time: '',
-    page: '1',
-    page_size: String(pageSize),
-  })
-  const url = `${baseUrl}/api/admin/tenant/list?${params.toString()}`
-
-  const token = process.env.SUANLI_OPENAPI_TOKEN?.trim()
-  const cookie = process.env.SUANLI_OPENAPI_COOKIE?.trim()
-  if (!token && !cookie) {
-    throw new SuanliOpenApiError(
-      '未配置算算力 OpenAPI 凭证，请在服务端设置 SUANLI_OPENAPI_TOKEN 或 SUANLI_OPENAPI_COOKIE',
-    )
-  }
 
   crmLog('suanli-api', 'request tenant list', {
     traceId,
@@ -105,25 +55,21 @@ async function fetchTenantBatch(
     pageSize,
   })
 
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-
   try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: buildAuthHeaders(),
-      signal: controller.signal,
-      cache: 'no-store',
+    const data = await adminInstance.get<unknown>('/admin/tenant/list', {
+      params: {
+        tenant_type: '',
+        tenant_name: '',
+        remark: '',
+        tenant_tids: ids.join(','),
+        start_time: '',
+        end_time: '',
+        page: 1,
+        page_size: pageSize,
+      },
     })
-
-    if (!res.ok) {
-      throw new SuanliOpenApiError(
-        `平台接口 HTTP ${res.status}：${res.statusText || '请求失败'}`,
-      )
-    }
-
-    const json: unknown = await res.json()
-    const parsed = tenantListResponseSchema.safeParse(json)
+    console.warn("fetchTenantBatch: data:", data)
+    const parsed = tenantListDataSchema.safeParse(data)
     if (!parsed.success) {
       crmWarn('suanli-api', 'response schema mismatch', {
         traceId,
@@ -132,33 +78,20 @@ async function fetchTenantBatch(
       throw new SuanliOpenApiError('平台返回数据格式异常')
     }
 
-    const body = parsed.data
-    if (!isApiSuccess(body.code)) {
-      throw new SuanliOpenApiError(
-        body.message?.trim() || '平台接口返回失败',
-        String(body.code),
-      )
-    }
-
-    const results = body.data?.results ?? []
+    const results = parsed.data.results ?? []
     crmLog('suanli-api', 'tenant list ok', {
       traceId,
       requested: ids.length,
       returned: results.length,
-      count: body.data?.count,
+      count: parsed.data.count,
     })
     return results
   } catch (e) {
     if (e instanceof SuanliOpenApiError) throw e
-    if (e instanceof Error && e.name === 'AbortError') {
-      throw new SuanliOpenApiError('连接算算力平台超时（15s），请稍后重试')
-    }
     crmError('suanli-api', 'fetch failed', e, { traceId, idCount: ids.length })
     throw new SuanliOpenApiError(
       e instanceof Error ? e.message : '连接算算力平台失败',
     )
-  } finally {
-    clearTimeout(timer)
   }
 }
 

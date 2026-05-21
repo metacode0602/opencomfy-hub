@@ -2,9 +2,11 @@ import type { DataCenter, Supplier } from '@/lib/data/types'
 import type {
   DatacenterImportCommitResult,
   DatacenterImportParsedRow,
+  DatacenterImportPreviewMode,
   DatacenterImportPreviewResult,
   DatacenterImportPreviewRow,
 } from '@/lib/types/datacenter-import'
+import { normalizePlatformTenantId } from '@/lib/supplier/supplier-import-utils'
 
 export function normalizeHeaderKey(h: string): string {
   return h.trim().replace(/\s+/g, '').toLowerCase()
@@ -155,32 +157,129 @@ function wouldCodeCollide(
   return dataCenters.some((dc) => dc.code === code)
 }
 
+export type DatacenterImportPreviewContext =
+  | {
+      mode: 'fixed'
+      supplierId: string
+      supplier: Supplier
+      existingDataCenters: DataCenter[]
+    }
+  | {
+      mode: 'auto'
+      suppliersByTenantId: Map<string, Supplier>
+      dataCentersBySupplierId: Map<string, DataCenter[]>
+    }
+
+function resolveRowSupplier(
+  row: DatacenterImportParsedRow,
+  context: DatacenterImportPreviewContext,
+):
+  | { ok: true; supplier: Supplier; platformTenantId?: string }
+  | { ok: false; preview: DatacenterImportPreviewRow } {
+  const tenantRaw = row.platform_tenant_id
+  const platformTenantId = normalizePlatformTenantId(tenantRaw)
+
+  if (context.mode === 'auto') {
+    if (!platformTenantId) {
+      return {
+        ok: false,
+        preview: {
+          row_no: row.row_no,
+          name: row.name,
+          external_onboarding_id: row.external_onboarding_id,
+          platform_tenant_id: tenantRaw,
+          action: 'error',
+          parse_status: 'error',
+          parse_message: '缺少平台租户 ID，无法匹配供应商',
+          field_warnings: [...row.field_warnings],
+        },
+      }
+    }
+    const supplier = context.suppliersByTenantId.get(platformTenantId)
+    if (!supplier) {
+      return {
+        ok: false,
+        preview: {
+          row_no: row.row_no,
+          name: row.name,
+          external_onboarding_id: row.external_onboarding_id,
+          platform_tenant_id: platformTenantId,
+          action: 'error',
+          parse_status: 'error',
+          parse_message: `未找到平台租户 ID「${platformTenantId}」对应的供应商`,
+          field_warnings: [...row.field_warnings],
+        },
+      }
+    }
+    return { ok: true, supplier, platformTenantId }
+  }
+
+  return { ok: true, supplier: context.supplier, platformTenantId }
+}
+
+function buildNameInFileCounts(
+  parsedRows: DatacenterImportParsedRow[],
+  context: DatacenterImportPreviewContext,
+): Map<string, number> {
+  const nameInFile = new Map<string, number>()
+  for (const row of parsedRows) {
+    if (!row.name) continue
+    const resolved = resolveRowSupplier(row, context)
+    const scopeKey =
+      context.mode === 'auto' && resolved.ok
+        ? `${resolved.supplier.id}:${normalizeDatacenterName(row.name)}`
+        : normalizeDatacenterName(row.name)
+    nameInFile.set(scopeKey, (nameInFile.get(scopeKey) ?? 0) + 1)
+  }
+  return nameInFile
+}
+
 export function buildDatacenterImportPreview(
   parsedRows: DatacenterImportParsedRow[],
   fileName: string,
   originalHeaders: string[],
-  supplierId: string,
-  supplier: Supplier,
-  existingDataCenters: DataCenter[],
+  context: DatacenterImportPreviewContext,
 ): DatacenterImportPreviewResult {
-  const scoped = existingDataCenters.filter((dc) => dc.supplierId === supplierId)
-  const codeSet = new Set(scoped.map((dc) => dc.code))
-
-  const nameInFile = new Map<string, number>()
-  for (const row of parsedRows) {
-    if (!row.name) continue
-    const key = normalizeDatacenterName(row.name)
-    nameInFile.set(key, (nameInFile.get(key) ?? 0) + 1)
-  }
+  const mode: DatacenterImportPreviewMode = context.mode
+  const nameInFile = buildNameInFileCounts(parsedRows, context)
 
   const previewRows: DatacenterImportPreviewRow[] = parsedRows.map((row) => {
     const warnings = [...row.field_warnings]
+    const resolvedSupplier = resolveRowSupplier(row, context)
+    const platformTenantId =
+      resolvedSupplier.ok && resolvedSupplier.platformTenantId
+        ? resolvedSupplier.platformTenantId
+        : normalizePlatformTenantId(row.platform_tenant_id)
+
+    const supplierFields =
+      resolvedSupplier.ok
+        ? {
+            platform_tenant_id: platformTenantId ?? row.platform_tenant_id,
+            resolved_supplier_id: resolvedSupplier.supplier.id,
+            resolved_supplier_name: resolvedSupplier.supplier.name,
+          }
+        : {
+            platform_tenant_id: row.platform_tenant_id,
+          }
+
+    if (!resolvedSupplier.ok) {
+      return resolvedSupplier.preview
+    }
+
+    const supplier = resolvedSupplier.supplier
+    const supplierId = supplier.id
+    const scoped =
+      context.mode === 'fixed'
+        ? context.existingDataCenters.filter((dc) => dc.supplierId === supplierId)
+        : (context.dataCentersBySupplierId.get(supplierId) ?? [])
+    const codeSet = new Set(scoped.map((dc) => dc.code))
 
     if (row.field_warnings.some((w) => w.includes('公网 IP 数量'))) {
       return {
         row_no: row.row_no,
         name: row.name,
         external_onboarding_id: row.external_onboarding_id,
+        ...supplierFields,
         action: 'error',
         parse_status: 'error',
         parse_message: row.field_warnings.find((w) => w.includes('公网 IP 数量')),
@@ -193,6 +292,7 @@ export function buildDatacenterImportPreview(
         row_no: row.row_no,
         name: row.name,
         external_onboarding_id: row.external_onboarding_id,
+        ...supplierFields,
         action: 'skip',
         skip_reason: 'source_deleted',
         parse_status: 'ok',
@@ -204,6 +304,7 @@ export function buildDatacenterImportPreview(
     if (!row.name?.trim()) {
       return {
         row_no: row.row_no,
+        ...supplierFields,
         action: 'skip',
         skip_reason: 'empty_name',
         parse_status: 'warning',
@@ -212,11 +313,16 @@ export function buildDatacenterImportPreview(
       }
     }
 
-    if ((nameInFile.get(normalizeDatacenterName(row.name)) ?? 0) > 1) {
+    const nameScopeKey =
+      context.mode === 'auto'
+        ? `${supplierId}:${normalizeDatacenterName(row.name)}`
+        : normalizeDatacenterName(row.name)
+    if ((nameInFile.get(nameScopeKey) ?? 0) > 1) {
       return {
         row_no: row.row_no,
         name: row.name,
         external_onboarding_id: row.external_onboarding_id,
+        ...supplierFields,
         action: 'error',
         parse_status: 'error',
         parse_message: '同文件内名称重复',
@@ -230,6 +336,7 @@ export function buildDatacenterImportPreview(
         row_no: row.row_no,
         name: row.name,
         external_onboarding_id: row.external_onboarding_id,
+        ...supplierFields,
         action: 'skip',
         skip_reason: 'already_exists',
         matched_data_center_id: matched.id,
@@ -247,6 +354,7 @@ export function buildDatacenterImportPreview(
           row_no: row.row_no,
           name: row.name,
           external_onboarding_id: row.external_onboarding_id,
+          ...supplierFields,
           action: 'skip',
           skip_reason: 'code_collision',
           matched_data_center_id: collision.id,
@@ -259,6 +367,7 @@ export function buildDatacenterImportPreview(
     }
 
     if (
+      context.mode === 'fixed' &&
       row.platform_tenant_id &&
       supplier.platformTenantId &&
       row.platform_tenant_id !== supplier.platformTenantId
@@ -273,6 +382,7 @@ export function buildDatacenterImportPreview(
       row_no: row.row_no,
       name: row.name,
       external_onboarding_id: row.external_onboarding_id,
+      ...supplierFields,
       action: 'create',
       derived_code,
       parse_status,
@@ -288,7 +398,8 @@ export function buildDatacenterImportPreview(
   return {
     fileName,
     originalHeaders,
-    supplierId,
+    mode,
+    supplierId: context.mode === 'fixed' ? context.supplierId : undefined,
     rows: previewRows,
     parsedRows,
     summary: {
@@ -301,6 +412,27 @@ export function buildDatacenterImportPreview(
       skip: previewRows.filter((r) => r.action === 'skip').length,
     },
   }
+}
+
+export function buildSuppliersByPlatformTenantId(suppliers: Supplier[]): Map<string, Supplier> {
+  const map = new Map<string, Supplier>()
+  for (const s of suppliers) {
+    const tid = normalizePlatformTenantId(s.platformTenantId)
+    if (tid) map.set(tid, s)
+  }
+  return map
+}
+
+export function groupDataCentersBySupplierId(
+  dataCenters: DataCenter[],
+): Map<string, DataCenter[]> {
+  const map = new Map<string, DataCenter[]>()
+  for (const dc of dataCenters) {
+    const list = map.get(dc.supplierId) ?? []
+    list.push(dc)
+    map.set(dc.supplierId, list)
+  }
+  return map
 }
 
 function parsedToDatacenterFields(
@@ -418,12 +550,10 @@ export async function previewDatacenterImportFromFile(
   const buffer = await file.arrayBuffer()
   const { parseDatacenterImportFile } = await import('@/lib/supplier/parse-datacenter-import-xlsx')
   const { rows, originalHeaders } = parseDatacenterImportFile(buffer, file.name)
-  return buildDatacenterImportPreview(
-    rows,
-    file.name,
-    originalHeaders,
-    supplier.id,
+  return buildDatacenterImportPreview(rows, file.name, originalHeaders, {
+    mode: 'fixed',
+    supplierId: supplier.id,
     supplier,
     existingDataCenters,
-  )
+  })
 }

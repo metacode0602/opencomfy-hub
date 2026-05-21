@@ -75,9 +75,10 @@ export function SupplierDatacenterImportDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  supplier: Supplier
+  supplier?: Supplier
   onSuccess: () => void
 }) {
+  const isAutoMode = !supplier
   const inputRef = React.useRef<HTMLInputElement>(null)
   const [step, setStep] = React.useState<Step>('upload')
   const [phase, setPhase] = React.useState<Phase>('idle')
@@ -147,7 +148,7 @@ export function SupplierDatacenterImportDialog({
     try {
       const fileBase64 = await fileToBase64(file)
       const result = await previewMutation.mutateAsync({
-        supplierId: supplier.id,
+        ...(supplier ? { supplierId: supplier.id } : {}),
         fileName: file.name,
         fileBase64,
       })
@@ -182,7 +183,7 @@ export function SupplierDatacenterImportDialog({
     try {
       const fileBase64 = await fileToBase64(file)
       const result = await commitMutation.mutateAsync({
-        supplierId: supplier.id,
+        ...(supplier ? { supplierId: supplier.id } : {}),
         fileName: file.name,
         fileBase64,
       })
@@ -223,9 +224,11 @@ export function SupplierDatacenterImportDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'upload' &&
-              `供应商：${supplier.name}。已存在的机房不会修改，仅导入新增数据。源系统 ID（external_onboarding_id）可空，缺失或重复均不报错。`}
+              (isAutoMode
+                ? '按每行「租户ID」自动匹配供应商并导入机房。已存在的机房不会修改，仅导入新增数据；租户ID 为必填。'
+                : `供应商：${supplier.name}。已存在的机房不会修改，仅导入新增数据。源系统 ID（external_onboarding_id）可空，缺失或重复均不报错。`)}
             {step === 'preview' && (previewSummary ?? '核对解析结果后确认导入。')}
-            {step === 'done' && '导入结果如下，关闭后机房列表已刷新。'}
+            {step === 'done' && '导入结果如下，关闭后列表已刷新。'}
           </DialogDescription>
         </DialogHeader>
 
@@ -235,6 +238,7 @@ export function SupplierDatacenterImportDialog({
               <Alert>
                 <AlertDescription>
                   表头需包含：ID、租户ID、名称、容器实例区域、裸金属区域、描述、规模、公网IP数量、内网网段、审核状态、审核备注、是否删除、创建时间、最后更新时间。
+                  {isAutoMode ? ' 自动匹配模式下每行「租户ID」必填，且须能匹配到已配置的供应商。' : null}
                 </AlertDescription>
               </Alert>
 
@@ -288,6 +292,12 @@ export function SupplierDatacenterImportDialog({
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12">行</TableHead>
+                      {isAutoMode ? (
+                        <>
+                          <TableHead className="w-24">租户ID</TableHead>
+                          <TableHead className="min-w-[100px]">供应商</TableHead>
+                        </>
+                      ) : null}
                       <TableHead>名称</TableHead>
                       <TableHead className="w-20">源 ID</TableHead>
                       <TableHead className="w-16">动作</TableHead>
@@ -300,6 +310,16 @@ export function SupplierDatacenterImportDialog({
                     {preview.rows.map((row) => (
                       <TableRow key={row.row_no}>
                         <TableCell>{row.row_no}</TableCell>
+                        {isAutoMode ? (
+                          <>
+                            <TableCell className="font-mono text-xs">
+                              {row.platform_tenant_id ?? '—'}
+                            </TableCell>
+                            <TableCell className="max-w-[120px] truncate text-xs">
+                              {row.resolved_supplier_name ?? '—'}
+                            </TableCell>
+                          </>
+                        ) : null}
                         <TableCell className="max-w-[160px] truncate font-medium">
                           {row.name ?? '—'}
                         </TableCell>
@@ -401,7 +421,7 @@ export function SupplierDatacenterImportTrigger({
   supplier,
   onSuccess,
 }: {
-  supplier: Supplier
+  supplier?: Supplier
   onSuccess: () => void
 }) {
   const [open, setOpen] = React.useState(false)

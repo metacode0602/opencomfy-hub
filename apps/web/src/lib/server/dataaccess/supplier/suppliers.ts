@@ -147,6 +147,43 @@ export const suppliersDataAccess = {
     )
   },
 
+  async listDataCentersBySupplierIds(supplierIds: string[]): Promise<DataCenter[]> {
+    if (supplierIds.length === 0) return []
+
+    const supplierRows = await db
+      .select({ id: supplier.id, name: supplier.name })
+      .from(supplier)
+      .where(inArray(supplier.id, supplierIds))
+    const nameMap = new Map(supplierRows.map((r) => [r.id, r.name]))
+
+    const dcRows = await db
+      .select()
+      .from(dataCenter)
+      .where(inArray(dataCenter.supplierId, supplierIds))
+      .orderBy(sql`${dataCenter.createdAt} DESC`)
+
+    const invCounts = await db
+      .select({
+        dataCenterId: supplierGpuInventory.dataCenterId,
+        total: sum(supplierGpuInventory.quantity),
+        online: sum(supplierGpuInventory.onlineQuantity),
+      })
+      .from(supplierGpuInventory)
+      .where(inArray(supplierGpuInventory.supplierId, supplierIds))
+      .groupBy(supplierGpuInventory.dataCenterId)
+
+    const countMap = new Map(
+      invCounts.map((r) => [
+        r.dataCenterId,
+        { total: Number(r.total ?? 0), online: Number(r.online ?? 0) },
+      ]),
+    )
+
+    return dcRows.map((row) =>
+      mapDataCenterRow(row, nameMap.get(row.supplierId) ?? '', countMap.get(row.id)),
+    )
+  },
+
   async listGpuInventoryBySupplier(supplierId: string): Promise<DataCenterDevice[]> {
     const rows = await db
       .select({
