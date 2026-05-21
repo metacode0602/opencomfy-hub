@@ -26,39 +26,42 @@ import { Textarea } from '@workspace/ui/components/textarea'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 
 import {
-  mockCommitPlatformDatacenterImport,
-  mockPreviewPlatformDatacenterImport,
+  parsePlatformDatacenterIds,
   PLATFORM_DATACENTER_IMPORT_MAX_IDS,
-} from '@/lib/supplier/platform-datacenter-import-mock'
-import { parsePlatformDatacenterIds } from '@/lib/supplier/platform-datacenter-import-utils'
-import type {
-  PlatformDatacenterImportCommitResult,
-  PlatformDatacenterImportPreviewResult,
-  PlatformDatacenterPreviewItem,
-} from '@/lib/types/platform-datacenter-import'
+} from '@/lib/supplier/platform-datacenter-import-utils'
+import { trpc } from '@/lib/trpc/client'
+import type { PlatformDatacenterImportPreviewResult } from '@/lib/types/platform-datacenter-import'
+import type { DatacenterImportCommitResult } from '@/lib/types/datacenter-import'
 
 type Step = 'input' | 'preview' | 'done'
 
+const ACTION_LABEL = { create: '新建', skip: '跳过', error: '错误' } as const
+
+const SKIP_REASON_LABEL = {
+  already_exists: '已存在',
+  source_deleted: '源已删',
+  empty_name: '无名称',
+  code_collision: '编码冲突',
+} as const
+
+function ParseBadge({ status }: { status: 'ok' | 'warning' | 'error' }) {
+  if (status === 'ok') return <Badge variant="outline">通过</Badge>
+  if (status === 'warning') return <Badge className="bg-amber-500/15 text-amber-700">告警</Badge>
+  return <Badge variant="destructive">错误</Badge>
+}
+
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border px-3 py-2">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
+    <div className="rounded-md border p-3 text-center">
+      <p className="text-2xl font-semibold">{value}</p>
+      <p className="text-muted-foreground text-xs">{label}</p>
     </div>
   )
 }
 
-function ActionBadge({ item }: { item: PlatformDatacenterPreviewItem }) {
-  if (item.missingOnPlatform) {
-    return <Badge variant="secondary">平台无数据</Badge>
-  }
-  if (item.action === 'create') {
-    return <Badge>新建</Badge>
-  }
-  if (item.action === 'error') {
-    return <Badge variant="destructive">错误</Badge>
-  }
-  return <Badge variant="outline">跳过</Badge>
+function getTrpcErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 export function PlatformDatacenterImportDialog({
@@ -72,32 +75,38 @@ export function PlatformDatacenterImportDialog({
 }) {
   const [step, setStep] = React.useState<Step>('input')
   const [idsRaw, setIdsRaw] = React.useState('')
+  const [resolvedIds, setResolvedIds] = React.useState<string[]>([])
   const [preview, setPreview] = React.useState<PlatformDatacenterImportPreviewResult | null>(null)
-  const [commitResult, setCommitResult] = React.useState<PlatformDatacenterImportCommitResult | null>(
-    null,
-  )
-  const [loading, setLoading] = React.useState(false)
+  const [commitResult, setCommitResult] = React.useState<DatacenterImportCommitResult | null>(null)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
+
+  const previewMutation = trpc.supplier.platformDatacenterImport.preview.useMutation()
+  const commitMutation = trpc.supplier.platformDatacenterImport.commit.useMutation()
+
+  const loading = previewMutation.isPending || commitMutation.isPending
 
   const reset = React.useCallback(() => {
     setStep('input')
     setIdsRaw('')
+    setResolvedIds([])
     setPreview(null)
     setCommitResult(null)
-    setLoading(false)
+    setFetchError(null)
   }, [])
 
   React.useEffect(() => {
     if (!open) reset()
   }, [open, reset])
 
-  const actionableItems = React.useMemo(
-    () => preview?.items.filter((i) => i.action === 'create') ?? [],
-    [preview],
-  )
+  const createCount = preview?.summary.create ?? 0
 
-  const previewSummary =
-    preview &&
-    `共 ${preview.items.length} 条，平台返回 ${preview.items.filter((i) => !i.missingOnPlatform).length} 条，可新建 ${actionableItems.length} 条`
+  const previewSummary = preview
+    ? `平台返回 ${preview.summary.total} 条，可新建 ${createCount} 条${
+        preview.missingPlatformIds.length > 0
+          ? `，${preview.missingPlatformIds.length} 个 ID 平台未返回`
+          : ''
+      }`
+    : null
 
   const onFetchPreview = async () => {
     const ids = parsePlatformDatacenterIds(idsRaw)
@@ -110,59 +119,65 @@ export function PlatformDatacenterImportDialog({
       return
     }
 
-    setLoading(true)
+    setFetchError(null)
     try {
-      const result = await mockPreviewPlatformDatacenterImport(ids)
+      const result = await previewMutation.mutateAsync({ externalOnboardingIds: ids })
+      setResolvedIds(ids)
       setPreview(result)
       setStep('preview')
+
       if (result.missingPlatformIds.length > 0) {
         toast.warning(`有 ${result.missingPlatformIds.length} 个 ID 平台未返回`)
-      } else if (result.items.filter((i) => !i.missingOnPlatform).length === 0) {
+      }
+      if (result.summary.total === 0) {
         toast.error('平台未返回任何有效机房')
+      } else if (result.summary.error > 0) {
+        toast.warning(
+          `拉取完成：${result.summary.create} 条可新建，${result.summary.error} 条存在错误`,
+        )
+      } else if (createCount === 0) {
+        toast.message('拉取完成：没有可新建的机房（可能均已存在或源已删除）')
+      } else {
+        toast.success(`拉取完成：${createCount} 条可新建`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '拉取失败')
-    } finally {
-      setLoading(false)
+      const message = getTrpcErrorMessage(e, '拉取平台机房失败')
+      setFetchError(message)
+      toast.error(message)
     }
   }
 
   const onCommit = async () => {
-    if (!preview) return
-    if (actionableItems.length === 0) {
+    if (!preview || resolvedIds.length === 0) return
+    if (createCount === 0) {
       toast.error('没有可导入的机房')
       return
     }
 
-    setLoading(true)
     try {
-      const result = await mockCommitPlatformDatacenterImport({
-        items: actionableItems.map((i) => ({ externalOnboardingId: i.externalOnboardingId })),
-      })
+      const result = await commitMutation.mutateAsync({ externalOnboardingIds: resolvedIds })
       setCommitResult(result)
       setStep('done')
-      const fail = result.errors.length
-      if (fail > 0) {
-        toast.warning(`导入完成：新建 ${result.created}，${fail} 条失败`)
+      onSuccess()
+
+      if (result.errors.length > 0 || result.failed > 0) {
+        toast.warning(`导入完成：新建 ${result.created}，失败 ${result.failed} 条`)
       } else {
         toast.success(`导入完成：新建 ${result.created} 条机房`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '导入失败')
-    } finally {
-      setLoading(false)
+      toast.error(getTrpcErrorMessage(e, '导入失败，请稍后重试'))
     }
   }
 
   const handleClose = (next: boolean) => {
-    if (!next && step === 'done') onSuccess()
     onOpenChange(next)
   }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-4xl">
-        <DialogHeader>
+      <DialogContent className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-4xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {step === 'input' && '从平台导入机房'}
             {step === 'preview' && '确认导入机房'}
@@ -173,11 +188,11 @@ export function PlatformDatacenterImportDialog({
               `输入平台机房 ID，多个可用逗号或换行分隔（最多 ${PLATFORM_DATACENTER_IMPORT_MAX_IDS} 个）。系统将按租户 ID 匹配本地供应商。`}
             {step === 'preview' &&
               (previewSummary ?? '核对平台数据；未匹配到供应商或已存在的机房将跳过。')}
-            {step === 'done' && '导入结果如下，关闭后将刷新列表。'}
+            {step === 'done' && '导入结果如下，关闭后列表已刷新。'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
           {step === 'input' && (
             <div className="space-y-3 px-1">
               <Label htmlFor="platform-datacenter-ids">平台机房 ID</Label>
@@ -190,12 +205,17 @@ export function PlatformDatacenterImportDialog({
                 onChange={(e) => setIdsRaw(e.target.value)}
               />
               <p className="text-muted-foreground text-xs">
-                支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。Mock 示例：20001、20002、20003。
+                支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。请先确保对应租户已导入本地供应商。
               </p>
+              {fetchError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{fetchError}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
           )}
 
-          {step === 'preview' && preview && !loading && (
+          {step === 'preview' && preview && (
             <div className="space-y-4 px-1">
               {preview.missingPlatformIds.length > 0 && (
                 <Alert variant="destructive">
@@ -206,67 +226,74 @@ export function PlatformDatacenterImportDialog({
                 </Alert>
               )}
 
-              <div className="rounded-md border">
+              {preview.summary.error > 0 && (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    有 {preview.summary.error} 行存在错误，将无法导入
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="平台返回" value={preview.summary.total} />
+                <Stat label="可新建" value={preview.summary.create} />
+                <Stat label="跳过" value={preview.summary.skip} />
+                <Stat label="错误" value={preview.summary.error} />
+              </div>
+
+              <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-24">机房 ID</TableHead>
-                      <TableHead>机房名称</TableHead>
-                      <TableHead>区域</TableHead>
-                      <TableHead className="w-24">租户 ID</TableHead>
-                      <TableHead>匹配供应商</TableHead>
-                      <TableHead className="w-20">操作</TableHead>
-                      <TableHead className="min-w-[140px]">说明</TableHead>
+                      <TableHead className="w-12">行</TableHead>
+                      <TableHead className="w-24">租户ID</TableHead>
+                      <TableHead className="min-w-[100px]">供应商</TableHead>
+                      <TableHead>名称</TableHead>
+                      <TableHead className="w-20">源 ID</TableHead>
+                      <TableHead className="w-16">动作</TableHead>
+                      <TableHead className="w-28">code</TableHead>
+                      <TableHead className="w-16">校验</TableHead>
+                      <TableHead className="min-w-[120px]">说明</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {preview.items.map((item) => (
+                    {preview.rows.map((row) => (
                       <TableRow
-                        key={item.externalOnboardingId}
-                        className={item.missingOnPlatform ? 'bg-muted/40 opacity-60' : undefined}
+                        key={row.row_no}
+                        className={
+                          row.parse_status === 'error'
+                            ? 'bg-destructive/5'
+                            : row.parse_status === 'warning'
+                              ? 'bg-amber-500/5'
+                              : undefined
+                        }
                       >
-                        <TableCell className="font-mono text-sm">
-                          {item.externalOnboardingId}
+                        <TableCell>{row.row_no}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {row.platform_tenant_id ?? '—'}
                         </TableCell>
-                        <TableCell className="max-w-[160px] truncate" title={item.platform.name}>
-                          {item.platform.name}
-                          {item.platform.sourceDeleted ? (
-                            <Badge variant="secondary" className="ml-2">
-                              源已删
-                            </Badge>
-                          ) : null}
+                        <TableCell className="max-w-[120px] truncate text-xs">
+                          {row.resolved_supplier_name ?? '—'}
                         </TableCell>
-                        <TableCell className="text-sm">
-                          {item.platform.zoneName ?? item.platform.region ?? '—'}
+                        <TableCell className="max-w-[160px] truncate font-medium">
+                          {row.name ?? '—'}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {item.platform.platformTenantId ?? '—'}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {item.resolvedSupplier?.supplierName ?? (
-                            <span className="text-destructive">未匹配</span>
-                          )}
+                        <TableCell className="text-muted-foreground text-xs">
+                          {row.external_onboarding_id ?? '—'}
                         </TableCell>
                         <TableCell>
-                          <ActionBadge item={item} />
+                          {row.action === 'skip' && row.skip_reason
+                            ? SKIP_REASON_LABEL[row.skip_reason]
+                            : ACTION_LABEL[row.action]}
                         </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {item.local ? (
-                            <>
-                              已存在：
-                              <span className="text-foreground font-medium">
-                                {item.local.dataCenterName}
-                              </span>
-                            </>
-                          ) : item.errorMessage ? (
-                            <span className="text-destructive">{item.errorMessage}</span>
-                          ) : item.skipReason ? (
-                            item.skipReason
-                          ) : item.action === 'create' ? (
-                            <span className="text-foreground">将新建</span>
-                          ) : (
-                            '—'
-                          )}
+                        <TableCell className="font-mono text-xs">
+                          {row.derived_code ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          <ParseBadge status={row.parse_status} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-xs">
+                          {row.parse_message ?? '—'}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -281,21 +308,21 @@ export function PlatformDatacenterImportDialog({
               <div className="grid grid-cols-3 gap-2 text-sm">
                 <Stat label="新建" value={commitResult.created} />
                 <Stat label="跳过" value={commitResult.skipped} />
-                <Stat label="失败" value={commitResult.errors.length} />
+                <Stat label="失败" value={commitResult.failed} />
               </div>
               {commitResult.errors.length > 0 && (
                 <div className="max-h-40 overflow-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>机房 ID</TableHead>
+                        <TableHead className="w-14">行</TableHead>
                         <TableHead>原因</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {commitResult.errors.map((err) => (
-                        <TableRow key={err.externalOnboardingId}>
-                          <TableCell className="font-mono">{err.externalOnboardingId}</TableCell>
+                        <TableRow key={`${err.row_no}-${err.message}`}>
+                          <TableCell>{err.row_no}</TableCell>
                           <TableCell className="text-destructive text-xs">{err.message}</TableCell>
                         </TableRow>
                       ))}
@@ -307,7 +334,7 @@ export function PlatformDatacenterImportDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0 gap-2 sm:gap-0">
           {step === 'input' && (
             <>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>
@@ -343,7 +370,7 @@ export function PlatformDatacenterImportDialog({
               </Button>
               <Button
                 type="button"
-                disabled={loading || actionableItems.length === 0}
+                disabled={loading || createCount === 0}
                 onClick={() => void onCommit()}
               >
                 {loading ? (
@@ -352,20 +379,14 @@ export function PlatformDatacenterImportDialog({
                     导入中…
                   </>
                 ) : (
-                  `确认导入${actionableItems.length > 0 ? `（${actionableItems.length} 条）` : ''}`
+                  `确认导入${createCount > 0 ? `（${createCount} 条）` : ''}`
                 )}
               </Button>
             </>
           )}
           {step === 'done' && (
-            <Button
-              type="button"
-              onClick={() => {
-                onSuccess()
-                handleClose(false)
-              }}
-            >
-              关闭并刷新列表
+            <Button type="button" onClick={() => handleClose(false)}>
+              关闭
             </Button>
           )}
         </DialogFooter>

@@ -12,6 +12,7 @@ import {
 import { normalizePlatformTenantId } from '@/lib/supplier/supplier-import-utils'
 import type {
   DatacenterImportCommitResult,
+  DatacenterImportParsedRow,
   DatacenterImportPreviewResult,
 } from '@/lib/types/datacenter-import'
 import {
@@ -41,53 +42,23 @@ function parseSourceDate(value?: string): Date | undefined {
   return Number.isNaN(d.getTime()) ? undefined : d
 }
 
-function toPublicPreview(
+export function toPublicDatacenterImportPreview(
   preview: DatacenterImportPreviewResult,
 ): Omit<DatacenterImportPreviewResult, 'parsedRows'> {
   const { parsedRows: _parsedRows, ...rest } = preview
   return rest
 }
 
-async function buildPreviewContext(params: {
-  supplierId?: string
-  fileName: string
-  buffer: Buffer
-}): Promise<{ preview: DatacenterImportPreviewResult; context: DatacenterImportPreviewContext }> {
-  const parsed = parseDatacenterImportFile(
-    bufferToArrayBuffer(params.buffer),
-    params.fileName,
-  )
-
-  if (params.supplierId) {
-    await suppliersDataAccess.assertSupplierExists(params.supplierId)
-    const supplierRow = await suppliersDataAccess.getById(params.supplierId)
-    if (!supplierRow) throw new Error('供应商不存在')
-
-    const existingDataCenters = await suppliersDataAccess.listDataCentersBySupplier(
-      params.supplierId,
-    )
-
-    const context: DatacenterImportPreviewContext = {
-      mode: 'fixed',
-      supplierId: params.supplierId,
-      supplier: supplierRow,
-      existingDataCenters,
-    }
-
-    const preview = buildDatacenterImportPreview(
-      parsed.rows,
-      params.fileName,
-      parsed.originalHeaders,
-      context,
-    )
-    return { preview, context }
-  }
-
+async function buildAutoPreviewFromParsedRows(
+  parsedRows: DatacenterImportParsedRow[],
+  fileName: string,
+  originalHeaders: string[] = [],
+): Promise<DatacenterImportPreviewResult> {
   const allSuppliers = await suppliersDataAccess.list()
   const suppliersByTenantId = buildSuppliersByPlatformTenantId(allSuppliers)
 
   const supplierIds = new Set<string>()
-  for (const row of parsed.rows) {
+  for (const row of parsedRows) {
     const tid = normalizePlatformTenantId(row.platform_tenant_id)
     const hit = tid ? suppliersByTenantId.get(tid) : undefined
     if (hit) supplierIds.add(hit.id)
@@ -104,13 +75,213 @@ async function buildPreviewContext(params: {
     dataCentersBySupplierId,
   }
 
-  const preview = buildDatacenterImportPreview(
-    parsed.rows,
+  return buildDatacenterImportPreview(parsedRows, fileName, originalHeaders, context)
+}
+
+async function buildFixedPreviewFromParsedRows(params: {
+  supplierId: string
+  parsedRows: DatacenterImportParsedRow[]
+  fileName: string
+  originalHeaders?: string[]
+}): Promise<DatacenterImportPreviewResult> {
+  await suppliersDataAccess.assertSupplierExists(params.supplierId)
+  const supplierRow = await suppliersDataAccess.getById(params.supplierId)
+  if (!supplierRow) throw new Error('供应商不存在')
+
+  const existingDataCenters = await suppliersDataAccess.listDataCentersBySupplier(
+    params.supplierId,
+  )
+
+  const context: DatacenterImportPreviewContext = {
+    mode: 'fixed',
+    supplierId: params.supplierId,
+    supplier: supplierRow,
+    existingDataCenters,
+  }
+
+  return buildDatacenterImportPreview(
+    params.parsedRows,
     params.fileName,
-    parsed.originalHeaders,
+    params.originalHeaders ?? [],
     context,
   )
-  return { preview, context }
+}
+
+export async function buildDatacenterImportPreviewFromParsedRows(params: {
+  parsedRows: DatacenterImportParsedRow[]
+  supplierId?: string
+  fileName?: string
+  originalHeaders?: string[]
+}): Promise<DatacenterImportPreviewResult> {
+  const fileName = params.fileName ?? 'platform-api'
+  if (params.supplierId) {
+    return buildFixedPreviewFromParsedRows({
+      supplierId: params.supplierId,
+      parsedRows: params.parsedRows,
+      fileName,
+      originalHeaders: params.originalHeaders,
+    })
+  }
+  return buildAutoPreviewFromParsedRows(
+    params.parsedRows,
+    fileName,
+    params.originalHeaders ?? [],
+  )
+}
+
+async function buildPreviewContext(params: {
+  supplierId?: string
+  fileName: string
+  buffer: Buffer
+}): Promise<{ preview: DatacenterImportPreviewResult }> {
+  const parsed = parseDatacenterImportFile(
+    bufferToArrayBuffer(params.buffer),
+    params.fileName,
+  )
+
+  const preview = await buildDatacenterImportPreviewFromParsedRows({
+    parsedRows: parsed.rows,
+    supplierId: params.supplierId,
+    fileName: params.fileName,
+    originalHeaders: parsed.originalHeaders,
+  })
+
+  return { preview }
+}
+
+export async function commitDatacenterImportPreview(
+  preview: DatacenterImportPreviewResult,
+  params: { supplierId?: string } = {},
+  logTag = 'datacenter-import',
+): Promise<DatacenterImportCommitResult> {
+  const supplierCache = new Map<string, Awaited<ReturnType<typeof suppliersDataAccess.getById>>>()
+  const codeSets = new Map<string, Set<string>>()
+
+  let created = 0
+  let skipped = 0
+  let failed = 0
+  const errors: DatacenterImportCommitResult['errors'] = []
+  const created_ids: string[] = []
+
+  for (const previewRow of preview.rows) {
+    if (previewRow.action === 'skip') {
+      skipped++
+      continue
+    }
+
+    if (previewRow.parse_status === 'error' || previewRow.action === 'error') {
+      failed++
+      if (previewRow.parse_message) {
+        errors.push({ row_no: previewRow.row_no, message: previewRow.parse_message })
+      }
+      continue
+    }
+
+    const row = preview.parsedRows.find((p) => p.row_no === previewRow.row_no)
+    if (!row) {
+      failed++
+      errors.push({ row_no: previewRow.row_no, message: '解析行缺失' })
+      continue
+    }
+
+    const targetSupplierId = previewRow.resolved_supplier_id ?? params.supplierId
+    if (!targetSupplierId) {
+      failed++
+      errors.push({ row_no: previewRow.row_no, message: '无法确定目标供应商' })
+      continue
+    }
+
+    try {
+      let supplierRow = supplierCache.get(targetSupplierId)
+      if (supplierRow === undefined) {
+        supplierRow = await suppliersDataAccess.getById(targetSupplierId)
+        supplierCache.set(targetSupplierId, supplierRow)
+      }
+      if (!supplierRow) {
+        failed++
+        errors.push({ row_no: previewRow.row_no, message: '供应商不存在' })
+        continue
+      }
+
+      let codeSet = codeSets.get(targetSupplierId)
+      if (!codeSet) {
+        const existing = await suppliersDataAccess.listDataCentersBySupplier(targetSupplierId)
+        codeSet = new Set(existing.map((dc) => dc.code))
+        codeSets.set(targetSupplierId, codeSet)
+      }
+
+      const code = previewRow.derived_code ?? deriveDatacenterCode(row, codeSet)
+      if (codeSet.has(code)) {
+        skipped++
+        continue
+      }
+      codeSet.add(code)
+
+      const id = newSupplierId()
+      const createdAt = parseSourceDate(row.source_created_at) ?? new Date()
+      const platformTenantId = row.platform_tenant_id ?? supplierRow.platformTenantId ?? null
+
+      if (
+        preview.mode === 'fixed' &&
+        row.platform_tenant_id &&
+        supplierRow.platformTenantId &&
+        row.platform_tenant_id !== supplierRow.platformTenantId
+      ) {
+        supplierWarn(logTag, 'tenant mismatch on create', {
+          supplierId: targetSupplierId,
+          row_no: row.row_no,
+          excelTenant: row.platform_tenant_id,
+          supplierTenant: supplierRow.platformTenantId,
+        })
+      }
+
+      await db.insert(dataCenter).values({
+        id,
+        supplierId: targetSupplierId,
+        code,
+        name: row.name!,
+        location: deriveLocation(row) || null,
+        address: null,
+        regionTags: buildRegionTags(row),
+        status: row.status ?? 'offline',
+        networkFeeMonthly: '0',
+        mgmtNodeFeeMonthly: '0',
+        externalOnboardingId: row.external_onboarding_id ?? null,
+        platformTenantId,
+        containerInstanceRegion: row.container_instance_region ?? null,
+        bareMetalRegion: row.bare_metal_region ?? null,
+        description: row.description ?? null,
+        scale: row.scale ?? null,
+        publicIpCount: row.public_ip_count ?? null,
+        internalNetworkCidr: row.internal_network_cidr ?? null,
+        auditStatus: row.audit_status ?? null,
+        auditRemark: row.audit_remark ?? null,
+        sourceDeleted: row.source_deleted ?? false,
+        createdAt,
+        updatedAt: parseSourceDate(row.source_updated_at) ?? new Date(),
+      })
+
+      created_ids.push(id)
+      created++
+    } catch (e) {
+      failed++
+      const message = e instanceof Error ? e.message : '导入失败'
+      supplierWarn(logTag, 'commit row failed', {
+        row_no: previewRow.row_no,
+        message,
+      })
+      errors.push({ row_no: previewRow.row_no, message })
+    }
+  }
+
+  supplierLog(logTag, 'commit done', {
+    created,
+    skipped,
+    failed,
+    errors: errors.length,
+  })
+
+  return { created, skipped, failed, errors, created_ids }
 }
 
 export const datacenterImportDataAccess = {
@@ -142,7 +313,7 @@ export const datacenterImportDataAccess = {
       error: preview.summary.error,
     })
 
-    return toPublicPreview(preview)
+    return toPublicDatacenterImportPreview(preview)
   },
 
   async commit(params: {
@@ -164,134 +335,10 @@ export const datacenterImportDataAccess = {
       buffer,
     })
 
-    const supplierCache = new Map<string, Awaited<ReturnType<typeof suppliersDataAccess.getById>>>()
-    const codeSets = new Map<string, Set<string>>()
-
-    let created = 0
-    let skipped = 0
-    let failed = 0
-    const errors: DatacenterImportCommitResult['errors'] = []
-    const created_ids: string[] = []
-
-    for (const previewRow of preview.rows) {
-      if (previewRow.action === 'skip') {
-        skipped++
-        continue
-      }
-
-      if (previewRow.parse_status === 'error' || previewRow.action === 'error') {
-        failed++
-        if (previewRow.parse_message) {
-          errors.push({ row_no: previewRow.row_no, message: previewRow.parse_message })
-        }
-        continue
-      }
-
-      const row = preview.parsedRows.find((p) => p.row_no === previewRow.row_no)
-      if (!row) {
-        failed++
-        errors.push({ row_no: previewRow.row_no, message: '解析行缺失' })
-        continue
-      }
-
-      const targetSupplierId = previewRow.resolved_supplier_id ?? params.supplierId
-      if (!targetSupplierId) {
-        failed++
-        errors.push({ row_no: previewRow.row_no, message: '无法确定目标供应商' })
-        continue
-      }
-
-      try {
-        let supplierRow = supplierCache.get(targetSupplierId)
-        if (supplierRow === undefined) {
-          supplierRow = await suppliersDataAccess.getById(targetSupplierId)
-          supplierCache.set(targetSupplierId, supplierRow)
-        }
-        if (!supplierRow) {
-          failed++
-          errors.push({ row_no: previewRow.row_no, message: '供应商不存在' })
-          continue
-        }
-
-        let codeSet = codeSets.get(targetSupplierId)
-        if (!codeSet) {
-          const existing = await suppliersDataAccess.listDataCentersBySupplier(targetSupplierId)
-          codeSet = new Set(existing.map((dc) => dc.code))
-          codeSets.set(targetSupplierId, codeSet)
-        }
-
-        const code = previewRow.derived_code ?? deriveDatacenterCode(row, codeSet)
-        if (codeSet.has(code)) {
-          skipped++
-          continue
-        }
-        codeSet.add(code)
-
-        const id = newSupplierId()
-        const createdAt = parseSourceDate(row.source_created_at) ?? new Date()
-        const platformTenantId =
-          row.platform_tenant_id ?? supplierRow.platformTenantId ?? null
-
-        if (
-          preview.mode === 'fixed' &&
-          row.platform_tenant_id &&
-          supplierRow.platformTenantId &&
-          row.platform_tenant_id !== supplierRow.platformTenantId
-        ) {
-          supplierWarn('datacenter-import', 'tenant mismatch on create', {
-            supplierId: targetSupplierId,
-            row_no: row.row_no,
-            excelTenant: row.platform_tenant_id,
-            supplierTenant: supplierRow.platformTenantId,
-          })
-        }
-
-        await db.insert(dataCenter).values({
-          id,
-          supplierId: targetSupplierId,
-          code,
-          name: row.name!,
-          location: deriveLocation(row) || null,
-          address: null,
-          regionTags: buildRegionTags(row),
-          status: row.status ?? 'offline',
-          networkFeeMonthly: '0',
-          mgmtNodeFeeMonthly: '0',
-          externalOnboardingId: row.external_onboarding_id ?? null,
-          platformTenantId,
-          containerInstanceRegion: row.container_instance_region ?? null,
-          bareMetalRegion: row.bare_metal_region ?? null,
-          description: row.description ?? null,
-          scale: row.scale ?? null,
-          publicIpCount: row.public_ip_count ?? null,
-          internalNetworkCidr: row.internal_network_cidr ?? null,
-          auditStatus: row.audit_status ?? null,
-          auditRemark: row.audit_remark ?? null,
-          sourceDeleted: row.source_deleted ?? false,
-          createdAt,
-          updatedAt: parseSourceDate(row.source_updated_at) ?? new Date(),
-        })
-
-        created_ids.push(id)
-        created++
-      } catch (e) {
-        failed++
-        const message = e instanceof Error ? e.message : '导入失败'
-        supplierWarn('datacenter-import', 'commit row failed', {
-          row_no: previewRow.row_no,
-          message,
-        })
-        errors.push({ row_no: previewRow.row_no, message })
-      }
-    }
-
-    supplierLog('datacenter-import', 'commit done', {
-      created,
-      skipped,
-      failed,
-      errors: errors.length,
-    })
-
-    return { created, skipped, failed, errors, created_ids }
+    return commitDatacenterImportPreview(
+      preview,
+      { supplierId: params.supplierId },
+      'datacenter-import',
+    )
   },
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { IconAlertTriangle, IconLoader2, IconPlus } from '@tabler/icons-react'
+import { IconLoader2, IconPlus } from '@tabler/icons-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@workspace/ui/components/dialog'
+import { Input } from '@workspace/ui/components/input'
 import { Label } from '@workspace/ui/components/label'
 import {
   Select,
@@ -29,47 +30,44 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { Textarea } from '@workspace/ui/components/textarea'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 
-import { contractPricingModeNames } from '@/lib/data/types'
 import type { UserStaff } from '@/lib/types/crm'
 import {
-  mockCommitPlatformSupplierImport,
-  mockPreviewPlatformSupplierImport,
-  PLATFORM_SUPPLIER_IMPORT_MAX_IDS,
-} from '@/lib/supplier/platform-supplier-import-mock'
-import { parsePlatformSupplierIds } from '@/lib/supplier/platform-supplier-import-utils'
+  PLATFORM_SUPPLIER_TYPE_LABEL,
+  PLATFORM_SUPPLIER_TYPES,
+  type PlatformSupplierType,
+} from '@/lib/supplier/platform-supplier-import-utils'
+import { trpc } from '@/lib/trpc/client'
 import type {
-  PlatformSupplierImportCommitResult,
   PlatformSupplierImportPreviewResult,
-  PlatformSupplierPreviewItem,
+  PlatformSupplierImportSearchParams,
 } from '@/lib/types/platform-supplier-import'
+import type { SupplierImportCommitResult } from '@/lib/types/supplier-import'
 
 type Step = 'input' | 'preview' | 'done'
 
 const ONBOARDING_LABEL = { enterprise: '企业', individual: '个人' } as const
+const ACTION_LABEL = { create: '新建', update: '更新', skip: '跳过' } as const
+
+function ParseBadge({ status }: { status: 'ok' | 'warning' | 'error' }) {
+  if (status === 'ok') return <Badge variant="outline">通过</Badge>
+  if (status === 'warning') return <Badge className="bg-amber-500/15 text-amber-700">告警</Badge>
+  return <Badge variant="destructive">错误</Badge>
+}
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border px-3 py-2">
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
+    <div className="rounded-md border p-3 text-center">
+      <p className="text-2xl font-semibold">{value}</p>
+      <p className="text-muted-foreground text-xs">{label}</p>
     </div>
   )
 }
 
-function ActionBadge({ item }: { item: PlatformSupplierPreviewItem }) {
-  if (item.missingOnPlatform) {
-    return <Badge variant="secondary">平台无数据</Badge>
-  }
-  if (item.action === 'update') {
-    return <Badge variant="outline">更新</Badge>
-  }
-  if (item.action === 'create') {
-    return <Badge>新建</Badge>
-  }
-  return <Badge variant="secondary">跳过</Badge>
+function getTrpcErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 export function PlatformSupplierImportDialog({
@@ -84,117 +82,120 @@ export function PlatformSupplierImportDialog({
   onSuccess: () => void
 }) {
   const [step, setStep] = React.useState<Step>('input')
-  const [idsRaw, setIdsRaw] = React.useState('')
-  const [businessManagerStaffId, setBusinessManagerStaffId] = React.useState('')
-  const [preview, setPreview] = React.useState<PlatformSupplierImportPreviewResult | null>(null)
-  const [commitResult, setCommitResult] = React.useState<PlatformSupplierImportCommitResult | null>(
+  const [supplierType, setSupplierType] = React.useState<PlatformSupplierType>('Enterprise')
+  const [supplierName, setSupplierName] = React.useState('')
+  const [searchParams, setSearchParams] = React.useState<PlatformSupplierImportSearchParams | null>(
     null,
   )
-  const [loading, setLoading] = React.useState(false)
+  const [businessManagerStaffId, setBusinessManagerStaffId] = React.useState('')
+  const [preview, setPreview] = React.useState<PlatformSupplierImportPreviewResult | null>(null)
+  const [commitResult, setCommitResult] = React.useState<SupplierImportCommitResult | null>(null)
+  const [fetchError, setFetchError] = React.useState<string | null>(null)
+
+  const previewMutation = trpc.supplier.platformImport.preview.useMutation()
+  const commitMutation = trpc.supplier.platformImport.commit.useMutation()
+
+  const loading = previewMutation.isPending || commitMutation.isPending
 
   const reset = React.useCallback(() => {
     setStep('input')
-    setIdsRaw('')
+    setSupplierType('Enterprise')
+    setSupplierName('')
+    setSearchParams(null)
     setBusinessManagerStaffId('')
     setPreview(null)
     setCommitResult(null)
-    setLoading(false)
+    setFetchError(null)
   }, [])
 
   React.useEffect(() => {
     if (!open) reset()
   }, [open, reset])
 
-  const actionableItems = React.useMemo(
-    () => preview?.items.filter((i) => !i.missingOnPlatform && i.action !== 'skip') ?? [],
+  const importableCount = React.useMemo(
+    () => preview?.rows.filter((r) => r.selectable).length ?? 0,
     [preview],
   )
 
-  const previewSummary =
-    preview &&
-    `共 ${preview.items.length} 条，平台返回 ${preview.items.filter((i) => !i.missingOnPlatform).length} 条，本地已有 ${preview.items.filter((i) => i.local).length} 条`
+  const previewSummary = preview
+    ? `平台返回 ${preview.summary.total} 条，可导入 ${importableCount} 条（新建 ${preview.summary.create}，更新 ${preview.summary.update}）`
+    : null
 
   const onFetchPreview = async () => {
-    const ids = parsePlatformSupplierIds(idsRaw)
-    if (ids.length === 0) {
-      toast.error('请输入有效的平台入驻 ID（纯数字）')
-      return
-    }
-    if (ids.length > PLATFORM_SUPPLIER_IMPORT_MAX_IDS) {
-      toast.error(`单次最多 ${PLATFORM_SUPPLIER_IMPORT_MAX_IDS} 个 ID`)
-      return
-    }
     if (!businessManagerStaffId) {
       toast.error('请选择默认商务经理')
       return
     }
 
-    const manager = activeStaff.find((s) => s.id === businessManagerStaffId)
-    if (!manager) {
-      toast.error('所选商务经理无效')
-      return
+    const params: PlatformSupplierImportSearchParams = {
+      types: supplierType,
+      name: supplierName.trim(),
     }
 
-    setLoading(true)
+    setFetchError(null)
     try {
-      const result = await mockPreviewPlatformSupplierImport({
-        externalOnboardingIds: ids,
+      const result = await previewMutation.mutateAsync({
+        ...params,
         defaultBusinessManagerStaffId: businessManagerStaffId,
-        defaultBusinessManagerLabel: manager.display_name,
       })
+      setSearchParams(params)
       setPreview(result)
       setStep('preview')
-      if (result.missingPlatformIds.length > 0) {
-        toast.warning(`有 ${result.missingPlatformIds.length} 个 ID 平台未返回`)
-      } else if (result.items.filter((i) => !i.missingOnPlatform).length === 0) {
+
+      if (result.summary.total === 0) {
         toast.error('平台未返回任何有效供应商')
+      } else if (result.summary.error > 0) {
+        toast.warning(
+          `拉取完成：${result.summary.create + result.summary.update} 条可导入，${result.summary.error} 条将跳过`,
+        )
+      } else if (result.summary.warn > 0) {
+        toast.message(`拉取完成：${result.summary.total} 条，${result.summary.warn} 条含告警`)
+      } else {
+        toast.success(`拉取完成：共 ${result.summary.total} 条`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '拉取失败')
-    } finally {
-      setLoading(false)
+      const message = getTrpcErrorMessage(e, '拉取平台供应商失败')
+      setFetchError(message)
+      toast.error(message)
     }
   }
 
   const onCommit = async () => {
-    if (!preview) return
-    if (actionableItems.length === 0) {
+    if (!preview || !businessManagerStaffId || !searchParams) return
+    if (importableCount === 0) {
       toast.error('没有可导入的供应商')
       return
     }
 
-    setLoading(true)
     try {
-      const result = await mockCommitPlatformSupplierImport({
-        defaultBusinessManagerStaffId: preview.defaultBusinessManagerStaffId,
-        items: actionableItems.map((i) => ({ externalOnboardingId: i.externalOnboardingId })),
+      const result = await commitMutation.mutateAsync({
+        ...searchParams,
+        defaultBusinessManagerStaffId: businessManagerStaffId,
       })
       setCommitResult(result)
       setStep('done')
-      const fail = result.errors.length
-      if (fail > 0) {
+      onSuccess()
+
+      if (result.errors.length > 0 || result.skipped > 0) {
         toast.warning(
-          `导入完成：新建 ${result.created}，更新 ${result.updated}，${fail} 条失败`,
+          `导入完成：新建 ${result.created}，更新 ${result.updated}，跳过 ${result.skipped} 行`,
         )
       } else {
         toast.success(`导入完成：新建 ${result.created}，更新 ${result.updated}`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '导入失败')
-    } finally {
-      setLoading(false)
+      toast.error(getTrpcErrorMessage(e, '导入失败，请稍后重试'))
     }
   }
 
   const handleClose = (next: boolean) => {
-    if (!next && step === 'done') onSuccess()
     onOpenChange(next)
   }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-4xl">
-        <DialogHeader>
+      <DialogContent className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-4xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {step === 'input' && '从平台导入供应商'}
             {step === 'preview' && '确认导入供应商'}
@@ -202,25 +203,25 @@ export function PlatformSupplierImportDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'input' &&
-              `输入平台入驻 ID，多个可用逗号或换行分隔（最多 ${PLATFORM_SUPPLIER_IMPORT_MAX_IDS} 个）。新建供应商将统一写入所选商务经理。`}
+              '按类型与名称从平台筛选供应商。新建供应商将统一写入所选商务经理。'}
             {step === 'preview' &&
               (previewSummary ??
                 '核对平台数据；已有本地供应商仅更新平台字段，不修改商务经理。')}
-            {step === 'done' && '导入结果如下，关闭后将刷新供应商列表。'}
+            {step === 'done' && '导入结果如下，关闭后列表已刷新。'}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
           {step === 'input' && (
             <div className="space-y-4 px-1">
               <div className="space-y-2">
-                <Label htmlFor="default-business-manager">默认商务经理</Label>
+                <Label htmlFor="platform-default-business-manager">默认商务经理 *</Label>
                 <Select
                   value={businessManagerStaffId || undefined}
                   onValueChange={setBusinessManagerStaffId}
                   disabled={loading}
                 >
-                  <SelectTrigger id="default-business-manager">
+                  <SelectTrigger id="platform-default-business-manager">
                     <SelectValue placeholder="选择商务经理（新建供应商必填）" />
                   </SelectTrigger>
                   <SelectContent position="popper">
@@ -244,110 +245,116 @@ export function PlatformSupplierImportDialog({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="platform-supplier-ids">平台入驻 ID</Label>
-                <Textarea
-                  id="platform-supplier-ids"
-                  placeholder={'10001\n10002, 10003'}
-                  rows={6}
-                  value={idsRaw}
+                <Label htmlFor="platform-supplier-type">类型 *</Label>
+                <Select
+                  value={supplierType}
+                  onValueChange={(value) => setSupplierType(value as PlatformSupplierType)}
                   disabled={loading}
-                  onChange={(e) => setIdsRaw(e.target.value)}
+                >
+                  <SelectTrigger id="platform-supplier-type">
+                    <SelectValue placeholder="选择供应商类型" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {PLATFORM_SUPPLIER_TYPES.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {PLATFORM_SUPPLIER_TYPE_LABEL[type]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="platform-supplier-name">名称</Label>
+                <Input
+                  id="platform-supplier-name"
+                  placeholder="输入供应商名称（可选，支持模糊匹配）"
+                  value={supplierName}
+                  disabled={loading}
+                  onChange={(e) => setSupplierName(e.target.value)}
                 />
                 <p className="text-muted-foreground text-xs">
-                  支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。Mock 示例：10001、10002、10003。
+                  留空则按类型拉取全部审核通过的供应商；名称会在请求平台 API 时进行 URL 编码。
                 </p>
               </div>
+
+              {fetchError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{fetchError}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
           )}
 
-          {step === 'preview' && preview && !loading && (
+          {step === 'preview' && preview && (
             <div className="space-y-4 px-1">
-              <Alert>
-                <AlertDescription>
-                  默认商务经理：
-                  <span className="text-foreground font-medium">
-                    {preview.defaultBusinessManagerLabel}
-                  </span>
-                  （仅新建行写入）
-                </AlertDescription>
-              </Alert>
-
-              {preview.missingPlatformIds.length > 0 && (
+              {preview.summary.error > 0 && (
                 <Alert variant="destructive">
-                  <IconAlertTriangle className="size-4" />
                   <AlertDescription>
-                    平台未返回：{preview.missingPlatformIds.join('、')}
+                    有 {preview.summary.error} 行存在错误将跳过；仍可导入其余 {importableCount} 行
                   </AlertDescription>
                 </Alert>
               )}
 
-              <div className="rounded-md border">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Stat label="平台返回" value={preview.summary.total} />
+                <Stat label="可新建" value={preview.summary.create} />
+                <Stat label="可更新" value={preview.summary.update} />
+                <Stat label="错误" value={preview.summary.error} />
+              </div>
+
+              <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-24">入驻 ID</TableHead>
-                      <TableHead>供应商名称</TableHead>
+                      <TableHead className="w-12">行</TableHead>
+                      <TableHead>名称</TableHead>
                       <TableHead className="w-16">类型</TableHead>
-                      <TableHead className="w-24">租户 ID</TableHead>
-                      <TableHead>联系人</TableHead>
-                      <TableHead className="w-20">合作模式</TableHead>
-                      <TableHead className="w-20">操作</TableHead>
-                      <TableHead className="min-w-[140px]">本地</TableHead>
+                      <TableHead className="w-28">证件号</TableHead>
+                      <TableHead className="w-16">动作</TableHead>
+                      <TableHead className="w-32">商务经理</TableHead>
+                      <TableHead className="w-16">校验</TableHead>
+                      <TableHead className="min-w-[120px]">说明</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {preview.items.map((item) => (
+                    {preview.rows.map((row) => (
                       <TableRow
-                        key={item.externalOnboardingId}
-                        className={item.missingOnPlatform ? 'bg-muted/40 opacity-60' : undefined}
+                        key={row.row_no}
+                        className={
+                          row.parse_status === 'error'
+                            ? 'bg-destructive/5'
+                            : row.parse_status === 'warning'
+                              ? 'bg-amber-500/5'
+                              : undefined
+                        }
                       >
-                        <TableCell className="font-mono text-sm">
-                          {item.externalOnboardingId}
-                        </TableCell>
-                        <TableCell className="max-w-[160px] truncate" title={item.platform.name}>
-                          {item.platform.name}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {item.platform.onboardingType
-                            ? ONBOARDING_LABEL[item.platform.onboardingType]
-                            : '—'}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {item.platform.platformTenantId ?? '—'}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {item.platform.contactPerson ?? '—'}
-                          {item.platform.contactPhone ? (
-                            <span className="text-muted-foreground block text-xs">
-                              {item.platform.contactPhone}
-                            </span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {item.platform.cooperationMode
-                            ? contractPricingModeNames[item.platform.cooperationMode]
-                            : '—'}
+                        <TableCell>{row.row_no}</TableCell>
+                        <TableCell className="max-w-[160px] truncate font-medium">
+                          {row.name ?? '—'}
                         </TableCell>
                         <TableCell>
-                          <ActionBadge item={item} />
+                          {row.onboarding_type
+                            ? ONBOARDING_LABEL[row.onboarding_type]
+                            : '—'}
                         </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {item.local ? (
-                            <>
-                              已存在：
-                              <span className="text-foreground font-medium">
-                                {item.local.supplierName}
-                              </span>
-                              {item.local.businessManager ? (
-                                <span className="block text-xs">
-                                  商务：{item.local.businessManager}
-                                </span>
-                              ) : null}
-                            </>
-                          ) : item.missingOnPlatform ? (
-                            '—'
+                        <TableCell className="text-muted-foreground text-xs">
+                          {row.identity_no ?? '—'}
+                        </TableCell>
+                        <TableCell>{ACTION_LABEL[row.action]}</TableCell>
+                        <TableCell className="text-xs">
+                          {row.business_manager_note === 'will_set'
+                            ? `→ ${row.business_manager_label ?? '—'}`
+                            : '保留原值'}
+                        </TableCell>
+                        <TableCell>
+                          <ParseBadge status={row.parse_status} />
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {row.parse_status === 'error' ? (
+                            <span className="text-destructive">{row.parse_message ?? '—'}</span>
                           ) : (
-                            <span className="text-foreground">将新建</span>
+                            <span className="text-muted-foreground">{row.parse_message ?? '—'}</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -364,21 +371,21 @@ export function PlatformSupplierImportDialog({
                 <Stat label="新建" value={commitResult.created} />
                 <Stat label="更新" value={commitResult.updated} />
                 <Stat label="跳过" value={commitResult.skipped} />
-                <Stat label="失败" value={commitResult.errors.length} />
+                <Stat label="失败" value={commitResult.failed} />
               </div>
               {commitResult.errors.length > 0 && (
                 <div className="max-h-40 overflow-auto rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>入驻 ID</TableHead>
+                        <TableHead className="w-14">行</TableHead>
                         <TableHead>原因</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {commitResult.errors.map((err) => (
-                        <TableRow key={err.externalOnboardingId}>
-                          <TableCell className="font-mono">{err.externalOnboardingId}</TableCell>
+                        <TableRow key={`${err.row_no}-${err.message}`}>
+                          <TableCell>{err.row_no}</TableCell>
                           <TableCell className="text-destructive text-xs">{err.message}</TableCell>
                         </TableRow>
                       ))}
@@ -390,7 +397,7 @@ export function PlatformSupplierImportDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0 gap-2 sm:gap-0">
           {step === 'input' && (
             <>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>
@@ -426,7 +433,7 @@ export function PlatformSupplierImportDialog({
               </Button>
               <Button
                 type="button"
-                disabled={loading || actionableItems.length === 0}
+                disabled={loading || importableCount === 0}
                 onClick={() => void onCommit()}
               >
                 {loading ? (
@@ -435,20 +442,14 @@ export function PlatformSupplierImportDialog({
                     导入中…
                   </>
                 ) : (
-                  `确认导入${actionableItems.length > 0 ? `（${actionableItems.length} 条）` : ''}`
+                  `确认导入${importableCount > 0 ? `（${importableCount} 条）` : ''}`
                 )}
               </Button>
             </>
           )}
           {step === 'done' && (
-            <Button
-              type="button"
-              onClick={() => {
-                onSuccess()
-                handleClose(false)
-              }}
-            >
-              关闭并刷新列表
+            <Button type="button" onClick={() => handleClose(false)}>
+              关闭
             </Button>
           )}
         </DialogFooter>

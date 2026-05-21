@@ -3,10 +3,15 @@ import { z } from 'zod'
 import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-import'
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
 import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
+import { platformDatacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-datacenter-import'
+import { platformSupplierImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-import'
 import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/supplier-import'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { supplierError } from '@/lib/server/dataaccess/supplier/logger'
+import { SuanliSupplyOpenApiError } from '@/lib/server/integrations/suanli-supply-api'
+import { PLATFORM_DATACENTER_IMPORT_MAX_IDS } from '@/lib/supplier/platform-datacenter-import-utils'
+import { PLATFORM_SUPPLIER_TYPES } from '@/lib/supplier/platform-supplier-import-utils'
 import {
   deviceChangelogRowSchema,
   deviceImportCommitBaseSchema,
@@ -21,23 +26,43 @@ const importFileSchema = z.object({
   fileBase64: z.string().min(1),
 })
 
+const platformSupplierSearchSchema = z.object({
+  types: z.enum(PLATFORM_SUPPLIER_TYPES),
+  name: z.string(),
+  defaultBusinessManagerStaffId: z.string().min(1),
+})
+
+const platformDatacenterIdsSchema = z
+  .array(z.string().regex(/^\d+$/))
+  .min(1)
+  .max(PLATFORM_DATACENTER_IMPORT_MAX_IDS)
+
 function mapImportError(error: unknown): never {
+  if (error instanceof SuanliSupplyOpenApiError) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: error.message })
+  }
   if (error instanceof Error) {
     const message = error.message
     if (
       message.includes('不能超过') ||
       message.includes('仅支持') ||
       message.includes('至少需要') ||
+      message.includes('请至少输入') ||
+      message.includes('单次最多') ||
       message.includes('无效') ||
       message.includes('不存在') ||
       message.includes('无法解析') ||
       message.includes('请先') ||
       message.includes('没有可入库') ||
+      message.includes('没有可导入') ||
       message.includes('没有通过校验') ||
       message.includes('外网IP') ||
       message.includes('期望完成日期') ||
       message.includes('已在线') ||
-      message.includes('不属于')
+      message.includes('不属于') ||
+      message.includes('拉取') ||
+      message.includes('OpenAPI') ||
+      message.includes('算算力')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
@@ -358,6 +383,58 @@ export const supplierRouter = createTRPCRouter({
       .mutation(async ({ input }) => {
         try {
           return await datacenterImportDataAccess.commit(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  platformImport: createTRPCRouter({
+    preview: adminProcedure
+      .input(platformSupplierSearchSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformSupplierImportDataAccess.preview(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    commit: adminProcedure
+      .input(platformSupplierSearchSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformSupplierImportDataAccess.commit(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  platformDatacenterImport: createTRPCRouter({
+    preview: adminProcedure
+      .input(
+        z.object({
+          externalOnboardingIds: platformDatacenterIdsSchema,
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await platformDatacenterImportDataAccess.preview(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    commit: adminProcedure
+      .input(
+        z.object({
+          externalOnboardingIds: platformDatacenterIdsSchema,
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await platformDatacenterImportDataAccess.commit(input)
         } catch (e) {
           mapImportError(e)
         }

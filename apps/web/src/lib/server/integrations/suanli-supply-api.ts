@@ -64,6 +64,8 @@ export type SupplierApplicationListParams = {
   split_modes?: string
   start_time?: string
   end_time?: string
+  /** 批量入驻 ID，半角逗号分隔（待平台确认参数名） */
+  application_ids?: string
   page?: number
   page_size?: number
 }
@@ -110,6 +112,8 @@ export type IdcInfoListParams = {
   status?: string
   start_time?: string
   end_time?: string
+  /** 批量机房 ID，半角逗号分隔（待平台确认参数名） */
+  idc_ids?: string
   page?: number
   page_size?: number
 }
@@ -499,14 +503,16 @@ export async function fetchSupplierApplicationList(
   })
 
   try {
+    const name = params.name?.trim() ?? ""
     const data = await supplyInstance.get<unknown>("/supply/supplier_application/list", {
       params: {
-        name: params.name ?? "",
+        name: name ? encodeURIComponent(name) : "",
         types: params.types ?? "",
-        status: params.status ?? "",
+        status: "Pass", //只抓取审核通过的数据
         split_modes: params.split_modes ?? "",
         start_time: params.start_time ?? "",
         end_time: params.end_time ?? "",
+        tenant_tids: params.application_ids ?? "",
         page: params.page ?? 1,
         page_size: params.page_size ?? BATCH_PAGE_SIZE,
       },
@@ -600,6 +606,7 @@ export async function fetchIdcInfoList(
         status: params.status ?? "",
         start_time: params.start_time ?? "",
         end_time: params.end_time ?? "",
+        idc_ids: params.idc_ids ?? "",
         page: params.page ?? 1,
         page_size: params.page_size ?? BATCH_PAGE_SIZE,
       },
@@ -658,4 +665,106 @@ export function mapIdcInfosToDbFields(records: IdcInfoApiRecord[]): IdcInfoDbFie
 /** 批量映射为机房导入解析行 */
 export function mapIdcInfosToImportRows(records: IdcInfoApiRecord[]): DatacenterImportParsedRow[] {
   return records.filter((r) => r.name?.trim()).map((r, i) => mapIdcInfoToImportRow(r, i + 1))
+}
+
+function indexRecordsById<T extends { id: number }>(
+  records: T[],
+  idSet: Set<string>,
+): Map<string, T> {
+  const map = new Map<string, T>()
+  for (const record of records) {
+    const key = String(record.id)
+    if (idSet.has(key)) {
+      map.set(key, record)
+    }
+  }
+  return map
+}
+
+/** 按入驻 ID 批量拉取供应商申请（优先 batch 参数，结果按 id 过滤） */
+export async function fetchSupplierApplicationsByIds(
+  ids: string[],
+  traceId?: string,
+): Promise<Map<string, SupplierApplicationApiRecord>> {
+  if (ids.length === 0) return new Map()
+
+  const tid = traceId ?? crypto.randomUUID().slice(0, 8)
+  const idSet = new Set(ids)
+  const pageSize = Math.max(BATCH_PAGE_SIZE, ids.length)
+
+  crmLog("suanli-supply-api", "fetch supplier applications by ids", {
+    traceId: tid,
+    count: ids.length,
+  })
+
+  const data = await fetchSupplierApplicationList(
+    {
+      application_ids: ids.join(","),
+      page: 1,
+      page_size: pageSize,
+    },
+    tid,
+  )
+
+  const map = indexRecordsById(data.results ?? [], idSet)
+
+  if (map.size < ids.length) {
+    crmWarn("suanli-supply-api", "supplier batch fetch partial", {
+      traceId: tid,
+      requested: ids.length,
+      returned: map.size,
+      missing: ids.filter((id) => !map.has(id)),
+    })
+  } else {
+    crmLog("suanli-supply-api", "supplier batch fetch ok", {
+      traceId: tid,
+      returned: map.size,
+    })
+  }
+
+  return map
+}
+
+/** 按机房 ID 批量拉取机房信息（优先 batch 参数，结果按 id 过滤） */
+export async function fetchIdcInfosByIds(
+  ids: string[],
+  traceId?: string,
+): Promise<Map<string, IdcInfoApiRecord>> {
+  if (ids.length === 0) return new Map()
+
+  const tid = traceId ?? crypto.randomUUID().slice(0, 8)
+  const idSet = new Set(ids)
+  const pageSize = Math.max(BATCH_PAGE_SIZE, ids.length)
+
+  crmLog("suanli-supply-api", "fetch idc infos by ids", {
+    traceId: tid,
+    count: ids.length,
+  })
+
+  const data = await fetchIdcInfoList(
+    {
+      idc_ids: ids.join(","),
+      page: 1,
+      page_size: pageSize,
+    },
+    tid,
+  )
+
+  const map = indexRecordsById(data.results ?? [], idSet)
+
+  if (map.size < ids.length) {
+    crmWarn("suanli-supply-api", "idc batch fetch partial", {
+      traceId: tid,
+      requested: ids.length,
+      returned: map.size,
+      missing: ids.filter((id) => !map.has(id)),
+    })
+  } else {
+    crmLog("suanli-supply-api", "idc batch fetch ok", {
+      traceId: tid,
+      returned: map.size,
+    })
+  }
+
+  return map
 }

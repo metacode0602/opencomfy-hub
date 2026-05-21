@@ -17,7 +17,6 @@ import {
   SUPPLIER_IMPORT_MAX_BYTES,
 } from '@/lib/types/supplier-import'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
-import { mapSupplierRow } from '@/lib/server/mappers/supply'
 import { supplierLog, supplierWarn } from '@/lib/server/dataaccess/supplier/logger'
 import { suppliersDataAccess, newSupplierId } from '@/lib/server/dataaccess/supplier/suppliers'
 import { billingTenant, supplier } from '@workspace/db/schema'
@@ -27,7 +26,7 @@ function bufferToArrayBuffer(buf: Buffer): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
 }
 
-function parseSourceDate(value?: string): Date | undefined {
+export function parseSourceDate(value?: string): Date | undefined {
   if (!value) return undefined
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? undefined : d
@@ -42,11 +41,11 @@ function assertImportFile(fileName: string, buffer: Buffer) {
   }
 }
 
-async function loadSuppliersForImport(): Promise<Supplier[]> {
+export async function loadSuppliersForImport(): Promise<Supplier[]> {
   return suppliersDataAccess.list()
 }
 
-async function loadBillingTenantPlatformIds(): Promise<Set<string>> {
+export async function loadBillingTenantPlatformIds(): Promise<Set<string>> {
   const rows = await db
     .select({ platformTenantId: billingTenant.platformTenantId })
     .from(billingTenant)
@@ -57,7 +56,7 @@ async function loadBillingTenantPlatformIds(): Promise<Set<string>> {
   return set
 }
 
-function enrichTenantWarnings(
+export function enrichTenantWarnings(
   preview: SupplierImportPreviewResult,
   knownTenantIds: Set<string>,
 ): SupplierImportPreviewResult {
@@ -85,12 +84,14 @@ function enrichTenantWarnings(
   }
 }
 
-function toPublicPreview(preview: SupplierImportPreviewResult): Omit<SupplierImportPreviewResult, 'parsedRows'> {
+export function toPublicSupplierImportPreview(
+  preview: SupplierImportPreviewResult,
+): Omit<SupplierImportPreviewResult, 'parsedRows'> {
   const { parsedRows: _parsedRows, ...rest } = preview
   return rest
 }
 
-function rowToDbFields(row: SupplierImportParsedRow) {
+export function rowToDbFields(row: SupplierImportParsedRow) {
   return {
     name: row.name!,
     contactPerson: row.contact_person?.trim() || null,
@@ -121,6 +122,128 @@ function rowToDbFields(row: SupplierImportParsedRow) {
   }
 }
 
+export async function validateDefaultBusinessManager(staffId: string) {
+  const staff = await staffDataAccess.getById(staffId)
+  if (!staff || staff.status !== 'active') {
+    throw new Error('默认商务经理无效或已停用')
+  }
+  return staff
+}
+
+export async function buildSupplierImportPreviewFromParsedRows(params: {
+  parsedRows: SupplierImportParsedRow[]
+  defaultBusinessManagerStaffId: string
+  fileName?: string
+  originalHeaders?: string[]
+  columnCanonicalByIndex?: (string | null)[]
+}): Promise<SupplierImportPreviewResult> {
+  await validateDefaultBusinessManager(params.defaultBusinessManagerStaffId)
+
+  const activeStaff = await staffDataAccess.listActive()
+  const existingSuppliers = await loadSuppliersForImport()
+
+  let preview = buildSupplierImportPreview(
+    params.parsedRows,
+    params.fileName ?? 'platform-api',
+    params.originalHeaders ?? [],
+    params.columnCanonicalByIndex ?? [],
+    existingSuppliers,
+    params.defaultBusinessManagerStaffId,
+    activeStaff,
+  )
+
+  const knownTenants = await loadBillingTenantPlatformIds()
+  preview = enrichTenantWarnings(preview, knownTenants)
+
+  return preview
+}
+
+export async function commitSupplierImportPreview(
+  preview: SupplierImportPreviewResult,
+  defaultBusinessManagerStaffId: string,
+  logTag = 'supplier-import',
+): Promise<SupplierImportCommitResult> {
+  await validateDefaultBusinessManager(defaultBusinessManagerStaffId)
+
+  const codeSet = new Set(
+    (await db.select({ code: supplier.code }).from(supplier)).map((r) => r.code),
+  )
+
+  let created = 0
+  let updated = 0
+  let failed = 0
+  let skipped = 0
+  const errors: SupplierImportCommitResult['errors'] = []
+
+  for (const previewRow of preview.rows) {
+    if (!previewRow.selectable) {
+      skipped++
+      if (previewRow.errors.length > 0) {
+        errors.push({
+          row_no: previewRow.row_no,
+          message: previewRow.errors.join('；'),
+        })
+      }
+      continue
+    }
+
+    const row = preview.parsedRows.find((p) => p.row_no === previewRow.row_no)
+    if (!row) {
+      failed++
+      errors.push({ row_no: previewRow.row_no, message: '解析行缺失' })
+      continue
+    }
+
+    try {
+      const fields = rowToDbFields(row)
+
+      if (previewRow.action === 'create') {
+        const code = deriveSupplierCode(row, codeSet)
+        codeSet.add(code)
+        const id = newSupplierId()
+        const createdAt = parseSourceDate(row.source_created_at) ?? new Date()
+
+        await db.insert(supplier).values({
+          id,
+          code,
+          shortName: deriveShortName(row.name!),
+          businessManagerStaffId: defaultBusinessManagerStaffId,
+          createdAt,
+          ...fields,
+        })
+        created++
+        continue
+      }
+
+      if (previewRow.action === 'update' && previewRow.matched_supplier_id) {
+        await db
+          .update(supplier)
+          .set(fields)
+          .where(eq(supplier.id, previewRow.matched_supplier_id))
+        updated++
+      }
+    } catch (e) {
+      failed++
+      const message = e instanceof Error ? e.message : '导入失败'
+      supplierWarn(logTag, 'commit row failed', {
+        row_no: previewRow.row_no,
+        message,
+      })
+      errors.push({ row_no: previewRow.row_no, message })
+    }
+  }
+
+  supplierLog(logTag, 'commit done', {
+    created,
+    updated,
+    failed,
+    skipped,
+    errors: errors.length,
+  })
+
+  return { created, updated, failed, skipped, errors }
+}
+
 export const supplierImportDataAccess = {
   async preview(params: {
     fileName: string
@@ -130,33 +253,19 @@ export const supplierImportDataAccess = {
     const buffer = Buffer.from(params.fileBase64, 'base64')
     assertImportFile(params.fileName, buffer)
 
-    const staff = await staffDataAccess.getById(params.defaultBusinessManagerStaffId)
-    if (!staff || staff.status !== 'active') {
-      throw new Error('默认商务经理无效或已停用')
-    }
-
-    const activeStaff = await staffDataAccess.listActive()
-    const existingSuppliers = await loadSuppliersForImport()
-
     supplierLog('supplier-import', 'preview start', {
       fileName: params.fileName,
       bytes: buffer.length,
-      existingCount: existingSuppliers.length,
     })
 
     const parsed = parseSupplierImportFile(bufferToArrayBuffer(buffer), params.fileName)
-    let preview = buildSupplierImportPreview(
-      parsed.rows,
-      params.fileName,
-      parsed.originalHeaders,
-      parsed.columnCanonicalByIndex,
-      existingSuppliers,
-      params.defaultBusinessManagerStaffId,
-      activeStaff,
-    )
-
-    const knownTenants = await loadBillingTenantPlatformIds()
-    preview = enrichTenantWarnings(preview, knownTenants)
+    const preview = await buildSupplierImportPreviewFromParsedRows({
+      parsedRows: parsed.rows,
+      defaultBusinessManagerStaffId: params.defaultBusinessManagerStaffId,
+      fileName: params.fileName,
+      originalHeaders: parsed.originalHeaders,
+      columnCanonicalByIndex: parsed.columnCanonicalByIndex,
+    })
 
     supplierLog('supplier-import', 'preview done', {
       total: preview.summary.total,
@@ -165,7 +274,7 @@ export const supplierImportDataAccess = {
       error: preview.summary.error,
     })
 
-    return toPublicPreview(preview)
+    return toPublicSupplierImportPreview(preview)
   },
 
   async commit(params: {
@@ -176,109 +285,24 @@ export const supplierImportDataAccess = {
     const buffer = Buffer.from(params.fileBase64, 'base64')
     assertImportFile(params.fileName, buffer)
 
-    const staff = await staffDataAccess.getById(params.defaultBusinessManagerStaffId)
-    if (!staff || staff.status !== 'active') {
-      throw new Error('默认商务经理无效或已停用')
-    }
-
-    const activeStaff = await staffDataAccess.listActive()
-    const existingSuppliers = await loadSuppliersForImport()
-
     supplierLog('supplier-import', 'commit start', {
       fileName: params.fileName,
       bytes: buffer.length,
     })
 
     const parsed = parseSupplierImportFile(bufferToArrayBuffer(buffer), params.fileName)
-    let preview = buildSupplierImportPreview(
-      parsed.rows,
-      params.fileName,
-      parsed.originalHeaders,
-      parsed.columnCanonicalByIndex,
-      existingSuppliers,
-      params.defaultBusinessManagerStaffId,
-      activeStaff,
-    )
-
-    const knownTenants = await loadBillingTenantPlatformIds()
-    preview = enrichTenantWarnings(preview, knownTenants)
-
-    const codeSet = new Set(
-      (await db.select({ code: supplier.code }).from(supplier)).map((r) => r.code),
-    )
-
-    let created = 0
-    let updated = 0
-    let failed = 0
-    let skipped = 0
-    const errors: SupplierImportCommitResult['errors'] = []
-
-    for (const previewRow of preview.rows) {
-      if (!previewRow.selectable) {
-        skipped++
-        if (previewRow.errors.length > 0) {
-          errors.push({
-            row_no: previewRow.row_no,
-            message: previewRow.errors.join('；'),
-          })
-        }
-        continue
-      }
-
-      const row = preview.parsedRows.find((p) => p.row_no === previewRow.row_no)
-      if (!row) {
-        failed++
-        errors.push({ row_no: previewRow.row_no, message: '解析行缺失' })
-        continue
-      }
-
-      try {
-        const fields = rowToDbFields(row)
-
-        if (previewRow.action === 'create') {
-          const code = deriveSupplierCode(row, codeSet)
-          codeSet.add(code)
-          const id = newSupplierId()
-          const createdAt = parseSourceDate(row.source_created_at) ?? new Date()
-
-          await db.insert(supplier).values({
-            id,
-            code,
-            shortName: deriveShortName(row.name!),
-            businessManagerStaffId: params.defaultBusinessManagerStaffId,
-            createdAt,
-            ...fields,
-          })
-          created++
-          continue
-        }
-
-        if (previewRow.action === 'update' && previewRow.matched_supplier_id) {
-          await db
-            .update(supplier)
-            .set(fields)
-            .where(eq(supplier.id, previewRow.matched_supplier_id))
-          updated++
-        }
-      } catch (e) {
-        failed++
-        const message = e instanceof Error ? e.message : '导入失败'
-        supplierWarn('supplier-import', 'commit row failed', {
-          row_no: previewRow.row_no,
-          message,
-        })
-        errors.push({ row_no: previewRow.row_no, message })
-      }
-    }
-
-    supplierLog('supplier-import', 'commit done', {
-      created,
-      updated,
-      failed,
-      skipped,
-      errors: errors.length,
+    const preview = await buildSupplierImportPreviewFromParsedRows({
+      parsedRows: parsed.rows,
+      defaultBusinessManagerStaffId: params.defaultBusinessManagerStaffId,
+      fileName: params.fileName,
+      originalHeaders: parsed.originalHeaders,
+      columnCanonicalByIndex: parsed.columnCanonicalByIndex,
     })
 
-    return { created, updated, failed, skipped, errors }
+    return commitSupplierImportPreview(
+      preview,
+      params.defaultBusinessManagerStaffId,
+      'supplier-import',
+    )
   },
 }

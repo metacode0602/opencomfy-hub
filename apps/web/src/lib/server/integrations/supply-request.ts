@@ -167,7 +167,7 @@ async function suanliSupplyRequest<T = unknown>(
     body: method === "POST" ? requestBody : undefined,
     cache: "no-store",
   })
-
+  console.log("suanliSupplyRequest requestUrl", requestUrl, "fetchHeaders", fetchHeaders, "response", response)
   let result: ApiResponse<T>
   try {
     result = (await response.json()) as ApiResponse<T>
