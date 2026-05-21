@@ -455,7 +455,9 @@ type SupplierImportPreviewRow = {
 | 新建企业行 | create；`business_manager_staff_id` = 弹窗所选 |
 | 重复 ID 重导 | update；商务经理 **不变** |
 | 个人行 | 无营业执照；身份证 URI 写入 |
-| 同文件证件号重复 | 第二行 error |
+| 联系人为空 | warning，仍可 create |
+| 同文件非空租户 ID 重复 | 第二行 error |
+| 同文件证件号重复 | 均可 import |
 | 500+ 行 | preview 拒绝 |
 
 ---
@@ -466,3 +468,4 @@ type SupplierImportPreviewRow = {
 |------|------|------|
 | v1.0 | 2026-05-21 | 首版：含入驻档案表、KYC 表、导入批次 |
 | v1.1 | 2026-05-21 | **简化**：Excel 字段全部映射 `supplier`；取消批次与入驻表；弹窗默认商务经理仅新建写入、更新不覆盖 |
+| v1.2 | 2026-05-21 | 证件号可重复；联系人可空；`platform_tenant_id` 非空唯一、可 null |
