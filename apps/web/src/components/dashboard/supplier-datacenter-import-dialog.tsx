@@ -25,7 +25,9 @@ import {
 } from '@workspace/ui/components/table'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 
-import type { DataCenter, Supplier } from '@/lib/data/types'
+import type { Supplier } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import { fileToBase64 } from '@/lib/utils/file-to-base64'
 import {
   DATACENTER_IMPORT_ACCEPT,
   DATACENTER_IMPORT_MAX_BYTES,
@@ -33,10 +35,6 @@ import {
   type DatacenterImportCommitResult,
   type DatacenterImportPreviewResult,
 } from '@/lib/types/datacenter-import'
-import {
-  commitDatacenterImportMock,
-  previewDatacenterImportFromFile,
-} from '@/lib/supplier/datacenter-import-utils'
 
 type Step = 'upload' | 'preview' | 'done'
 type Phase = 'idle' | 'parsing' | 'committing'
@@ -73,14 +71,12 @@ export function SupplierDatacenterImportDialog({
   open,
   onOpenChange,
   supplier,
-  existingDataCenters,
-  onImported,
+  onSuccess,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   supplier: Supplier
-  existingDataCenters: DataCenter[]
-  onImported: (dataCenters: DataCenter[]) => void
+  onSuccess: () => void
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null)
   const [step, setStep] = React.useState<Step>('upload')
@@ -90,7 +86,14 @@ export function SupplierDatacenterImportDialog({
   const [commitResult, setCommitResult] = React.useState<DatacenterImportCommitResult | null>(null)
   const [parseError, setParseError] = React.useState<string | null>(null)
 
-  const loading = phase === 'parsing' || phase === 'committing'
+  const previewMutation = trpc.supplier.datacenterImport.preview.useMutation()
+  const commitMutation = trpc.supplier.datacenterImport.commit.useMutation()
+
+  const loading =
+    phase === 'parsing' ||
+    phase === 'committing' ||
+    previewMutation.isPending ||
+    commitMutation.isPending
 
   const reset = React.useCallback(() => {
     setStep('upload')
@@ -142,8 +145,13 @@ export function SupplierDatacenterImportDialog({
     setPhase('parsing')
     setParseError(null)
     try {
-      const result = await previewDatacenterImportFromFile(file, supplier, existingDataCenters)
-      setPreview(result)
+      const fileBase64 = await fileToBase64(file)
+      const result = await previewMutation.mutateAsync({
+        supplierId: supplier.id,
+        fileName: file.name,
+        fileBase64,
+      })
+      setPreview(result as DatacenterImportPreviewResult)
       setStep('preview')
 
       const { summary } = result
@@ -172,19 +180,15 @@ export function SupplierDatacenterImportDialog({
 
     setPhase('committing')
     try {
-      const freshPreview = await previewDatacenterImportFromFile(
-        file,
-        supplier,
-        existingDataCenters,
-      )
-      const { dataCenters, result } = commitDatacenterImportMock(
-        freshPreview,
-        supplier,
-        existingDataCenters,
-      )
+      const fileBase64 = await fileToBase64(file)
+      const result = await commitMutation.mutateAsync({
+        supplierId: supplier.id,
+        fileName: file.name,
+        fileBase64,
+      })
       setCommitResult(result)
       setStep('done')
-      onImported(dataCenters.filter((dc) => dc.supplierId === supplier.id))
+      onSuccess()
 
       if (result.errors.length > 0) {
         toast.warning(
@@ -395,12 +399,10 @@ export function SupplierDatacenterImportDialog({
 
 export function SupplierDatacenterImportTrigger({
   supplier,
-  existingDataCenters,
-  onImported,
+  onSuccess,
 }: {
   supplier: Supplier
-  existingDataCenters: DataCenter[]
-  onImported: (dataCenters: DataCenter[]) => void
+  onSuccess: () => void
 }) {
   const [open, setOpen] = React.useState(false)
 
@@ -414,8 +416,7 @@ export function SupplierDatacenterImportTrigger({
         open={open}
         onOpenChange={setOpen}
         supplier={supplier}
-        existingDataCenters={existingDataCenters}
-        onImported={onImported}
+        onSuccess={onSuccess}
       />
     </>
   )

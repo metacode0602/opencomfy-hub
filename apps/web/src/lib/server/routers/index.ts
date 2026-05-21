@@ -7,6 +7,7 @@ import { invitationRouter } from './invitation'
 import { newslettersRouter } from './web/newsletters'
 import { crmRouter } from './crm'
 import { financeRouter } from './finance'
+import { supplierRouter } from './supplier'
 
 export * from './trpc'
 export type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
@@ -19,6 +20,7 @@ export const appRouter = router({
   newsletters: newslettersRouter,
   crm: crmRouter,
   finance: financeRouter,
+  supplier: supplierRouter,
   // Admin routes
   admin: router({
   }),

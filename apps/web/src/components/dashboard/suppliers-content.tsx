@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   Factory,
@@ -45,10 +45,9 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Tabs, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
-import { mockSuppliers, mockDataCenters } from '@/lib/data/mock-data'
 import { contractPricingModeNames, statusColors } from '@/lib/data/types'
 import type { Supplier } from '@/lib/data/types'
-import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { trpc } from '@/lib/trpc/client'
 import {
   CreateSupplierDialog,
   EditSupplierDialog,
@@ -63,18 +62,15 @@ const statusNames: Record<string, string> = {
 }
 
 export function SuppliersContent() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(() => [...mockSuppliers])
+  const utils = trpc.useUtils()
+  const { data: suppliers = [], isLoading, refetch } = trpc.supplier.list.useQuery()
+  const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery()
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table')
-  const userStaff = useCrmMockStore((s) => s.userStaff)
-  const activeStaff = useMemo(
-    () => userStaff.filter((s) => s.status === 'active'),
-    [userStaff],
-  )
 
   const handleEditOpenChange = (open: boolean) => {
     setEditDialogOpen(open)
@@ -94,7 +90,7 @@ export function SuppliersContent() {
   const stats = {
     total: suppliers.length,
     cooperating: suppliers.filter((s) => s.status === 'cooperating').length,
-    totalDataCenters: mockDataCenters.length,
+    totalDataCenters: suppliers.reduce((sum, s) => sum + s.dataCenterCount, 0),
     totalDevices: suppliers.reduce((sum, s) => sum + s.totalDeviceCount, 0),
     monthlySettlement: suppliers.reduce((sum, s) => sum + s.monthlySettlement, 0),
   }
@@ -112,12 +108,11 @@ export function SuppliersContent() {
         <div className="flex items-center gap-2">
           <SupplierImportTrigger
             activeStaff={activeStaff}
-            existingSuppliers={suppliers}
-            onImported={setSuppliers}
+            onSuccess={() => void utils.supplier.list.invalidate()}
           />
           <CreateSupplierDialog
             activeStaff={activeStaff}
-            onCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+            onCreated={() => void refetch()}
           />
         </div>
       </div>
@@ -347,7 +342,6 @@ export function SuppliersContent() {
       ) : (
         <div className="grid grid-cols-2 gap-4">
           {filteredSuppliers.map((supplier) => {
-            const dataCenters = mockDataCenters.filter((dc) => dc.supplierId === supplier.id)
             return (
               <Link key={supplier.id} href={`/supplier/suppliers/${supplier.id}`}>
                 <Card className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer h-full">
@@ -406,19 +400,11 @@ export function SuppliersContent() {
                     </div>
 
                     <div className="pt-2 border-t border-border">
-                      <p className="text-xs text-muted-foreground mb-2">机房分布</p>
-                      <div className="flex flex-wrap gap-1">
-                        {dataCenters.slice(0, 3).map((dc) => (
-                          <Badge key={dc.id} variant="secondary" className="text-xs">
-                            {dc.location}
-                          </Badge>
-                        ))}
-                        {dataCenters.length > 3 && (
-                          <Badge variant="secondary" className="text-xs">
-                            +{dataCenters.length - 3}
-                          </Badge>
-                        )}
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {supplier.dataCenterCount > 0
+                          ? `已接入 ${supplier.dataCenterCount} 个机房`
+                          : '暂无机房'}
+                      </p>
                     </div>
 
                     <div className="flex items-center justify-between pt-2 border-t border-border text-xs text-muted-foreground">
@@ -447,9 +433,7 @@ export function SuppliersContent() {
         onOpenChange={handleEditOpenChange}
         supplier={editSupplier}
         activeStaff={activeStaff}
-        onUpdated={(updated) =>
-          setSuppliers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
-        }
+        onUpdated={() => void refetch()}
       />
 
       {filteredSuppliers.length === 0 && (

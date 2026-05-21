@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { CheckCircle2, Download } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -13,8 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { getSupplierBillsBySupplierId } from '@/lib/data/mock-data'
-import type { Supplier, SupplierBill } from '@/lib/data/types'
+import type { Supplier } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import {
   billStatusColors,
   cooperationModeLabels,
@@ -26,7 +25,9 @@ interface SupplierBillsPanelProps {
 }
 
 export function SupplierBillsPanel({ supplier }: SupplierBillsPanelProps) {
-  const [bills] = useState<SupplierBill[]>(() => getSupplierBillsBySupplierId(supplier.id))
+  const { data: bills = [], isLoading } = trpc.supplier.listBills.useQuery({
+    supplierId: supplier.id,
+  })
 
   return (
     <div className="space-y-4">
@@ -40,6 +41,18 @@ export function SupplierBillsPanel({ supplier }: SupplierBillsPanelProps) {
           导出账单
         </Button>
       </div>
+
+      {isLoading && (
+        <p className="text-sm text-muted-foreground">加载账单列表…</p>
+      )}
+
+      {!isLoading && bills.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            暂无结算账单
+          </CardContent>
+        </Card>
+      )}
 
       {bills.map((bill) => (
         <Card key={bill.id} className="bg-card border-border">

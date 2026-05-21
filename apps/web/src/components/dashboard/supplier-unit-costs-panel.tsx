@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Cpu, DollarSign, MoreHorizontal, Percent, Plus, Search } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -38,12 +38,6 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
 import { CreateCardPricingDialog } from '@/components/dashboard/create-card-pricing-dialog'
-import {
-  mockGPUCardTypes,
-  mockDataCenters,
-  mockSupplierPricingHistory,
-  mockSupplierPricingRecords,
-} from '@/lib/data/mock-data'
 import type {
   ContractPricingMode,
   Supplier,
@@ -51,6 +45,7 @@ import type {
   SupplierPricingRecord,
 } from '@/lib/data/types'
 import { contractPricingModeNames } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 
 function formatDateTime(iso?: string | null) {
   if (!iso) return '—'
@@ -105,12 +100,25 @@ interface SupplierUnitCostsPanelProps {
 }
 
 export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps) {
-  const [pricingRecords, setPricingRecords] = useState<SupplierPricingRecord[]>(() =>
-    mockSupplierPricingRecords.map((r) => ({ ...r })),
-  )
-  const [history, setHistory] = useState<SupplierPricingHistory[]>(() => [
-    ...mockSupplierPricingHistory,
-  ])
+  const { data: serverRecords = [], isLoading: recordsLoading } =
+    trpc.supplier.listPricingRecords.useQuery({ supplierId: supplier.id })
+  const { data: serverHistory = [] } = trpc.supplier.listPricingHistory.useQuery({
+    supplierId: supplier.id,
+  })
+  const { data: dataCenterOptions = [] } = trpc.supplier.listDataCenters.useQuery({
+    supplierId: supplier.id,
+  })
+  const { data: activeCardTypes = [] } = trpc.supplier.listActiveGpuCardTypes.useQuery()
+
+  const [pricingRecords, setPricingRecords] = useState<SupplierPricingRecord[]>([])
+  const [history, setHistory] = useState<SupplierPricingHistory[]>([])
+
+  useEffect(() => {
+    if (!recordsLoading) {
+      setPricingRecords(serverRecords.map((r) => ({ ...r })))
+      setHistory(serverHistory.map((h) => ({ ...h })))
+    }
+  }, [recordsLoading, serverRecords, serverHistory])
 
   const [searchTerm, setSearchTerm] = useState('')
   const [dataCenterFilter, setDataCenterFilter] = useState('all')
@@ -125,19 +133,9 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
   const [editEffectiveFrom, setEditEffectiveFrom] = useState('')
   const [editReason, setEditReason] = useState('')
 
-  const activeCardTypes = useMemo(
-    () => mockGPUCardTypes.filter((c) => c.status === 'active'),
-    [],
-  )
-
   const supplierRecords = useMemo(
     () => pricingRecords.filter((r) => r.supplierId === supplier.id),
     [pricingRecords, supplier.id],
-  )
-
-  const dataCenterOptions = useMemo(
-    () => mockDataCenters.filter((dc) => dc.supplierId === supplier.id),
-    [supplier.id],
   )
 
   const filteredPricing = supplierRecords.filter((row) => {
@@ -283,6 +281,10 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
           </div>
         </CardContent>
       </Card>
+
+      {recordsLoading && (
+        <p className="text-sm text-muted-foreground">加载卡型成本配置…</p>
+      )}
 
       <Card className="bg-card border-border">
         <Table>

@@ -114,7 +114,7 @@ export function deriveDatacenterCode(
   return code
 }
 
-function buildRegionTags(row: DatacenterImportParsedRow): string[] {
+export function buildRegionTags(row: DatacenterImportParsedRow): string[] {
   const tags: string[] = []
   if (row.container_instance_region) tags.push(row.container_instance_region)
   if (row.bare_metal_region && row.bare_metal_region !== row.container_instance_region) {
@@ -123,7 +123,7 @@ function buildRegionTags(row: DatacenterImportParsedRow): string[] {
   return tags
 }
 
-function deriveLocation(row: DatacenterImportParsedRow): string {
+export function deriveLocation(row: DatacenterImportParsedRow): string {
   return row.bare_metal_region ?? row.container_instance_region ?? ''
 }
 

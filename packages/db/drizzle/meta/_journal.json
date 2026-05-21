@@ -43,6 +43,13 @@
       "when": 1779184849150,
       "tag": "0005_daily_beast",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779342052448,
+      "tag": "0006_pale_phalanx",
+      "breakpoints": true
     }
   ]
 }

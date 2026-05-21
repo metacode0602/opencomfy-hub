@@ -32,8 +32,9 @@ import {
 } from '@workspace/ui/components/table'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 
-import type { Supplier } from '@/lib/data/types'
 import type { UserStaff } from '@/lib/types/crm'
+import { trpc } from '@/lib/trpc/client'
+import { fileToBase64 } from '@/lib/utils/file-to-base64'
 import {
   SUPPLIER_IMPORT_ACCEPT,
   SUPPLIER_IMPORT_MAX_BYTES,
@@ -41,10 +42,6 @@ import {
   type SupplierImportCommitResult,
   type SupplierImportPreviewResult,
 } from '@/lib/types/supplier-import'
-import {
-  commitSupplierImportMock,
-  previewSupplierImportFromFile,
-} from '@/lib/supplier/supplier-import-utils'
 import {
   buildSupplierImportErrorExportRows,
   downloadSupplierImportErrorExcel,
@@ -76,14 +73,12 @@ export function SupplierImportDialog({
   open,
   onOpenChange,
   activeStaff,
-  existingSuppliers,
-  onImported,
+  onSuccess,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   activeStaff: UserStaff[]
-  existingSuppliers: Supplier[]
-  onImported: (suppliers: Supplier[]) => void
+  onSuccess: () => void
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null)
   const [step, setStep] = React.useState<Step>('upload')
@@ -94,7 +89,14 @@ export function SupplierImportDialog({
   const [commitResult, setCommitResult] = React.useState<SupplierImportCommitResult | null>(null)
   const [parseError, setParseError] = React.useState<string | null>(null)
 
-  const loading = phase === 'parsing' || phase === 'committing'
+  const previewMutation = trpc.supplier.import.preview.useMutation()
+  const commitMutation = trpc.supplier.import.commit.useMutation()
+
+  const loading =
+    phase === 'parsing' ||
+    phase === 'committing' ||
+    previewMutation.isPending ||
+    commitMutation.isPending
 
   const reset = React.useCallback(() => {
     setStep('upload')
@@ -151,13 +153,13 @@ export function SupplierImportDialog({
     setPhase('parsing')
     setParseError(null)
     try {
-      const result = await previewSupplierImportFromFile(
-        file,
-        existingSuppliers,
-        businessManagerStaffId,
-        activeStaff,
-      )
-      setPreview(result)
+      const fileBase64 = await fileToBase64(file)
+      const result = await previewMutation.mutateAsync({
+        fileName: file.name,
+        fileBase64,
+        defaultBusinessManagerStaffId: businessManagerStaffId,
+      })
+      setPreview(result as SupplierImportPreviewResult)
       setStep('preview')
 
       const { summary } = result
@@ -171,7 +173,8 @@ export function SupplierImportDialog({
         toast.success(`解析完成：共 ${summary.total} 行`)
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : '解析失败'
+      const message =
+        e instanceof Error ? e.message : '解析失败，请检查文件格式与表头'
       setParseError(message)
       toast.error(message)
     } finally {
@@ -188,21 +191,15 @@ export function SupplierImportDialog({
 
     setPhase('committing')
     try {
-      const freshPreview = await previewSupplierImportFromFile(
-        file,
-        existingSuppliers,
-        businessManagerStaffId,
-        activeStaff,
-      )
-      const { suppliers, result } = commitSupplierImportMock(
-        freshPreview,
-        existingSuppliers,
-        businessManagerStaffId,
-        activeStaff,
-      )
+      const fileBase64 = await fileToBase64(file)
+      const result = await commitMutation.mutateAsync({
+        fileName: file.name,
+        fileBase64,
+        defaultBusinessManagerStaffId: businessManagerStaffId,
+      })
       setCommitResult(result)
       setStep('done')
-      onImported(suppliers)
+      onSuccess()
 
       if (result.errors.length > 0 || result.skipped > 0) {
         toast.warning(
@@ -212,7 +209,7 @@ export function SupplierImportDialog({
         toast.success(`导入完成：新建 ${result.created}，更新 ${result.updated}`)
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '导入失败')
+      toast.error(e instanceof Error ? e.message : '导入失败，请稍后重试')
     } finally {
       setPhase('idle')
     }
@@ -480,12 +477,10 @@ export function SupplierImportDialog({
 
 export function SupplierImportTrigger({
   activeStaff,
-  existingSuppliers,
-  onImported,
+  onSuccess,
 }: {
   activeStaff: UserStaff[]
-  existingSuppliers: Supplier[]
-  onImported: (suppliers: Supplier[]) => void
+  onSuccess: () => void
 }) {
   const [open, setOpen] = React.useState(false)
 
@@ -499,8 +494,7 @@ export function SupplierImportTrigger({
         open={open}
         onOpenChange={setOpen}
         activeStaff={activeStaff}
-        existingSuppliers={existingSuppliers}
-        onImported={onImported}
+        onSuccess={onSuccess}
       />
     </>
   )

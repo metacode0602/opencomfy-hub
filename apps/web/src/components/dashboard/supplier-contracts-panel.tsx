@@ -12,8 +12,8 @@ import {
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
 import { CreateSupplierContractDialog } from '@/components/dashboard/create-supplier-contract-dialog'
-import { getSupplierContractsBySupplierId } from '@/lib/data/mock-data'
 import type { Supplier, SupplierContract } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import { contractPricingModeNames, statusColors } from '@/lib/data/types'
 import { statusNames } from '@/components/dashboard/supplier-detail-constants'
 
@@ -22,9 +22,13 @@ interface SupplierContractsPanelProps {
 }
 
 export function SupplierContractsPanel({ supplier }: SupplierContractsPanelProps) {
-  const [contracts, setContracts] = useState<SupplierContract[]>(() =>
-    getSupplierContractsBySupplierId(supplier.id),
-  )
+  const utils = trpc.useUtils()
+  const { data: contracts = [], isLoading } = trpc.supplier.listContracts.useQuery({
+    supplierId: supplier.id,
+  })
+  const [localContracts, setLocalContracts] = useState<SupplierContract[]>([])
+
+  const displayContracts = [...localContracts, ...contracts]
 
   return (
     <div className="space-y-4">
@@ -35,12 +39,27 @@ export function SupplierContractsPanel({ supplier }: SupplierContractsPanelProps
         </div>
         <CreateSupplierContractDialog
           supplier={supplier}
-          onCreated={(contract) => setContracts((prev) => [contract, ...prev])}
+          onCreated={(contract) => {
+            setLocalContracts((prev) => [contract, ...prev])
+            void utils.supplier.listContracts.invalidate({ supplierId: supplier.id })
+          }}
         />
       </div>
 
+      {isLoading && (
+        <p className="text-sm text-muted-foreground">加载合同列表…</p>
+      )}
+
+      {!isLoading && displayContracts.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            暂无合同数据
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
-        {contracts.map((contract) => (
+        {displayContracts.map((contract) => (
           <Card key={contract.id} className="bg-card border-border">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">

@@ -29,12 +29,8 @@ import {
 } from '@workspace/ui/components/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import { Progress } from '@workspace/ui/components/progress'
-import {
-  getDataCentersBySupplierId,
-  getDevicesBySupplierId,
-  getSupplierBillsBySupplierId,
-} from '@/lib/data/mock-data'
 import type { Supplier } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import { statusColors } from '@/lib/data/types'
 import {
   billStatusColors,
@@ -84,9 +80,15 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
     if (tabFromUrl && VALID_TABS.has(tabFromUrl)) setActiveTab(tabFromUrl)
   }, [tabFromUrl])
 
-  const dataCenters = getDataCentersBySupplierId(supplier.id)
-  const devices = getDevicesBySupplierId(supplier.id)
-  const bills = getSupplierBillsBySupplierId(supplier.id)
+  const { data: dataCenters = [] } = trpc.supplier.listDataCenters.useQuery({
+    supplierId: supplier.id,
+  })
+  const { data: devices = [] } = trpc.supplier.listGpuInventory.useQuery({
+    supplierId: supplier.id,
+  })
+  const { data: bills = [] } = trpc.supplier.listBills.useQuery({
+    supplierId: supplier.id,
+  })
 
   const totalOnlineDevices = devices.reduce((sum, d) => sum + d.onlineQuantity, 0)
   const totalDevices = devices.reduce((sum, d) => sum + d.quantity, 0)
@@ -202,7 +204,11 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
                   {totalOnlineDevices.toLocaleString()}/{totalDevices.toLocaleString()}
                 </p>
                 <p className="text-xs text-green-500">
-                  在线率 {((totalOnlineDevices / totalDevices) * 100).toFixed(1)}%
+                  在线率{' '}
+                  {totalDevices > 0
+                    ? ((totalOnlineDevices / totalDevices) * 100).toFixed(1)
+                    : '0.0'}
+                  %
                 </p>
               </div>
               <Cpu className="w-8 h-8 text-muted-foreground/50" />
@@ -341,7 +347,11 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
                       </span>
                     </div>
                     <Progress
-                      value={(device.onlineQuantity / device.quantity) * 100}
+                      value={
+                        device.quantity > 0
+                          ? (device.onlineQuantity / device.quantity) * 100
+                          : 0
+                      }
                       className="h-2"
                     />
                   </div>

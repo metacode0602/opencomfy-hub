@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { CheckCircle2, Cpu, MoreHorizontal, Plus, Server } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -20,8 +20,8 @@ import {
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
 import { Progress } from '@workspace/ui/components/progress'
-import { getDevicesBySupplierId } from '@/lib/data/mock-data'
-import type { DataCenterDevice, Supplier } from '@/lib/data/types'
+import type { Supplier } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 
 interface SupplierDevicesPanelProps {
@@ -30,7 +30,9 @@ interface SupplierDevicesPanelProps {
 }
 
 export function SupplierDevicesPanel({ supplier, onOpenOpsImport }: SupplierDevicesPanelProps) {
-  const [devices] = useState<DataCenterDevice[]>(() => getDevicesBySupplierId(supplier.id))
+  const { data: devices = [], isLoading } = trpc.supplier.listGpuInventory.useQuery({
+    supplierId: supplier.id,
+  })
 
   const totalOnlineDevices = devices.reduce((sum, d) => sum + d.onlineQuantity, 0)
   const totalDevices = devices.reduce((sum, d) => sum + d.quantity, 0)
@@ -84,6 +86,9 @@ export function SupplierDevicesPanel({ supplier, onOpenOpsImport }: SupplierDevi
         </div>
       </div>
 
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">加载设备列表…</p>
+      ) : (
       <Card className="bg-card border-border">
         <Table>
           <TableHeader>
@@ -102,7 +107,8 @@ export function SupplierDevicesPanel({ supplier, onOpenOpsImport }: SupplierDevi
           </TableHeader>
           <TableBody>
             {devices.map((device) => {
-              const onlineRate = (device.onlineQuantity / device.quantity) * 100
+              const onlineRate =
+                device.quantity > 0 ? (device.onlineQuantity / device.quantity) * 100 : 0
               return (
                 <TableRow key={device.id} className="border-border">
                   <TableCell className="font-medium text-foreground">
@@ -152,6 +158,15 @@ export function SupplierDevicesPanel({ supplier, onOpenOpsImport }: SupplierDevi
           </TableBody>
         </Table>
       </Card>
+      )}
+
+      {!isLoading && devices.length === 0 && (
+        <Card className="bg-card border-border">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            暂无设备资源数据
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-6 gap-4">
         <Card className="bg-card border-border">

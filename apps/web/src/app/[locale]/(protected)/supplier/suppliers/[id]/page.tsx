@@ -1,6 +1,6 @@
 import { AppShell } from '@/components/dashboard/app-shell'
 import { SupplierDetailContent } from '@/components/dashboard/supplier-detail-content'
-import { mockSuppliers } from '@/lib/data/mock-data'
+import { createServerCaller } from '@/lib/trpc/server'
 import { notFound } from 'next/navigation'
 
 interface SupplierDetailPageProps {
@@ -9,9 +9,12 @@ interface SupplierDetailPageProps {
 
 export default async function SupplierDetailPage({ params }: SupplierDetailPageProps) {
   const { id } = await params
-  const supplier = mockSuppliers.find((s) => s.id === id)
+  const caller = await createServerCaller()
 
-  if (!supplier) {
+  let supplier
+  try {
+    supplier = await caller.supplier.getById({ id })
+  } catch {
     notFound()
   }
 
