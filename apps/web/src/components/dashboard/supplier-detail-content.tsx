@@ -453,11 +453,11 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
         </TabsContent>
 
         <TabsContent value="machines" className="space-y-4">
-          <PhysicalDevicesContent supplierIdFilter={domainSupplierId} />
+          <PhysicalDevicesContent supplierIdFilter={supplier.id} />
         </TabsContent>
 
         <TabsContent value="ops-import" className="space-y-4">
-          <SupplierDeviceImportPanel supplierId={domainSupplierId} />
+          <SupplierDeviceImportPanel supplierId={supplier.id} />
         </TabsContent>
       </Tabs>
     </div>

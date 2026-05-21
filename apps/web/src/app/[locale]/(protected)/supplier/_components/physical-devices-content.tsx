@@ -4,8 +4,10 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
+  AlertCircle,
   CheckCircle2,
   Eye,
+  Loader2,
   MoreHorizontal,
   Search,
   Server,
@@ -36,82 +38,103 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
-import type { SupplierActivity, SupplierDevice } from '@/lib/types/supplier-domain'
+import { Alert, AlertDescription } from '@workspace/ui/components/alert'
+import type { PhysicalDevice } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
-import { useSupplierLabel } from '@/lib/supplier/supplier-domain-lookups'
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return '操作失败，请稍后重试'
+}
 
 export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?: string }) {
   const router = useRouter()
-  const devices = useSupplierDomainMockStore((s) => s.devices)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const upsertEntityStateTransitionLog = useSupplierDomainMockStore((s) => s.upsertEntityStateTransitionLog)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
+  const utils = trpc.useUtils()
+
+  const {
+    data: devices = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = trpc.supplier.listPhysicalDevices.useQuery(
+    { supplierId: supplierIdFilter },
+    { retry: 1 },
+  )
+
+  const { data: stats } = trpc.supplier.getPhysicalDeviceStats.useQuery(
+    { supplierId: supplierIdFilter },
+    { retry: 1 },
+  )
+
+  const markOnlineMutation = trpc.supplier.markPhysicalDeviceOnline.useMutation({
+    onSuccess: (device) => {
+      toast.success(`设备 ${device.sn} 已标记上线`)
+      void utils.supplier.listPhysicalDevices.invalidate()
+      void utils.supplier.getPhysicalDeviceStats.invalidate()
+    },
+    onError: (err) => {
+      const message = getErrorMessage(err)
+      if (message.includes('已在线')) {
+        toast.info(message)
+      } else {
+        toast.error(message)
+      }
+    },
+  })
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
 
   const filtered = useMemo(() => {
     return devices.filter((d) => {
-      if (supplierIdFilter && d.supplier_id !== supplierIdFilter) return false
       const q = search.trim().toLowerCase()
       const matchQ =
         !q ||
         d.sn.toLowerCase().includes(q) ||
-        d.asset_no.toLowerCase().includes(q) ||
-        d.idc_code.toLowerCase().includes(q)
-      const matchStatus = statusFilter === 'all' || d.lifecycle_status === statusFilter
+        d.assetNo.toLowerCase().includes(q) ||
+        d.idcCode.toLowerCase().includes(q)
+      const matchStatus = statusFilter === 'all' || d.lifecycleStatus === statusFilter
       return matchQ && matchStatus
     })
-  }, [devices, search, statusFilter, supplierIdFilter])
+  }, [devices, search, statusFilter])
 
-  const stats = useMemo(() => {
-    const base = supplierIdFilter ? devices.filter((d) => d.supplier_id === supplierIdFilter) : devices
-    return {
-      total: base.length,
-      online: base.filter((d) => d.lifecycle_status === '在线').length,
-      onboarding: base.filter((d) => d.lifecycle_status === '接入中').length,
-    }
-  }, [devices, supplierIdFilter])
+  const displayStats = stats ?? {
+    total: devices.length,
+    online: devices.filter((d) => d.lifecycleStatus === '在线').length,
+    onboarding: devices.filter((d) => d.lifecycleStatus === '接入中').length,
+  }
 
-  const markOnline = (device: SupplierDevice) => {
-    if (device.lifecycle_status === '在线') {
+  const markOnline = (device: PhysicalDevice) => {
+    if (device.lifecycleStatus === '在线') {
       toast.info('设备已在线')
       return
     }
-    const now = new Date().toISOString()
-    const from = device.lifecycle_status
-    upsertDevice({
-      ...device,
-      lifecycle_status: '在线',
-      onboarding_substage: '已完成',
-      platform_resource_id: device.platform_resource_id ?? `res-${device.sn.toLowerCase()}`,
-    })
-    upsertEntityStateTransitionLog({
-      id: createId('esl'),
-      entity_type: 'device',
-      entity_id: device.id,
-      from_state: from,
-      to_state: '在线',
-      operator_id: 'staff-mock-01',
-      reason_code: 'ONBOARDING_DONE',
-      occurred_at: now,
-    })
-    const activity: SupplierActivity = {
-      id: createId('act'),
-      supplier_id: device.supplier_id,
-      type: 'device_online',
-      title: `设备 ${device.sn} 已上线`,
-      description: `机房 ${device.idc_code}`,
-      author_name: '运营（mock）',
-      author_role: 'ops',
-      ref_domain: 'device',
-      ref_id: device.id,
-      occurred_at: now,
-    }
-    upsertSupplierActivity(activity)
-    toast.success('已标记上线')
+    markOnlineMutation.mutate({ deviceId: device.id })
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        加载物理机列表...
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription className="flex flex-wrap items-center gap-3">
+          <span>{getErrorMessage(error)}</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            重试
+          </Button>
+        </AlertDescription>
+      </Alert>
+    )
   }
 
   return (
@@ -122,20 +145,20 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
             <CardContent className="p-4 flex gap-3">
               <Server className="w-8 h-8 text-primary" />
               <div>
-                <p className="text-2xl font-semibold">{stats.total}</p>
+                <p className="text-2xl font-semibold">{displayStats.total}</p>
                 <p className="text-xs text-muted-foreground">物理机总数</p>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-2xl font-semibold text-green-500">{stats.online}</p>
+              <p className="text-2xl font-semibold text-green-500">{displayStats.online}</p>
               <p className="text-xs text-muted-foreground">在线</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-4">
-              <p className="text-2xl font-semibold text-blue-500">{stats.onboarding}</p>
+              <p className="text-2xl font-semibold text-blue-500">{displayStats.onboarding}</p>
               <p className="text-xs text-muted-foreground">接入中</p>
             </CardContent>
           </Card>
@@ -183,7 +206,7 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
             {filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                  暂无物理机，请通过「设备上架」批次入库
+                  暂无物理机，请通过「运维数据导入」入库
                 </TableCell>
               </TableRow>
             ) : (
@@ -191,6 +214,7 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
                 <PhysicalDeviceRow
                   key={d.id}
                   device={d}
+                  markingOnline={markOnlineMutation.isPending && markOnlineMutation.variables?.deviceId === d.id}
                   onView={() => router.push(`/supplier/devices/machines/${d.id}`)}
                   onOnline={() => markOnline(d)}
                 />
@@ -205,38 +229,49 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
 
 function PhysicalDeviceRow({
   device,
+  markingOnline,
   onView,
   onOnline,
 }: {
-  device: SupplierDevice
+  device: PhysicalDevice
+  markingOnline: boolean
   onView: () => void
   onOnline: () => void
 }) {
-  const supplierName = useSupplierLabel(device.supplier_id)
   return (
     <TableRow>
       <TableCell>
         <div className="font-mono text-sm">{device.sn}</div>
-        <div className="text-xs text-muted-foreground">{device.asset_no}</div>
+        <div className="text-xs text-muted-foreground">{device.assetNo}</div>
       </TableCell>
       <TableCell>
-        <Link href={`/supplier/suppliers/${device.supplier_id}`} className="text-primary hover:underline text-sm">
-          {supplierName}
+        <Link
+          href={`/supplier/suppliers/${device.supplierId}`}
+          className="text-primary hover:underline text-sm"
+        >
+          {device.supplierShortName}
         </Link>
       </TableCell>
-      <TableCell>{device.idc_code}</TableCell>
-      <TableCell>{device.card_type}</TableCell>
+      <TableCell>{device.idcCode}</TableCell>
+      <TableCell>{device.cardTypeName}</TableCell>
       <TableCell>
-        <Badge variant="outline" className={LIFECYCLE_STATUS_COLORS[device.lifecycle_status] ?? ''}>
-          {device.lifecycle_status}
+        <Badge
+          variant="outline"
+          className={LIFECYCLE_STATUS_COLORS[device.lifecycleStatus] ?? ''}
+        >
+          {device.lifecycleStatus}
         </Badge>
       </TableCell>
-      <TableCell className="text-muted-foreground">{device.onboarding_substage}</TableCell>
+      <TableCell className="text-muted-foreground">{device.onboardingSubstage ?? '—'}</TableCell>
       <TableCell>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <MoreHorizontal className="w-4 h-4" />
+            <Button variant="ghost" size="icon" disabled={markingOnline}>
+              {markingOnline ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <MoreHorizontal className="w-4 h-4" />
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -244,8 +279,8 @@ function PhysicalDeviceRow({
               <Eye className="w-4 h-4 mr-2" />
               详情
             </DropdownMenuItem>
-            {device.lifecycle_status !== '在线' && (
-              <DropdownMenuItem onClick={onOnline}>
+            {device.lifecycleStatus !== '在线' && (
+              <DropdownMenuItem onClick={onOnline} disabled={markingOnline}>
                 <CheckCircle2 className="w-4 h-4 mr-2" />
                 确认上线
               </DropdownMenuItem>

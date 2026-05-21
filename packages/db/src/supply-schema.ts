@@ -497,6 +497,7 @@ export const supplierDevice = pgTable(
     gpuCardTypeId: text("gpu_card_type_id")
       .notNull()
       .references(() => gpuCardType.id, { onDelete: "restrict" }),
+    externalDeviceId: varchar("external_device_id", { length: 128 }),
     assetNo: varchar("asset_no", { length: 64 }),
     sn: varchar("sn", { length: 64 }).notNull(),
     idcCode: varchar("idc_code", { length: 64 }).notNull(),
@@ -504,8 +505,17 @@ export const supplierDevice = pgTable(
     gpuCount: integer("gpu_count").notNull(),
     externalIp: varchar("external_ip", { length: 45 }),
     internalIp: varchar("internal_ip", { length: 45 }),
+    opsStatus: varchar("ops_status", { length: 64 }).notNull().default("预留闲置中"),
     lifecycleStatus: varchar("lifecycle_status", { length: 32 }).notNull(),
+    inMaintenance: boolean("in_maintenance").notNull().default(false),
     onboardingSubstage: varchar("onboarding_substage", { length: 64 }),
+    bandwidthGroup: varchar("bandwidth_group", { length: 64 }),
+    rateLimit: varchar("rate_limit", { length: 64 }),
+    deviceSpec: text("device_spec"),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    remark: text("remark"),
+    loginUsername: varchar("login_username", { length: 128 }),
+    loginPassword: text("login_password"),
     platformResourceId: varchar("platform_resource_id", { length: 128 }),
     ...supplyTimestamps,
   },
@@ -517,6 +527,9 @@ export const supplierDevice = pgTable(
     index("supplier_device_data_center_id_idx").on(table.dataCenterId),
     index("supplier_device_lifecycle_status_idx").on(table.lifecycleStatus),
     index("supplier_device_idc_code_idx").on(table.idcCode),
+    index("supplier_device_ops_status_idx").on(table.opsStatus),
+    index("supplier_device_in_maintenance_idx").on(table.inMaintenance),
+    index("supplier_device_external_device_id_idx").on(table.externalDeviceId),
   ],
 )
 
@@ -582,6 +595,9 @@ export const computeNode = pgTable(
       .references(() => supplierDevice.id, { onDelete: "cascade" }),
     nodeRole: varchar("node_role", { length: 32 }).notNull(),
     mgmtIp: varchar("mgmt_ip", { length: 45 }),
+    clusterName: varchar("cluster_name", { length: 128 }),
+    nodeName: varchar("node_name", { length: 128 }),
+    expectedService: varchar("expected_service", { length: 255 }),
     clusterId: varchar("cluster_id", { length: 64 }),
     lifecycleStatus: varchar("lifecycle_status", { length: 32 }).notNull(),
     ...supplyTimestamps,
@@ -589,6 +605,43 @@ export const computeNode = pgTable(
   (table) => [
     index("compute_node_supplier_device_id_idx").on(table.supplierDeviceId),
     index("compute_node_cluster_id_idx").on(table.clusterId),
+  ],
+)
+
+export const supplierDeviceChangeLog = pgTable(
+  "supplier_device_change_log",
+  {
+    id: text("id").primaryKey(),
+    supplierDeviceId: text("supplier_device_id")
+      .notNull()
+      .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    onboardingBatchId: text("onboarding_batch_id")
+      .notNull()
+      .references(() => onboardingBatch.id, { onDelete: "restrict" }),
+    internalIp: varchar("internal_ip", { length: 45 }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    changeAction: varchar("change_action", { length: 64 }).notNull(),
+    changeContent: text("change_content"),
+    description: text("description"),
+    ticketNo: varchar("ticket_no", { length: 64 }),
+    importRowNo: integer("import_row_no"),
+    previousOpsStatus: varchar("previous_ops_status", { length: 64 }),
+    newOpsStatus: varchar("new_ops_status", { length: 64 }),
+    previousLifecycleStatus: varchar("previous_lifecycle_status", { length: 32 }),
+    newLifecycleStatus: varchar("new_lifecycle_status", { length: 32 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("supplier_device_change_log_batch_row_uk").on(
+      table.onboardingBatchId,
+      table.importRowNo,
+    ),
+    index("supplier_device_change_log_device_occurred_idx").on(
+      table.supplierDeviceId,
+      table.occurredAt,
+    ),
+    index("supplier_device_change_log_batch_id_idx").on(table.onboardingBatchId),
+    index("supplier_device_change_log_ticket_no_idx").on(table.ticketNo),
   ],
 )
 
@@ -636,21 +689,37 @@ export const faultIncident = pgTable(
   "fault_incident",
   {
     id: text("id").primaryKey(),
+    supplierId: text("supplier_id")
+      .notNull()
+      .references(() => supplier.id, { onDelete: "restrict" }),
+    supplierOpsUploadBatchId: text("supplier_ops_upload_batch_id").references(
+      () => supplierOpsUploadBatch.id,
+      { onDelete: "set null" },
+    ),
     supplierDeviceId: text("supplier_device_id").references(() => supplierDevice.id, {
       onDelete: "set null",
     }),
     computeNodeId: text("compute_node_id").references(() => computeNode.id, {
       onDelete: "set null",
     }),
-    severity: varchar("severity", { length: 8 }).notNull(),
+    faultType: varchar("fault_type", { length: 64 }).notNull(),
+    severity: varchar("severity", { length: 8 }).notNull().default("P3"),
     incidentStatus: varchar("incident_status", { length: 32 }).notNull(),
+    impactMinutes: integer("impact_minutes"),
+    impactScope: varchar("impact_scope", { length: 255 }),
+    affectedDeviceCount: integer("affected_device_count"),
+    postmortem: text("postmortem"),
     resolutionOutcome: text("resolution_outcome"),
     openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
     closedAt: timestamp("closed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
+    index("fault_incident_supplier_id_opened_idx").on(table.supplierId, table.openedAt),
     index("fault_incident_supplier_device_id_idx").on(table.supplierDeviceId),
     index("fault_incident_compute_node_id_idx").on(table.computeNodeId),
+    index("fault_incident_ops_upload_batch_id_idx").on(table.supplierOpsUploadBatchId),
+    index("fault_incident_fault_type_idx").on(table.faultType),
   ],
 )
 
@@ -705,8 +774,16 @@ export const supplierOpsUploadBatch = pgTable(
     fileName: varchar("file_name", { length: 255 }).notNull(),
     rowsJson: jsonb("rows_json").notNull(),
     status: varchar("status", { length: 32 }).notNull(),
+    importStatus: varchar("import_status", { length: 32 }).notNull().default("uploaded"),
     parseError: text("parse_error"),
+    parsedRowCount: integer("parsed_row_count").notNull().default(0),
+    parsedSuccessCount: integer("parsed_success_count").notNull().default(0),
+    committedIncidentCount: integer("committed_incident_count").notNull().default(0),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
     onboardingBatchId: text("onboarding_batch_id").references(() => onboardingBatch.id, {
+      onDelete: "set null",
+    }),
+    createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -714,6 +791,7 @@ export const supplierOpsUploadBatch = pgTable(
   (table) => [
     index("supplier_ops_upload_batch_supplier_id_idx").on(table.supplierId),
     index("supplier_ops_upload_batch_onboarding_batch_id_idx").on(table.onboardingBatchId),
+    index("supplier_ops_upload_batch_import_status_idx").on(table.importStatus),
   ],
 )
 
@@ -950,7 +1028,19 @@ export const supplierDeviceRelations = relations(supplierDevice, ({ one, many })
     references: [onboardingBatch.id],
   }),
   computeNodes: many(computeNode),
+  changeLogs: many(supplierDeviceChangeLog),
   poolBindings: many(resourcePoolBinding),
+}))
+
+export const supplierDeviceChangeLogRelations = relations(supplierDeviceChangeLog, ({ one }) => ({
+  supplierDevice: one(supplierDevice, {
+    fields: [supplierDeviceChangeLog.supplierDeviceId],
+    references: [supplierDevice.id],
+  }),
+  onboardingBatch: one(onboardingBatch, {
+    fields: [supplierDeviceChangeLog.onboardingBatchId],
+    references: [onboardingBatch.id],
+  }),
 }))
 
 export const supplierBillRelations = relations(supplierBill, ({ one, many }) => ({
@@ -983,5 +1073,7 @@ export type DataCenterRow = typeof dataCenter.$inferSelect
 export type SupplierContractRow = typeof supplierContract.$inferSelect
 export type OnboardingBatchRow = typeof onboardingBatch.$inferSelect
 export type SupplierDeviceRow = typeof supplierDevice.$inferSelect
+export type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSelect
+export type SupplierOpsUploadBatchRow = typeof supplierOpsUploadBatch.$inferSelect
 export type SupplierUnitCostRow = typeof supplierUnitCost.$inferSelect
 export type SupplierGpuInventoryRow = typeof supplierGpuInventory.$inferSelect

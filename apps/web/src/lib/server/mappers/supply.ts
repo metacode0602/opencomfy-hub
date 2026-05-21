@@ -4,6 +4,7 @@ import type {
   DataCenter,
   DataCenterDevice,
   GPUCardType,
+  PhysicalDevice,
   Supplier,
   SupplierBill,
   SupplierBillDetail,
@@ -14,6 +15,7 @@ import type {
 import type {
   DataCenterRow,
   SupplierContractRow,
+  SupplierDeviceRow,
   SupplierGpuInventoryRow,
   SupplierRow,
 } from '@workspace/db/schema'
@@ -278,6 +280,36 @@ export function mapGpuCardTypeRow(row: GpuCardTypeRow): GPUCardType {
     tdpWatts: row.tdpWatts ?? 0,
     computeCapability: row.computeCapability ?? undefined,
     status: row.status as GPUCardType['status'],
+    createdAt: toIsoDate(row.createdAt),
+    updatedAt: toIsoDate(row.updatedAt),
+  }
+}
+
+export function mapPhysicalDeviceRow(
+  row: SupplierDeviceRow,
+  names: { supplierShortName: string; cardTypeName: string },
+): PhysicalDevice {
+  return {
+    id: row.id,
+    supplierId: row.supplierId,
+    supplierShortName: names.supplierShortName,
+    contractId: row.contractId,
+    onboardingBatchId: row.onboardingBatchId,
+    dataCenterId: row.dataCenterId,
+    assetNo: row.assetNo ?? '—',
+    sn: row.sn,
+    lifecycleStatus: row.lifecycleStatus,
+    onboardingSubstage: row.onboardingSubstage,
+    idcRegion: row.idcRegion,
+    idcCode: row.idcCode,
+    gpuCount: row.gpuCount,
+    cardTypeName: names.cardTypeName,
+    externalIp: row.externalIp,
+    internalIp: row.internalIp,
+    platformResourceId: row.platformResourceId,
+    externalDeviceId: row.externalDeviceId,
+    opsStatus: row.opsStatus,
+    inMaintenance: row.inMaintenance,
     createdAt: toIsoDate(row.createdAt),
     updatedAt: toIsoDate(row.updatedAt),
   }

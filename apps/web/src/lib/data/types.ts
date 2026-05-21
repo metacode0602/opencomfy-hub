@@ -489,6 +489,38 @@ export interface DataCenterDevice {
   updatedAt?: string
 }
 
+/** 物理算力设备（supplier_device） */
+export interface PhysicalDevice {
+  id: string
+  supplierId: string
+  supplierShortName: string
+  contractId: string | null
+  onboardingBatchId: string | null
+  dataCenterId: string | null
+  assetNo: string
+  sn: string
+  lifecycleStatus: string
+  onboardingSubstage: string | null
+  idcRegion: string | null
+  idcCode: string
+  gpuCount: number
+  cardTypeName: string
+  externalIp: string | null
+  internalIp: string | null
+  platformResourceId: string | null
+  externalDeviceId: string | null
+  opsStatus: string | null
+  inMaintenance: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PhysicalDeviceStats {
+  total: number
+  online: number
+  onboarding: number
+}
+
 /** L1 聚合库存变更记录（Mock） */
 export interface InventoryChangeLog {
   id: string

@@ -38,27 +38,20 @@ import {
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
+import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import {
   parseDeviceChangelogCsv,
   parseDeviceInventoryCsv,
   parseFaultRecordsCsv,
 } from '@/lib/supplier-ops/parse-device-import-csv'
 import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
-import {
-  FAULT_IMPORT_STATUS_LABELS,
-  buildChangeLogsFromChangelogImport,
-  buildDevicesFromInventoryImport,
-  buildFaultIncidentsFromRecordsImport,
-  createFaultRecordsUploadBatch,
-  createInventoryOnboardingBatch,
-} from '@/lib/supplier/device-import-utils'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
+import { FAULT_IMPORT_STATUS_LABELS } from '@/lib/supplier/device-import-utils'
 import type {
   DeviceChangelogParsedRow,
   DeviceInventoryParsedRow,
   FaultRecordsParsedRow,
-  SupplierActivity,
 } from '@/lib/types/supplier-domain'
+import { trpc } from '@/lib/trpc/client'
 
 export type DeviceImportKind = 'device_inventory' | 'device_changelog' | 'fault_records'
 
@@ -116,6 +109,11 @@ function formatDt(iso: string | null | undefined) {
   })
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return '操作失败，请稍后重试'
+}
+
 function ParseStatusBadge({ status }: { status: string }) {
   const cls =
     status === 'ok'
@@ -134,58 +132,29 @@ export function SupplierDeviceImportPanel({
   supplierId,
   defaultKind = 'device_inventory',
 }: SupplierDeviceImportPanelProps) {
-  const suppliers = useSupplierDomainMockStore((s) => s.suppliers)
-  const dataCenters = useSupplierDomainMockStore((s) => s.dataCenters)
-  const onboardingBatches = useSupplierDomainMockStore((s) => s.onboardingBatches)
-  const opsUploadBatches = useSupplierDomainMockStore((s) => s.opsUploadBatches)
-  const deviceChangeLogs = useSupplierDomainMockStore((s) => s.deviceChangeLogs)
-  const devices = useSupplierDomainMockStore((s) => s.devices)
+  const utils = trpc.useUtils()
 
-  const upsertOnboardingBatch = useSupplierDomainMockStore((s) => s.upsertOnboardingBatch)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertComputeNode = useSupplierDomainMockStore((s) => s.upsertComputeNode)
-  const upsertDeviceChangeLog = useSupplierDomainMockStore((s) => s.upsertDeviceChangeLog)
-  const upsertOpsUploadBatch = useSupplierDomainMockStore((s) => s.upsertOpsUploadBatch)
-  const upsertFaultIncident = useSupplierDomainMockStore((s) => s.upsertFaultIncident)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
+  const { data: supplier, isLoading: supplierLoading, isError: supplierError } =
+    trpc.supplier.getById.useQuery({ id: supplierId }, { retry: 1 })
 
-  const supplier = suppliers.find((s) => s.id === supplierId)
-  const supplierDcs = useMemo(
-    () => dataCenters.filter((dc) => dc.supplier_id === supplierId),
-    [dataCenters, supplierId],
+  const { data: dataCenters = [], isLoading: dcLoading } = trpc.supplier.listDataCenters.useQuery(
+    { supplierId },
+    { enabled: Boolean(supplierId) },
   )
-  const recentInventoryBatches = useMemo(
-    () =>
-      onboardingBatches
-        .filter((b) => b.supplier_id === supplierId && b.batch_kind === 'device_inventory')
-        .slice(0, 5),
-    [onboardingBatches, supplierId],
-  )
-  const recentChangelogBatches = useMemo(
-    () =>
-      onboardingBatches
-        .filter((b) => b.supplier_id === supplierId && b.batch_kind === 'device_changelog')
-        .slice(0, 5),
-    [onboardingBatches, supplierId],
-  )
-  const recentFaultBatches = useMemo(
-    () =>
-      opsUploadBatches
-        .filter((b) => b.supplier_id === supplierId && b.kind === 'fault_records')
-        .slice(0, 5),
-    [opsUploadBatches, supplierId],
-  )
-  const changeLogCount = useMemo(
-    () => deviceChangeLogs.filter((l) => devices.some((d) => d.id === l.supplier_device_id && d.supplier_id === supplierId)).length,
-    [deviceChangeLogs, devices, supplierId],
-  )
+
+  const {
+    data: importContext,
+    isLoading: contextLoading,
+  } = trpc.supplier.deviceImport.getContext.useQuery({ supplierId }, { enabled: Boolean(supplierId) })
+
+  const commitInventoryMutation = trpc.supplier.deviceImport.commitInventory.useMutation()
+  const commitChangelogMutation = trpc.supplier.deviceImport.commitChangelog.useMutation()
+  const commitFaultMutation = trpc.supplier.deviceImport.commitFaultRecords.useMutation()
 
   const [activeKind, setActiveKind] = useState<DeviceImportKind>(defaultKind)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
   const [parsing, setParsing] = useState(false)
-  const [committing, setCommitting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [dataCenterId, setDataCenterId] = useState('')
@@ -194,9 +163,19 @@ export function SupplierDeviceImportPanel({
   const [changelogRows, setChangelogRows] = useState<DeviceChangelogParsedRow[]>([])
   const [faultRows, setFaultRows] = useState<FaultRecordsParsedRow[]>([])
   const [parseError, setParseError] = useState<string | null>(null)
-  const [pendingBatchId, setPendingBatchId] = useState<string | null>(null)
 
   const meta = IMPORT_META[activeKind]
+  const needsDc = activeKind !== 'fault_records'
+
+  const committing =
+    commitInventoryMutation.isPending ||
+    commitChangelogMutation.isPending ||
+    commitFaultMutation.isPending
+
+  const recentInventoryBatches = importContext?.inventoryBatches ?? []
+  const recentChangelogBatches = importContext?.changelogBatches ?? []
+  const recentFaultBatches = importContext?.faultBatches ?? []
+  const changeLogCount = importContext?.changeLogCount ?? 0
 
   const resetWizard = () => {
     setWizardStep('meta')
@@ -206,9 +185,7 @@ export function SupplierDeviceImportPanel({
     setChangelogRows([])
     setFaultRows([])
     setParseError(null)
-    setPendingBatchId(null)
     setParsing(false)
-    setCommitting(false)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -218,217 +195,116 @@ export function SupplierDeviceImportPanel({
     setWizardOpen(true)
   }
 
-  const needsDc = activeKind !== 'fault_records'
+  const invalidateAfterCommit = () => {
+    void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
+    void utils.supplier.listPhysicalDevices.invalidate({ supplierId })
+    void utils.supplier.getPhysicalDeviceStats.invalidate({ supplierId })
+  }
 
   const onParseFile = async (file: File) => {
     setParseError(null)
     setParsing(true)
-    const text = await file.text()
-    setParsing(false)
-    setFileName(file.name)
+    try {
+      const text = await file.text()
+      setFileName(file.name)
 
-    if (activeKind === 'device_inventory') {
-      const result = parseDeviceInventoryCsv(text)
+      if (activeKind === 'device_inventory') {
+        const result = parseDeviceInventoryCsv(text)
+        if (!result.ok) {
+          setParseError(result.error)
+          return
+        }
+        setInventoryRows(result.rows)
+        setWizardStep('preview')
+        toast.success(`解析 ${result.rows.length} 行`)
+        return
+      }
+
+      if (activeKind === 'device_changelog') {
+        const result = parseDeviceChangelogCsv(text)
+        if (!result.ok) {
+          setParseError(result.error)
+          return
+        }
+        setChangelogRows(result.rows)
+        setWizardStep('preview')
+        toast.success(`解析 ${result.rows.length} 行`)
+        return
+      }
+
+      const result = parseFaultRecordsCsv(text)
       if (!result.ok) {
         setParseError(result.error)
         return
       }
-      setInventoryRows(result.rows)
+      setFaultRows(result.rows)
       setWizardStep('preview')
       toast.success(`解析 ${result.rows.length} 行`)
-      return
+    } catch (e) {
+      const message = getErrorMessage(e)
+      setParseError(message)
+      toast.error(message)
+    } finally {
+      setParsing(false)
     }
-
-    if (activeKind === 'device_changelog') {
-      const result = parseDeviceChangelogCsv(text)
-      if (!result.ok) {
-        setParseError(result.error)
-        return
-      }
-      setChangelogRows(result.rows)
-      setWizardStep('preview')
-      toast.success(`解析 ${result.rows.length} 行`)
-      return
-    }
-
-    const result = parseFaultRecordsCsv(text)
-    if (!result.ok) {
-      setParseError(result.error)
-      return
-    }
-    setFaultRows(result.rows)
-    setWizardStep('preview')
-    toast.success(`解析 ${result.rows.length} 行`)
   }
 
-  const saveParsedBatch = (): string | null => {
-    if (!supplier) return null
-    const dc = dataCenters.find((d) => d.id === dataCenterId)
-
-    if (activeKind === 'fault_records') {
-      const idc = dc?.code ?? supplierDcs[0]?.code ?? 'DEFAULT-DC'
-      const batch = createFaultRecordsUploadBatch({
-        supplierId,
-        idcCode: idc,
-        fileName,
-        rows: faultRows,
-        createId,
-      })
-      upsertOpsUploadBatch(batch)
-      setPendingBatchId(batch.id)
-      return batch.id
-    }
-
-    if (!dc) {
-      toast.error('请选择机房')
-      return null
-    }
-
-    const batch = createInventoryOnboardingBatch({
-      batchKind: activeKind,
-      supplier,
-      dc,
-      contractId: '',
-      accessSheetId: '',
-      fileName,
-      rows: activeKind === 'device_inventory' ? inventoryRows : changelogRows,
-      createId,
-    })
-    upsertOnboardingBatch(batch)
-    setPendingBatchId(batch.id)
-    return batch.id
-  }
-
-  const commitImport = () => {
+  const commitImport = async () => {
     if (!supplier) return
-    setCommitting(true)
-    const now = new Date().toISOString()
-    let batchId = pendingBatchId
-    if (!batchId) batchId = saveParsedBatch()
-    if (!batchId) {
-      setCommitting(false)
+
+    if (needsDc && !dataCenterId) {
+      toast.error('请选择机房')
       return
     }
 
-    if (activeKind === 'device_inventory') {
-      const batch = useSupplierDomainMockStore.getState().onboardingBatches.find((b) => b.id === batchId)
-      const dc = dataCenters.find((d) => d.id === dataCenterId)
-      if (!batch || !dc) {
-        setCommitting(false)
-        return
-      }
-      const { devices: newDevices, nodes } = buildDevicesFromInventoryImport({
-        batchId,
-        supplierId,
-        contractId: null,
-        dataCenterId: dc.id,
-        idcCode: dc.code,
-        idcRegion: dc.location,
-        cardTypeDefault: 'A100-80G',
-        rows: inventoryRows,
-        createId,
-      })
-      for (const d of newDevices) upsertDevice(d)
-      for (const n of nodes) upsertComputeNode(n)
-      upsertOnboardingBatch({
-        ...batch,
-        import_status: 'committed',
-        batch_status: '已完成',
-        committed_device_count: newDevices.length,
-        committed_at: now,
-        updated_at: now,
-      })
-      const activity: SupplierActivity = {
-        id: createId('act'),
-        supplier_id: supplierId,
-        type: 'ops_import',
-        title: `设备主数据导入 ${batch.batch_code}`,
-        description: `写入 ${newDevices.length} 台物理机（Mock）`,
-        author_name: '运营（mock）',
-        author_role: 'ops',
-        ref_domain: 'batch',
-        ref_id: batchId,
-        occurred_at: now,
-      }
-      upsertSupplierActivity(activity)
-      toast.success(`已入库 ${newDevices.length} 台设备`)
-    } else if (activeKind === 'device_changelog') {
-      const batch = useSupplierDomainMockStore.getState().onboardingBatches.find((b) => b.id === batchId)
-      if (!batch) {
-        setCommitting(false)
-        return
-      }
-      const supplierDevices = useSupplierDomainMockStore.getState().devices.filter(
-        (d) => d.supplier_id === supplierId,
-      )
-      const { logs, updatedDevices } = buildChangeLogsFromChangelogImport({
-        batchId,
-        rows: changelogRows,
-        devices: supplierDevices,
-        createId,
-      })
-      for (const log of logs) upsertDeviceChangeLog(log)
-      for (const d of updatedDevices) upsertDevice(d)
-      upsertOnboardingBatch({
-        ...batch,
-        import_status: 'committed',
-        batch_status: '已完成',
-        committed_device_count: logs.length,
-        committed_at: now,
-        updated_at: now,
-      })
-      const activity: SupplierActivity = {
-        id: createId('act'),
-        supplier_id: supplierId,
-        type: 'device_change_imported',
-        title: `设备变更导入 ${batch.batch_code}`,
-        description: `追加 ${logs.length} 条变更审计（不写 entity_state_transition_log）`,
-        author_name: '运营（mock）',
-        author_role: 'ops',
-        ref_domain: 'batch',
-        ref_id: batchId,
-        occurred_at: now,
-      }
-      upsertSupplierActivity(activity)
-      toast.success(`已写入 ${logs.length} 条变更记录`)
-    } else {
-      const batch = useSupplierDomainMockStore.getState().opsUploadBatches.find((b) => b.id === batchId)
-      if (!batch) {
-        setCommitting(false)
-        return
-      }
-      const incidents = buildFaultIncidentsFromRecordsImport({
-        batchId,
-        supplierId,
-        rows: faultRows,
-        createId,
-      })
-      for (const f of incidents) upsertFaultIncident(f)
-      upsertOpsUploadBatch({
-        ...batch,
-        import_status: 'committed',
-        committed_incident_count: incidents.length,
-        committed_at: now,
-      })
-      const activity: SupplierActivity = {
-        id: createId('act'),
-        supplier_id: supplierId,
-        type: 'fault_opened',
-        title: `故障记录导入 ${batch.file_name}`,
-        description: `写入 ${incidents.length} 条故障事件`,
-        author_name: '运营（mock）',
-        author_role: 'ops',
-        ref_domain: 'ops_upload_batch',
-        ref_id: batchId,
-        occurred_at: now,
-      }
-      upsertSupplierActivity(activity)
-      toast.success(`已入库 ${incidents.length} 条故障记录`)
+    const okCount = previewRows.filter((r) => r.parse_status === 'ok').length
+    if (okCount === 0) {
+      toast.error('没有通过校验的行可入库')
+      return
     }
 
-    setCommitting(false)
-    setWizardOpen(false)
-    resetWizard()
+    try {
+      let result
+      if (activeKind === 'device_inventory') {
+        result = await commitInventoryMutation.mutateAsync({
+          supplierId,
+          dataCenterId,
+          fileName,
+          rows: inventoryRows,
+        })
+        toast.success(`已入库 ${result.committedCount} 台设备`)
+      } else if (activeKind === 'device_changelog') {
+        result = await commitChangelogMutation.mutateAsync({
+          supplierId,
+          dataCenterId,
+          fileName,
+          rows: changelogRows,
+        })
+        toast.success(`已写入 ${result.committedCount} 条变更记录`)
+      } else {
+        result = await commitFaultMutation.mutateAsync({
+          supplierId,
+          dataCenterId: dataCenterId || undefined,
+          fileName,
+          rows: faultRows,
+        })
+        toast.success(`已入库 ${result.committedCount} 条故障记录`)
+      }
+
+      if (result.skippedCount > 0 || result.warnings.length > 0) {
+        toast.warning(
+          result.warnings.length > 0
+            ? result.warnings.slice(0, 3).join('；')
+            : `跳过 ${result.skippedCount} 行`,
+        )
+      }
+
+      invalidateAfterCommit()
+      setWizardOpen(false)
+      resetWizard()
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    }
   }
 
   const previewRows =
@@ -441,10 +317,23 @@ export function SupplierDeviceImportPanel({
   const okCount = previewRows.filter((r) => r.parse_status === 'ok').length
   const warnCount = previewRows.filter((r) => r.parse_status === 'warning').length
 
-  if (!supplier) {
+  if (supplierLoading || contextLoading) {
     return (
       <Card>
-        <CardContent className="p-8 text-center text-muted-foreground text-sm">未找到供应商</CardContent>
+        <CardContent className="p-8 flex items-center justify-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          加载导入上下文...
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (supplierError || !supplier) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center text-muted-foreground text-sm">
+          未找到供应商或加载失败
+        </CardContent>
       </Card>
     )
   }
@@ -454,9 +343,17 @@ export function SupplierDeviceImportPanel({
       <div>
         <h2 className="text-lg font-medium text-foreground">运维数据导入</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          三类 Excel/CSV 批量导入（仅 Mock，不写库）；依据 supplier-device-import-schema.md
+          三类 Excel/CSV 批量导入，写入 PostgreSQL；依据 supplier-device-import-schema.md
         </p>
       </div>
+
+      {dataCenters.length === 0 && (
+        <Alert>
+          <AlertDescription>
+            该供应商尚未配置机房，设备主数据/变更导入需先添加机房并配置合同与接入条件单。
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {(Object.keys(IMPORT_META) as DeviceImportKind[]).map((kind) => {
@@ -495,10 +392,10 @@ export function SupplierDeviceImportPanel({
             emptyHint="暂无设备主数据导入批次"
             rows={recentInventoryBatches.map((b) => ({
               id: b.id,
-              code: b.batch_code,
-              status: IMPORT_STATUS_LABELS[b.import_status] ?? b.import_status,
-              count: `${b.committed_device_count} / ${b.parsed_success_count}`,
-              time: formatDt(b.committed_at ?? b.parsed_at),
+              code: b.code,
+              status: IMPORT_STATUS_LABELS[b.importStatus as keyof typeof IMPORT_STATUS_LABELS] ?? b.importStatus,
+              count: `${b.committedCount} / ${b.parsedSuccessCount}`,
+              time: formatDt(b.committedAt ?? b.parsedAt),
             }))}
           />
         </TabsContent>
@@ -510,10 +407,10 @@ export function SupplierDeviceImportPanel({
             emptyHint="暂无设备变更导入批次"
             rows={recentChangelogBatches.map((b) => ({
               id: b.id,
-              code: b.batch_code,
-              status: IMPORT_STATUS_LABELS[b.import_status] ?? b.import_status,
-              count: String(b.committed_device_count),
-              time: formatDt(b.committed_at ?? b.parsed_at),
+              code: b.code,
+              status: IMPORT_STATUS_LABELS[b.importStatus as keyof typeof IMPORT_STATUS_LABELS] ?? b.importStatus,
+              count: String(b.committedCount),
+              time: formatDt(b.committedAt ?? b.parsedAt),
             }))}
           />
         </TabsContent>
@@ -522,10 +419,12 @@ export function SupplierDeviceImportPanel({
             emptyHint="暂无故障记录导入批次"
             rows={recentFaultBatches.map((b) => ({
               id: b.id,
-              code: b.file_name,
-              status: FAULT_IMPORT_STATUS_LABELS[b.import_status] ?? b.import_status,
-              count: String(b.committed_incident_count),
-              time: formatDt(b.committed_at ?? b.created_at),
+              code: b.code,
+              status:
+                FAULT_IMPORT_STATUS_LABELS[b.importStatus as keyof typeof FAULT_IMPORT_STATUS_LABELS] ??
+                b.importStatus,
+              count: String(b.committedCount),
+              time: formatDt(b.committedAt ?? b.createdAt),
             }))}
           />
         </TabsContent>
@@ -551,27 +450,34 @@ export function SupplierDeviceImportPanel({
               {needsDc && (
                 <div className="space-y-2">
                   <Label>机房</Label>
-                  <Select value={dataCenterId} onValueChange={setDataCenterId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择机房" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {supplierDcs.map((dc) => (
-                        <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {dcLoading ? (
+                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      加载机房...
+                    </p>
+                  ) : (
+                    <Select value={dataCenterId} onValueChange={setDataCenterId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择机房" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {dataCenters.map((dc) => (
+                          <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               )}
-              {activeKind === 'fault_records' && supplierDcs.length > 0 && (
+              {activeKind === 'fault_records' && dataCenters.length > 0 && (
                 <div className="space-y-2">
                   <Label>默认机房编码（可选）</Label>
                   <Select value={dataCenterId} onValueChange={setDataCenterId}>
                     <SelectTrigger>
-                      <SelectValue placeholder={supplierDcs[0]?.code ?? '选择机房'} />
+                      <SelectValue placeholder={dataCenters[0]?.code ?? '选择机房'} />
                     </SelectTrigger>
                     <SelectContent>
-                      {supplierDcs.map((dc) => (
+                      {dataCenters.map((dc) => (
                         <SelectItem key={dc.id} value={dc.id}>{dc.code} · {dc.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -639,13 +545,10 @@ export function SupplierDeviceImportPanel({
                 <Button variant="outline" onClick={() => setWizardStep('upload')}>重新上传</Button>
                 <Button
                   disabled={committing || okCount === 0}
-                  onClick={() => {
-                    if (!pendingBatchId) saveParsedBatch()
-                    commitImport()
-                  }}
+                  onClick={() => void commitImport()}
                 >
                   {committing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-                  确认入库（Mock）
+                  确认入库
                 </Button>
               </DialogFooter>
             </div>

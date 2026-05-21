@@ -50,6 +50,13 @@
       "when": 1779342052448,
       "tag": "0006_pale_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779352903436,
+      "tag": "0007_remarkable_sheva_callister",
+      "breakpoints": true
     }
   ]
 }
