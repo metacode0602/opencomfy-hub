@@ -1,12 +1,12 @@
 # 供应商算力资源全生命周期 — 产品实现方案
 
-**依据**：`[supplier-database.md](./supplier-database.md)`（v1.2）、`apps/web/src/app/[locale]/(protected)/supplier` 现有路由与组件、`lib/types/supplier-domain.ts` / `supplier-ops-batch.ts` Mock。
+**依据**：`[supplier-database.md](./supplier-database.md)`（v1.4）、`[supplier-device-import-schema.md](./supplier-device-import-schema.md)`（设备/变更/故障 Excel 导入）、`apps/web/src/app/[locale]/(protected)/supplier` 现有路由与组件、`lib/types/supplier-domain.ts` / `supplier-ops-batch.ts` Mock。
 
 **视角**：算力运营经理（以下简称「运营经理」）— 负责供应商侧资源接入、在线可售、故障与测试占用、与商务/财务协同，而非 CRM 客户侧交付。
 
 **文档性质**：产品方案与用户操作流；不涉及代码修改。
 
-**版本**：v1.0（2026-05-20）
+**版本**：v1.1（2026-05-21）
 
 ---
 
@@ -19,7 +19,7 @@
 | **接得进** | 合同与接入条件就绪后，批量导入物理机，施工任务可跟踪直至上线               | §3.3 接入批次、`supplier_device`                         |
 | **管得住** | 运行状态、故障、内部测试、资源池绑定有审计与时间线                    | §3.4–§3.5、`supplier_activity`                       |
 | **算得清** | 机房×卡型成本与合同/财务基准一致，支撑毛利与月结                    | §3.2、`supplier_unit_cost` → `platform_cost_monthly` |
-| **追得到** | 任意一台 SN 从「批次入库 → 子阶段 → 上线 → 维护/退役」可追溯        | §7.3–§7.4、`entity_state_transition_log`             |
+| **追得到** | 任意一台 SN 从「批次入库 → 子阶段 → 上线 → 维护/退订」可追溯        | §7.3–§7.4、`entity_state_transition_log`             |
 
 
 ---
@@ -77,7 +77,8 @@
 | ----------------------------- | ----------------------------------------------------- | ------------ |
 | 接入批次 `onboarding_batch`       | `supplier-domain-mock`、ops batch seed                 | **无**        |
 | Excel/CSV 解析入库                | `parse-inventory-csv.ts`、`import_status` 状态机（设计 §3.3） | **无**        |
-| 物理机 `supplier_device`         | domain mock（SN、子阶段、IP）                                | **无**列表/详情页  |
+| 设备主数据/变更/故障 Excel 导入         | [supplier-device-import-schema.md](./supplier-device-import-schema.md) | **无**        |
+| 物理机 `supplier_device`         | domain mock（SN、子阶段、IP、登录凭据）                         | **无**列表/详情页  |
 | 施工任务 `onboarding_task`        | mock                                                  | **无**        |
 | 计算节点 `compute_node`           | mock                                                  | **无**        |
 | 资源池绑定 `resource_pool_binding` | mock                                                  | **无**        |
@@ -91,7 +92,7 @@
 | ------------------- | ---------------------------------- | --------------------- |
 | 故障 `fault_incident` | Mock 数据                            | 无列表/开单/关闭 UI；与设备详情未关联 |
 | 故障清单 CSV            | `supplier_ops_upload_batch` 设计     | 无                     |
-| 状态审计                | `entity_state_transition_log` Mock | 无排障只读视图               |
+| 状态审计                | `entity_state_transition_log`（UI 手动）；`supplier_device_change_log`（Excel 变更） | 无排障只读视图               |
 
 
 ### 2.3 模型分层与当前前端错位（必须在方案中消化）
@@ -144,9 +145,9 @@ stateDiagram-v2
   维护中 --> 在线: 维护完成
   在线 --> 离线: 主动下线
   离线 --> 在线: 恢复
-  在线 --> 退役: 退租/报废
-  维护中 --> 退役: 无法恢复
-  退役 --> [*]
+  在线 --> 退订: 退租/报废
+  维护中 --> 退订: 无法恢复
+  退订 --> [*]
 ```
 
 
@@ -251,7 +252,7 @@ flowchart TD
   S3 -->|失败| S3e[查看 parse_error 修正重传]
   S3 -->|成功| S4[预览 parsed_rows 校验 SN/IP]
   S4 --> S5[确认入库]
-  S5 --> S6[生成 supplier_device 生命周期=接入中]
+  S5 --> S6[生成 supplier_device 含 login_username/password 明文]
   S6 --> S7[创建 onboarding_task 分配施工人]
   S7 --> S8[supplier_activity: batch_started / ops_import]
   S8 --> S9[异步刷新 supplier_gpu_inventory]
@@ -266,14 +267,30 @@ flowchart TD
 | 2   | 批次向导 Step 1              | 选择供应商、机房、生效合同、接入方式（SSH/IPMI/现场等） | FK 校验 `data_center.supplier_id`；绑定 `access_condition_sheet`                                              |
 | 3   | Step 2                   | 上传清单文件                           | 更新 `import_file_*`，`import_status=uploaded` → 异步 `parsing`                                               |
 | 4   | Step 3                   | 查看解析结果表（成功/警告/失败行）               | `parsed` + `parsed_rows_json` 或 `onboarding_batch_import_row`                                            |
-| 5   | Step 4                   | 确认入库                             | `committing` → 每行 INSERT `supplier_device`（`lifecycle_status=接入中`，`onboarding_batch_id` 一致）→ `committed` |
+| 5   | Step 4                   | 确认入库                             | `committing` → 每行 UPSERT `supplier_device`（含 `login_username`/`login_password` **阶段一明文**、`ops_status`→`lifecycle_status` 映射，`onboarding_batch_id` 一致）→ `committed` |
 | 6   | 批次详情                     | 分配施工任务、设置计划就绪时间                  | INSERT `onboarding_task`；`batch_status=接入中`                                                              |
 | 7   | —                        | —                                | `supplier_activity`：`ops_import`、`batch_started`；刷新对应机房×卡型 `quantity`                                    |
 
 
-**成功标准**：批次 `committed_device_count` = 解析成功行数；供应商详情时间线可见导入事件；设备台账能按批次 SN 检索。
+**成功标准**：批次 `committed_device_count` = 解析成功行数；供应商详情时间线可见导入事件；设备台账能按批次 SN 检索；物理机详情可查看登录凭据（**权限控制 + 默认脱敏**）。
 
 **现状**：侧边栏有入口，**页面与向导均未实现**；`parse-inventory-csv.ts` 可复用。
+
+---
+
+### 流 2b：设备主数据表 / 设备变更表批量导入（运维台账）
+
+**依据**：[supplier-device-import-schema.md](./supplier-device-import-schema.md)。
+
+| 导入类型 | 批次 | commit 写入 |
+|----------|------|-------------|
+| **设备表** | `onboarding_batch.batch_kind=device_inventory` | `supplier_device` + `compute_node`；含登录凭据（阶段一明文） |
+| **设备变更表** | `onboarding_batch.batch_kind=device_changelog`（**每次上传新建批次**） | **仅** `supplier_device_change_log`（含 `ticket_no`）；按行刷新 `ops_status` / `lifecycle_status`；**不写** `entity_state_transition_log` |
+| **故障记录表** | `supplier_ops_upload_batch.kind=fault_records` | `fault_incident` |
+
+**运营经理操作**：在供应商 Hub 或 `/supplier/suppliers/[id]` →「物理机」/「运维导入」上传对应 Excel → 预览 → 确认 commit。
+
+**安全约定（阶段一）**：`login_password` 库内明文；UI 列表掩码显示；导出需单独权限（阶段二改 KMS 加密）。
 
 ---
 
@@ -314,7 +331,7 @@ flowchart LR
 | --- | ----------- | -------------------------------- | ----------------------------------------------------------------------------------- |
 | 1   | 批次详情 · 任务列表 | 工程师开始/完成任务                       | UPDATE `onboarding_task`；子阶段 UPDATE `onboarding_substage`；活动 `device_onboarding`    |
 | 2   | 物理机详情       | 填写 `platform_resource_id`（与监控对齐） | UPDATE `supplier_device`                                                            |
-| 3   | 物理机详情       | 点击「确认上线」                         | `lifecycle_status → online`；INSERT `entity_state_transition_log`；活动 `device_online` |
+| 3   | 物理机详情       | 点击「确认上线」                         | `ops_status`/`lifecycle_status → 在线`；INSERT `entity_state_transition_log`（**仅 UI 手动**）；活动 `device_online` |
 | 4   | 物理机详情       | 绑定资源池、Workload                   | INSERT `resource_pool_binding`；活动 `pool_bound`                                      |
 | 5   | —           | —                                | 触发 `supplier_gpu_inventory` 汇总同步；活动 `inventory_sync`（system）                        |
 
@@ -580,6 +597,7 @@ flowchart LR
 | 接入 CSV 解析  | `lib/supplier-ops/parse-inventory-csv.ts`                      | 流 2 解析预览            |
 | Ops UI 元数据 | `lib/supplier-ops/ui-meta.ts`                                  | 上架/订单/故障页标题与接入方式选项  |
 | 接入域类型      | `lib/types/supplier-domain.ts`                                 | API/表单字段对齐          |
+| 设备导入表结构    | `content/design/supplier-device-import-schema.md`              | 设备/变更/故障 Excel 与 DB |
 | 批次 Mock    | `lib/types/supplier-ops-batch.ts`、`supplier-ops-batch-seed.ts` | 阶段 1 前端联调           |
 | 设备页交互      | `supplier/components/devices-content.tsx`                      | 状态/测试 Dialog 迁到 API |
 | 定价弹窗       | `components/dashboard/create-card-pricing-dialog.tsx`          | 流 9                 |
@@ -609,5 +627,6 @@ flowchart LR
 | 版本   | 日期         | 说明                            |
 | ---- | ---------- | ----------------------------- |
 | v1.0 | 2026-05-20 | 首版：现状分析 + 运营经理视角方案 + 10 条主操作流 |
+| v1.1 | 2026-05-21 | 对齐 v1.4 库表：流 2b 三类 Excel 导入；`supplier_device` 登录凭据阶段一明文；变更走 `supplier_device_change_log` |
 
 

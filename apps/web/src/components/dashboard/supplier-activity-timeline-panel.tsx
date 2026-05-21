@@ -6,6 +6,7 @@ import { Activity, ChevronRight } from 'lucide-react'
 import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
+import { BATCH_KIND_LABELS } from '@/lib/supplier/device-import-utils'
 
 const typeLabels: Record<string, string> = {
   batch_started: '批次',
@@ -15,6 +16,7 @@ const typeLabels: Record<string, string> = {
   fault_opened: '故障',
   fault_closed: '故障',
   ops_import: '导入',
+  device_change_imported: '变更导入',
   pricing_change: '定价',
   contract_created: '合同',
 }
@@ -96,7 +98,7 @@ export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: str
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-medium text-foreground">接入批次</h2>
-          <p className="text-sm text-muted-foreground">该供应商下的上架与订单接入批次</p>
+          <p className="text-sm text-muted-foreground">上架、订单接入、设备主数据与设备变更批次</p>
         </div>
         <Link href="/supplier/online-tasks" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
           接入工作台
@@ -117,12 +119,16 @@ export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: str
                   <Badge variant="outline">{b.batch_status}</Badge>
                 </div>
                 <CardDescription>
-                  {b.batch_kind === 'online' ? '设备上架' : '订单接入'} · {b.idc_code} · 已入库 {b.committed_device_count} 台
+                  {BATCH_KIND_LABELS[b.batch_kind] ?? b.batch_kind} · {b.idc_code} · 已入库 {b.committed_device_count} 台
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4">
                 <Link
-                  href={b.batch_kind === 'online' ? '/supplier/online-tasks' : '/supplier/order-access'}
+                  href={
+                    b.batch_kind === 'online'
+                      ? `/supplier/online-tasks/${b.id}`
+                      : `/supplier/order-access/${b.id}`
+                  }
                   className="text-sm text-primary hover:underline"
                 >
                   查看批次详情

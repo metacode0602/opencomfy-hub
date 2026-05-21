@@ -25,7 +25,7 @@ import {
 } from '@workspace/ui/components/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
-import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
+import { LIFECYCLE_STATUS_COLORS, onboardingBatchDetailPath } from '@/lib/supplier/onboarding-batch-utils'
 import {
   useAssigneeLabel,
   useBatchCode,
@@ -120,6 +120,7 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
   const computeNodes = useSupplierDomainMockStore((s) => s.computeNodes)
   const poolBindings = useSupplierDomainMockStore((s) => s.resourcePoolBindings)
   const transitionLogs = useSupplierDomainMockStore((s) => s.entityStateTransitionLogs)
+  const deviceChangeLogs = useSupplierDomainMockStore((s) => s.deviceChangeLogs)
   const activities = useSupplierDomainMockStore((s) => s.supplierActivities)
   const faultIncidents = useSupplierDomainMockStore((s) => s.faultIncidents)
   const testHolds = useSupplierDomainMockStore((s) => s.internalTestHolds)
@@ -132,6 +133,11 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
   const supplierName = useSupplierLabel(device?.supplier_id ?? '')
   const contractNo = useContractNo(device?.contract_id ?? '')
   const batchCode = useBatchCode(device?.onboarding_batch_id ?? '')
+  const onboardingBatch = useSupplierDomainMockStore((s) =>
+    device?.onboarding_batch_id
+      ? s.onboardingBatches.find((b) => b.id === device.onboarding_batch_id)
+      : undefined,
+  )
 
   const detailNodes = useMemo(
     () => (device ? computeNodes.filter((n) => n.device_id === device.id) : []),
@@ -147,6 +153,13 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
         .filter((log) => log.entity_type === 'device' && log.entity_id === deviceId)
         .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
     [transitionLogs, deviceId],
+  )
+  const importedChangeLogs = useMemo(
+    () =>
+      deviceChangeLogs
+        .filter((log) => log.supplier_device_id === deviceId)
+        .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
+    [deviceChangeLogs, deviceId],
   )
   const relatedActivities = useMemo(
     () =>
@@ -311,7 +324,14 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                 <InfoRow
                   label="接入批次"
                   value={
-                    <Link href="/supplier/online-tasks" className="text-primary hover:underline inline-flex items-center gap-1">
+                    <Link
+                      href={
+                        onboardingBatch
+                          ? onboardingBatchDetailPath(onboardingBatch)
+                          : '/supplier/online-tasks'
+                      }
+                      className="text-primary hover:underline inline-flex items-center gap-1"
+                    >
                       {batchCode}
                       <ChevronRight className="w-3 h-3" />
                     </Link>
@@ -400,6 +420,43 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                       operatorId={log.operator_id}
                       occurredAt={log.occurred_at}
                     />
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Excel 变更导入审计</CardTitle>
+              <CardDescription>来自 supplier_device_change_log（设备变更表批次）</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              {importedChangeLogs.length === 0 ? (
+                <p className="p-8 text-center text-muted-foreground text-sm">暂无导入变更记录</p>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {importedChangeLogs.map((log) => (
+                    <li key={log.id} className="p-4 text-sm space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{log.change_action}</span>
+                        {log.ticket_no && (
+                          <Badge variant="outline" className="text-xs font-mono">
+                            {log.ticket_no}
+                          </Badge>
+                        )}
+                      </div>
+                      {log.change_content && (
+                        <p className="text-muted-foreground">{log.change_content}</p>
+                      )}
+                      {(log.previous_ops_status || log.new_ops_status) && (
+                        <p className="text-xs text-muted-foreground">
+                          状态 {log.previous_ops_status ?? '—'} → {log.new_ops_status ?? '—'}
+                          {log.new_lifecycle_status ? ` · 生命周期 → ${log.new_lifecycle_status}` : ''}
+                        </p>
+                      )}
+                      <p className="text-xs text-muted-foreground">{formatDt(log.occurred_at)}</p>
+                    </li>
                   ))}
                 </ul>
               )}

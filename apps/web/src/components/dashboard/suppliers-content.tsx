@@ -4,9 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Factory,
-  Plus,
   Search,
-  Filter,
   MoreHorizontal,
   Building2,
   Cpu,
@@ -20,6 +18,7 @@ import {
   Eye,
   Edit,
   CreditCard,
+  Upload,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -47,21 +46,14 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Tabs, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@workspace/ui/components/dialog'
-import { Label } from '@workspace/ui/components/label'
 import { mockSuppliers, mockDataCenters } from '@/lib/data/mock-data'
 import { contractPricingModeNames, statusColors } from '@/lib/data/types'
-import type { CooperationMode, Supplier } from '@/lib/data/types'
+import type { Supplier } from '@/lib/data/types'
 import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
-import { toast } from 'sonner'
+import {
+  CreateSupplierDialog,
+  EditSupplierDialog,
+} from '@/components/dashboard/supplier-form-dialog'
 
 const statusNames: Record<string, string> = {
   negotiating: '洽谈中',
@@ -70,40 +62,10 @@ const statusNames: Record<string, string> = {
   terminated: '已终止',
 }
 
-type SupplierFormValues = {
-  name: string
-  shortName: string
-  status: Supplier['status']
-  cooperationMode: CooperationMode
-  revenueShareRatio: string
-  businessManagerStaffId: string
-  contactPerson: string
-  contactPhone: string
-  contactEmail: string
-  address: string
-  bankAccount: string
-  bankName: string
-}
-
-const emptySupplierForm: SupplierFormValues = {
-  name: '',
-  shortName: '',
-  status: 'negotiating',
-  cooperationMode: 'card_time',
-  revenueShareRatio: '',
-  businessManagerStaffId: '',
-  contactPerson: '',
-  contactPhone: '',
-  contactEmail: '',
-  address: '',
-  bankAccount: '',
-  bankName: '',
-}
-
 export function SuppliersContent() {
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => [...mockSuppliers])
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [form, setForm] = useState<SupplierFormValues>(emptySupplierForm)
+  const [editSupplier, setEditSupplier] = useState<Supplier | null>(null)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
@@ -114,65 +76,9 @@ export function SuppliersContent() {
     [userStaff],
   )
 
-  const updateForm = (patch: Partial<SupplierFormValues>) => {
-    setForm((prev) => ({ ...prev, ...patch }))
-  }
-
-  const resetForm = () => setForm(emptySupplierForm)
-
-  const handleCreateSupplier = () => {
-    if (!form.name.trim() || !form.shortName.trim()) {
-      toast.error('请填写供应商全称和简称')
-      return
-    }
-    const businessManager = activeStaff.find((s) => s.id === form.businessManagerStaffId)?.display_name
-    if (!businessManager || !form.contactPerson.trim()) {
-      toast.error('请选择商务经理并填写联系人')
-      return
-    }
-    if (!form.contactPhone.trim() || !form.contactEmail.trim()) {
-      toast.error('请填写联系电话和邮箱')
-      return
-    }
-    if (!form.address.trim()) {
-      toast.error('请填写地址')
-      return
-    }
-    if (form.cooperationMode === 'revenue_share') {
-      const ratio = Number(form.revenueShareRatio)
-      if (!form.revenueShareRatio.trim() || Number.isNaN(ratio) || ratio <= 0 || ratio > 100) {
-        toast.error('分成模式请填写有效的分成比例（1-100）')
-        return
-      }
-    }
-
-    const newSupplier: Supplier = {
-      id: `sup${Date.now()}`,
-      name: form.name.trim(),
-      shortName: form.shortName.trim(),
-      status: form.status,
-      cooperationMode: form.cooperationMode,
-      revenueShareRatio:
-        form.cooperationMode === 'revenue_share'
-          ? Number(form.revenueShareRatio)
-          : undefined,
-      businessManager,
-      contactPerson: form.contactPerson.trim(),
-      contactPhone: form.contactPhone.trim(),
-      contactEmail: form.contactEmail.trim(),
-      address: form.address.trim(),
-      bankAccount: form.bankAccount.trim() || undefined,
-      bankName: form.bankName.trim() || undefined,
-      createdAt: new Date().toISOString().split('T')[0]!,
-      dataCenterCount: 0,
-      totalDeviceCount: 0,
-      monthlySettlement: 0,
-    }
-
-    setSuppliers((prev) => [...prev, newSupplier])
-    resetForm()
-    setCreateDialogOpen(false)
-    toast.success('供应商已创建')
+  const handleEditOpenChange = (open: boolean) => {
+    setEditDialogOpen(open)
+    if (!open) setEditSupplier(null)
   }
 
   const filteredSuppliers = suppliers.filter((supplier) => {
@@ -203,182 +109,16 @@ export function SuppliersContent() {
             管理算力供应商、机房和设备资源
           </p>
         </div>
-        <Dialog
-          open={createDialogOpen}
-          onOpenChange={(open) => {
-            setCreateDialogOpen(open)
-            if (!open) resetForm()
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              新增供应商
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>新增供应商</DialogTitle>
-              <DialogDescription>
-                填写供应商基本信息，创建后可继续维护机房与合同
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="supplier-name">供应商全称</Label>
-                <Input
-                  id="supplier-name"
-                  placeholder="请输入公司全称"
-                  value={form.name}
-                  onChange={(e) => updateForm({ name: e.target.value })}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="supplier-short-name">简称</Label>
-                <Input
-                  id="supplier-short-name"
-                  placeholder="请输入简称"
-                  value={form.shortName}
-                  onChange={(e) => updateForm({ shortName: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>合作状态</Label>
-                  <Select
-                    value={form.status}
-                    onValueChange={(v) => updateForm({ status: v as Supplier['status'] })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(statusNames).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>合作模式</Label>
-                  <Select
-                    value={form.cooperationMode}
-                    onValueChange={(v) =>
-                      updateForm({
-                        cooperationMode: v as CooperationMode,
-                        revenueShareRatio: v === 'card_time' ? '' : form.revenueShareRatio,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(contractPricingModeNames).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>商务经理</Label>
-                  <Select
-                    value={form.businessManagerStaffId || undefined}
-                    onValueChange={(v) => updateForm({ businessManagerStaffId: v })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择商务经理" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeStaff.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.employee_no ? `${s.display_name}（${s.employee_no}）` : s.display_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="supplier-contact-person">联系人</Label>
-                  <Input
-                    id="supplier-contact-person"
-                    placeholder="供应商对接人"
-                    value={form.contactPerson}
-                    onChange={(e) => updateForm({ contactPerson: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="supplier-phone">联系电话</Label>
-                  <Input
-                    id="supplier-phone"
-                    placeholder="请输入联系电话"
-                    value={form.contactPhone}
-                    onChange={(e) => updateForm({ contactPhone: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="supplier-email">联系邮箱</Label>
-                  <Input
-                    id="supplier-email"
-                    type="email"
-                    placeholder="请输入联系邮箱"
-                    value={form.contactEmail}
-                    onChange={(e) => updateForm({ contactEmail: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="supplier-address">地址</Label>
-                <Input
-                  id="supplier-address"
-                  placeholder="请输入详细地址"
-                  value={form.address}
-                  onChange={(e) => updateForm({ address: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="supplier-bank-name">开户行（选填）</Label>
-                  <Input
-                    id="supplier-bank-name"
-                    placeholder="银行名称"
-                    value={form.bankName}
-                    onChange={(e) => updateForm({ bankName: e.target.value })}
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="supplier-bank-account">银行账号（选填）</Label>
-                  <Input
-                    id="supplier-bank-account"
-                    placeholder="对公账号"
-                    value={form.bankAccount}
-                    onChange={(e) => updateForm({ bankAccount: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  resetForm()
-                  setCreateDialogOpen(false)
-                }}
-              >
-                取消
-              </Button>
-              <Button onClick={handleCreateSupplier}>创建供应商</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <div>
+          <Button className="gap-2">
+            <Upload className="w-4 h-4 mr-2" />
+            导入供应商
+          </Button>
+        <CreateSupplierDialog
+          activeStaff={activeStaff}
+          onCreated={(supplier) => setSuppliers((prev) => [...prev, supplier])}
+        />
+        </div>
       </div>
 
       {/* Stats */}
@@ -578,7 +318,12 @@ export function SuppliersContent() {
                             查看详情
                           </Link>
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            setEditSupplier(supplier)
+                            setEditDialogOpen(true)
+                          }}
+                        >
                           <Edit className="w-4 h-4 mr-2" />
                           编辑信息
                         </DropdownMenuItem>
@@ -695,6 +440,16 @@ export function SuppliersContent() {
           })}
         </div>
       )}
+
+      <EditSupplierDialog
+        open={editDialogOpen}
+        onOpenChange={handleEditOpenChange}
+        supplier={editSupplier}
+        activeStaff={activeStaff}
+        onUpdated={(updated) =>
+          setSuppliers((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
+        }
+      />
 
       {filteredSuppliers.length === 0 && (
         <Card className="bg-card border-border">

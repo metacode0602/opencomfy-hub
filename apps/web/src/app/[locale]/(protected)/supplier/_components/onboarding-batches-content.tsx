@@ -34,13 +34,6 @@ import {
   DialogTitle,
 } from '@workspace/ui/components/dialog'
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from '@workspace/ui/components/sheet'
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -48,7 +41,6 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,12 +50,7 @@ import {
 import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI } from '@/lib/supplier-ops/ui-meta'
 import { parseInventoryCsv } from '@/lib/supplier-ops/parse-inventory-csv'
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
-import type {
-  OnboardingBatch,
-  OnboardingParsedRow,
-  OnboardingTask,
-  SupplierActivity,
-} from '@/lib/types/supplier-domain'
+import type { OnboardingBatch, OnboardingParsedRow, SupplierActivity } from '@/lib/types/supplier-domain'
 import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
 import {
   batchKindFromRoute,
@@ -72,8 +59,8 @@ import {
   IMPORT_STATUS_LABELS,
   inventoryRowsToParsed,
   maskPassword,
+  onboardingBatchDetailPath,
 } from '@/lib/supplier/onboarding-batch-utils'
-import { useAssigneeLabel, useDeviceLabel } from '@/lib/supplier/supplier-domain-lookups'
 
 type WizardStep = 'meta' | 'upload' | 'preview' | 'done'
 
@@ -113,8 +100,6 @@ export function OnboardingBatchesContent({
     () => onboardingBatches.filter((b) => b.batch_kind === batchKind),
     [onboardingBatches, batchKind],
   )
-  const devices = useSupplierDomainMockStore((s) => s.devices)
-  const tasks = useSupplierDomainMockStore((s) => s.onboardingTasks)
   const upsertOnboardingBatch = useSupplierDomainMockStore((s) => s.upsertOnboardingBatch)
   const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
   const upsertOnboardingTask = useSupplierDomainMockStore((s) => s.upsertOnboardingTask)
@@ -126,7 +111,6 @@ export function OnboardingBatchesContent({
   const [statusFilter, setStatusFilter] = useState('all')
   const [importFilter, setImportFilter] = useState('all')
   const [wizardOpen, setWizardOpen] = useState(false)
-  const [detailBatch, setDetailBatch] = useState<OnboardingBatch | null>(null)
   const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
   const [parsing, setParsing] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -270,12 +254,16 @@ export function OnboardingBatchesContent({
   }
 
   const commitBatch = (batch: OnboardingBatch) => {
+    if (batch.batch_kind !== 'online' && batch.batch_kind !== 'order_access') {
+      toast.error('该批次类型请使用「运维导入」确认入库')
+      return
+    }
     if (!batch.parsed_rows_json?.length) {
       toast.error('无解析数据，无法入库')
       return
     }
     setCommitting(true)
-    const rows = batch.parsed_rows_json
+    const rows = batch.parsed_rows_json as OnboardingParsedRow[]
     const newDevices = buildDevicesFromBatch({
       batchId: batch.id,
       supplierId: batch.supplier_id,
@@ -338,13 +326,6 @@ export function OnboardingBatchesContent({
     setWizardStep('done')
     resetWizard()
   }
-
-  const detailDevices = detailBatch
-    ? devices.filter((d) => d.onboarding_batch_id === detailBatch.id)
-    : []
-  const detailTasks = detailBatch
-    ? tasks.filter((t) => t.onboarding_batch_id === detailBatch.id)
-    : []
 
   return (
     <div className="space-y-6">
@@ -445,7 +426,14 @@ export function OnboardingBatchesContent({
             ) : (
               filtered.map((b) => (
                 <TableRow key={b.id}>
-                  <TableCell className="font-medium">{b.batch_code}</TableCell>
+                  <TableCell className="font-medium">
+                    <Link
+                      href={onboardingBatchDetailPath(b)}
+                      className="text-primary hover:underline"
+                    >
+                      {b.batch_code}
+                    </Link>
+                  </TableCell>
                   <TableCell>
                     <div>{b.supplier_short_name}</div>
                     <div className="text-xs text-muted-foreground">
@@ -473,9 +461,11 @@ export function OnboardingBatchesContent({
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setDetailBatch(b)}>
-                          <Eye className="w-4 h-4 mr-2" />
-                          查看详情
+                        <DropdownMenuItem asChild>
+                          <Link href={onboardingBatchDetailPath(b)}>
+                            <Eye className="w-4 h-4 mr-2" />
+                            查看详情
+                          </Link>
                         </DropdownMenuItem>
                         {b.import_status === 'parsed' && (
                           <DropdownMenuItem onClick={() => commitBatch(b)}>
@@ -660,99 +650,6 @@ export function OnboardingBatchesContent({
         </DialogContent>
       </Dialog>
 
-      <Sheet open={!!detailBatch} onOpenChange={(o) => !o && setDetailBatch(null)}>
-        <SheetContent className="w-full sm:max-w-xl overflow-y-auto">
-          {detailBatch && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{detailBatch.batch_code}</SheetTitle>
-                <SheetDescription>
-                  {detailBatch.supplier_short_name} · {detailBatch.idc_code}
-                </SheetDescription>
-              </SheetHeader>
-              <Tabs defaultValue="overview" className="mt-6">
-                <TabsList>
-                  <TabsTrigger value="overview">概览</TabsTrigger>
-                  <TabsTrigger value="devices">设备 ({detailDevices.length})</TabsTrigger>
-                  <TabsTrigger value="tasks">任务 ({detailTasks.length})</TabsTrigger>
-                </TabsList>
-                <TabsContent value="overview" className="space-y-4 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">导入状态</span>
-                    <Badge variant="outline">{IMPORT_STATUS_LABELS[detailBatch.import_status]}</Badge>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">批次状态</span>
-                    <span>{detailBatch.batch_status}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">接入方式</span>
-                    <span>{ACCESS_METHOD_OPTIONS.find((o) => o.value === detailBatch.access_method)?.label ?? detailBatch.access_method}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">清单文件</span>
-                    <span>{detailBatch.import_file_name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">入库时间</span>
-                    <span>{formatDt(detailBatch.committed_at)}</span>
-                  </div>
-                  {detailBatch.import_status === 'parsed' && (
-                    <Button className="w-full" onClick={() => commitBatch(detailBatch)}>
-                      确认入库
-                    </Button>
-                  )}
-                  <Link href={`/supplier/suppliers/${detailBatch.supplier_id}`} className="text-primary text-sm inline-flex items-center gap-1">
-                    供应商详情
-                    <ChevronRight className="w-3 h-3" />
-                  </Link>
-                </TabsContent>
-                <TabsContent value="devices">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>SN</TableHead>
-                        <TableHead>状态</TableHead>
-                        <TableHead>子阶段</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detailDevices.map((d) => (
-                        <TableRow key={d.id}>
-                          <TableCell className="font-mono text-xs">{d.sn}</TableCell>
-                          <TableCell>{d.lifecycle_status}</TableCell>
-                          <TableCell>{d.onboarding_substage}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TabsContent>
-                <TabsContent value="tasks" className="space-y-3">
-                  {detailTasks.map((t) => (
-                    <OnboardingTaskCard key={t.id} task={t} />
-                  ))}
-                </TabsContent>
-              </Tabs>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
-  )
-}
-
-function OnboardingTaskCard({ task }: { task: OnboardingTask }) {
-  const assignee = useAssigneeLabel(task.assignee_id)
-  const deviceLabel = useDeviceLabel(task.device_id ?? '')
-  return (
-    <Card>
-      <CardHeader className="py-3">
-        <CardTitle className="text-sm">{task.task_type}</CardTitle>
-        <CardDescription>
-          {assignee} · {task.task_status}
-          {task.device_id ? ` · ${deviceLabel}` : ' · 批次级'}
-        </CardDescription>
-      </CardHeader>
-    </Card>
   )
 }

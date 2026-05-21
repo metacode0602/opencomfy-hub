@@ -4,7 +4,9 @@
 
 **文档性质**：供应商域逻辑表结构（PostgreSQL 风格类型）；物理实现可独立 schema（如 `supplier`），外键语义与唯一约束应保持一致。与 CRM 域通过 `user_staff`、财务域通过 `supplier_unit_cost` / `platform_cost_monthly` 衔接。
 
-**版本**：v1.3（2026-05-21）
+**版本**：v1.4（2026-05-21）
+
+**设备批量导入补充**：[supplier-device-import-schema.md](./supplier-device-import-schema.md)（`ops_status`、`device_inventory` / `device_changelog` 批次、`supplier_device_change_log`、故障 `fault_records` 导入；v1.1 起登录凭据阶段一明文）
 
 **核心目标**：
 
@@ -47,7 +49,8 @@
 | **合同与计价** | `supplier_contract` 存商务合同；计价细节拆为 `supplier_terms_version` + `supplier_card_list_price`（刊例价）+ `supplier_unit_cost`（成交价/财务基准）+ `supplier_pricing_tier`（**按成交/刊例比例**划档）；UI 当前价用 `supplier_pricing_record`（生效中快照）。 |
 | **刊例价与阶梯** | **刊例价**为供应商×机房×卡型的基准挂牌单价；**成交卡时价**为实际采购结算价；**阶梯档**由 `deal_to_list_ratio`（成交/刊例）区间或各档 `list_price_multiplier` 表达，**不以累计用量（卡时）划档**（见 §3.2.1）。 |
 | **两类设备表** | **物理机** `supplier_device`（SN 级）与 **聚合库存** `supplier_gpu_inventory`（机房×卡型）并存；大盘读聚合，接入详情读物理机。 |
-| **接入编排** | 选定 **供应商 + 机房** → 上传 Excel → `onboarding_batch`（含解析行）→ `supplier_device` / `onboarding_task`；合同与 `access_condition_sheet` 仍关联；状态变更写 `entity_state_transition_log` 并 **投影** `supplier_activity`。 |
+| **接入编排** | 选定 **供应商 + 机房** → 上传 Excel → `onboarding_batch`（含解析行）→ `supplier_device` / `onboarding_task`；合同与 `access_condition_sheet` 仍关联；**UI 手动**状态变更写 `entity_state_transition_log` 并投影 `supplier_activity`；**Excel 设备变更**写 `supplier_device_change_log`（见补充设计 §3.5）。 |
+| **设备登录凭据** | Excel「登录用户名/登录密码」入库 `supplier_device.login_username` / `login_password`；**阶段一明文**；列表/API 默认脱敏；阶段二加密（见 [supplier-device-import-schema.md §3.1.1](./supplier-device-import-schema.md)）。 |
 | **活动时间线** | `supplier_activity`：供应商 Hub 时间线（类比 CRM `project_activity`）；机器可读审计用 `entity_state_transition_log`，二者通过 `metadata.ref_log_id` 关联。 |
 | **内部测试** | 聚合层 `is_internal_test` 与物理层 `internal_test_hold` 对齐；开启/关闭须写时间线 `internal_test_hold`。 |
 | **财务单价** | 财务月结行 `platform_cost_monthly.supplier_unit_cost_id` FK → `supplier_unit_cost`；解析失败时回退 `supplier_pricing_record`（应用层，见 `cost-row-utils.ts`）。 |
@@ -89,7 +92,7 @@
 | **R-S3.3b** | **冗余快照**：写入批次时同步冗余 `supplier_code`、`supplier_name`、`idc_code`、`data_center_name`（及可选 `idc_region`），便于列表/导出不 JOIN；主数据变更 **不回写** 历史批次。 |
 | **R-S3.3c** | **Excel 导入**：上架/订单接入类批次须上传清单文件（`.xlsx` / `.csv`）；解析结果落 `parsed_rows_json`（及可选明细表）；`import_status = parsed` 后才允许「确认入库」生成 `supplier_device`。 |
 | **R-S3.4** | 聚合库存 `supplier_gpu_inventory` 的 `quantity` / `online_quantity` 须与同期 `supplier_device` 汇总一致（允许异步刷新，延迟 ≤ 业务约定 SLA）。 |
-| **R-S3.5** | 设备生命周期状态变更必须写 `entity_state_transition_log`；若为用户可见事件，同步写 `supplier_activity`（`type` 见 §3.8）。 |
+| **R-S3.5** | **UI/接口手动**变更 `lifecycle_status` 须写 `entity_state_transition_log` 并投影 `supplier_activity`。**Excel 设备变更表**导入仅写 `supplier_device_change_log`（`onboarding_batch.batch_kind=device_changelog`），不写 `entity_state_transition_log`（见 [supplier-device-import-schema.md](./supplier-device-import-schema.md)）。 |
 
 #### 规则 4：资源监控与可售
 
@@ -639,7 +642,7 @@ UK：`(contract_id, version_no)`；部分唯一索引：`(contract_id) WHERE is_
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
-| `batch_kind` | varchar(32) | NOT NULL | `online`（设备上架）\| `order_access`（订单接入） |
+| `batch_kind` | varchar(32) | NOT NULL | `online` \| `order_access` \| `device_inventory`（设备主数据表）\| `device_changelog`（设备变更表）；后两者见 [supplier-device-import-schema.md](./supplier-device-import-schema.md) |
 | **归属（FK + 冗余快照）** | | | |
 | `supplier_id` | text | FK→`supplier`, NOT NULL | 本批次上架供应商 |
 | `supplier_code` | varchar(64) | NOT NULL | 冗余：`supplier.code` |
@@ -704,8 +707,8 @@ CHECK（应用层或 DB）：`data_center_id` 所属 `supplier_id` 与批次 `su
   "row_no": 2,
   "public_ip": "203.0.113.10",
   "private_ip": "10.20.30.40",
-  "root_account": "root",
-  "root_password": "***",
+  "login_username": "root",
+  "login_password": "***",
   "sn": "8F2A91C2",
   "asset_no": "AST-HB-00091",
   "gpu_count": 8,
@@ -719,7 +722,7 @@ CHECK（应用层或 DB）：`data_center_id` 所属 `supplier_id` 与批次 `su
 |------|------|------|
 | `row_no` | 是 | 源文件行号（便于报错定位） |
 | `public_ip` / `private_ip` | 是 | 公网/内网 IP |
-| `root_account` / `root_password` | 是 | 带外/跳板登录信息（入库 `supplier_device` 或加密凭据表时脱敏） |
+| `login_username` / `login_password` | 否 | 登录凭据；入库 `supplier_device`（**阶段一明文**）；解析兼容别名 `root_account` / `root_password` |
 | `sn` / `asset_no` | 否 | 有则用于建 `supplier_device` UK |
 | `gpu_count` / `card_type_code` | 否 | 无则继承批次默认值或合同默认卡型 |
 
@@ -732,8 +735,8 @@ CHECK（应用层或 DB）：`data_center_id` 所属 `supplier_id` 与批次 `su
 | `row_no` | integer | NOT NULL | |
 | `public_ip` | varchar(45) | NOT NULL | |
 | `private_ip` | varchar(45) | NOT NULL | |
-| `root_account` | varchar(128) | NOT NULL | |
-| `root_password_enc` | text | NOT NULL | 加密存储 |
+| `login_username` | varchar(128) | 可空 | Excel「登录用户名」；commit 写入 `supplier_device` |
+| `login_password` | text | 可空 | Excel「登录密码」；**阶段一明文**（不再使用 `root_password_enc`） |
 | `sn` | varchar(64) | 可空 | |
 | `asset_no` | varchar(64) | 可空 | |
 | `gpu_count` | integer | 可空 | |
@@ -770,30 +773,42 @@ UK：`(onboarding_batch_id, row_no)`。索引：`(onboarding_batch_id)`、`(pars
 
 #### `supplier_device`（物理算力设备）
 
-对应 `lib/types/supplier-domain.SupplierDevice`；**接入追踪的核心实体**。
+对应 `lib/types/supplier-domain.SupplierDevice`；**接入追踪的核心实体**。扩展字段与 `ops_status` 映射见 [supplier-device-import-schema.md §3.1](./supplier-device-import-schema.md)。
 
 | 列名 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | text | PK | |
 | `supplier_id` | text | FK→`supplier`, NOT NULL | |
 | `contract_id` | text | FK→`supplier_contract`, 可空 | |
-| `onboarding_batch_id` | text | FK→`onboarding_batch`, 可空 | |
+| `onboarding_batch_id` | text | FK→`onboarding_batch`, 可空 | 最近一次 **设备主数据** 导入批次（`device_inventory` / `online` / `order_access`） |
 | `data_center_id` | text | FK→`data_center`, 可空 | 落机房前可空 |
 | `gpu_card_type_id` | text | FK→`gpu_card_type`, NOT NULL | |
-| `asset_no` | varchar(64) | UK | |
+| `external_device_id` | varchar(128) | 可空 | Excel「设备ID」 |
+| `asset_no` | varchar(64) | UK, 可空 | Excel「设备标识」 |
 | `sn` | varchar(64) | UK, NOT NULL | |
-| `idc_code` | varchar(64) | NOT NULL | 冗余，对接导入 CSV |
+| `idc_code` | varchar(64) | NOT NULL | 冗余，对接导入 |
 | `idc_region` | varchar(64) | 可空 | |
 | `gpu_count` | integer | NOT NULL | 单机 GPU 数 |
 | `external_ip` | varchar(45) | 可空 | |
-| `internal_ip` | varchar(45) | 可空 | |
-| `lifecycle_status` | varchar(32) | NOT NULL | 待接入/接入中/在线/离线/维护/退役 |
+| `internal_ip` | varchar(45) | 可空 | Excel「内网IP」 |
+| `ops_status` | varchar(64) | NOT NULL | Excel「设备状态」原文；字典 `lifecycle_state_definition.domain=device_ops_status` |
+| `lifecycle_status` | varchar(32) | NOT NULL | CRM 统一状态：待接入/接入中/在线/离线/维护中/退订；由 `ops_status` + `in_maintenance` 映射 |
+| `in_maintenance` | boolean | NOT NULL DEFAULT false | Excel「维修中」 |
 | `onboarding_substage` | varchar(64) | 可空 | 上架布线/联调/… |
+| `bandwidth_group` | varchar(64) | 可空 | Excel「带宽组」 |
+| `rate_limit` | varchar(64) | 可空 | Excel「限速」 |
+| `device_spec` | text | 可空 | Excel「设备配置」 |
+| `received_at` | timestamptz | 可空 | Excel「设备接收时间」 |
+| `remark` | text | 可空 | Excel「备注」 |
+| `login_username` | varchar(128) | 可空 | Excel「登录用户名」；**阶段一明文** |
+| `login_password` | text | 可空 | Excel「登录密码」；**阶段一明文**（阶段二改加密，见补充设计 §3.1.1） |
 | `platform_resource_id` | varchar(128) | 可空 | 与监控/调度系统对齐 |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | NOT NULL | |
 
-索引：`(supplier_id)`、`(onboarding_batch_id)`、`(data_center_id)`、`(lifecycle_status)`、`(idc_code)`。
+**不落库**：Excel「合作类型」（归属合同域）。
+
+索引：`(supplier_id)`、`(onboarding_batch_id)`、`(data_center_id)`、`(lifecycle_status)`、`(ops_status)`、`(in_maintenance)`、`(idc_code)`。
 
 ---
 
@@ -807,12 +822,41 @@ UK：`(onboarding_batch_id, row_no)`。索引：`(onboarding_batch_id)`、`(pars
 | `supplier_device_id` | text | FK→`supplier_device`, NOT NULL | |
 | `node_role` | varchar(32) | NOT NULL | Worker / ControlPlane / … |
 | `mgmt_ip` | varchar(45) | 可空 | |
-| `cluster_id` | varchar(64) | 可空 | |
+| `cluster_name` | varchar(128) | 可空 | Excel「K8s集群」 |
+| `node_name` | varchar(128) | 可空 | Excel「集群中节点名称」 |
+| `expected_service` | varchar(255) | 可空 | Excel「预期集群提供服务」 |
+| `cluster_id` | varchar(64) | 可空 | 平台侧集群 ID |
 | `lifecycle_status` | varchar(32) | NOT NULL | |
 | `created_at` | timestamptz | NOT NULL | |
 | `updated_at` | timestamptz | NOT NULL | |
 
 索引：`(supplier_device_id)`、`(cluster_id)`。
+
+---
+
+#### `supplier_device_change_log`（设备变更审计 — Excel 导入）
+
+对应设备变更表批量导入；**不可变追加**；详见 [supplier-device-import-schema.md §3.5](./supplier-device-import-schema.md)。
+
+| 列名 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | text | PK | |
+| `supplier_device_id` | text | FK→`supplier_device`, NOT NULL | |
+| `onboarding_batch_id` | text | FK→`onboarding_batch`, NOT NULL | `batch_kind=device_changelog` |
+| `internal_ip` | varchar(45) | 可空 | 校验冗余 |
+| `occurred_at` | timestamptz | NOT NULL | 操作时间 |
+| `change_action` | varchar(64) | NOT NULL | 变更动作 |
+| `change_content` | text | 可空 | 变更内容 |
+| `description` | text | 可空 | 详细说明 |
+| `ticket_no` | varchar(64) | 可空 | 工单 |
+| `import_row_no` | integer | 可空 | 源行号 |
+| `previous_ops_status` | varchar(64) | 可空 | commit 快照 |
+| `new_ops_status` | varchar(64) | 可空 | |
+| `previous_lifecycle_status` | varchar(32) | 可空 | |
+| `new_lifecycle_status` | varchar(32) | 可空 | |
+| `created_at` | timestamptz | NOT NULL | |
+
+索引：`(supplier_device_id, occurred_at DESC)`、`(onboarding_batch_id)`、`(ticket_no)` WHERE NOT NULL。
 
 ---
 
@@ -1377,3 +1421,4 @@ GROUP BY 1, 2, 3;
 | v1.1 | 2026-05-19 | 阶梯计价改为成交/刊例比例；新增 `supplier_card_list_price` |
 | v1.2 | 2026-05-19 | `onboarding_batch` 增加 Excel 导入、解析状态及供应商/机房冗余字段；可选 `onboarding_batch_import_row` |
 | v1.3 | 2026-05-21 | `data_center`：`network_fee_monthly` / `mgmt_node_fee_monthly` 改为 jsonb 配套费配置；新增 `region_tags`；`supplier_contract` 增加 OSS PDF 上传元数据字段 |
+| v1.4 | 2026-05-21 | `supplier_device` 扩展导入字段与 `login_username`/`login_password`（阶段一明文）；`onboarding_batch_import_row` 凭据列改为明文；新增 `supplier_device_change_log`；`batch_kind` 增加 `device_inventory`/`device_changelog`；关联 [supplier-device-import-schema.md](./supplier-device-import-schema.md) |

@@ -1,4 +1,9 @@
-import type { OnboardingBatchKind, OnboardingParsedRow, SupplierDevice } from "@/lib/types/supplier-domain"
+import type {
+  OnboardingBatch,
+  OnboardingBatchKind,
+  OnboardingParsedRow,
+  SupplierDevice,
+} from "@/lib/types/supplier-domain"
 import type { SupplierOpsInventoryRow } from "@/lib/types/supplier-ops-batch"
 
 export function batchKindFromRoute(kind: "online-tasks" | "order-access"): OnboardingBatchKind {
@@ -9,8 +14,24 @@ export function routeKindFromBatch(batchKind: OnboardingBatchKind): "online-task
   return batchKind === "online" ? "online-tasks" : "order-access"
 }
 
+export function onboardingBatchDetailPath(
+  batch: Pick<OnboardingBatch, "id" | "batch_kind">,
+): string {
+  const kind = routeKindFromBatch(batch.batch_kind)
+  return `/supplier/${kind}/${batch.id}`
+}
+
 export function generateBatchCode(batchKind: OnboardingBatchKind): string {
-  const prefix = batchKind === "online" ? "ONB" : "ORD"
+  const prefix =
+    batchKind === "online"
+      ? "ONB"
+      : batchKind === "order_access"
+        ? "ORD"
+        : batchKind === "device_inventory"
+          ? "DINV"
+          : batchKind === "device_changelog"
+            ? "DCHG"
+            : "BAT"
   const d = new Date()
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")

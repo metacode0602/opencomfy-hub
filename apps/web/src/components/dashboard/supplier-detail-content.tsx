@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -51,15 +52,37 @@ import {
   SupplierOnboardingBatchesPanel,
 } from '@/components/dashboard/supplier-activity-timeline-panel'
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
+import { SupplierDeviceImportPanel } from '@/components/dashboard/supplier-device-import-panel'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 
 interface SupplierDetailContentProps {
   supplier: Supplier
 }
 
+const VALID_TABS = new Set([
+  'overview',
+  'datacenters',
+  'devices',
+  'contracts',
+  'unit-costs',
+  'bills',
+  'batches',
+  'timeline',
+  'machines',
+  'ops-import',
+])
+
 export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) {
-  const [activeTab, setActiveTab] = useState('overview')
+  const searchParams = useSearchParams()
+  const tabFromUrl = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState(
+    tabFromUrl && VALID_TABS.has(tabFromUrl) ? tabFromUrl : 'overview',
+  )
   const domainSupplierId = resolveDomainSupplierId(supplier.id)
+
+  useEffect(() => {
+    if (tabFromUrl && VALID_TABS.has(tabFromUrl)) setActiveTab(tabFromUrl)
+  }, [tabFromUrl])
 
   const dataCenters = getDataCentersBySupplierId(supplier.id)
   const devices = getDevicesBySupplierId(supplier.id)
@@ -215,6 +238,7 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
           <TabsTrigger value="batches">接入批次</TabsTrigger>
           <TabsTrigger value="timeline">活动时间线</TabsTrigger>
           <TabsTrigger value="machines">物理机</TabsTrigger>
+          <TabsTrigger value="ops-import">运维导入</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -396,7 +420,10 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
         </TabsContent>
 
         <TabsContent value="devices" className="space-y-4">
-          <SupplierDevicesPanel supplier={supplier} />
+          <SupplierDevicesPanel
+            supplier={supplier}
+            onOpenOpsImport={() => setActiveTab('ops-import')}
+          />
         </TabsContent>
 
         <TabsContent value="contracts" className="space-y-4">
@@ -417,6 +444,10 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
 
         <TabsContent value="machines" className="space-y-4">
           <PhysicalDevicesContent supplierIdFilter={domainSupplierId} />
+        </TabsContent>
+
+        <TabsContent value="ops-import" className="space-y-4">
+          <SupplierDeviceImportPanel supplierId={domainSupplierId} />
         </TabsContent>
       </Tabs>
     </div>

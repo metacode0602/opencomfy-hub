@@ -164,10 +164,17 @@ export function FaultIncidentsContent() {
             登记与跟踪供应商侧物理机/节点故障（Mock，后续接 tRPC）
           </p>
         </div>
-        <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-          <Plus className="w-4 h-4" />
-          新建故障单
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" asChild>
+            <Link href="/supplier/suppliers/sup1?tab=ops-import">
+              故障记录表导入
+            </Link>
+          </Button>
+          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+            <Plus className="w-4 h-4" />
+            新建故障单
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4">

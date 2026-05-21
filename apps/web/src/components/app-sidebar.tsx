@@ -67,16 +67,6 @@ const data = {
       icon: <FileText className="size-4" />,
     },
     {
-      title: "平台定价",
-      url: "/supplier/platform-pricing",
-      icon: <Sparkles className="size-4" />,
-    },
-    {
-      title: "卡型单价",
-      url: "/supplier/unit-costs",
-      icon: <DollarSignIcon className="size-4" />,
-    },
-    {
       title: "设备管理",
       url: "/supplier/devices",
       icon: <Computer className="size-4" />,
@@ -149,6 +139,16 @@ const data = {
       title: "运营月报",
       url: "/finance",
       icon: <CreditCard className="size-4" />,
+    },
+    {
+      title: "平台定价",
+      url: "/supplier/platform-pricing",
+      icon: <Sparkles className="size-4" />,
+    },
+    {
+      title: "卡型单价",
+      url: "/supplier/unit-costs",
+      icon: <DollarSignIcon className="size-4" />,
     },
   ],
   navSecondary: [

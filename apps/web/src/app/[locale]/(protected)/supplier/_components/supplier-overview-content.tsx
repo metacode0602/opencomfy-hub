@@ -587,8 +587,8 @@ export function SupplierOverviewContent() {
                       <Link
                         href={
                           batch.batchKind === 'online'
-                            ? '/supplier/online-tasks'
-                            : '/supplier/order-access'
+                            ? `/supplier/online-tasks/${batch.id}`
+                            : `/supplier/order-access/${batch.id}`
                         }
                       >
                         查看

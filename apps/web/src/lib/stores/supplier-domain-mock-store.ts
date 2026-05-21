@@ -16,6 +16,8 @@ import type {
   SupplierContract,
   SupplierDataCenter,
   SupplierDevice,
+  SupplierDeviceChangeLog,
+  SupplierOpsUploadBatch,
   SupplierTermsVersion,
   SupplierUnitCost,
 } from "@/lib/types/supplier-domain"
@@ -85,6 +87,12 @@ export type SupplierDomainMockState = Base & {
 
   upsertSupplierActivity: (row: SupplierActivity) => void
   removeSupplierActivity: (id: string) => void
+
+  upsertDeviceChangeLog: (row: SupplierDeviceChangeLog) => void
+  removeDeviceChangeLog: (id: string) => void
+
+  upsertOpsUploadBatch: (row: SupplierOpsUploadBatch) => void
+  removeOpsUploadBatch: (id: string) => void
 }
 
 function collectCascadeForSupplier(
@@ -316,10 +324,31 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
 
       upsertSupplierActivity: (row) => set((s) => ({ supplierActivities: replaceById(s.supplierActivities, row) })),
       removeSupplierActivity: (id) => set((s) => ({ supplierActivities: s.supplierActivities.filter((x) => x.id !== id) })),
+
+      upsertDeviceChangeLog: (row) =>
+        set((s) => ({ deviceChangeLogs: replaceById(s.deviceChangeLogs, row) })),
+      removeDeviceChangeLog: (id) =>
+        set((s) => ({ deviceChangeLogs: s.deviceChangeLogs.filter((x) => x.id !== id) })),
+
+      upsertOpsUploadBatch: (row) =>
+        set((s) => ({ opsUploadBatches: replaceById(s.opsUploadBatches, row) })),
+      removeOpsUploadBatch: (id) =>
+        set((s) => ({ opsUploadBatches: s.opsUploadBatches.filter((x) => x.id !== id) })),
     }),
     {
-      name: "supplier-domain-mock-store-v2",
-      version: 2,
+      name: "supplier-domain-mock-store-v3",
+      version: 3,
+      migrate: (persisted, version) => {
+        const state = persisted as SupplierDomainMockState
+        if (version < 3) {
+          return {
+            ...state,
+            deviceChangeLogs: state.deviceChangeLogs ?? supplierDomainSeed.deviceChangeLogs,
+            opsUploadBatches: state.opsUploadBatches ?? supplierDomainSeed.opsUploadBatches,
+          }
+        }
+        return state
+      },
     },
   ),
 )

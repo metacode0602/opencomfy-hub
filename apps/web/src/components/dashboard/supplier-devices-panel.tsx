@@ -26,9 +26,10 @@ import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-det
 
 interface SupplierDevicesPanelProps {
   supplier: Supplier
+  onOpenOpsImport?: () => void
 }
 
-export function SupplierDevicesPanel({ supplier }: SupplierDevicesPanelProps) {
+export function SupplierDevicesPanel({ supplier, onOpenOpsImport }: SupplierDevicesPanelProps) {
   const [devices] = useState<DataCenterDevice[]>(() => getDevicesBySupplierId(supplier.id))
 
   const totalOnlineDevices = devices.reduce((sum, d) => sum + d.onlineQuantity, 0)
@@ -69,10 +70,18 @@ export function SupplierDevicesPanel({ supplier }: SupplierDevicesPanelProps) {
           <h2 className="text-lg font-medium text-foreground">设备资源</h2>
           <p className="text-sm text-muted-foreground">管理各机房的GPU设备和成本配置</p>
         </div>
-        <Button className="gap-2">
-          <Plus className="w-4 h-4" />
-          新增设备
-        </Button>
+        <div className="flex gap-2">
+          {onOpenOpsImport && (
+            <Button variant="outline" className="gap-2" onClick={onOpenOpsImport}>
+              <Plus className="w-4 h-4" />
+              运维导入
+            </Button>
+          )}
+          <Button className="gap-2">
+            <Plus className="w-4 h-4" />
+            新增设备
+          </Button>
+        </div>
       </div>
 
       <Card className="bg-card border-border">

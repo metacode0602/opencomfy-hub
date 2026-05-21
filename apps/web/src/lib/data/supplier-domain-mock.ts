@@ -13,6 +13,8 @@ import type {
   SupplierContract,
   SupplierDataCenter,
   SupplierDevice,
+  SupplierDeviceChangeLog,
+  SupplierOpsUploadBatch,
   SupplierTermsVersion,
   SupplierUnitCost,
 } from "@/lib/types/supplier-domain"
@@ -56,6 +58,8 @@ export type SupplierDomainSeed = {
   lifecycleStateDefinitions: LifecycleStateDefinition[]
   entityStateTransitionLogs: EntityStateTransitionLog[]
   supplierActivities: SupplierActivity[]
+  deviceChangeLogs: SupplierDeviceChangeLog[]
+  opsUploadBatches: SupplierOpsUploadBatch[]
 }
 
 export const supplierDomainSeed: SupplierDomainSeed = {
@@ -315,6 +319,11 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       external_ip: "203.0.113.11",
       internal_ip: "10.20.30.41",
       platform_resource_id: "res-hb-a100-92",
+      external_device_id: "EXT-7C11AA01",
+      ops_status: "在集群中",
+      in_maintenance: false,
+      login_username: "root",
+      login_password: "mock-secret",
     },
   ],
 
@@ -541,6 +550,55 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       ref_domain: "batch",
       ref_id: batch2,
       occurred_at: now,
+    },
+  ],
+
+  deviceChangeLogs: [
+    {
+      id: "dcl-001",
+      supplier_device_id: dev2,
+      onboarding_batch_id: batch1,
+      internal_ip: "10.20.30.41",
+      occurred_at: "2026-04-18T10:00:00.000Z",
+      change_action: "状态变更",
+      change_content: "设备状态改为在集群中",
+      description: "验收通过",
+      ticket_no: "WO-20260418-01",
+      import_row_no: 2,
+      previous_ops_status: "网关直连裸金属上架中",
+      new_ops_status: "在集群中",
+      previous_lifecycle_status: "接入中",
+      new_lifecycle_status: "在线",
+      created_at: "2026-04-18T10:05:00.000Z",
+    },
+  ],
+
+  opsUploadBatches: [
+    {
+      id: "opsb-fault-001",
+      kind: "fault_records",
+      supplier_id: supA,
+      idc_code: "HB-BJ-DC1",
+      file_name: "故障记录-2026Q1.csv",
+      import_status: "committed",
+      parsed_row_count: 1,
+      parsed_success_count: 1,
+      rows_json: [
+        {
+          row_no: 2,
+          opened_at: "2026-04-12T09:00:00.000Z",
+          closed_at: "2026-04-12T14:30:00.000Z",
+          fault_type: "网络抖动",
+          impact_minutes: 330,
+          impact_scope: "A100 机房 B 区",
+          affected_device_count: 2,
+          postmortem: "更换光模块",
+          parse_status: "ok",
+        },
+      ],
+      committed_incident_count: 1,
+      committed_at: "2026-04-12T15:00:00.000Z",
+      created_at: "2026-04-12T08:00:00.000Z",
     },
   ],
 }

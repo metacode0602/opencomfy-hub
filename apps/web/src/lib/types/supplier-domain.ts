@@ -55,7 +55,11 @@ export type AccessConditionSheet = {
   gpu_network_cpu_terms: Record<string, unknown>
 }
 
-export type OnboardingBatchKind = "online" | "order_access"
+export type OnboardingBatchKind =
+  | "online"
+  | "order_access"
+  | "device_inventory"
+  | "device_changelog"
 
 export type OnboardingImportStatus =
   | "draft"
@@ -77,6 +81,47 @@ export type OnboardingParsedRow = {
   asset_no?: string
   gpu_count?: number
   card_type_code?: string
+  parse_status: "ok" | "warning" | "error"
+  parse_message?: string | null
+}
+
+/** 设备主数据表 Excel 解析行（batch_kind=device_inventory） */
+export type DeviceInventoryParsedRow = {
+  row_no: number
+  external_device_id?: string
+  internal_ip?: string
+  asset_no?: string
+  sn?: string
+  gpu_card_type_code?: string
+  gpu_count?: number
+  ops_status: string
+  in_maintenance?: boolean
+  bandwidth_group?: string
+  rate_limit?: string
+  device_spec?: string
+  received_at?: string
+  remark?: string
+  login_username?: string
+  login_password?: string
+  cluster_name?: string
+  node_name?: string
+  node_role?: string
+  expected_service?: string
+  parse_status: "ok" | "warning" | "error"
+  parse_message?: string | null
+  supplier_device_id?: string
+}
+
+/** 设备变更表 Excel 解析行（batch_kind=device_changelog） */
+export type DeviceChangelogParsedRow = {
+  row_no: number
+  external_device_id?: string
+  internal_ip?: string
+  occurred_at: string
+  change_action: string
+  change_content?: string
+  description?: string
+  ticket_no?: string
   parse_status: "ok" | "warning" | "error"
   parse_message?: string | null
 }
@@ -103,7 +148,11 @@ export type OnboardingBatch = {
   parse_error?: string | null
   parsed_row_count: number
   parsed_success_count: number
-  parsed_rows_json: OnboardingParsedRow[] | null
+  parsed_rows_json:
+    | OnboardingParsedRow[]
+    | DeviceInventoryParsedRow[]
+    | DeviceChangelogParsedRow[]
+    | null
   parsed_at: string | null
   committed_device_count: number
   committed_at: string | null
@@ -128,6 +177,18 @@ export type SupplierDevice = {
   external_ip: string
   internal_ip: string
   platform_resource_id?: string | null
+  /** Excel 设备ID */
+  external_device_id?: string | null
+  /** Excel 设备状态原文 */
+  ops_status?: string
+  in_maintenance?: boolean
+  bandwidth_group?: string | null
+  rate_limit?: string | null
+  device_spec?: string | null
+  received_at?: string | null
+  remark?: string | null
+  login_username?: string | null
+  login_password?: string | null
 }
 
 export type ComputeNode = {
@@ -137,6 +198,28 @@ export type ComputeNode = {
   mgmt_ip: string
   cluster_id: string
   lifecycle_status: string
+  cluster_name?: string | null
+  node_name?: string | null
+  expected_service?: string | null
+}
+
+/** 设备变更审计（device_changelog 批次 commit） */
+export type SupplierDeviceChangeLog = {
+  id: string
+  supplier_device_id: string
+  onboarding_batch_id: string
+  internal_ip?: string | null
+  occurred_at: string
+  change_action: string
+  change_content?: string | null
+  description?: string | null
+  ticket_no?: string | null
+  import_row_no?: number | null
+  previous_ops_status?: string | null
+  new_ops_status?: string | null
+  previous_lifecycle_status?: string | null
+  new_lifecycle_status?: string | null
+  created_at: string
 }
 
 export type OnboardingTask = {
@@ -161,6 +244,50 @@ export type FaultIncident = {
   resolution_outcome: string
   opened_at: string
   closed_at: string | null
+  /** 故障记录表导入 */
+  supplier_ops_upload_batch_id?: string | null
+  fault_type?: string
+  impact_minutes?: number | null
+  impact_scope?: string | null
+  affected_device_count?: number | null
+  postmortem?: string | null
+}
+
+/** 故障记录表导入批次（kind=fault_records） */
+export type FaultRecordsImportStatus =
+  | "uploaded"
+  | "parsed"
+  | "committed"
+  | "parse_failed"
+
+export type FaultRecordsParsedRow = {
+  row_no: number
+  opened_at: string
+  closed_at?: string
+  fault_type: string
+  impact_minutes?: number
+  impact_scope?: string
+  affected_device_count?: number
+  postmortem?: string
+  parse_status: "ok" | "warning" | "error"
+  parse_message?: string | null
+  fault_incident_id?: string
+}
+
+export type SupplierOpsUploadBatch = {
+  id: string
+  kind: "fault_records"
+  supplier_id: string
+  idc_code: string
+  file_name: string
+  import_status: FaultRecordsImportStatus
+  parse_error?: string | null
+  parsed_row_count: number
+  parsed_success_count: number
+  rows_json: FaultRecordsParsedRow[]
+  committed_incident_count: number
+  committed_at: string | null
+  created_at: string
 }
 
 export type InternalTestHold = {
@@ -221,6 +348,8 @@ export const SUPPLIER_RELATION_KEYS = [
   "unit-costs",
   "access-sheets",
   "onboarding-batches",
+  "device-change-logs",
+  "ops-upload-batches",
   "devices",
   "compute-nodes",
   "onboarding-tasks",
@@ -244,6 +373,8 @@ export const SUPPLIER_RELATION_TITLES: Record<SupplierRelationKey, string> = {
   "unit-costs": "条款单价/分成档",
   "access-sheets": "接入条件单",
   "onboarding-batches": "接入批次",
+  "device-change-logs": "设备变更审计",
+  "ops-upload-batches": "运维上传批次",
   devices: "物理设备",
   "compute-nodes": "计算节点",
   "onboarding-tasks": "接入施工任务",
