@@ -41,13 +41,14 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
+import { Textarea } from '@workspace/ui/components/textarea'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
-import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI } from '@/lib/supplier-ops/ui-meta'
+import { ACCESS_METHOD_OPTIONS, ONLINE_REASON_OPTIONS, OPS_KIND_UI, onlineReasonLabel } from '@/lib/supplier-ops/ui-meta'
 import { parseInventoryCsv } from '@/lib/supplier-ops/parse-inventory-csv'
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
 import type { OnboardingBatch, OnboardingParsedRow, SupplierActivity } from '@/lib/types/supplier-domain'
@@ -90,6 +91,7 @@ export function OnboardingBatchesContent({
 }) {
   const ui = OPS_KIND_UI[routeKind]
   const batchKind = batchKindFromRoute(routeKind)
+  const isOnlineTasks = routeKind === 'online-tasks'
 
   const suppliers = useSupplierDomainMockStore((s) => s.suppliers)
   const dataCenters = useSupplierDomainMockStore((s) => s.dataCenters)
@@ -121,6 +123,8 @@ export function OnboardingBatchesContent({
   const [contractId, setContractId] = useState('')
   const [accessMethod, setAccessMethod] = useState('ssh_jump')
   const [plannedReady, setPlannedReady] = useState('')
+  const [onlineReason, setOnlineReason] = useState('')
+  const [remark, setRemark] = useState('')
   const [fileName, setFileName] = useState('')
   const [parsedRows, setParsedRows] = useState<OnboardingParsedRow[]>([])
   const [parseError, setParseError] = useState<string | null>(null)
@@ -165,6 +169,8 @@ export function OnboardingBatchesContent({
     setContractId('')
     setAccessMethod('ssh_jump')
     setPlannedReady('')
+    setOnlineReason('')
+    setRemark('')
     setFileName('')
     setParsedRows([])
     setParseError(null)
@@ -187,6 +193,10 @@ export function OnboardingBatchesContent({
       toast.error('请完整选择供应商、机房与生效合同')
       return null
     }
+    if (isOnlineTasks && !onlineReason) {
+      toast.error('请选择上架原因')
+      return null
+    }
     const now = new Date().toISOString()
     const batch: OnboardingBatch = {
       id: draftBatchId ?? createId('batch'),
@@ -204,6 +214,8 @@ export function OnboardingBatchesContent({
       batch_code: generateBatchCode(batchKind),
       batch_status: '待开始',
       planned_ready_at: plannedReady ? new Date(plannedReady).toISOString() : null,
+      online_reason: isOnlineTasks ? onlineReason : null,
+      remark: remark.trim() || null,
       access_method: accessMethod,
       import_file_name: fileName || '未上传',
       import_status: 'draft',
@@ -412,6 +424,7 @@ export function OnboardingBatchesContent({
               <TableHead>导入状态</TableHead>
               <TableHead>批次状态</TableHead>
               <TableHead>已入库</TableHead>
+              {isOnlineTasks && <TableHead>上架原因</TableHead>}
               <TableHead>计划就绪</TableHead>
               <TableHead className="w-[80px]" />
             </TableRow>
@@ -419,7 +432,7 @@ export function OnboardingBatchesContent({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={isOnlineTasks ? 8 : 7} className="text-center text-muted-foreground py-12">
                   暂无批次，点击右上角新建
                 </TableCell>
               </TableRow>
@@ -450,6 +463,11 @@ export function OnboardingBatchesContent({
                     {b.committed_device_count}
                     {b.parsed_success_count > 0 ? ` / ${b.parsed_success_count}` : ''}
                   </TableCell>
+                  {isOnlineTasks && (
+                    <TableCell className="text-sm">
+                      {onlineReasonLabel(b.online_reason)}
+                    </TableCell>
+                  )}
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDt(b.planned_ready_at)}
                   </TableCell>
@@ -551,6 +569,32 @@ export function OnboardingBatchesContent({
                   <Label>计划就绪时间（可选）</Label>
                   <Input type="datetime-local" value={plannedReady} onChange={(e) => setPlannedReady(e.target.value)} />
                 </div>
+                {isOnlineTasks && (
+                  <>
+                    <div className="space-y-2 col-span-2">
+                      <Label>上架原因</Label>
+                      <Select value={onlineReason} onValueChange={setOnlineReason}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="请选择上架原因" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ONLINE_REASON_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label>备注</Label>
+                      <Textarea
+                        placeholder="补充说明本次上架背景、优先级或特殊要求"
+                        value={remark}
+                        onChange={(e) => setRemark(e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setWizardOpen(false)}>取消</Button>
@@ -559,7 +603,12 @@ export function OnboardingBatchesContent({
                     if (!createDraftBatch()) return
                     setWizardStep('upload')
                   }}
-                  disabled={!supplierId || !dataCenterId || !contractId}
+                  disabled={
+                    !supplierId ||
+                    !dataCenterId ||
+                    !contractId ||
+                    (isOnlineTasks && !onlineReason)
+                  }
                 >
                   下一步：上传清单
                   <ChevronRight className="w-4 h-4 ml-1" />

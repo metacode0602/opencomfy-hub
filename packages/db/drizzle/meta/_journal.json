@@ -52,10 +52,17 @@
       "breakpoints": true
     },
     {
-      "idx": 7,
+      "idx": 8,
       "version": "7",
-      "when": 1779352903436,
-      "tag": "0007_remarkable_sheva_callister",
+      "when": 1779400000000,
+      "tag": "0008_device_retire_batch",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779354897186,
+      "tag": "0009_futuristic_tinkerer",
       "breakpoints": true
     }
   ]

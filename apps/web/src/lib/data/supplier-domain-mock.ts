@@ -36,8 +36,13 @@ const batch1 = "batch-hb-2026-q1"
 const batch2 = "batch-hb-ord-2026-01"
 const dev1 = "dev-sn-8f2a91"
 const dev2 = "dev-sn-7c11aa"
+const dev3 = "dev-sh-001"
+const dev4 = "dev-sh-002"
+const dev5 = "dev-retired-01"
 const node1 = "node-dev1-w01"
 const node2 = "node-dev2-cp"
+const node3 = "node-dev3-w01"
+const node4 = "node-dev4-w01"
 
 const now = "2026-05-18T10:00:00.000Z"
 
@@ -211,6 +216,8 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       batch_code: "ONB-2026-Q1-HB",
       batch_status: "接入中",
       planned_ready_at: "2026-06-01T10:00:00.000Z",
+      online_reason: "contract_delivery",
+      remark: "Q1 合同交付首批 2 台 A100，需优先完成联调",
       access_method: "ssh_jump",
       import_file_name: "上架清单-Q1.csv",
       import_status: "committed",
@@ -260,6 +267,8 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       batch_code: "ORD-202605-102",
       batch_status: "待开始",
       planned_ready_at: "2026-06-15T18:00:00.000Z",
+      online_reason: null,
+      remark: null,
       access_method: "ipmi",
       import_file_name: "订单接入-待入库.csv",
       import_status: "parsed",
@@ -325,6 +334,73 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       login_username: "root",
       login_password: "mock-secret",
     },
+    {
+      id: dev3,
+      supplier_id: supA,
+      contract_id: conA1,
+      onboarding_batch_id: batch1,
+      data_center_id: dcHbSh,
+      asset_no: "AST-HB-SH-001",
+      sn: "SH001ABC",
+      lifecycle_status: "在线",
+      onboarding_substage: "已完成",
+      idc_region: "华东-上海",
+      idc_code: "HB-SH-DC2",
+      gpu_count: "8",
+      card_type: "A100-80G",
+      external_ip: "203.0.113.30",
+      internal_ip: "10.30.10.10",
+      platform_resource_id: "res-hb-sh-001",
+      external_device_id: "EXT-SH-001",
+      ops_status: "在集群中",
+      in_maintenance: false,
+      login_username: "root",
+      login_password: "mock-secret",
+    },
+    {
+      id: dev4,
+      supplier_id: supA,
+      contract_id: conA1,
+      onboarding_batch_id: batch1,
+      data_center_id: dcHbSh,
+      asset_no: "AST-HB-SH-002",
+      sn: "SH002DEF",
+      lifecycle_status: "在线",
+      onboarding_substage: "已完成",
+      idc_region: "华东-上海",
+      idc_code: "HB-SH-DC2",
+      gpu_count: "8",
+      card_type: "H100-80G",
+      external_ip: "203.0.113.31",
+      internal_ip: "10.30.10.11",
+      platform_resource_id: null,
+      external_device_id: "EXT-SH-002",
+      ops_status: "在集群中",
+      in_maintenance: true,
+      login_username: "root",
+      login_password: "mock-secret",
+    },
+    {
+      id: dev5,
+      supplier_id: supA,
+      contract_id: conA1,
+      onboarding_batch_id: batch1,
+      data_center_id: dcHbBj,
+      asset_no: "AST-HB-RETIRED",
+      sn: "RET001XYZ",
+      lifecycle_status: "已下线",
+      onboarding_substage: "已完成",
+      idc_region: "华北-北京",
+      idc_code: "HB-BJ-DC1",
+      gpu_count: "8",
+      card_type: "A100-80G",
+      external_ip: "203.0.113.99",
+      internal_ip: "10.20.30.99",
+      platform_resource_id: null,
+      external_device_id: "EXT-RETIRED-01",
+      ops_status: "已退订",
+      in_maintenance: false,
+    },
   ],
 
   computeNodes: [
@@ -342,6 +418,22 @@ export const supplierDomainSeed: SupplierDomainSeed = {
       node_role: "Worker",
       mgmt_ip: "10.20.30.51",
       cluster_id: "cls-hb-prod-01",
+      lifecycle_status: "在线",
+    },
+    {
+      id: node3,
+      device_id: dev3,
+      node_role: "Worker",
+      mgmt_ip: "10.30.10.20",
+      cluster_id: "cls-hb-sh-prod-01",
+      lifecycle_status: "在线",
+    },
+    {
+      id: node4,
+      device_id: dev4,
+      node_role: "Worker",
+      mgmt_ip: "10.30.10.21",
+      cluster_id: "cls-hb-sh-prod-01",
       lifecycle_status: "在线",
     },
   ],

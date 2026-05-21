@@ -25,6 +25,7 @@ import {
   CheckCircleIcon,
   Computer,
   CreditCard,
+  DownloadIcon,
   Factory,
   FileText,
   FolderKanban,
@@ -71,6 +72,11 @@ const data = {
       url: "/supplier/devices",
       icon: <Computer className="size-4" />,
     },
+    {
+      title: "设备下架",
+      url: "/supplier/offline-tasks",
+      icon: <DownloadIcon className="size-4" />,
+    },    
     {
       title: "设备上架",
       url: "/supplier/online-tasks",

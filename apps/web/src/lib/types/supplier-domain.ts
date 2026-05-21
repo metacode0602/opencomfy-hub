@@ -60,6 +60,7 @@ export type OnboardingBatchKind =
   | "order_access"
   | "device_inventory"
   | "device_changelog"
+  | "device_retire"
 
 export type OnboardingImportStatus =
   | "draft"
@@ -142,6 +143,10 @@ export type OnboardingBatch = {
   batch_code: string
   batch_status: string
   planned_ready_at: string | null
+  /** 上架原因（`batch_kind=online` 时填写） */
+  online_reason: string | null
+  /** 批次备注 */
+  remark: string | null
   access_method: string
   import_file_name: string
   import_status: OnboardingImportStatus

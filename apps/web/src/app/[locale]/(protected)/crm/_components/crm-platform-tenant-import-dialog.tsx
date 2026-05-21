@@ -80,9 +80,13 @@ function CustomerSearchSelect({
 }) {
   const [search, setSearch] = React.useState("")
   const [debouncedSearch, setDebouncedSearch] = React.useState("")
+  const [open, setOpen] = React.useState(false)
 
   React.useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    const t = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+      setOpen(false)
+    }, 300)
     return () => window.clearTimeout(t)
   }, [search])
 
@@ -91,7 +95,7 @@ function CustomerSearchSelect({
     { enabled: !disabled },
   )
 
-  const selectedLabel = customers.find((c) => c.id === value)?.name
+  const emptyMessage = debouncedSearch ? "未找到匹配客户" : "输入关键词搜索客户"
 
   return (
     <div className="space-y-2">
@@ -102,24 +106,29 @@ function CustomerSearchSelect({
         onChange={(e) => setSearch(e.target.value)}
         className="h-8 text-sm"
       />
-      <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+      <Select
+        open={open}
+        onOpenChange={setOpen}
+        value={value || undefined}
+        onValueChange={(customerId) => {
+          onChange(customerId)
+          setOpen(false)
+        }}
+        disabled={disabled}
+        key={debouncedSearch || "__all__"}
+      >
         <SelectTrigger className="w-full">
-          <SelectValue placeholder={isFetching ? "加载中…" : "选择客户"}>
-            {value && !selectedLabel ? value : selectedLabel}
-          </SelectValue>
+          <SelectValue placeholder={isFetching ? "加载中…" : "选择客户"} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent position="popper">
           {customers.length === 0 ? (
-            <p className="text-muted-foreground px-2 py-4 text-center text-xs">
-              {debouncedSearch ? "未找到匹配客户" : "输入关键词搜索客户"}
-            </p>
+            <SelectItem value="__empty__" disabled>
+              {emptyMessage}
+            </SelectItem>
           ) : (
             customers.slice(0, 50).map((c) => (
               <SelectItem key={c.id} value={c.id}>
-                {c.name}
-                <span className="text-muted-foreground ml-2">
-                  ({c.type === "B" ? "企业" : "个人"})
-                </span>
+                {`${c.name} (${c.type === "B" ? "企业" : "个人"})`}
               </SelectItem>
             ))
           )}
@@ -349,7 +358,7 @@ export function CrmPlatformTenantImportDialog({
             </div>
           )}
 
-          {step === "preview" && preview && (
+          {step === "preview" && preview && !commitMutation.isPending && (
             <div className="space-y-4 px-1">
               {preview.missingPlatformIds.length > 0 && (
                 <Alert variant="destructive">
@@ -619,7 +628,7 @@ function PreviewRow({
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent position="popper">
                     <SelectItem value="B">B 端（企业）</SelectItem>
                     <SelectItem value="C">C 端（个人）</SelectItem>
                   </SelectContent>

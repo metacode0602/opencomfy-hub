@@ -29,8 +29,10 @@ export function generateBatchCode(batchKind: OnboardingBatchKind): string {
         ? "ORD"
         : batchKind === "device_inventory"
           ? "DINV"
-          : batchKind === "device_changelog"
-            ? "DCHG"
+        : batchKind === "device_changelog"
+          ? "DCHG"
+          : batchKind === "device_retire"
+            ? "RET"
             : "BAT"
   const d = new Date()
   const y = d.getFullYear()

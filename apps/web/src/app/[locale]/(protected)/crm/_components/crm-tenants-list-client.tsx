@@ -188,16 +188,20 @@ export function CrmTenantsListClient() {
         </CardContent>
       </Card>
 
-      <CrmPlatformTenantImportDialog
-        open={platformImportOpen}
-        onOpenChange={setPlatformImportOpen}
-        onSuccess={onImportSuccess}
-      />
-      <CrmTenantImportDialog
-        open={excelImportOpen}
-        onOpenChange={setExcelImportOpen}
-        onSuccess={onImportSuccess}
-      />
+      {platformImportOpen ? (
+        <CrmPlatformTenantImportDialog
+          open
+          onOpenChange={setPlatformImportOpen}
+          onSuccess={onImportSuccess}
+        />
+      ) : null}
+      {excelImportOpen ? (
+        <CrmTenantImportDialog
+          open
+          onOpenChange={setExcelImportOpen}
+          onSuccess={onImportSuccess}
+        />
+      ) : null}
     </div>
   )
 }

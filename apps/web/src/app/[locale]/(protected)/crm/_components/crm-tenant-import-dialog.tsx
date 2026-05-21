@@ -164,13 +164,7 @@ export function CrmTenantImportDialog({
               )}
             </Button>
           ) : (
-            <Button
-              type="button"
-              onClick={() => {
-                onSuccess()
-                handleClose(false)
-              }}
-            >
+            <Button type="button" onClick={() => handleClose(false)}>
               完成并刷新
             </Button>
           )}

@@ -172,15 +172,16 @@ export const physicalDevicesDataAccess = {
 }
 
 export async function resolveOnboardingBatchRefs(supplierId: string): Promise<{
-  contractId: string
-  accessSheetId: string
+  contractId: string | null
+  accessSheetId: string | null
 }> {
   await suppliersDataAccess.assertSupplierExists(supplierId)
 
   const contracts = await suppliersDataAccess.listContractsBySupplier(supplierId)
-  const contract = contracts.find((c) => c.status === 'active') ?? contracts[0]
+  const contract = contracts.find((c) => c.status === 'active') ?? contracts[0] ?? null
   if (!contract) {
-    throw new Error('请先创建供应商合同后再导入设备')
+    supplierLog('physical-devices', 'resolveOnboardingBatchRefs: no contract', { supplierId })
+    return { contractId: null, accessSheetId: null }
   }
 
   const [sheet] = await db
@@ -195,7 +196,11 @@ export async function resolveOnboardingBatchRefs(supplierId: string): Promise<{
     .limit(1)
 
   if (!sheet) {
-    throw new Error('请先配置当前接入条件单后再导入设备')
+    supplierWarn('physical-devices', 'resolveOnboardingBatchRefs: no access sheet', {
+      supplierId,
+      contractId: contract.id,
+    })
+    return { contractId: contract.id, accessSheetId: null }
   }
 
   return { contractId: contract.id, accessSheetId: sheet.id }

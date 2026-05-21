@@ -22,7 +22,7 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
-import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI } from '@/lib/supplier-ops/ui-meta'
+import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI, onlineReasonLabel } from '@/lib/supplier-ops/ui-meta'
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
 import type {
   OnboardingParsedRow,
@@ -422,6 +422,24 @@ export function OnboardingBatchDetailContent({
                   <p className="text-muted-foreground">合同 / 接入条件</p>
                   <p className="font-medium mt-1 font-mono text-xs">{batch.contract_id}</p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground">计划就绪时间</p>
+                  <p className="font-medium mt-1">{formatDt(batch.planned_ready_at)}</p>
+                </div>
+                {batch.batch_kind === 'online' && (
+                  <>
+                    <div>
+                      <p className="text-muted-foreground">上架原因</p>
+                      <p className="font-medium mt-1">{onlineReasonLabel(batch.online_reason)}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">备注</p>
+                      <p className="font-medium mt-1 whitespace-pre-wrap">
+                        {batch.remark?.trim() || '—'}
+                      </p>
+                    </div>
+                  </>
+                )}
                 <div>
                   <p className="text-muted-foreground">创建时间</p>
                   <p className="font-medium mt-1">{formatDt(batch.created_at)}</p>

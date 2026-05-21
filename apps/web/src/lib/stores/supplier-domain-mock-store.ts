@@ -337,7 +337,7 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
     }),
     {
       name: "supplier-domain-mock-store-v3",
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const state = persisted as SupplierDomainMockState
         if (version < 3) {
@@ -346,6 +346,19 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
             deviceChangeLogs: state.deviceChangeLogs ?? supplierDomainSeed.deviceChangeLogs,
             opsUploadBatches: state.opsUploadBatches ?? supplierDomainSeed.opsUploadBatches,
           }
+        }
+        if (version < 4) {
+          const existingIds = new Set((state.devices ?? []).map((d) => d.id))
+          const mergedDevices = [
+            ...(state.devices ?? []),
+            ...supplierDomainSeed.devices.filter((d) => !existingIds.has(d.id)),
+          ]
+          const existingNodeIds = new Set((state.computeNodes ?? []).map((n) => n.id))
+          const mergedNodes = [
+            ...(state.computeNodes ?? []),
+            ...supplierDomainSeed.computeNodes.filter((n) => !existingNodeIds.has(n.id)),
+          ]
+          return { ...state, devices: mergedDevices, computeNodes: mergedNodes }
         }
         return state
       },

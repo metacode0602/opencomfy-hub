@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-import'
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
+import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
 import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/supplier-import'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
@@ -12,6 +13,7 @@ import {
   deviceInventoryRowSchema,
   faultRecordsRowSchema,
 } from '@/lib/server/routers/supplier/device-import-schemas'
+import { deviceRetireRequestSchema } from '@/lib/server/routers/supplier/device-retire-schemas'
 import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -31,6 +33,9 @@ function mapImportError(error: unknown): never {
       message.includes('无法解析') ||
       message.includes('请先') ||
       message.includes('没有可入库') ||
+      message.includes('没有通过校验') ||
+      message.includes('外网IP') ||
+      message.includes('期望完成日期') ||
       message.includes('已在线') ||
       message.includes('不属于')
     ) {
@@ -241,6 +246,70 @@ export const supplierRouter = createTRPCRouter({
           mapImportError(e)
         }
       }),
+  }),
+
+  deviceRetire: createTRPCRouter({
+    listBatches: protectedProcedure
+      .input(
+        z
+          .object({
+            supplierId: z.string().optional(),
+            importStatus: z.string().optional(),
+            search: z.string().optional(),
+          })
+          .optional(),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await deviceRetireDataAccess.listBatches(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getBatchById: protectedProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const batch = await deviceRetireDataAccess.getBatchById(input.id)
+          if (!batch) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '下架批次不存在' })
+          }
+          return batch
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getContext: protectedProcedure
+      .input(z.object({ supplierId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          return await deviceRetireDataAccess.getContext(input.supplierId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    preview: adminProcedure.input(deviceRetireRequestSchema).mutation(async ({ input }) => {
+      try {
+        return await deviceRetireDataAccess.preview(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    commit: adminProcedure.input(deviceRetireRequestSchema).mutation(async ({ input, ctx }) => {
+      try {
+        return await deviceRetireDataAccess.commit({
+          ...input,
+          operatorStaffId: ctx.user.id,
+          operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
   }),
 
   import: createTRPCRouter({

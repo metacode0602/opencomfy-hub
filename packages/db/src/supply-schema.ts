@@ -431,12 +431,13 @@ export const onboardingBatch = pgTable(
     idcCode: varchar("idc_code", { length: 64 }).notNull(),
     dataCenterName: varchar("data_center_name", { length: 255 }).notNull(),
     idcRegion: varchar("idc_region", { length: 64 }),
-    contractId: text("contract_id")
-      .notNull()
-      .references(() => supplierContract.id, { onDelete: "restrict" }),
-    accessConditionSheetId: text("access_condition_sheet_id")
-      .notNull()
-      .references(() => accessConditionSheet.id, { onDelete: "restrict" }),
+    contractId: text("contract_id").references(() => supplierContract.id, {
+      onDelete: "restrict",
+    }),
+    accessConditionSheetId: text("access_condition_sheet_id").references(
+      () => accessConditionSheet.id,
+      { onDelete: "restrict" },
+    ),
     batchCode: varchar("batch_code", { length: 64 }).notNull(),
     batchStatus: varchar("batch_status", { length: 32 }).notNull(),
     plannedReadyAt: timestamp("planned_ready_at", { withTimezone: true }),
@@ -453,6 +454,10 @@ export const onboardingBatch = pgTable(
     parsedAt: timestamp("parsed_at", { withTimezone: true }),
     committedDeviceCount: integer("committed_device_count").notNull().default(0),
     committedAt: timestamp("committed_at", { withTimezone: true }),
+    retireReason: varchar("retire_reason", { length: 64 }),
+    expectedCompletionDate: date("expected_completion_date"),
+    retireRemark: text("retire_remark"),
+    retiredDeviceCount: integer("retired_device_count").notNull().default(0),
     createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
       onDelete: "set null",
     }),

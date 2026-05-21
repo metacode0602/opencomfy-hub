@@ -1,5 +1,20 @@
 import type { SupplierOpsBatchKind } from "@/lib/types/supplier-ops-batch"
 
+export const ONLINE_REASON_OPTIONS = [
+  { value: "contract_delivery", label: "合同交付" },
+  { value: "capacity_expansion", label: "扩容补量" },
+  { value: "hardware_replacement", label: "硬件替换" },
+  { value: "new_business", label: "新业务上线" },
+  { value: "test_to_production", label: "测试转生产" },
+  { value: "other", label: "其他" },
+] as const
+
+export function onlineReasonLabel(value: string | null | undefined): string {
+  if (!value) return "—"
+  const hit = ONLINE_REASON_OPTIONS.find((o) => o.value === value)
+  return hit?.label ?? value
+}
+
 export const ACCESS_METHOD_OPTIONS = [
   { value: "ssh_jump", label: "SSH 跳板" },
   { value: "ipmi", label: "IPMI 带外" },

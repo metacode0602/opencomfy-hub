@@ -31,6 +31,7 @@ export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
   order_access: "订单接入",
   device_inventory: "设备主数据",
   device_changelog: "设备变更",
+  device_retire: "设备下架",
 }
 
 export const FAULT_IMPORT_STATUS_LABELS: Record<string, string> = {
@@ -51,9 +52,11 @@ export function generateImportBatchCode(batchKind: OnboardingBatchKind): string 
       ? "DINV"
       : batchKind === "device_changelog"
         ? "DCHG"
-        : batchKind === "online"
-          ? "ONB"
-          : "ORD"
+        : batchKind === "device_retire"
+          ? "RET"
+          : batchKind === "online"
+            ? "ONB"
+            : "ORD"
   const d = new Date()
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -292,6 +295,8 @@ export function createInventoryOnboardingBatch(params: {
     batch_code: generateImportBatchCode(batchKind),
     batch_status: batchKind === "device_changelog" ? "已完成" : "待开始",
     planned_ready_at: null,
+    online_reason: null,
+    remark: null,
     access_method: "on_site",
     import_file_name: fileName,
     import_status: "parsed",

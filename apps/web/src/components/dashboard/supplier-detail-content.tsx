@@ -49,6 +49,7 @@ import {
 } from '@/components/dashboard/supplier-activity-timeline-panel'
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
 import { SupplierDeviceImportPanel } from '@/components/dashboard/supplier-device-import-panel'
+import { SupplierDeviceRetireDialog } from '@/components/dashboard/supplier-device-retire-dialog'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 
 interface SupplierDetailContentProps {
@@ -74,7 +75,9 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
   const [activeTab, setActiveTab] = useState(
     tabFromUrl && VALID_TABS.has(tabFromUrl) ? tabFromUrl : 'overview',
   )
+  const [retireDialogOpen, setRetireDialogOpen] = useState(false)
   const domainSupplierId = resolveDomainSupplierId(supplier.id)
+  const utils = trpc.useUtils()
 
   useEffect(() => {
     if (tabFromUrl && VALID_TABS.has(tabFromUrl)) setActiveTab(tabFromUrl)
@@ -150,8 +153,19 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
         <div className="flex items-center gap-2">
           <Button variant="outline">编辑信息</Button>
           <Button>同步数据</Button>
+          <Button onClick={() => setRetireDialogOpen(true)}>设备下架</Button>
         </div>
       </div>
+
+      <SupplierDeviceRetireDialog
+        open={retireDialogOpen}
+        onOpenChange={setRetireDialogOpen}
+        supplierId={supplier.id}
+        supplierName={supplier.name}
+        onSuccess={() => {
+          void utils.supplier.listGpuInventory.invalidate({ supplierId: supplier.id })
+        }}
+      />
 
       <div className="grid grid-cols-4 gap-4">
         <Card className="bg-card border-border">
