@@ -114,6 +114,8 @@ export type IdcInfoListParams = {
   end_time?: string
   /** 批量机房 ID，半角逗号分隔（待平台确认参数名） */
   idc_ids?: string
+  /** 批量租户 ID，半角逗号分隔 */
+  tenant_tids?: string
   page?: number
   page_size?: number
 }
@@ -598,15 +600,17 @@ export async function fetchIdcInfoList(
   })
 
   try {
+    const name = params.name?.trim() ?? ""
     const data = await supplyInstance.get<unknown>("/supply/idc_info/list", {
       params: {
-        name: params.name ?? "",
+        name: name ? encodeURIComponent(name) : "",
         container_instance_region: params.container_instance_region ?? "",
         zone_ids: params.zone_ids ?? "",
         status: params.status ?? "",
         start_time: params.start_time ?? "",
         end_time: params.end_time ?? "",
         idc_ids: params.idc_ids ?? "",
+        tenant_tids: params.tenant_tids ?? "",
         page: params.page ?? 1,
         page_size: params.page_size ?? BATCH_PAGE_SIZE,
       },

@@ -296,6 +296,7 @@ export function createInventoryOnboardingBatch(params: {
     batch_status: batchKind === "device_changelog" ? "已完成" : "待开始",
     planned_ready_at: null,
     online_reason: null,
+    order_no: null,
     remark: null,
     access_method: "on_site",
     import_file_name: fileName,

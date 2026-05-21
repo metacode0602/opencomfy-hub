@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { IconAlertTriangle, IconLoader2, IconPlus } from '@tabler/icons-react'
+import { IconLoader2, IconPlus } from '@tabler/icons-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@workspace/ui/components/dialog'
+import { Input } from '@workspace/ui/components/input'
 import { Label } from '@workspace/ui/components/label'
 import {
   Table,
@@ -22,15 +23,17 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
-import { Textarea } from '@workspace/ui/components/textarea'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 
 import {
-  parsePlatformDatacenterIds,
-  PLATFORM_DATACENTER_IMPORT_MAX_IDS,
+  parsePlatformTenantIds,
+  PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS,
 } from '@/lib/supplier/platform-datacenter-import-utils'
 import { trpc } from '@/lib/trpc/client'
-import type { PlatformDatacenterImportPreviewResult } from '@/lib/types/platform-datacenter-import'
+import type {
+  PlatformDatacenterImportPreviewResult,
+  PlatformDatacenterImportSearchParams,
+} from '@/lib/types/platform-datacenter-import'
 import type { DatacenterImportCommitResult } from '@/lib/types/datacenter-import'
 
 type Step = 'input' | 'preview' | 'done'
@@ -74,8 +77,10 @@ export function PlatformDatacenterImportDialog({
   onSuccess: () => void
 }) {
   const [step, setStep] = React.useState<Step>('input')
-  const [idsRaw, setIdsRaw] = React.useState('')
-  const [resolvedIds, setResolvedIds] = React.useState<string[]>([])
+  const [tenantIdsRaw, setTenantIdsRaw] = React.useState('')
+  const [name, setName] = React.useState('')
+  const [searchParams, setSearchParams] =
+    React.useState<PlatformDatacenterImportSearchParams | null>(null)
   const [preview, setPreview] = React.useState<PlatformDatacenterImportPreviewResult | null>(null)
   const [commitResult, setCommitResult] = React.useState<DatacenterImportCommitResult | null>(null)
   const [fetchError, setFetchError] = React.useState<string | null>(null)
@@ -87,8 +92,9 @@ export function PlatformDatacenterImportDialog({
 
   const reset = React.useCallback(() => {
     setStep('input')
-    setIdsRaw('')
-    setResolvedIds([])
+    setTenantIdsRaw('')
+    setName('')
+    setSearchParams(null)
     setPreview(null)
     setCommitResult(null)
     setFetchError(null)
@@ -101,34 +107,28 @@ export function PlatformDatacenterImportDialog({
   const createCount = preview?.summary.create ?? 0
 
   const previewSummary = preview
-    ? `平台返回 ${preview.summary.total} 条，可新建 ${createCount} 条${
-        preview.missingPlatformIds.length > 0
-          ? `，${preview.missingPlatformIds.length} 个 ID 平台未返回`
-          : ''
-      }`
+    ? `平台返回 ${preview.summary.total} 条，可新建 ${createCount} 条`
     : null
 
   const onFetchPreview = async () => {
-    const ids = parsePlatformDatacenterIds(idsRaw)
-    if (ids.length === 0) {
-      toast.error('请输入有效的平台机房 ID（纯数字）')
+    const tenantIds = parsePlatformTenantIds(tenantIdsRaw)
+    if (tenantIds.length > PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS) {
+      toast.error(`单次最多 ${PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS} 个租户 ID`)
       return
     }
-    if (ids.length > PLATFORM_DATACENTER_IMPORT_MAX_IDS) {
-      toast.error(`单次最多 ${PLATFORM_DATACENTER_IMPORT_MAX_IDS} 个 ID`)
-      return
+
+    const params: PlatformDatacenterImportSearchParams = {
+      tenantIds,
+      name: name.trim(),
     }
 
     setFetchError(null)
     try {
-      const result = await previewMutation.mutateAsync({ externalOnboardingIds: ids })
-      setResolvedIds(ids)
+      const result = await previewMutation.mutateAsync(params)
+      setSearchParams(params)
       setPreview(result)
       setStep('preview')
 
-      if (result.missingPlatformIds.length > 0) {
-        toast.warning(`有 ${result.missingPlatformIds.length} 个 ID 平台未返回`)
-      }
       if (result.summary.total === 0) {
         toast.error('平台未返回任何有效机房')
       } else if (result.summary.error > 0) {
@@ -148,14 +148,14 @@ export function PlatformDatacenterImportDialog({
   }
 
   const onCommit = async () => {
-    if (!preview || resolvedIds.length === 0) return
+    if (!preview || !searchParams) return
     if (createCount === 0) {
       toast.error('没有可导入的机房')
       return
     }
 
     try {
-      const result = await commitMutation.mutateAsync({ externalOnboardingIds: resolvedIds })
+      const result = await commitMutation.mutateAsync(searchParams)
       setCommitResult(result)
       setStep('done')
       onSuccess()
@@ -185,7 +185,7 @@ export function PlatformDatacenterImportDialog({
           </DialogTitle>
           <DialogDescription>
             {step === 'input' &&
-              `输入平台机房 ID，多个可用逗号或换行分隔（最多 ${PLATFORM_DATACENTER_IMPORT_MAX_IDS} 个）。系统将按租户 ID 匹配本地供应商。`}
+              '按租户 ID 与名称从平台筛选审核通过的机房。请先确保对应租户已导入本地供应商。'}
             {step === 'preview' &&
               (previewSummary ?? '核对平台数据；未匹配到供应商或已存在的机房将跳过。')}
             {step === 'done' && '导入结果如下，关闭后列表已刷新。'}
@@ -194,19 +194,36 @@ export function PlatformDatacenterImportDialog({
 
         <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
           {step === 'input' && (
-            <div className="space-y-3 px-1">
-              <Label htmlFor="platform-datacenter-ids">平台机房 ID</Label>
-              <Textarea
-                id="platform-datacenter-ids"
-                placeholder={'20001\n20002, 20003'}
-                rows={6}
-                value={idsRaw}
-                disabled={loading}
-                onChange={(e) => setIdsRaw(e.target.value)}
-              />
-              <p className="text-muted-foreground text-xs">
-                支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。请先确保对应租户已导入本地供应商。
-              </p>
+            <div className="space-y-4 px-1">
+              <div className="space-y-2">
+                <Label htmlFor="platform-datacenter-tenant-ids">租户 ID</Label>
+                <Input
+                  id="platform-datacenter-tenant-ids"
+                  placeholder="16462,16463"
+                  value={tenantIdsRaw}
+                  disabled={loading}
+                  onChange={(e) => setTenantIdsRaw(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">
+                  可选，多个租户 ID 用半角逗号分隔（最多 {PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS}{' '}
+                  个）；留空则不限租户。
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="platform-datacenter-name">名称</Label>
+                <Input
+                  id="platform-datacenter-name"
+                  placeholder="输入机房名称（可选，支持模糊匹配）"
+                  value={name}
+                  disabled={loading}
+                  onChange={(e) => setName(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">
+                  留空则按租户 ID 拉取全部审核通过的机房；名称会在请求平台 API 时进行 URL 编码。
+                </p>
+              </div>
+
               {fetchError ? (
                 <Alert variant="destructive">
                   <AlertDescription>{fetchError}</AlertDescription>
@@ -217,15 +234,6 @@ export function PlatformDatacenterImportDialog({
 
           {step === 'preview' && preview && (
             <div className="space-y-4 px-1">
-              {preview.missingPlatformIds.length > 0 && (
-                <Alert variant="destructive">
-                  <IconAlertTriangle className="size-4" />
-                  <AlertDescription>
-                    平台未返回：{preview.missingPlatformIds.join('、')}
-                  </AlertDescription>
-                </Alert>
-              )}
-
               {preview.summary.error > 0 && (
                 <Alert variant="destructive">
                   <AlertDescription>

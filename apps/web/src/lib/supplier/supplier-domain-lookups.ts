@@ -65,6 +65,19 @@ export function useTermsVersionLabel(termsId: string) {
   return useMemo(() => (t ? `${t.deal_mode} · ${termsId.slice(0, 10)}` : termsId), [t, termsId])
 }
 
+export function dataCenterLabelSync(dataCenterId: string) {
+  if (!dataCenterId) return "—"
+  const dc = readStore().dataCenters.find((x) => x.id === dataCenterId)
+  return dc ? `${dc.name} (${dc.code})` : dataCenterId
+}
+
+export function useDataCenterLabel(dataCenterId: string) {
+  const dc = useSupplierDomainMockStore((s) =>
+    dataCenterId ? s.dataCenters.find((x) => x.id === dataCenterId) : undefined,
+  )
+  return dc ? `${dc.name} (${dc.code})` : dataCenterId || "—"
+}
+
 export function useAssigneeLabel(id: string) {
   const map: Record<string, string> = {
     "staff-mock-01": "张三（mock）",

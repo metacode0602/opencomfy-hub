@@ -10,7 +10,7 @@ import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/suppl
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { SuanliSupplyOpenApiError } from '@/lib/server/integrations/suanli-supply-api'
-import { PLATFORM_DATACENTER_IMPORT_MAX_IDS } from '@/lib/supplier/platform-datacenter-import-utils'
+import { PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS } from '@/lib/supplier/platform-datacenter-import-utils'
 import { PLATFORM_SUPPLIER_TYPES } from '@/lib/supplier/platform-supplier-import-utils'
 import {
   deviceChangelogRowSchema,
@@ -32,10 +32,12 @@ const platformSupplierSearchSchema = z.object({
   defaultBusinessManagerStaffId: z.string().min(1),
 })
 
-const platformDatacenterIdsSchema = z
-  .array(z.string().regex(/^\d+$/))
-  .min(1)
-  .max(PLATFORM_DATACENTER_IMPORT_MAX_IDS)
+const platformDatacenterSearchSchema = z.object({
+  tenantIds: z
+    .array(z.string().regex(/^\d+$/))
+    .max(PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS),
+  name: z.string(),
+})
 
 function mapImportError(error: unknown): never {
   if (error instanceof SuanliSupplyOpenApiError) {
@@ -413,11 +415,7 @@ export const supplierRouter = createTRPCRouter({
 
   platformDatacenterImport: createTRPCRouter({
     preview: adminProcedure
-      .input(
-        z.object({
-          externalOnboardingIds: platformDatacenterIdsSchema,
-        }),
-      )
+      .input(platformDatacenterSearchSchema)
       .mutation(async ({ input }) => {
         try {
           return await platformDatacenterImportDataAccess.preview(input)
@@ -427,11 +425,7 @@ export const supplierRouter = createTRPCRouter({
       }),
 
     commit: adminProcedure
-      .input(
-        z.object({
-          externalOnboardingIds: platformDatacenterIdsSchema,
-        }),
-      )
+      .input(platformDatacenterSearchSchema)
       .mutation(async ({ input }) => {
         try {
           return await platformDatacenterImportDataAccess.commit(input)

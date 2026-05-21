@@ -150,11 +150,8 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
                 (f.device_id == null || !deviceIds.has(f.device_id)) &&
                 (f.compute_node_id == null || !nodeIds.has(f.compute_node_id)),
             ),
-            internalTestHolds: s.internalTestHolds.filter(
-              (h) =>
-                (h.device_id == null || !deviceIds.has(h.device_id)) &&
-                (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
-            ),
+            internalTestHolds: s.internalTestHolds.filter((h) => h.supplier_id !== id),
+            dataCenters: s.dataCenters.filter((dc) => dc.supplier_id !== id),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => !deviceIds.has(r.device_id)),
             supplierActivities: s.supplierActivities.filter((a) => a.supplier_id !== id),
             entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
@@ -191,11 +188,6 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
               (f) =>
                 (f.device_id == null || !deviceIds.has(f.device_id)) &&
                 (f.compute_node_id == null || !nodeIds.has(f.compute_node_id)),
-            ),
-            internalTestHolds: s.internalTestHolds.filter(
-              (h) =>
-                (h.device_id == null || !deviceIds.has(h.device_id)) &&
-                (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
             ),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => !deviceIds.has(r.device_id)),
             supplierActivities: s.supplierActivities.filter((a) => a.supplier_id !== id),
@@ -243,11 +235,6 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
                 (f.device_id == null || !deviceIds.has(f.device_id)) &&
                 (f.compute_node_id == null || !nodeIds.has(f.compute_node_id)),
             ),
-            internalTestHolds: s.internalTestHolds.filter(
-              (h) =>
-                (h.device_id == null || !deviceIds.has(h.device_id)) &&
-                (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
-            ),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => !deviceIds.has(r.device_id)),
             entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
               (e) =>
@@ -270,9 +257,6 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
             faultIncidents: s.faultIncidents.filter(
               (f) => f.device_id !== did && (f.compute_node_id == null || !nodeIds.has(f.compute_node_id)),
             ),
-            internalTestHolds: s.internalTestHolds.filter(
-              (h) => h.device_id !== did && (h.compute_node_id == null || !nodeIds.has(h.compute_node_id)),
-            ),
             resourcePoolBindings: s.resourcePoolBindings.filter((r) => r.device_id !== did),
             entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
               (e) =>
@@ -289,7 +273,6 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
         set((s) => ({
           computeNodes: s.computeNodes.filter((n) => n.id !== nid),
           faultIncidents: s.faultIncidents.filter((f) => f.compute_node_id !== nid),
-          internalTestHolds: s.internalTestHolds.filter((h) => h.compute_node_id !== nid),
           entityStateTransitionLogs: s.entityStateTransitionLogs.filter(
             (e) => !(e.entity_type === "compute_node" && e.entity_id === nid),
           ),
@@ -320,7 +303,11 @@ export const useSupplierDomainMockStore = create<SupplierDomainMockState>()(
         set((s) => ({ entityStateTransitionLogs: s.entityStateTransitionLogs.filter((x) => x.id !== id) })),
 
       upsertDataCenter: (row) => set((s) => ({ dataCenters: replaceById(s.dataCenters, row) })),
-      removeDataCenter: (id) => set((s) => ({ dataCenters: s.dataCenters.filter((x) => x.id !== id) })),
+      removeDataCenter: (id) =>
+        set((s) => ({
+          dataCenters: s.dataCenters.filter((x) => x.id !== id),
+          internalTestHolds: s.internalTestHolds.filter((h) => h.data_center_id !== id),
+        })),
 
       upsertSupplierActivity: (row) => set((s) => ({ supplierActivities: replaceById(s.supplierActivities, row) })),
       removeSupplierActivity: (id) => set((s) => ({ supplierActivities: s.supplierActivities.filter((x) => x.id !== id) })),

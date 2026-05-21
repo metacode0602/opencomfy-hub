@@ -145,6 +145,8 @@ export type OnboardingBatch = {
   planned_ready_at: string | null
   /** 上架原因（`batch_kind=online` 时填写） */
   online_reason: string | null
+  /** 关联订单编号（`batch_kind=order_access` 时填写） */
+  order_no: string | null
   /** 批次备注 */
   remark: string | null
   access_method: string
@@ -295,15 +297,45 @@ export type SupplierOpsUploadBatch = {
   created_at: string
 }
 
+export type InternalTestHoldDepartment = "product" | "rd" | "test"
+
+export type InternalTestHoldSettlement = "whole_rent" | "idle_time"
+
+export const INTERNAL_TEST_HOLD_DEPARTMENT_LABELS: Record<InternalTestHoldDepartment, string> = {
+  product: "产品",
+  rd: "研发",
+  test: "测试",
+}
+
+export const INTERNAL_TEST_HOLD_SETTLEMENT_LABELS: Record<InternalTestHoldSettlement, string> = {
+  whole_rent: "整租",
+  idle_time: "闲时",
+}
+
+export type InternalTestHoldDevice = {
+  id: string
+  device_id: string
+  internal_ip: string
+  external_ip: string
+  port: string
+  root_account: string
+  root_password: string
+  sn?: string
+}
+
 export type InternalTestHold = {
   id: string
   supplier_id: string
-  device_id: string | null
-  compute_node_id: string | null
-  scope: string
+  data_center_id: string
+  user_name: string
+  department: InternalTestHoldDepartment
+  card_type: string
+  unit_count: number
+  settlement_mode: InternalTestHoldSettlement
   hold_from: string
   hold_until: string | null
   remark?: string
+  devices?: InternalTestHoldDevice[]
 }
 
 export type ResourcePoolBinding = {

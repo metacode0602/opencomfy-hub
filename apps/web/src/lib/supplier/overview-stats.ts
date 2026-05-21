@@ -158,7 +158,6 @@ function inventoryMatchesFilters(
 function internalTestGpuForInventory(
   row: DataCenterDevice,
   holds: InternalTestHold[],
-  physicalDevices: SupplierDevice[],
 ): number {
   if (row.isInternalTest) {
     if (row.internalTestScope) return parseGpuScopeCount(row.internalTestScope, row.onlineQuantity)
@@ -171,10 +170,8 @@ function internalTestGpuForInventory(
   for (const hold of holds) {
     if (!isHoldActive(hold)) continue
     if (hold.supplier_id !== domainSupplierId) continue
-    const device = physicalDevices.find((d) => d.id === hold.device_id)
-    if (!device) continue
-    if (normalizeCardType(device.card_type) !== cardKey) continue
-    total += parseGpuScopeCount(hold.scope, deviceGpuCount(device))
+    if (normalizeCardType(hold.card_type) !== cardKey) continue
+    total += Math.max(0, hold.unit_count) * 8
   }
   return total
 }
@@ -270,7 +267,7 @@ export function buildInventoryOverviewRows(
     .filter((row) => inventoryMatchesFilters(row, filters, poolBindings, physicalDevices))
     .map((row) => {
       const supplier = mockSuppliers.find((s) => s.id === row.supplierId)
-      const internalTestGpu = internalTestGpuForInventory(row, holds, physicalDevices)
+      const internalTestGpu = internalTestGpuForInventory(row, holds)
       const faultDownGpu = faultDownGpuForInventory(row, faults, physicalDevices)
       const maintenanceQuantity =
         row.status === 'maintenance' ? row.quantity : Math.max(0, row.quantity - row.onlineQuantity)

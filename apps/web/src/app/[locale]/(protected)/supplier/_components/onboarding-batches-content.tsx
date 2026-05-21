@@ -92,6 +92,7 @@ export function OnboardingBatchesContent({
   const ui = OPS_KIND_UI[routeKind]
   const batchKind = batchKindFromRoute(routeKind)
   const isOnlineTasks = routeKind === 'online-tasks'
+  const isOrderAccess = routeKind === 'order-access'
 
   const suppliers = useSupplierDomainMockStore((s) => s.suppliers)
   const dataCenters = useSupplierDomainMockStore((s) => s.dataCenters)
@@ -124,6 +125,7 @@ export function OnboardingBatchesContent({
   const [accessMethod, setAccessMethod] = useState('ssh_jump')
   const [plannedReady, setPlannedReady] = useState('')
   const [onlineReason, setOnlineReason] = useState('')
+  const [orderNo, setOrderNo] = useState('')
   const [remark, setRemark] = useState('')
   const [fileName, setFileName] = useState('')
   const [parsedRows, setParsedRows] = useState<OnboardingParsedRow[]>([])
@@ -146,7 +148,8 @@ export function OnboardingBatchesContent({
         !q ||
         b.batch_code.toLowerCase().includes(q) ||
         b.supplier_name.toLowerCase().includes(q) ||
-        b.idc_code.toLowerCase().includes(q)
+        b.idc_code.toLowerCase().includes(q) ||
+        (b.order_no?.toLowerCase().includes(q) ?? false)
       const matchStatus = statusFilter === 'all' || b.batch_status === statusFilter
       const matchImport = importFilter === 'all' || b.import_status === importFilter
       return matchQ && matchStatus && matchImport
@@ -170,6 +173,7 @@ export function OnboardingBatchesContent({
     setAccessMethod('ssh_jump')
     setPlannedReady('')
     setOnlineReason('')
+    setOrderNo('')
     setRemark('')
     setFileName('')
     setParsedRows([])
@@ -197,6 +201,14 @@ export function OnboardingBatchesContent({
       toast.error('请选择上架原因')
       return null
     }
+    if (isOrderAccess && !orderNo.trim()) {
+      toast.error('请填写订单编号')
+      return null
+    }
+    if (isOrderAccess && !remark.trim()) {
+      toast.error('请填写备注')
+      return null
+    }
     const now = new Date().toISOString()
     const batch: OnboardingBatch = {
       id: draftBatchId ?? createId('batch'),
@@ -215,6 +227,7 @@ export function OnboardingBatchesContent({
       batch_status: '待开始',
       planned_ready_at: plannedReady ? new Date(plannedReady).toISOString() : null,
       online_reason: isOnlineTasks ? onlineReason : null,
+      order_no: isOrderAccess ? orderNo.trim() : null,
       remark: remark.trim() || null,
       access_method: accessMethod,
       import_file_name: fileName || '未上传',
@@ -425,6 +438,7 @@ export function OnboardingBatchesContent({
               <TableHead>批次状态</TableHead>
               <TableHead>已入库</TableHead>
               {isOnlineTasks && <TableHead>上架原因</TableHead>}
+              {isOrderAccess && <TableHead>订单编号</TableHead>}
               <TableHead>计划就绪</TableHead>
               <TableHead className="w-[80px]" />
             </TableRow>
@@ -432,7 +446,7 @@ export function OnboardingBatchesContent({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={isOnlineTasks ? 8 : 7} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={isOnlineTasks || isOrderAccess ? 8 : 7} className="text-center text-muted-foreground py-12">
                   暂无批次，点击右上角新建
                 </TableCell>
               </TableRow>
@@ -466,6 +480,11 @@ export function OnboardingBatchesContent({
                   {isOnlineTasks && (
                     <TableCell className="text-sm">
                       {onlineReasonLabel(b.online_reason)}
+                    </TableCell>
+                  )}
+                  {isOrderAccess && (
+                    <TableCell className="text-sm font-mono">
+                      {b.order_no ?? '—'}
                     </TableCell>
                   )}
                   <TableCell className="text-sm text-muted-foreground">
@@ -506,7 +525,9 @@ export function OnboardingBatchesContent({
           <DialogHeader>
             <DialogTitle>{ui.dialogTitle}</DialogTitle>
             <DialogDescription>
-              选择供应商与机房 → 上传 CSV 清单 → 预览 → 确认入库（Mock，后续接 tRPC）
+              {isOrderAccess
+                ? '填写订单编号与备注 → 选择供应商与机房 → 上传 CSV 清单 → 预览 → 确认入库（Mock，后续接 tRPC）'
+                : '选择供应商与机房 → 上传 CSV 清单 → 预览 → 确认入库（Mock，后续接 tRPC）'}
             </DialogDescription>
           </DialogHeader>
 
@@ -566,7 +587,7 @@ export function OnboardingBatchesContent({
                   </Select>
                 </div>
                 <div className="space-y-2 col-span-2">
-                  <Label>计划就绪时间（可选）</Label>
+                  <Label>计划完成时间（可选）</Label>
                   <Input type="datetime-local" value={plannedReady} onChange={(e) => setPlannedReady(e.target.value)} />
                 </div>
                 {isOnlineTasks && (
@@ -595,6 +616,27 @@ export function OnboardingBatchesContent({
                     </div>
                   </>
                 )}
+                {isOrderAccess && (
+                  <>
+                    <div className="space-y-2 col-span-2">
+                      <Label>订单编号</Label>
+                      <Input
+                        placeholder="请输入关联订单编号"
+                        value={orderNo}
+                        onChange={(e) => setOrderNo(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label>备注</Label>
+                      <Textarea
+                        placeholder="补充说明本次订单接入背景、优先级或特殊要求"
+                        value={remark}
+                        onChange={(e) => setRemark(e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setWizardOpen(false)}>取消</Button>
@@ -607,7 +649,8 @@ export function OnboardingBatchesContent({
                     !supplierId ||
                     !dataCenterId ||
                     !contractId ||
-                    (isOnlineTasks && !onlineReason)
+                    (isOnlineTasks && !onlineReason) ||
+                    (isOrderAccess && (!orderNo.trim() || !remark.trim()))
                   }
                 >
                   下一步：上传清单

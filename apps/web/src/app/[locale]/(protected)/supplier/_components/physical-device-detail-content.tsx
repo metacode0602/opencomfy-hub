@@ -173,8 +173,14 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
     [faultIncidents, deviceId],
   )
   const relatedHolds = useMemo(
-    () => testHolds.filter((h) => h.device_id === deviceId),
-    [testHolds, deviceId],
+    () =>
+      device
+        ? testHolds.filter(
+            (h) =>
+              h.data_center_id === device.data_center_id && h.card_type === device.card_type,
+          )
+        : [],
+    [testHolds, device],
   )
   const relatedTasks = useMemo(
     () => onboardingTasks.filter((t) => t.device_id === deviceId),
@@ -560,7 +566,9 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                       className="block hover:bg-muted/30 rounded-md transition-colors"
                     >
                       <div className="flex justify-between items-start gap-4 p-3 rounded-md border border-border">
-                        <span className="font-medium text-sm">{hold.scope}</span>
+                        <span className="font-medium text-sm">
+                          {hold.user_name} · {hold.card_type} × {hold.unit_count}台
+                        </span>
                         <span className="text-xs text-muted-foreground">
                           {formatDt(hold.hold_from)} — {formatDt(hold.hold_until)}
                         </span>

@@ -5,7 +5,9 @@ export const ONLINE_REASON_OPTIONS = [
   { value: "capacity_expansion", label: "扩容补量" },
   { value: "hardware_replacement", label: "硬件替换" },
   { value: "new_business", label: "新业务上线" },
-  { value: "test_to_production", label: "测试转生产" },
+  { value: "new_idc", label: "新机房上架" },
+  { value: "test_to_production", label: "内部测试转生产" },
+  { value: "offline_delivery_to_production", label: "线下交付转生产" },
   { value: "other", label: "其他" },
 ] as const
 

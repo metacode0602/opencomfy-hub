@@ -423,7 +423,7 @@ export function OnboardingBatchDetailContent({
                   <p className="font-medium mt-1 font-mono text-xs">{batch.contract_id}</p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">计划就绪时间</p>
+                  <p className="text-muted-foreground">计划完成时间</p>
                   <p className="font-medium mt-1">{formatDt(batch.planned_ready_at)}</p>
                 </div>
                 {batch.batch_kind === 'online' && (
@@ -431,6 +431,20 @@ export function OnboardingBatchDetailContent({
                     <div>
                       <p className="text-muted-foreground">上架原因</p>
                       <p className="font-medium mt-1">{onlineReasonLabel(batch.online_reason)}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">备注</p>
+                      <p className="font-medium mt-1 whitespace-pre-wrap">
+                        {batch.remark?.trim() || '—'}
+                      </p>
+                    </div>
+                  </>
+                )}
+                {batch.batch_kind === 'order_access' && (
+                  <>
+                    <div>
+                      <p className="text-muted-foreground">订单编号</p>
+                      <p className="font-medium mt-1 font-mono">{batch.order_no ?? '—'}</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-muted-foreground">备注</p>
