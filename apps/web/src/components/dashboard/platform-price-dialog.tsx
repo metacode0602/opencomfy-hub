@@ -20,8 +20,12 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { mockGPUCardTypes } from '@/lib/data/mock-data'
 import type { GPUCardType } from '@/lib/data/types'
+import {
+  fromDatetimeLocalValue,
+  nowPlatformDateTime,
+  toDatetimeLocalValue,
+} from '@/lib/platform-pricing/datetime'
 import type {
   PlatformBillingUnit,
   PlatformCardPriceRecord,
@@ -44,19 +48,34 @@ const PRODUCT_LINES: PlatformProductLine[] = [
 
 const BARE_METAL_UNITS: PlatformBillingUnit[] = ['hour', 'day', 'week', 'month']
 
+export type PlatformPriceFormValues = {
+  gpuCardTypeId: string
+  productLine: PlatformProductLine
+  billingUnit: PlatformBillingUnit
+  sellPrice: number
+  effectiveFrom: string
+  status: PlatformPriceStatus
+  remark?: string
+}
+
 export type PlatformPriceDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   existingRecords: PlatformCardPriceRecord[]
   cardTypes: GPUCardType[]
   editing?: PlatformCardPriceRecord | null
+  isSubmitting?: boolean
   /** 新增时默认选中的卡型 */
   defaultCardTypeId?: string
   /** 详情页选定时间段内新增/编辑 */
   periodId?: string
   periodEffectiveFrom?: string
   periodEffectiveTo?: string | null
-  onSaved: (record: PlatformCardPriceRecord, isNew: boolean) => void
+  onSaved: (
+    record: PlatformCardPriceRecord,
+    isNew: boolean,
+    form: PlatformPriceFormValues,
+  ) => void
 }
 
 export function PlatformPriceDialog({
@@ -65,6 +84,7 @@ export function PlatformPriceDialog({
   existingRecords,
   cardTypes,
   editing,
+  isSubmitting = false,
   defaultCardTypeId,
   periodId,
   periodEffectiveFrom,
@@ -96,11 +116,11 @@ export function PlatformPriceDialog({
       setProductLine('elastic_service')
       setBillingUnit('hour')
       setSellPrice('')
-      setEffectiveFrom(new Date().toISOString().slice(0, 10))
+      setEffectiveFrom(nowPlatformDateTime())
       setStatus('active')
       setRemark('')
     }
-  }, [open, editing, cardTypes])
+  }, [open, editing, cardTypes, defaultCardTypeId])
 
   useEffect(() => {
     if (productLine !== 'bare_metal') {
@@ -128,32 +148,43 @@ export function PlatformPriceDialog({
     !Number.isNaN(priceNum) &&
     priceNum > 0 &&
     effectiveFromVal &&
-    !duplicate
+    !duplicate &&
+    !isSubmitting
 
   const handleSubmit = () => {
     if (!canSubmit) return
     const card = cardTypes.find((c) => c.id === cardTypeId)
     if (!card) return
 
+    const form: PlatformPriceFormValues = {
+      gpuCardTypeId: cardTypeId,
+      productLine,
+      billingUnit,
+      sellPrice: priceNum,
+      effectiveFrom: effectiveFromVal,
+      status,
+      remark: remark.trim() || undefined,
+    }
+
     const now = new Date().toISOString()
     const record: PlatformCardPriceRecord = {
-      id: editing?.id ?? `pcp-${Date.now()}`,
+      id: editing?.id ?? '',
       gpuCardTypeId: cardTypeId,
       cardTypeName: card.name,
-      periodId: editing?.periodId ?? periodId ?? `${cardTypeId}-p-${Date.now()}`,
+      periodId: editing?.periodId ?? periodId ?? `${cardTypeId}-p-${effectiveFromVal}`,
       productLine,
       billingUnit,
       sellPrice: priceNum,
       currency: 'CNY',
-      effectiveFrom: periodEffectiveFrom ?? effectiveFrom,
-      effectiveTo: periodEffectiveTo !== undefined ? periodEffectiveTo : editing?.effectiveTo ?? null,
+      effectiveFrom: effectiveFromVal,
+      effectiveTo:
+        periodEffectiveTo !== undefined ? periodEffectiveTo : editing?.effectiveTo ?? null,
       status,
-      remark: remark.trim() || undefined,
+      remark: form.remark,
       updatedAt: now,
-      updatedBy: '当前用户',
     }
-    onSaved(record, !isEdit)
-    onOpenChange(false)
+
+    onSaved(record, !isEdit, form)
   }
 
   return (
@@ -172,7 +203,7 @@ export function PlatformPriceDialog({
             <Select
               value={cardTypeId}
               onValueChange={setCardTypeId}
-              disabled={isEdit}
+              disabled={isEdit || isSubmitting}
             >
               <SelectTrigger>
                 <SelectValue placeholder="选择卡型" />
@@ -195,7 +226,7 @@ export function PlatformPriceDialog({
               <Select
                 value={productLine}
                 onValueChange={(v) => setProductLine(v as PlatformProductLine)}
-                disabled={isEdit}
+                disabled={isEdit || isSubmitting}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -216,7 +247,7 @@ export function PlatformPriceDialog({
                 <Select
                   value={billingUnit}
                   onValueChange={(v) => setBillingUnit(v as PlatformBillingUnit)}
-                  disabled={isEdit}
+                  disabled={isEdit || isSubmitting}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -244,18 +275,21 @@ export function PlatformPriceDialog({
                 step="0.01"
                 placeholder="0.00"
                 value={sellPrice}
+                disabled={isSubmitting}
                 onChange={(e) => setSellPrice(e.target.value)}
               />
             </div>
             <div className="grid gap-2">
-              <Label>生效日期</Label>
+              <Label>生效时间</Label>
               {periodEffectiveFrom != null ? (
                 <Input value={periodEffectiveFrom} disabled className="bg-muted" />
               ) : (
                 <Input
-                  type="date"
-                  value={effectiveFrom}
-                  onChange={(e) => setEffectiveFrom(e.target.value)}
+                  type="datetime-local"
+                  step={1}
+                  value={toDatetimeLocalValue(effectiveFrom)}
+                  disabled={isSubmitting}
+                  onChange={(e) => setEffectiveFrom(fromDatetimeLocalValue(e.target.value))}
                 />
               )}
             </div>
@@ -263,18 +297,20 @@ export function PlatformPriceDialog({
 
           <div className="grid gap-2">
             <Label>状态</Label>
-            <Select value={status} onValueChange={(v) => setStatus(v as PlatformPriceStatus)}>
+            <Select
+              value={status}
+              onValueChange={(v) => setStatus(v as PlatformPriceStatus)}
+              disabled={isSubmitting}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(platformPriceStatusNames) as PlatformPriceStatus[]).map(
-                  (s) => (
-                    <SelectItem key={s} value={s}>
-                      {platformPriceStatusNames[s]}
-                    </SelectItem>
-                  ),
-                )}
+                {(Object.keys(platformPriceStatusNames) as PlatformPriceStatus[]).map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {platformPriceStatusNames[s]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -284,6 +320,7 @@ export function PlatformPriceDialog({
             <Textarea
               placeholder="调价说明（可选）"
               value={remark}
+              disabled={isSubmitting}
               onChange={(e) => setRemark(e.target.value)}
               rows={2}
             />
@@ -304,17 +341,14 @@ export function PlatformPriceDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             取消
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
-            {isEdit ? '保存' : '创建'}
+            {isSubmitting ? '保存中…' : isEdit ? '保存' : '创建'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
-
-/** 供外部默认导出卡型列表 */
-export { mockGPUCardTypes }

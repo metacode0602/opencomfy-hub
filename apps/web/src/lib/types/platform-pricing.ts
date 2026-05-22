@@ -16,14 +16,15 @@ export type PlatformCardPriceRecord = {
   id: string
   gpuCardTypeId: string
   cardTypeName: string
-  /** 同一卡型下的定价时间段 ID，该段内所有产品线记录共享起止日 */
+  /** 同一卡型下的定价时间段 ID，该段内所有产品线记录共享起止时间 */
   periodId: string
   productLine: PlatformProductLine
   billingUnit: PlatformBillingUnit
   sellPrice: number
   currency: string
+  /** yyyy-MM-dd HH:mm:ss */
   effectiveFrom: string
-  /** null = 仍在此时间段内（与 period 结束日一致） */
+  /** null = 仍在此时间段内（与 period 结束时间一致） */
   effectiveTo?: string | null
   status: PlatformPriceStatus
   remark?: string

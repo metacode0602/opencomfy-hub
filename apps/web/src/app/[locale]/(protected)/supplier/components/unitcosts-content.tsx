@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -54,11 +54,10 @@ import {
 } from '@workspace/ui/components/dialog'
 import { Label } from '@workspace/ui/components/label'
 import { RadioGroup } from '@workspace/ui/components/radio-group'
-import { CreateCardPricingDialog } from '@/components/dashboard/create-card-pricing-dialog'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import { Textarea } from '@workspace/ui/components/textarea'
+import { CreateCardPricingDialog } from '@/components/dashboard/create-card-pricing-dialog'
+import { trpc } from '@/lib/trpc/client'
 import {
-  mockGPUCardTypes,
   mockDataCenters,
   mockSupplierPricingHistory,
   mockSupplierPricingRecords,
@@ -68,9 +67,6 @@ import type {
   ContractPricingMode,
   ContractPricingTier,
   CooperationMode,
-  GPUCardType,
-  GPUCardTypeManufacturer,
-  GPUCardTypeStatus,
   SupplierPricingHistory,
   SupplierPricingRecord,
 } from '@/lib/data/types'
@@ -131,23 +127,6 @@ function buildInitialHistory(): SupplierPricingHistory[] {
   return [...mockSupplierPricingHistory]
 }
 
-function buildInitialCardTypes(): GPUCardType[] {
-  return mockGPUCardTypes.map((c) => ({ ...c }))
-}
-
-const cardTypeStatusNames: Record<GPUCardTypeStatus, string> = {
-  active: '启用',
-  disabled: '已禁用',
-}
-
-const gpuManufacturers: GPUCardTypeManufacturer[] = [
-  'NVIDIA',
-  'AMD',
-  'Intel',
-  'Huawei',
-  'Other',
-]
-
 export interface UnitCostsContentProps {
   /** 锁定为指定供应商（用于供应商详情页嵌入） */
   supplierId?: string
@@ -156,10 +135,9 @@ export interface UnitCostsContentProps {
 }
 
 export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: UnitCostsContentProps = {}) {
-  const [activeTab, setActiveTab] = useState('pricing')
   const [pricingRecords, setPricingRecords] = useState<SupplierPricingRecord[]>(buildInitialPricing)
   const [history, setHistory] = useState<SupplierPricingHistory[]>(buildInitialHistory)
-  const [cardTypes, setCardTypes] = useState<GPUCardType[]>(buildInitialCardTypes)
+  const { data: activeCardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
 
   const [searchTerm, setSearchTerm] = useState('')
   const [supplierFilter, setSupplierFilter] = useState(lockedSupplierId ?? 'all')
@@ -241,11 +219,6 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
     return mockDataCenters.filter((dc) => dc.supplierId === scopeId)
   }, [supplierFilter, lockedSupplierId])
 
-  const activeCardTypes = useMemo(
-    () => cardTypes.filter((c) => c.status === 'active'),
-    [cardTypes],
-  )
-
   const openEdit = (record: SupplierPricingRecord) => {
     setSelectedId(record.id)
     setEditUnitPrice(record.unitPricePerHour?.toString() ?? '')
@@ -258,7 +231,6 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
   const openDetail = (id: string) => {
     setSelectedId(id)
     setView('detail')
-    setActiveTab('pricing')
   }
 
   const backToList = () => {
@@ -405,13 +377,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
       </div>
       )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="pricing">机房卡型单价</TabsTrigger>
-          <TabsTrigger value="card-types">系统卡型</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="pricing" className="space-y-4 mt-4">
+      <div className="space-y-4 mt-4">
           <Card className="bg-card border-border">
             <CardContent className="p-4">
               <div className="flex flex-wrap items-center gap-3">
@@ -562,16 +528,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
               </TableBody>
             </Table>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="card-types" className="space-y-4 mt-4">
-          <CardTypesPanel
-            cardTypes={cardTypes}
-            pricingRecords={pricingRecords}
-            onCardTypesChange={setCardTypes}
-          />
-        </TabsContent>
-      </Tabs>
+      </div>
 
       <CreateCardPricingDialog
         open={createDialogOpen}
@@ -919,423 +876,5 @@ function UnitCostDetailView(props: {
         onConfirm={onConfirmEdit}
       />
     </div>
-  )
-}
-
-function CardTypeStatusBadge({ status }: { status: GPUCardTypeStatus }) {
-  return (
-    <Badge
-      variant="outline"
-      className={
-        status === 'active'
-          ? 'bg-green-500/10 text-green-400 border-green-500/30'
-          : 'bg-gray-500/10 text-gray-400 border-gray-500/30'
-      }
-    >
-      {cardTypeStatusNames[status]}
-    </Badge>
-  )
-}
-
-type CardTypeFormMode = 'create' | 'edit'
-
-function CardTypeFormDialog({
-  open,
-  onOpenChange,
-  mode,
-  initial,
-  existingIds,
-  onSave,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  mode: CardTypeFormMode
-  initial: GPUCardType | null
-  existingIds: string[]
-  onSave: (card: GPUCardType) => void
-}) {
-  const [id, setId] = useState('')
-  const [name, setName] = useState('')
-  const [manufacturer, setManufacturer] = useState<GPUCardTypeManufacturer>('NVIDIA')
-  const [memoryGB, setMemoryGB] = useState('')
-  const [tdpWatts, setTdpWatts] = useState('')
-  const [computeCapability, setComputeCapability] = useState('')
-  const [submitError, setSubmitError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    if (mode === 'edit' && initial) {
-      setId(initial.id)
-      setName(initial.name)
-      setManufacturer(initial.manufacturer)
-      setMemoryGB(String(initial.memoryGB))
-      setTdpWatts(String(initial.tdpWatts))
-      setComputeCapability(initial.computeCapability ?? '')
-    } else {
-      setId('')
-      setName('')
-      setManufacturer('NVIDIA')
-      setMemoryGB('')
-      setTdpWatts('')
-      setComputeCapability('')
-    }
-    setSubmitError(null)
-  }, [open, mode, initial])
-
-  const handleSubmit = () => {
-    const trimmedId = id.trim()
-    const trimmedName = name.trim()
-    if (!trimmedId) {
-      setSubmitError('请填写卡型 ID')
-      return
-    }
-    if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(trimmedId)) {
-      setSubmitError('卡型 ID 需以字母开头，仅可包含字母、数字、下划线与连字符')
-      return
-    }
-    if (mode === 'create' && existingIds.includes(trimmedId)) {
-      setSubmitError('卡型 ID 已存在')
-      return
-    }
-    if (!trimmedName) {
-      setSubmitError('请填写卡型名称')
-      return
-    }
-    const memory = parseInt(memoryGB, 10)
-    const tdp = parseInt(tdpWatts, 10)
-    if (Number.isNaN(memory) || memory <= 0) {
-      setSubmitError('请填写有效的显存容量（GB）')
-      return
-    }
-    if (Number.isNaN(tdp) || tdp <= 0) {
-      setSubmitError('请填写有效的 TDP（W）')
-      return
-    }
-
-    const now = new Date().toISOString()
-    onSave({
-      id: trimmedId,
-      name: trimmedName,
-      manufacturer,
-      memoryGB: memory,
-      tdpWatts: tdp,
-      computeCapability: computeCapability.trim() || undefined,
-      status: initial?.status ?? 'active',
-      createdAt: initial?.createdAt ?? now,
-      updatedAt: now,
-    })
-    onOpenChange(false)
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{mode === 'create' ? '新增系统卡型' : '编辑系统卡型'}</DialogTitle>
-          <DialogDescription>
-            {mode === 'create'
-              ? '录入平台标准 GPU 卡型，供机房单价配置时关联选用'
-              : '修改卡型规格信息，已关联的机房配置将同步展示新名称'}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-2">
-          <div className="grid gap-2">
-            <Label>卡型 ID *</Label>
-            <Input
-              placeholder="如 card9"
-              value={id}
-              disabled={mode === 'edit'}
-              onChange={(e) => {
-                setId(e.target.value)
-                setSubmitError(null)
-              }}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label>卡型名称 *</Label>
-            <Input
-              placeholder="如 NVIDIA A100 80GB"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setSubmitError(null)
-              }}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label>厂商 *</Label>
-            <Select
-              value={manufacturer}
-              onValueChange={(v) => setManufacturer(v as GPUCardTypeManufacturer)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {gpuManufacturers.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {manufacturerNames[m] ?? m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>显存（GB）*</Label>
-              <Input
-                type="number"
-                min={1}
-                value={memoryGB}
-                onChange={(e) => setMemoryGB(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>TDP（W）*</Label>
-              <Input
-                type="number"
-                min={1}
-                value={tdpWatts}
-                onChange={(e) => setTdpWatts(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label>算力版本</Label>
-            <Input
-              placeholder="如 8.0（选填）"
-              value={computeCapability}
-              onChange={(e) => setComputeCapability(e.target.value)}
-            />
-          </div>
-          {submitError && <p className="text-sm text-destructive">{submitError}</p>}
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={handleSubmit}>{mode === 'create' ? '创建' : '保存'}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function CardTypesPanel({
-  cardTypes,
-  pricingRecords,
-  onCardTypesChange,
-}: {
-  cardTypes: GPUCardType[]
-  pricingRecords: SupplierPricingRecord[]
-  onCardTypesChange: Dispatch<SetStateAction<GPUCardType[]>>
-}) {
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | GPUCardTypeStatus>('all')
-  const [formOpen, setFormOpen] = useState(false)
-  const [formMode, setFormMode] = useState<CardTypeFormMode>('create')
-  const [editingCard, setEditingCard] = useState<GPUCardType | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  const usageByCardId = useMemo(() => {
-    const map = new Map<string, number>()
-    for (const r of pricingRecords) {
-      map.set(r.cardTypeId, (map.get(r.cardTypeId) ?? 0) + 1)
-    }
-    return map
-  }, [pricingRecords])
-
-  const filteredCards = cardTypes.filter((card) => {
-    const q = searchTerm.toLowerCase()
-    const matchesSearch =
-      card.id.toLowerCase().includes(q) ||
-      card.name.toLowerCase().includes(q) ||
-      card.manufacturer.toLowerCase().includes(q)
-    const matchesStatus = statusFilter === 'all' || card.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
-
-  const openCreate = () => {
-    setFormMode('create')
-    setEditingCard(null)
-    setFormOpen(true)
-    setActionError(null)
-  }
-
-  const openEdit = (card: GPUCardType) => {
-    setFormMode('edit')
-    setEditingCard(card)
-    setFormOpen(true)
-    setActionError(null)
-  }
-
-  const handleSave = (card: GPUCardType) => {
-    if (formMode === 'create') {
-      onCardTypesChange((prev) => [card, ...prev])
-    } else {
-      onCardTypesChange((prev) => prev.map((c) => (c.id === card.id ? card : c)))
-    }
-    setActionError(null)
-  }
-
-  const toggleStatus = (card: GPUCardType) => {
-    const usageCount = usageByCardId.get(card.id) ?? 0
-    if (card.status === 'active' && usageCount > 0) {
-      setActionError(`卡型「${card.name}」已被 ${usageCount} 条机房单价配置引用，无法禁用`)
-      return
-    }
-    const nextStatus: GPUCardTypeStatus = card.status === 'active' ? 'disabled' : 'active'
-    onCardTypesChange((prev) =>
-      prev.map((c) =>
-        c.id === card.id
-          ? { ...c, status: nextStatus, updatedAt: new Date().toISOString() }
-          : c,
-      ),
-    )
-    setActionError(null)
-  }
-
-  return (
-    <Card className="bg-card border-border">
-      <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-        <div>
-          <CardTitle className="text-base">系统卡型列表</CardTitle>
-          <CardDescription>
-            平台维护的标准 GPU 卡型字典，机房配置单价时需关联以下卡型
-          </CardDescription>
-        </div>
-        <Button className="gap-2 shrink-0" onClick={openCreate}>
-          <Plus className="w-4 h-4" />
-          新增卡型
-        </Button>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="搜索 ID、名称、厂商..."
-              className="pl-9"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as 'all' | GPUCardTypeStatus)}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="状态" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="active">启用</SelectItem>
-              <SelectItem value="disabled">已禁用</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-
-        <Table>
-          <TableHeader>
-            <TableRow className="border-border hover:bg-transparent">
-              <TableHead className="text-muted-foreground">卡型 ID</TableHead>
-              <TableHead className="text-muted-foreground">名称</TableHead>
-              <TableHead className="text-muted-foreground">厂商</TableHead>
-              <TableHead className="text-muted-foreground">显存</TableHead>
-              <TableHead className="text-muted-foreground">TDP</TableHead>
-              <TableHead className="text-muted-foreground">算力版本</TableHead>
-              <TableHead className="text-muted-foreground">状态</TableHead>
-              <TableHead className="text-muted-foreground">已配置机房数</TableHead>
-              <TableHead className="text-muted-foreground w-[50px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredCards.length === 0 ? (
-              <TableRow className="border-border">
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-12">
-                  暂无匹配的卡型
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredCards.map((card) => {
-                const usageCount = usageByCardId.get(card.id) ?? 0
-                const isDisabled = card.status === 'disabled'
-                return (
-                  <TableRow
-                    key={card.id}
-                    className={`border-border ${isDisabled ? 'opacity-60' : ''}`}
-                  >
-                    <TableCell>
-                      <code className="text-xs bg-muted px-2 py-0.5 rounded">{card.id}</code>
-                    </TableCell>
-                    <TableCell className="font-medium text-foreground">
-                      <div className="flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-muted-foreground" />
-                        {card.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        {manufacturerNames[card.manufacturer] ?? card.manufacturer}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-foreground">{card.memoryGB} GB</TableCell>
-                    <TableCell className="text-foreground">{card.tdpWatts} W</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {card.computeCapability ?? '—'}
-                    </TableCell>
-                    <TableCell>
-                      <CardTypeStatusBadge status={card.status} />
-                    </TableCell>
-                    <TableCell className="text-foreground">{usageCount}</TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEdit(card)}>
-                            <Pencil className="w-4 h-4 mr-2" />
-                            编辑
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {card.status === 'active' ? (
-                            <DropdownMenuItem
-                              onClick={() => toggleStatus(card)}
-                              className="text-destructive focus:text-destructive"
-                            >
-                              <Ban className="w-4 h-4 mr-2" />
-                              禁用
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem onClick={() => toggleStatus(card)}>
-                              <CheckCircle className="w-4 h-4 mr-2" />
-                              启用
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                )
-              })
-            )}
-          </TableBody>
-        </Table>
-
-        <CardTypeFormDialog
-          open={formOpen}
-          onOpenChange={setFormOpen}
-          mode={formMode}
-          initial={editingCard}
-          existingIds={cardTypes.map((c) => c.id)}
-          onSave={handleSave}
-        />
-      </CardContent>
-    </Card>
   )
 }

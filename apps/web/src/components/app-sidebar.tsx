@@ -24,6 +24,7 @@ import {
   ChartBarIcon,
   CheckCircleIcon,
   Computer,
+  Cpu,
   CreditCard,
   DownloadIcon,
   Factory,
@@ -96,6 +97,11 @@ const data = {
       title: "测试占用",
       url: "/supplier/test-holds",
       icon: <CheckCircleIcon className="size-4" />,
+    },
+    {
+      title: "系统卡型",
+      url: "/supplier/gpu-card-types",
+      icon: <Cpu className="size-4" />,
     },
   ],
   navCrm: [

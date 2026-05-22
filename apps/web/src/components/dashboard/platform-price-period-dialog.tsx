@@ -23,6 +23,11 @@ import { Switch } from '@workspace/ui/components/switch'
 import type { PlatformCardPriceRecord } from '@/lib/types/platform-pricing'
 import type { PlatformCardPricePeriodRow } from '@/lib/types/platform-pricing-views'
 import {
+  fromDatetimeLocalValue,
+  nowPlatformDateTime,
+  toDatetimeLocalValue,
+} from '@/lib/platform-pricing/datetime'
+import {
   formatPeriodRange,
   getRecordsForPeriod,
   validatePeriodAgainstExisting,
@@ -76,7 +81,7 @@ export function PlatformPricePeriodDialog({
       setCopyFromPeriodId('none')
       setAutoClosePrevious(false)
     } else {
-      setEffectiveFrom(new Date().toISOString().slice(0, 10))
+      setEffectiveFrom(nowPlatformDateTime())
       setEffectiveTo('')
       setOpenEnded(true)
       const current = periods.find((p) => p.isCurrent)
@@ -144,19 +149,25 @@ export function PlatformPricePeriodDialog({
         <div className="grid gap-4 py-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
-              <Label>生效开始日</Label>
+              <Label>生效开始时间</Label>
               <Input
-                type="date"
-                value={effectiveFrom}
-                onChange={(e) => setEffectiveFrom(e.target.value)}
+                type="datetime-local"
+                step={1}
+                value={toDatetimeLocalValue(effectiveFrom)}
+                onChange={(e) => setEffectiveFrom(fromDatetimeLocalValue(e.target.value))}
               />
             </div>
             <div className="grid gap-2">
-              <Label>生效结束日</Label>
+              <Label>生效结束时间</Label>
               <Input
-                type="date"
-                value={effectiveTo}
-                onChange={(e) => setEffectiveTo(e.target.value)}
+                type="datetime-local"
+                step={1}
+                value={effectiveTo ? toDatetimeLocalValue(effectiveTo) : ''}
+                onChange={(e) =>
+                  setEffectiveTo(
+                    e.target.value ? fromDatetimeLocalValue(e.target.value) : '',
+                  )
+                }
                 disabled={openEnded}
               />
             </div>
@@ -164,7 +175,7 @@ export function PlatformPricePeriodDialog({
 
           <div className="flex items-center justify-between gap-4">
             <Label htmlFor="open-ended" className="text-sm font-normal">
-              长期有效（无结束日）
+              长期有效（无结束时间）
             </Label>
             <Switch
               id="open-ended"
@@ -208,7 +219,7 @@ export function PlatformPricePeriodDialog({
               <div className="space-y-0.5">
                 <p className="text-sm font-medium">自动闭合原当前时间段</p>
                 <p className="text-xs text-muted-foreground">
-                  新段生效日前一天作为原当前段的结束日
+                  新段生效时间的前一秒作为原当前段的结束时间
                 </p>
               </div>
               <Switch checked={autoClosePrevious} onCheckedChange={setAutoClosePrevious} />

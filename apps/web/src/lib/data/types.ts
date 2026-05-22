@@ -464,10 +464,12 @@ export type GPUCardTypeStatus = 'active' | 'disabled'
 
 export interface GPUCardType {
   id: string
+  /** 业务编码，落库 gpu_card_type.code */
+  code?: string
   name: string
   manufacturer: GPUCardTypeManufacturer
   memoryGB: number
-  tdpWatts: number
+  tdpWatts?: number
   computeCapability?: string
   status: GPUCardTypeStatus
   createdAt?: string

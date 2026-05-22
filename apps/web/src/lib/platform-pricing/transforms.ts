@@ -89,7 +89,7 @@ function buildPlatformRecordMap(
 ): Map<string, PlatformCardPriceRecord> {
   const map = new Map<string, PlatformCardPriceRecord>()
   for (const r of records) {
-    if (r.gpuCardTypeId !== cardTypeId || r.status === 'archived') continue
+    if (r.gpuCardTypeId !== cardTypeId) continue
     if (periodId != null && r.periodId !== periodId) continue
     map.set(recordKey(r.productLine, r.billingUnit), r)
   }
@@ -301,6 +301,30 @@ export function buildListPageData(): PlatformPricingListPageData {
   }
 }
 
+export function buildDetailPageDataForCard(
+  card: { id: string; name: string; manufacturer: string; memoryGB: number },
+  platformRecords: PlatformCardPriceRecord[] = mockPlatformCardPriceRecords,
+  sellRecords: SupplierDatacenterSellPrice[] = mockSupplierDatacenterSellPrices,
+  platformHistoryCount = 0,
+): PlatformPricingDetailPageData {
+  const periods = toPeriodRows(platformRecords, card.id)
+  const currentPeriodId = findCurrentPeriodId(platformRecords, card.id) ?? null
+
+  return {
+    cardTypeId: card.id,
+    cardTypeName: card.name,
+    manufacturer: card.manufacturer,
+    memoryGB: card.memoryGB,
+    periods,
+    currentPeriodId,
+    platformPrices: currentPeriodId
+      ? toPlatformProductLinePriceRows(card.id, platformRecords, currentPeriodId)
+      : [],
+    datacenters: toDatacenterGroupRows(card.id, sellRecords, platformRecords),
+    platformHistoryCount,
+  }
+}
+
 export function buildDetailPageData(
   cardTypeId: string,
   platformRecords: PlatformCardPriceRecord[] = mockPlatformCardPriceRecords,
@@ -312,24 +336,12 @@ export function buildDetailPageData(
   const card = mockGPUCardTypes.find((c) => c.id === cardTypeId)
   if (!card) return null
 
-  const periods = toPeriodRows(platformRecords, cardTypeId)
-  const currentPeriodId = findCurrentPeriodId(platformRecords, cardTypeId) ?? null
-  const selectedPeriodId =
-    currentPeriodId ?? periods[0]?.periodId ?? null
-
-  return {
-    cardTypeId: card.id,
-    cardTypeName: card.name,
-    manufacturer: card.manufacturer,
-    memoryGB: card.memoryGB,
-    periods,
-    currentPeriodId,
-    platformPrices: selectedPeriodId
-      ? toPlatformProductLinePriceRows(cardTypeId, platformRecords, selectedPeriodId)
-      : [],
-    datacenters: toDatacenterGroupRows(cardTypeId, sellRecords, platformRecords),
+  return buildDetailPageDataForCard(
+    card,
+    platformRecords,
+    sellRecords,
     platformHistoryCount,
-  }
+  )
 }
 
 export function buildDetailPageDataForPeriod(

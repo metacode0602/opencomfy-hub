@@ -1,6 +1,11 @@
 import type { PlatformCardPriceRecord } from '@/lib/types/platform-pricing'
+import {
+  formatPlatformPeriodRange,
+  parsePlatformDateTime,
+  secondBeforePlatformDateTime,
+} from '@/lib/platform-pricing/datetime'
 
-/** 时间段生命周期（相对「今天」） */
+/** 时间段生命周期（相对当前时刻） */
 export type PlatformPricePeriodPhase = 'current' | 'scheduled' | 'expired' | 'draft'
 
 export type PlatformPricePeriod = {
@@ -9,34 +14,26 @@ export type PlatformPricePeriod = {
   effectiveFrom: string
   effectiveTo: string | null
   phase: PlatformPricePeriodPhase
-  /** 展示用，如 2024-07-01 ~ 至今 */
+  /** 展示用，如 2024-07-01 00:00:00 ~ 至今 */
   rangeLabel: string
   priceEntryCount: number
   isCurrent: boolean
 }
 
 export function parsePeriodDate(iso: string): number {
-  const [y, m, d] = iso.split('-').map(Number)
-  return Date.UTC(y!, m! - 1, d!)
+  return parsePlatformDateTime(iso)
 }
 
 export function formatPeriodDate(iso: string): string {
-  const [y, m, d] = iso.split('-')
-  return `${y}-${m}-${d}`
+  return iso
 }
 
 export function formatPeriodRange(from: string, to: string | null): string {
-  const end = to ? formatPeriodDate(to) : '至今'
-  return `${formatPeriodDate(from)} ~ ${end}`
+  return formatPlatformPeriodRange(from, to)
 }
 
 export function dayBefore(iso: string): string {
-  const t = parsePeriodDate(iso) - 86400000
-  const d = new Date(t)
-  const y = d.getUTCFullYear()
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(d.getUTCDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return secondBeforePlatformDateTime(iso)
 }
 
 /** 闭区间 [from, to]；to 为 null 表示正无穷 */
@@ -60,15 +57,11 @@ export function getPeriodPhase(
   refDate = new Date(),
 ): PlatformPricePeriodPhase {
   if (hasDraftPrices) return 'draft'
-  const today = Date.UTC(
-    refDate.getUTCFullYear(),
-    refDate.getUTCMonth(),
-    refDate.getUTCDate(),
-  )
+  const now = refDate.getTime()
   const from = parsePeriodDate(effectiveFrom)
   const to = effectiveTo ? parsePeriodDate(effectiveTo) : Number.POSITIVE_INFINITY
-  if (today < from) return 'scheduled'
-  if (today > to) return 'expired'
+  if (now < from) return 'scheduled'
+  if (now > to) return 'expired'
   return 'current'
 }
 
@@ -84,9 +77,7 @@ export function groupPeriodsFromRecords(
   cardTypeId: string,
   refDate = new Date(),
 ): PlatformPricePeriod[] {
-  const cardRecords = records.filter(
-    (r) => r.gpuCardTypeId === cardTypeId && r.status !== 'archived',
-  )
+  const cardRecords = records.filter((r) => r.gpuCardTypeId === cardTypeId)
 
   const byPeriod = new Map<
     string,
@@ -157,10 +148,7 @@ export function getRecordsForPeriod(
   periodId: string,
 ): PlatformCardPriceRecord[] {
   return records.filter(
-    (r) =>
-      r.gpuCardTypeId === cardTypeId &&
-      r.periodId === periodId &&
-      r.status !== 'archived',
+    (r) => r.gpuCardTypeId === cardTypeId && r.periodId === periodId,
   )
 }
 
@@ -186,10 +174,10 @@ export function validatePeriodRange(
   effectiveTo: string | null,
 ): PeriodOverlapError | null {
   if (!effectiveFrom) {
-    return { code: 'invalid_range', message: '请填写生效开始日' }
+    return { code: 'invalid_range', message: '请填写生效开始时间' }
   }
   if (effectiveTo && parsePeriodDate(effectiveFrom) > parsePeriodDate(effectiveTo)) {
-    return { code: 'invalid_range', message: '结束日不能早于开始日' }
+    return { code: 'invalid_range', message: '结束时间不能早于开始时间' }
   }
   return null
 }
@@ -212,7 +200,7 @@ export function validatePeriodAgainstExisting(
     if (periodsOverlap(effectiveFrom, effectiveTo, p.effectiveFrom, p.effectiveTo)) {
       return {
         code: 'overlap',
-        message: `与已有时间段「${p.rangeLabel}」重叠，请调整起止日期`,
+        message: `与已有时间段「${p.rangeLabel}」重叠，请调整起止时间`,
       }
     }
   }
@@ -223,14 +211,14 @@ export function validatePeriodAgainstExisting(
   if (newPhase === 'current' && existingCurrent.length > 0) {
     return {
       code: 'multiple_current',
-      message: `已存在当前有效时间段「${existingCurrent[0]!.rangeLabel}」。请先为其设置结束日，或让新时间段的开始日晚于今天且不与现有区间重叠。`,
+      message: `已存在当前有效时间段「${existingCurrent[0]!.rangeLabel}」。请先为其设置结束时间，或让新时间段的开始时间晚于当前时刻且不与现有区间重叠。`,
     }
   }
 
   return null
 }
 
-/** 新建「当前」时间段时，自动闭合原当前时间段的结束日 */
+/** 新建「当前」时间段时，自动闭合原当前时间段的结束时间 */
 export function closePreviousCurrentPeriod(
   records: PlatformCardPriceRecord[],
   cardTypeId: string,

@@ -1,5 +1,8 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
+import { platformPricingDataAccess } from '@/lib/server/dataaccess/platform-pricing'
+import { platformPricingError } from '@/lib/server/dataaccess/platform-pricing/logger'
+import { gpuCardTypesDataAccess } from '@/lib/server/dataaccess/supplier/gpu-card-types'
 import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-import'
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
 import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
@@ -19,6 +22,15 @@ import {
   faultRecordsRowSchema,
 } from '@/lib/server/routers/supplier/device-import-schemas'
 import { deviceRetireRequestSchema } from '@/lib/server/routers/supplier/device-retire-schemas'
+import {
+  gpuCardTypeListSchema,
+  gpuCardTypeUpdateSchema,
+  gpuCardTypeUpsertSchema,
+} from '@/lib/server/routers/supplier/gpu-card-types-schemas'
+import {
+  platformPriceUpdateSchema,
+  platformPriceUpsertSchema,
+} from '@/lib/server/routers/supplier/platform-pricing-schemas'
 import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -40,6 +52,9 @@ const platformDatacenterSearchSchema = z.object({
 })
 
 function mapImportError(error: unknown): never {
+  if (error instanceof TRPCError) {
+    throw error
+  }
   if (error instanceof SuanliSupplyOpenApiError) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: error.message })
   }
@@ -64,12 +79,19 @@ function mapImportError(error: unknown): never {
       message.includes('不属于') ||
       message.includes('拉取') ||
       message.includes('OpenAPI') ||
-      message.includes('算算力')
+      message.includes('算算力') ||
+      message.includes('已存在') ||
+      message.includes('无法禁用') ||
+      message.includes('无法配置') ||
+      message.includes('不可变更') ||
+      message.includes('已有平台价') ||
+      message.includes('请填写') ||
+      message.includes('须大于')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
-    supplierError('supplier-router', 'import failed', error)
-    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message })
+    supplierError('supplier-router', 'operation failed', error)
+    throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '操作失败，请稍后重试' })
   }
   throw error
 }
@@ -433,5 +455,140 @@ export const supplierRouter = createTRPCRouter({
           mapImportError(e)
         }
       }),
+  }),
+
+  gpuCardTypes: createTRPCRouter({
+    list: protectedProcedure.input(gpuCardTypeListSchema).query(async ({ input }) => {
+      try {
+        return await gpuCardTypesDataAccess.list(input ?? {})
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    listActive: protectedProcedure.query(async () => {
+      try {
+        return await gpuCardTypesDataAccess.listActive()
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          const row = await gpuCardTypesDataAccess.getById(input.id)
+          if (!row) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '卡型不存在' })
+          }
+          return row
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    create: adminProcedure.input(gpuCardTypeUpsertSchema).mutation(async ({ input }) => {
+      try {
+        return await gpuCardTypesDataAccess.create(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    update: adminProcedure
+      .input(z.object({ id: z.string(), data: gpuCardTypeUpdateSchema }))
+      .mutation(async ({ input }) => {
+        try {
+          return await gpuCardTypesDataAccess.update(input.id, input.data)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    setStatus: adminProcedure
+      .input(z.object({ id: z.string(), status: z.enum(['active', 'disabled']) }))
+      .mutation(async ({ input }) => {
+        try {
+          return await gpuCardTypesDataAccess.setStatus(input.id, input.status)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  platformPricing: createTRPCRouter({
+    listPage: protectedProcedure.query(async () => {
+      try {
+        return await platformPricingDataAccess.getListPage()
+      } catch (e) {
+        platformPricingError('router.listPage', 'failed', e)
+        mapImportError(e)
+      }
+    }),
+
+    listRecords: protectedProcedure.query(async () => {
+      try {
+        return await platformPricingDataAccess.listRecords()
+      } catch (e) {
+        platformPricingError('router.listRecords', 'failed', e)
+        mapImportError(e)
+      }
+    }),
+
+    listRecordsForCardType: protectedProcedure
+      .input(z.object({ cardTypeId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await platformPricingDataAccess.listRecordsForCardType(input.cardTypeId)
+        } catch (e) {
+          platformPricingError('router.listRecordsForCardType', 'failed', e, input)
+          mapImportError(e)
+        }
+      }),
+
+    getDetailPage: protectedProcedure
+      .input(z.object({ cardTypeId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          const detail = await platformPricingDataAccess.getDetailPage(input.cardTypeId)
+          if (!detail) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '卡型不存在' })
+          }
+          return detail
+        } catch (e) {
+          platformPricingError('router.getDetailPage', 'failed', e, input)
+          mapImportError(e)
+        }
+      }),
+
+    listHistory: protectedProcedure
+      .input(z.object({ cardTypeId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await platformPricingDataAccess.listHistory(input.cardTypeId)
+        } catch (e) {
+          platformPricingError('router.listHistory', 'failed', e, input)
+          mapImportError(e)
+        }
+      }),
+
+    create: adminProcedure.input(platformPriceUpsertSchema).mutation(async ({ input }) => {
+      try {
+        return await platformPricingDataAccess.createPrice(input)
+      } catch (e) {
+        platformPricingError('router.create', 'failed', e, { gpuCardTypeId: input.gpuCardTypeId })
+        mapImportError(e)
+      }
+    }),
+
+    update: adminProcedure.input(platformPriceUpdateSchema).mutation(async ({ input }) => {
+      try {
+        return await platformPricingDataAccess.updatePrice(input)
+      } catch (e) {
+        platformPricingError('router.update', 'failed', e, { recordId: input.recordId })
+        mapImportError(e)
+      }
+    }),
   }),
 })

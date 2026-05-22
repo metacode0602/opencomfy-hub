@@ -3,6 +3,7 @@
 import { Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Badge } from '@workspace/ui/components/badge'
+import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import {
   Dialog,
@@ -37,6 +38,9 @@ type PricingHistoryDialogProps = {
   description?: string
   platformHistory?: PlatformCardPriceHistory[]
   datacenterHistory?: SupplierDatacenterSellPriceHistory[]
+  isLoading?: boolean
+  isError?: boolean
+  onRetry?: () => void
 }
 
 export function PricingHistoryDialog({
@@ -47,6 +51,9 @@ export function PricingHistoryDialog({
   description,
   platformHistory = [],
   datacenterHistory = [],
+  isLoading = false,
+  isError = false,
+  onRetry,
 }: PricingHistoryDialogProps) {
   const [search, setSearch] = useState('')
 
@@ -94,6 +101,16 @@ export function PricingHistoryDialog({
         </div>
 
         <div className="overflow-auto flex-1 -mx-1 px-1">
+          {isError && (
+            <div className="mb-3 flex items-center justify-between rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <span>加载调价历史失败</span>
+              {onRetry && (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  重试
+                </Button>
+              )}
+            </div>
+          )}
           <Table>
             <TableHeader>
               <TableRow>
@@ -107,7 +124,16 @@ export function PricingHistoryDialog({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={mode === 'datacenter' ? 7 : 6}
+                    className="text-center text-muted-foreground py-8"
+                  >
+                    加载中…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={mode === 'datacenter' ? 7 : 6}

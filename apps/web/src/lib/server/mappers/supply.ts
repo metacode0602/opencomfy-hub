@@ -274,10 +274,11 @@ type GpuCardTypeRow = typeof gpuCardType.$inferSelect
 export function mapGpuCardTypeRow(row: GpuCardTypeRow): GPUCardType {
   return {
     id: row.id,
+    code: row.code,
     name: row.name,
     manufacturer: row.manufacturer as GPUCardType['manufacturer'],
     memoryGB: row.memoryGb ?? 0,
-    tdpWatts: row.tdpWatts ?? 0,
+    tdpWatts: row.tdpWatts ?? undefined,
     computeCapability: row.computeCapability ?? undefined,
     status: row.status as GPUCardType['status'],
     createdAt: toIsoDate(row.createdAt),

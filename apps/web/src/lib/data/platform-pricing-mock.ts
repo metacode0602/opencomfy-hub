@@ -141,13 +141,13 @@ function periodsForCard(cardId: string): PeriodConfig[] {
     return [
       {
         periodId: 'card1-p-current',
-        effectiveFrom: '2024-07-01',
+        effectiveFrom: '2024-07-01 00:00:00',
         effectiveTo: null,
       },
       {
         periodId: 'card1-p-hist',
-        effectiveFrom: '2024-01-01',
-        effectiveTo: '2024-06-30',
+        effectiveFrom: '2024-01-01 00:00:00',
+        effectiveTo: '2024-06-30 23:59:59',
         priceFactor: 0.9,
       },
     ]
@@ -156,12 +156,12 @@ function periodsForCard(cardId: string): PeriodConfig[] {
     return [
       {
         periodId: 'card5-p-current',
-        effectiveFrom: '2024-01-01',
+        effectiveFrom: '2024-01-01 00:00:00',
         effectiveTo: null,
       },
       {
         periodId: 'card5-p-future',
-        effectiveFrom: '2026-01-01',
+        effectiveFrom: '2026-01-01 00:00:00',
         effectiveTo: null,
         priceFactor: 1.08,
       },
@@ -170,7 +170,7 @@ function periodsForCard(cardId: string): PeriodConfig[] {
   return [
     {
       periodId: `${cardId}-p-current`,
-      effectiveFrom: '2024-01-01',
+      effectiveFrom: '2024-01-01 00:00:00',
       effectiveTo: null,
     },
   ]

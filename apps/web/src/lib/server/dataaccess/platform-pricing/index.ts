@@ -1,13 +1,12 @@
-import {
-  buildDetailPageData,
-  buildListPageData,
-  getDatacenterHistoryForCardType,
-  getPlatformHistoryForCardType,
-} from '@/lib/platform-pricing/transforms'
+import { platformPricingDbDataAccess } from './db'
 
 export const platformPricingDataAccess = {
-  getListPage: buildListPageData,
-  getDetailPage: (cardTypeId: string) => buildDetailPageData(cardTypeId),
-  getPlatformHistory: getPlatformHistoryForCardType,
-  getDatacenterHistory: getDatacenterHistoryForCardType,
+  getListPage: () => platformPricingDbDataAccess.getListPage(),
+  getDetailPage: (cardTypeId: string) => platformPricingDbDataAccess.getDetailPage(cardTypeId),
+  listRecords: () => platformPricingDbDataAccess.listRecords(),
+  listRecordsForCardType: (cardTypeId: string) =>
+    platformPricingDbDataAccess.listRecordsForCardType(cardTypeId),
+  listHistory: (cardTypeId: string) => platformPricingDbDataAccess.listHistory(cardTypeId),
+  createPrice: platformPricingDbDataAccess.createPrice.bind(platformPricingDbDataAccess),
+  updatePrice: platformPricingDbDataAccess.updatePrice.bind(platformPricingDbDataAccess),
 }

@@ -100,12 +100,13 @@ export const gpuCardType = pgTable(
   "gpu_card_type",
   {
     id: text("id").primaryKey(),
-    name: varchar("name", { length: 128 }).notNull(),
-    manufacturer: varchar("manufacturer", { length: 32 }).notNull(),
-    memoryGb: integer("memory_gb"),
-    tdpWatts: integer("tdp_watts"),
-    computeCapability: varchar("compute_capability", { length: 64 }),
-    status: varchar("status", { length: 32 }).notNull(),
+    name: varchar("name", { length: 128 }).notNull(), // 卡型名称
+    code: varchar("code", { length: 64 }).notNull().unique(), // 卡型编码
+    manufacturer: varchar("manufacturer", { length: 32 }).notNull(), // 制造商
+    memoryGb: integer("memory_gb"), // 内存容量（GB）
+    tdpWatts: integer("tdp_watts"), // 功耗（瓦）
+    computeCapability: varchar("compute_capability", { length: 64 }), // 计算能力
+    status: varchar("status", { length: 32 }).notNull(), // 状态
     ...supplyTimestamps,
   },
   (table) => [uniqueIndex("gpu_card_type_name_uk").on(table.name)],
@@ -264,7 +265,7 @@ export const supplierTermsVersion = pgTable(
     index("supplier_terms_version_contract_id_idx").on(table.contractId),
   ],
 )
-
+// 供应商机房×卡型成本
 export const supplierUnitCost = pgTable(
   "supplier_unit_cost",
   {
@@ -301,6 +302,7 @@ export const supplierUnitCost = pgTable(
   ],
 )
 
+// 供应商机房×卡型定价记录
 export const supplierPricingRecord = pgTable(
   "supplier_pricing_record",
   {
