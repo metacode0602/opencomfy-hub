@@ -516,7 +516,7 @@ export function OnboardingBatchDetailContent({
                       <TableCell className="font-mono text-xs">{d.external_ip}</TableCell>
                       <TableCell>
                         <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/supplier/devices/machines/${d.id}`}>详情</Link>
+                          <Link href={`/supplier/devices/${d.id}`}>详情</Link>
                         </Button>
                       </TableCell>
                     </TableRow>

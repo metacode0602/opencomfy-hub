@@ -323,7 +323,7 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/supplier/devices/machines/${d.device_id}`}>详情</Link>
+                            <Link href={`/supplier/devices/${d.device_id}`}>详情</Link>
                           </Button>
                           {active && (
                             <Button

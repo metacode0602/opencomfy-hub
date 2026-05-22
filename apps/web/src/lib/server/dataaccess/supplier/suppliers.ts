@@ -4,6 +4,7 @@ import type {
   DataCenter,
   DataCenterDevice,
   GPUCardType,
+  GpuInventoryDetail,
   Supplier,
   SupplierBill,
   SupplierContract,
@@ -14,6 +15,7 @@ import {
   mapDataCenterRow,
   mapGpuCardTypeRow,
   mapGpuInventoryRow,
+  mapPhysicalDeviceRow,
   mapSupplierBillDetailRow,
   mapSupplierBillRow,
   mapSupplierContractRow,
@@ -28,6 +30,7 @@ import {
   supplier,
   supplierBill,
   supplierBillDetail,
+  computeNode,
   supplierContract,
   supplierDevice,
   supplierGpuInventory,
@@ -35,7 +38,7 @@ import {
   supplierPricingRecord,
   userStaff,
 } from '@workspace/db/schema'
-import { and, count, eq, gt, inArray, sql, sum } from 'drizzle-orm'
+import { and, count, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -217,6 +220,74 @@ export const suppliersDataAccess = {
   /** @deprecated 使用 listGpuInventory({ supplierId }) */
   async listGpuInventoryBySupplier(supplierId: string): Promise<DataCenterDevice[]> {
     return this.listGpuInventory({ supplierId })
+  },
+
+  async getGpuInventoryDetail(inventoryId: string): Promise<GpuInventoryDetail | null> {
+    const [hit] = await db
+      .select({
+        inventory: supplierGpuInventory,
+        dataCenterName: dataCenter.name,
+        cardTypeName: gpuCardType.name,
+        supplierShortName: supplier.shortName,
+      })
+      .from(supplierGpuInventory)
+      .innerJoin(dataCenter, eq(supplierGpuInventory.dataCenterId, dataCenter.id))
+      .innerJoin(gpuCardType, eq(supplierGpuInventory.gpuCardTypeId, gpuCardType.id))
+      .innerJoin(supplier, eq(supplierGpuInventory.supplierId, supplier.id))
+      .where(eq(supplierGpuInventory.id, inventoryId))
+      .limit(1)
+
+    if (!hit) return null
+
+    const inventory = mapGpuInventoryRow(hit.inventory, {
+      dataCenterName: hit.dataCenterName,
+      cardTypeName: hit.cardTypeName,
+      supplierShortName: hit.supplierShortName,
+    })
+
+    const deviceRows = await db
+      .select({
+        device: supplierDevice,
+        supplierShortName: supplier.shortName,
+        cardTypeName: gpuCardType.name,
+        clusterName: computeNode.clusterName,
+        nodeRole: computeNode.nodeRole,
+        expectedService: computeNode.expectedService,
+      })
+      .from(supplierDevice)
+      .innerJoin(supplier, eq(supplierDevice.supplierId, supplier.id))
+      .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+      .leftJoin(computeNode, eq(computeNode.supplierDeviceId, supplierDevice.id))
+      .where(
+        and(
+          eq(supplierDevice.supplierId, inventory.supplierId),
+          eq(supplierDevice.dataCenterId, inventory.dataCenterId),
+          eq(supplierDevice.gpuCardTypeId, inventory.cardTypeId),
+          ne(supplierDevice.lifecycleStatus, '退订'),
+        ),
+      )
+      .orderBy(sql`${supplierDevice.updatedAt} DESC`)
+
+    const physicalDevices = deviceRows.map(
+      ({ device, supplierShortName, cardTypeName, clusterName, nodeRole, expectedService }) =>
+        mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }, {
+          clusterName,
+          nodeRole,
+          expectedService,
+        }),
+    )
+
+    return {
+      inventory,
+      physicalDevices,
+      physicalDeviceStats: {
+        total: physicalDevices.length,
+        online: physicalDevices.filter((d) => d.lifecycleStatus === '在线').length,
+        maintenance: physicalDevices.filter(
+          (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
+        ).length,
+      },
+    }
   },
 
   async listContractsBySupplier(supplierId: string): Promise<SupplierContract[]> {

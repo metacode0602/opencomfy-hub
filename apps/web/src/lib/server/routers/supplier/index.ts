@@ -159,6 +159,20 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
+  getGpuInventoryDetail: protectedProcedure
+    .input(z.object({ inventoryId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const detail = await suppliersDataAccess.getGpuInventoryDetail(input.inventoryId)
+        if (!detail) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '聚合库存不存在' })
+        }
+        return detail
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
   listContracts: protectedProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {

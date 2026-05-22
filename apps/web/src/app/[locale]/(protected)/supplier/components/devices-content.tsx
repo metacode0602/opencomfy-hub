@@ -16,15 +16,14 @@ export function DevicesContent() {
         <div>
           <h1 className="text-2xl font-semibold text-foreground">设备管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            机房×卡型聚合库存（L1）与物理机 SN 台账（L2）
+            物理机台账
           </p>
         </div>
-        {listTab === 'aggregate' && (
           <Button className="gap-2" disabled>
             <Plus className="w-4 h-4" />
             新增设备
           </Button>
-        )}
+
       </div>
 
       <Tabs value={listTab} onValueChange={(v) => setListTab(v as 'aggregate' | 'physical')}>

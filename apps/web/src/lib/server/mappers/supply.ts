@@ -162,6 +162,7 @@ export function mapGpuInventoryRow(
     isInternalTest: row.isInternalTest,
     internalTestScope: row.internalTestScope ?? undefined,
     internalTestUntil: row.internalTestUntil?.toISOString() ?? null,
+    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
   }
 }

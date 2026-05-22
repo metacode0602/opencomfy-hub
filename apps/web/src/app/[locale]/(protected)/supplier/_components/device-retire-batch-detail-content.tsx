@@ -205,7 +205,7 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
                       <TableCell>
                         {d.deviceId !== '—' && !d.deviceId.startsWith('—') && (
                           <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/supplier/devices/machines/${d.deviceId}`}>详情</Link>
+                            <Link href={`/supplier/devices/${d.deviceId}`}>详情</Link>
                           </Button>
                         )}
                       </TableCell>

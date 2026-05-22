@@ -500,7 +500,19 @@ export interface DataCenterDevice {
   internalTestScope?: string
   /** 内部测试计划结束时间 */
   internalTestUntil?: string | null
+  /** 与物理机汇总同步时间 */
+  lastSyncedAt?: string | null
   updatedAt?: string
+}
+
+export interface GpuInventoryDetail {
+  inventory: DataCenterDevice
+  physicalDevices: PhysicalDevice[]
+  physicalDeviceStats: {
+    total: number
+    online: number
+    maintenance: number
+  }
 }
 
 /** 设备合作类型（supplier_device.cooperation_type） */

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronRight,
   Cpu,
   FlaskConical,
   Loader2,
@@ -262,6 +263,7 @@ export function AggregateInventoryContent({ supplierIdFilter }: { supplierIdFilt
               <TableHead className="text-muted-foreground">成本</TableHead>
               <TableHead className="text-muted-foreground">状态</TableHead>
               <TableHead className="text-muted-foreground">内部测试</TableHead>
+              <TableHead className="text-muted-foreground">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -329,6 +331,14 @@ export function AggregateInventoryContent({ supplierIdFilter }: { supplierIdFilt
                       ) : (
                         <span className="text-sm text-muted-foreground">—</span>
                       )}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/supplier/inventory/${device.id}`}>
+                          详情
+                        <ChevronRight className="w-3 h-3" />
+                        </Link>
+                      </Button>
                     </TableCell>
                   </TableRow>
                 )

@@ -75,7 +75,7 @@ const data = {
     },
     {
       title: "设备库存",
-      url: "/supplier/gpu-inventory",
+      url: "/supplier/inventory",
       icon: <Cpu className="size-4" />,
     },    
     {

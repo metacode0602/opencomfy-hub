@@ -353,7 +353,7 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
                   key={d.id}
                   device={d}
                   markingOnline={markOnlineMutation.isPending && markOnlineMutation.variables?.deviceId === d.id}
-                  onView={() => router.push(`/supplier/devices/machines/${d.id}`)}
+                  onView={() => router.push(`/supplier/devices/${d.id}`)}
                   onOnline={() => markOnline(d)}
                 />
               ))
