@@ -64,6 +64,7 @@ import {
 import { getActivityIcon } from '@/components/dashboard/project-detail-utils'
 import { ProjectTimelinePanel } from '@/components/dashboard/project-timeline-panel'
 import { ProjectConsumptionPanel } from '@/components/dashboard/project-consumption-panel'
+import { ProjectDailyConsumptionPanel } from '@/components/dashboard/project-daily-consumption-panel'
 import { ProjectTasksPanel } from '@/components/dashboard/project-tasks-panel'
 import { ProjectOrdersPanel } from '@/components/dashboard/project-orders-panel'
 import { ProjectCouponsPanel } from '@/components/dashboard/project-coupons-panel'
@@ -497,7 +498,8 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
           <ProjectTimelinePanel project={project} />
         </TabsContent>
 
-        <TabsContent value="consumption" className="mt-6">
+        <TabsContent value="consumption" className="mt-6 space-y-6">
+          <ProjectDailyConsumptionPanel project={project} />
           <ProjectConsumptionPanel project={project} />
         </TabsContent>
 

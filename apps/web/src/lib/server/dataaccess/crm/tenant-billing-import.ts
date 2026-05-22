@@ -9,6 +9,7 @@ import {
   mapMetalOrderStatus,
   mapPayChannel,
   mapPlatformProductLine,
+  mapPlatformTaskType,
   mapRechargeStatus,
   moneyStringsEqual,
   parsePlatformDateTime,
@@ -16,16 +17,19 @@ import {
   platformAmountToMoneyString,
   platformAmountToRmb,
   summarizeSection,
+  usageDateFromPlatformPeriod,
   validateBillingDateRange,
 } from '@/lib/crm/tenant-billing-import-utils'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
   fetchPlatformBillDetailsForOverview,
+  fetchPlatformDailyUsageBills,
   fetchPlatformMetalOrders,
   fetchPlatformMonthlyBills,
   fetchPlatformRecharges,
   SuanliBillingApiError,
   type PlatformBillDetailRecord,
+  type PlatformDailyUsageBillRecord,
   type PlatformMetalOrderRecord,
   type PlatformMonthlyBillRecord,
   type PlatformRechargeRecord,
@@ -33,6 +37,7 @@ import {
 import { BILLING_IMPORT_SECTION_DELAY_MS, delayBillingApi } from '@/lib/server/integrations/suanli-billing-api-throttle'
 import type {
   BillDetailPreviewItem,
+  DailyUsageBillPreviewItem,
   MetalOrderPreviewItem,
   MonthlyBillPreviewItem,
   RechargePreviewItem,
@@ -46,6 +51,7 @@ import {
   billingTenant,
   commerceOrder,
   commerceOrderItem,
+  consumptionUsageDaily,
   recharge,
   tenantBill,
   tenantBillDetail,
@@ -82,6 +88,12 @@ type CachedBillingImport = {
   metalOrders: Array<{ action: TenantBillingImportAction; record: PlatformMetalOrderRecord }>
   monthlyBills: Array<{ action: TenantBillingImportAction; record: PlatformMonthlyBillRecord; billMonth: string }>
   recharges: Array<{ action: TenantBillingImportAction; record: PlatformRechargeRecord }>
+  dailyUsageBills: Array<{
+    action: TenantBillingImportAction
+    record: PlatformDailyUsageBillRecord
+    usageDate: string
+    productLine: string
+  }>
   billDetailGroups: BillDetailGroup[]
   billDetailItems: BillDetailPreviewItem[]
 }
@@ -263,6 +275,59 @@ function buildMonthlyBillPreview(
   return { preview, cached }
 }
 
+function buildDailyUsagePreview(
+  records: PlatformDailyUsageBillRecord[],
+  existingByKey: Map<
+    string,
+    { id: string; amount: string; voucherAmount: string; balanceAmount: string }
+  >,
+): {
+  preview: DailyUsageBillPreviewItem[]
+  cached: CachedBillingImport['dailyUsageBills']
+} {
+  const preview: DailyUsageBillPreviewItem[] = []
+  const cached: CachedBillingImport['dailyUsageBills'] = []
+
+  for (const record of records) {
+    const usageDate = usageDateFromPlatformPeriod(record.start_time)
+    const { productLine, label: taskTypeLabel } = mapPlatformTaskType(record.task_type)
+    const amount = platformAmountToMoneyString(record.total_billing_value)
+    const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
+    const balanceAmount = platformAmountToRmb(
+      record.total_billing_value - record.total_discount_value,
+    ).toFixed(4)
+    const diffKey = `${usageDate}:${productLine}`
+
+    const existing = existingByKey.get(diffKey)
+    let action: TenantBillingImportAction = 'create'
+    if (existing) {
+      const same =
+        moneyStringsEqual(existing.amount, amount) &&
+        moneyStringsEqual(existing.voucherAmount, voucherAmount) &&
+        moneyStringsEqual(existing.balanceAmount, balanceAmount)
+      action = same ? 'skip' : 'update'
+    }
+
+    cached.push({ action, record, usageDate, productLine })
+    preview.push({
+      key: `daily-${usageDate}-${productLine}`,
+      action,
+      usageDate,
+      taskType: taskTypeLabel,
+      productLine,
+      periodStart: record.start_time,
+      periodEnd: record.end_time,
+      totalAmountRmb: platformAmountToRmb(record.total_billing_value),
+      couponAmountRmb: platformAmountToRmb(record.total_discount_value),
+      balanceAmountRmb: platformAmountToRmb(
+        record.total_billing_value - record.total_discount_value,
+      ),
+    })
+  }
+
+  return { preview, cached }
+}
+
 function buildRechargePreview(
   records: PlatformRechargeRecord[],
   existingByTx: Map<string, { id: string; amount: string; status: string }>,
@@ -358,14 +423,16 @@ export const tenantBillingImportDataAccess = {
     let metalRecords: PlatformMetalOrderRecord[] = []
     let billRecords: PlatformMonthlyBillRecord[] = []
     let rechargeRecords: PlatformRechargeRecord[] = []
+    let dailyUsageRecords: PlatformDailyUsageBillRecord[] = []
     let detailRecords: PlatformBillDetailRecord[] = []
 
     let metalError: string | undefined
     let billsError: string | undefined
     let rechargesError: string | undefined
+    let dailyUsageError: string | undefined
     let detailsError: string | undefined
 
-    const [metalRes, billsRes, rechargesRes] = await (async () => {
+    const [metalRes, billsRes, rechargesRes, dailyUsageRes] = await (async () => {
       /** 串行拉取 + 段间等待，避免并发打满 OpenAPI */
       const runSection = async <T>(label: string, fn: () => Promise<T>) => {
         try {
@@ -385,7 +452,12 @@ export const tenantBillingImportDataAccess = {
       await delayBillingApi(BILLING_IMPORT_SECTION_DELAY_MS, 'section:recharges')
 
       const recharges = await runSection('recharges', () => fetchPlatformRecharges(apiInput))
-      return [metal, bills, recharges] as const
+      await delayBillingApi(BILLING_IMPORT_SECTION_DELAY_MS, 'section:daily_usage_bills')
+
+      const dailyUsage = await runSection('daily_usage_bills', () =>
+        fetchPlatformDailyUsageBills(apiInput),
+      )
+      return [metal, bills, recharges, dailyUsage] as const
     })()
 
     if (metalRes.status === 'fulfilled') {
@@ -411,6 +483,16 @@ export const tenantBillingImportDataAccess = {
       crmWarn('tenant-billing-import', 'recharges failed', { traceId, err: rechargesError })
     }
 
+    if (dailyUsageRes.status === 'fulfilled') {
+      dailyUsageRecords = dailyUsageRes.value
+    } else {
+      dailyUsageError =
+        dailyUsageRes.reason instanceof Error
+          ? dailyUsageRes.reason.message
+          : '每日用量账单拉取失败'
+      crmWarn('tenant-billing-import', 'daily usage failed', { traceId, err: dailyUsageError })
+    }
+
     if (billRecords.length > 0) {
       await delayBillingApi(BILLING_IMPORT_SECTION_DELAY_MS, 'section:bill_details')
       try {
@@ -429,7 +511,7 @@ export const tenantBillingImportDataAccess = {
       detailsError = '月度账单拉取失败，无法获取账单明细'
     }
 
-    const [existingOrders, existingBills, existingRecharges, existingBillRows] =
+    const [existingOrders, existingBills, existingRecharges, existingBillRows, existingDailyUsage] =
       await Promise.all([
         db
           .select({ id: commerceOrder.id, orderNo: commerceOrder.orderNo, amount: commerceOrder.amount })
@@ -458,6 +540,17 @@ export const tenantBillingImportDataAccess = {
           .select({ id: tenantBill.id, billMonth: tenantBill.billMonth })
           .from(tenantBill)
           .where(eq(tenantBill.tenantId, tenant.id)),
+        db
+          .select({
+            id: consumptionUsageDaily.id,
+            usageDate: consumptionUsageDaily.usageDate,
+            productLine: consumptionUsageDaily.productLine,
+            amount: consumptionUsageDaily.amount,
+            voucherAmount: consumptionUsageDaily.voucherAmount,
+            balanceAmount: consumptionUsageDaily.balanceAmount,
+          })
+          .from(consumptionUsageDaily)
+          .where(eq(consumptionUsageDaily.tenantId, tenant.id)),
       ])
 
     const existingByOrderNo = new Map(
@@ -483,6 +576,18 @@ export const tenantBillingImportDataAccess = {
           r.transactionId!,
           { id: r.id, amount: String(r.amount), status: r.status },
         ]),
+    )
+
+    const existingDailyUsageByKey = new Map(
+      existingDailyUsage.map((row) => [
+        `${String(row.usageDate).slice(0, 10)}:${row.productLine ?? ''}`,
+        {
+          id: row.id,
+          amount: String(row.amount ?? '0'),
+          voucherAmount: String(row.voucherAmount ?? '0'),
+          balanceAmount: String(row.balanceAmount ?? '0'),
+        },
+      ]),
     )
 
     const billIds = existingBillRows.map((b) => b.id)
@@ -522,6 +627,7 @@ export const tenantBillingImportDataAccess = {
     const metalBuilt = buildMetalPreview(metalRecords, existingByOrderNo)
     const billsBuilt = buildMonthlyBillPreview(billRecords, existingByMonth)
     const rechargesBuilt = buildRechargePreview(rechargeRecords, existingByTx)
+    const dailyUsageBuilt = buildDailyUsagePreview(dailyUsageRecords, existingDailyUsageByKey)
     const { groups: billDetailGroups, items: rawDetailItems } =
       expandBillDetails(detailRecords)
     const billDetailItems = diffBillDetailItems(rawDetailItems, existingDetailsByBillMonth)
@@ -536,6 +642,7 @@ export const tenantBillingImportDataAccess = {
       metalOrders: metalBuilt.cached,
       monthlyBills: billsBuilt.cached,
       recharges: rechargesBuilt.cached,
+      dailyUsageBills: dailyUsageBuilt.cached,
       billDetailGroups,
       billDetailItems,
     })
@@ -554,6 +661,7 @@ export const tenantBillingImportDataAccess = {
         metalOrders: section(metalBuilt.preview, metalError),
         monthlyBills: section(billsBuilt.preview, billsError),
         recharges: section(rechargesBuilt.preview, rechargesError),
+        dailyUsageBills: section(dailyUsageBuilt.preview, dailyUsageError),
         billDetails: section(billDetailItems, detailsError),
       },
     }
@@ -564,6 +672,7 @@ export const tenantBillingImportDataAccess = {
       metal: metalBuilt.preview.length,
       bills: billsBuilt.preview.length,
       recharges: rechargesBuilt.preview.length,
+      dailyUsage: dailyUsageBuilt.preview.length,
       details: billDetailItems.length,
     })
 
@@ -584,6 +693,7 @@ export const tenantBillingImportDataAccess = {
       metalOrders: { created: 0, updated: 0, errors: [] },
       monthlyBills: { created: 0, updated: 0, errors: [] },
       recharges: { created: 0, updated: 0, errors: [] },
+      dailyUsageBills: { created: 0, updated: 0, errors: [] },
       billDetails: { created: 0, updated: 0, deleted: 0, errors: [] },
     }
 
@@ -699,6 +809,62 @@ export const tenantBillingImportDataAccess = {
             crmWarn('tenant-billing-import', 'detail group failed', {
               traceId,
               billMonth: group.billMonth,
+              err: message,
+            })
+          }
+        }
+
+        for (const item of cached.dailyUsageBills) {
+          if (item.action === 'skip') continue
+          try {
+            const { record, usageDate, productLine } = item
+            const amount = platformAmountToMoneyString(record.total_billing_value)
+            const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
+            const balanceAmount = platformAmountToRmb(
+              record.total_billing_value - record.total_discount_value,
+            ).toFixed(4)
+            const rowId = `usage-daily-${cached.tenantId}-${usageDate}-${productLine}`
+
+            const existing = await tx.query.consumptionUsageDaily.findFirst({
+              where: and(
+                eq(consumptionUsageDaily.tenantId, cached.tenantId),
+                eq(consumptionUsageDaily.usageDate, usageDate),
+                eq(consumptionUsageDaily.productLine, productLine),
+              ),
+              columns: { id: true },
+            })
+
+            const payload = {
+              customerId: cached.customerId,
+              tenantId: cached.tenantId,
+              usageDate,
+              productLine,
+              unit: 'day',
+              amount,
+              voucherAmount,
+              balanceAmount,
+            }
+
+            if (existing) {
+              await tx
+                .update(consumptionUsageDaily)
+                .set(payload)
+                .where(eq(consumptionUsageDaily.id, existing.id))
+              result.dailyUsageBills.updated += 1
+            } else {
+              await tx.insert(consumptionUsageDaily).values({ id: rowId, ...payload })
+              result.dailyUsageBills.created += 1
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : '每日用量写入失败'
+            result.dailyUsageBills.errors.push({
+              key: `${item.usageDate}:${item.productLine}`,
+              message,
+            })
+            crmWarn('tenant-billing-import', 'daily usage row failed', {
+              traceId,
+              usageDate: item.usageDate,
+              productLine: item.productLine,
               err: message,
             })
           }
@@ -866,6 +1032,7 @@ export const tenantBillingImportDataAccess = {
         ...commitResult.metalOrders.errors,
         ...commitResult.monthlyBills.errors,
         ...commitResult.recharges.errors,
+        ...commitResult.dailyUsageBills.errors,
         ...commitResult.billDetails.errors,
       ]
       const summary = formatBillingCommitSummary(commitResult)

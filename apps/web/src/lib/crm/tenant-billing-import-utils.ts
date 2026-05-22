@@ -10,6 +10,7 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
   push('裸金属', result.metalOrders)
   push('月度账单', result.monthlyBills)
   push('充值', result.recharges)
+  push('每日用量', result.dailyUsageBills)
   if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
     parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
   }
@@ -84,6 +85,49 @@ export function toRechargeQueryTimes(startDate?: string, endDate?: string) {
     start_time: cstDateStartToUtcIso(startDate),
     end_time: cstDateEndExclusiveToUtcIso(endDate),
   }
+}
+
+/** 每日用量账单 API：UTC ISO，东八区自然日界（左闭右开） */
+export function toDailyUsageBillQueryTimes(startDate?: string, endDate?: string) {
+  if (!startDate || !endDate) return emptyApiDateRange()
+  return {
+    start_time: cstDateStartToUtcIso(startDate),
+    end_time: cstDateEndExclusiveToUtcIso(endDate),
+  }
+}
+
+/** 平台 Pod 任务类型 → 产品线（billing_pod_record_list task_type） */
+export const PLATFORM_DAILY_USAGE_TASK_TYPES = ['Deployment', 'Job', 'Development'] as const
+
+const TASK_TYPE_PRODUCT_LINE_MAP: Record<
+  string,
+  { productLine: string; label: string }
+> = {
+  Deployment: { productLine: 'pod_deployment', label: 'Deployment' },
+  Job: { productLine: 'pod_job', label: 'Job' },
+  Development: { productLine: 'pod_development', label: 'Development' },
+}
+
+export function mapPlatformTaskType(taskType: string) {
+  const mapped = TASK_TYPE_PRODUCT_LINE_MAP[taskType]
+  if (mapped) return mapped
+  const snake = taskType.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+  return { productLine: snake, label: taskType }
+}
+
+/** 从平台账期 start_time 提取东八区 usage_date（YYYY-MM-DD） */
+export function usageDateFromPlatformPeriod(startTime: string): string {
+  const d = parsePlatformDateTime(startTime)
+  if (d) {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d)
+  }
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(startTime)
+  return m ? m[1]! : startTime.slice(0, 10)
 }
 
 /** 账单明细 API：必须与 overview 返回的 start_time / end_time 原样一致 */

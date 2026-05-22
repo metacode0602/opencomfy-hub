@@ -2,9 +2,11 @@ import { z } from 'zod'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
   toBillDetailQueryTimes,
+  toDailyUsageBillQueryTimes,
   toMetalOrderQueryTimes,
   toMonthlyBillQueryTimes,
   toRechargeQueryTimes,
+  PLATFORM_DAILY_USAGE_TASK_TYPES,
 } from '@/lib/crm/tenant-billing-import-utils'
 
 import adminInstance from './request'
@@ -85,6 +87,10 @@ export type PlatformMonthlyBillRecord = {
   end_time: string
   total_billing_value: number
   total_discount_value: number
+}
+
+export type PlatformDailyUsageBillRecord = PlatformMonthlyBillRecord & {
+  task_type: string
 }
 
 export type PlatformRechargeRecord = {
@@ -236,6 +242,63 @@ export async function fetchPlatformMonthlyBills(input: {
       return { count: parsed.data.count, results }
     },
   )
+}
+
+export async function fetchPlatformDailyUsageBills(input: {
+  platformTenantId: string
+  startDate?: string
+  endDate?: string
+  traceId: string
+}): Promise<PlatformDailyUsageBillRecord[]> {
+  const { start_time, end_time } = toDailyUsageBillQueryTimes(input.startDate, input.endDate)
+  const all: PlatformDailyUsageBillRecord[] = []
+
+  for (let i = 0; i < PLATFORM_DAILY_USAGE_TASK_TYPES.length; i++) {
+    const taskType = PLATFORM_DAILY_USAGE_TASK_TYPES[i]!
+    if (i > 0) {
+      await delayBillingApi(BILLING_API_PAGE_DELAY_MS, `daily_usage:${taskType}`)
+    }
+
+    const params: Record<string, string | number> = {
+      tenant_tid: input.platformTenantId,
+      range: 'day',
+      task_type: taskType,
+      start_time,
+      end_time,
+      page: 1,
+      page_size: PAGE_SIZE,
+    }
+
+    const rows = await fetchAllPages<Omit<PlatformDailyUsageBillRecord, 'task_type'>>(
+      `daily_usage:${taskType}`,
+      input.traceId,
+      async (page) => {
+        const data = await throttledGet<unknown>(
+          `daily_usage:${taskType}`,
+          '/admin/tenant/billing_pod_record_list',
+          { params: { ...params, page } },
+        )
+        const parsed = paginatedSchema.safeParse(data)
+        if (!parsed.success) {
+          throw new SuanliBillingApiError(`每日用量账单（${taskType}）返回格式异常`)
+        }
+        const results = (parsed.data.results ?? []).map((row) => ({
+          start_time: String(row.start_time ?? ''),
+          end_time: String(row.end_time ?? ''),
+          total_billing_value: Number(row.total_billing_value ?? 0),
+          total_discount_value: Number(row.total_discount_value ?? 0),
+        }))
+        return { count: parsed.data.count, results }
+      },
+    )
+
+    for (const row of rows) {
+      if (!row.start_time || !row.end_time) continue
+      all.push({ ...row, task_type: taskType })
+    }
+  }
+
+  return all
 }
 
 export async function fetchPlatformRecharges(input: {

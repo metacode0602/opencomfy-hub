@@ -722,6 +722,7 @@ export const rechargeOrder = pgTable(
   (table) => [index("recharge_order_tenant_id_idx").on(table.tenantId)],
 )
 
+/** 客户消费明细，按天汇总 */
 export const consumptionUsageDaily = pgTable(
   "consumption_usage_daily",
   {
@@ -733,8 +734,11 @@ export const consumptionUsageDaily = pgTable(
     usageDate: date("usage_date").notNull(),
     productLine: varchar("product_line", { length: 64 }),
     unit: varchar("unit", { length: 32 }),
-    amount: money("amount"),
-    gpuSeconds: numeric("gpu_seconds"),
+    amount: money("amount"), // 消费金额
+    balance: tenantMoney("balance"), // 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数）
+    voucherAmount: money("voucher_amount"), // 算力券消费金额
+    balanceAmount: money("balance_amount"), // 余额消费金额
+    gpuSeconds: numeric("gpu_seconds"), // GPU 秒数
   },
   (table) => [
     index("consumption_usage_daily_tenant_date_idx").on(table.tenantId, table.usageDate),

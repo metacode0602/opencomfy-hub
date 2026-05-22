@@ -28,6 +28,7 @@ import { toast } from "sonner"
 import { trpc } from "@/lib/trpc/client"
 import type {
   BillDetailPreviewItem,
+  DailyUsageBillPreviewItem,
   MetalOrderPreviewItem,
   MonthlyBillPreviewItem,
   RechargePreviewItem,
@@ -42,6 +43,7 @@ const TAB_CONFIG: { value: TenantBillingImportTab; label: string }[] = [
   { value: "metalOrders", label: "裸金属订单" },
   { value: "monthlyBills", label: "月度账单" },
   { value: "recharges", label: "充值" },
+  { value: "dailyUsageBills", label: "每日用量" },
   { value: "billDetails", label: "账单明细" },
 ]
 
@@ -73,6 +75,7 @@ function formatCommitSummary(result: TenantBillingImportCommitResult) {
   push("裸金属", result.metalOrders)
   push("月度账单", result.monthlyBills)
   push("充值", result.recharges)
+  push("每日用量", result.dailyUsageBills)
   if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
     parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
   }
@@ -85,6 +88,7 @@ function collectCommitErrors(result: TenantBillingImportCommitResult): string[] 
     ["裸金属", result.metalOrders],
     ["月度账单", result.monthlyBills],
     ["充值", result.recharges],
+    ["每日用量", result.dailyUsageBills],
     ["账单明细", result.billDetails],
   ] as const) {
     for (const err of section.errors) {
@@ -311,7 +315,7 @@ export function CrmTenantBillingImportDialog({
             onValueChange={(v) => setActiveTab(v as TenantBillingImportTab)}
             className="w-full"
           >
-            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+            <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
               {TAB_CONFIG.map(({ value, label }) => (
                 <TabsTrigger
                   key={value}
@@ -351,6 +355,13 @@ export function CrmTenantBillingImportDialog({
                   <ScrollTable>
                     <SectionPanel section={preview.sections.recharges} label="充值">
                       {(items) => <RechargesTable items={items} />}
+                    </SectionPanel>
+                  </ScrollTable>
+                </TabsContent>
+                <TabsContent value="dailyUsageBills" className="mt-4">
+                  <ScrollTable>
+                    <SectionPanel section={preview.sections.dailyUsageBills} label="每日用量">
+                      {(items) => <DailyUsageBillsTable items={items} />}
                     </SectionPanel>
                   </ScrollTable>
                 </TabsContent>
@@ -541,6 +552,43 @@ function RechargesTable({ items }: { items: RechargePreviewItem[] }) {
             <TableCell className="text-right tabular-nums">{formatRmb(row.amountRmb)}</TableCell>
             <TableCell className="text-muted-foreground text-xs">{row.createTime}</TableCell>
             <TableCell className="max-w-[180px] truncate text-xs">{row.remark ?? "—"}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function DailyUsageBillsTable({ items }: { items: DailyUsageBillPreviewItem[] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[72px]">操作</TableHead>
+          <TableHead>日期</TableHead>
+          <TableHead>任务类型</TableHead>
+          <TableHead>产品线</TableHead>
+          <TableHead className="text-right">总消费</TableHead>
+          <TableHead className="text-right">券/优惠</TableHead>
+          <TableHead className="text-right">余额消费</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((row) => (
+          <TableRow key={row.key}>
+            <TableCell>{actionBadge(row.action)}</TableCell>
+            <TableCell>{row.usageDate}</TableCell>
+            <TableCell>{row.taskType}</TableCell>
+            <TableCell className="font-mono text-xs">{row.productLine}</TableCell>
+            <TableCell className="text-right tabular-nums">
+              {formatRmb(row.totalAmountRmb)}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {formatRmb(row.couponAmountRmb)}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">
+              {formatRmb(row.balanceAmountRmb)}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>

@@ -187,6 +187,23 @@ function buildMockBillDetails(): BillDetailPreviewItem[] {
   }))
 }
 
+function buildMockDailyUsageBills() {
+  return [
+    {
+      key: 'daily-2025-11-10-pod_deployment',
+      action: 'create' as const,
+      usageDate: '2025-11-10',
+      taskType: 'Deployment',
+      productLine: 'pod_deployment',
+      periodStart: '2025-11-10T00:00:00+08:00',
+      periodEnd: '2025-11-11T00:00:00+08:00',
+      totalAmountRmb: mockPlatformAmountToRmb(117_898),
+      couponAmountRmb: mockPlatformAmountToRmb(117_898),
+      balanceAmountRmb: 0,
+    },
+  ]
+}
+
 const previewCache = new Map<string, TenantBillingImportPreviewResult>()
 
 function delay(ms: number) {
@@ -222,6 +239,7 @@ export async function mockFetchTenantBillingImportPreview(
   const metalOrders = buildMockMetalOrders()
   const monthlyBills = buildMockMonthlyBills()
   const recharges = buildMockRecharges()
+  const dailyUsageBills = buildMockDailyUsageBills()
   const billDetails = buildMockBillDetails()
 
   const result: TenantBillingImportPreviewResult = {
@@ -238,6 +256,7 @@ export async function mockFetchTenantBillingImportPreview(
       metalOrders: section(metalOrders),
       monthlyBills: section(monthlyBills),
       recharges: section(recharges),
+      dailyUsageBills: section(dailyUsageBills),
       billDetails: section(billDetails),
     },
   }
@@ -272,6 +291,7 @@ export async function mockCommitTenantBillingImport(
     metalOrders: fromSection(preview.sections.metalOrders),
     monthlyBills: fromSection(preview.sections.monthlyBills),
     recharges: fromSection(preview.sections.recharges),
+    dailyUsageBills: fromSection(preview.sections.dailyUsageBills),
     billDetails: {
       ...fromSection(preview.sections.billDetails),
       deleted: 2,

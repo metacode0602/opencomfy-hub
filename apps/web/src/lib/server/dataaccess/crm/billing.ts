@@ -5,6 +5,7 @@ import type {
   BillDetail,
   Consumption,
   Coupon,
+  DailyConsumption,
   Order,
   OrderItem,
   PlatformTenant,
@@ -36,7 +37,7 @@ import {
   tenantBill,
   tenantBillDetail,
 } from '@workspace/db/schema'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 
 async function tenantIdsForCustomer(customerId: string): Promise<string[]> {
   const rows = await db
@@ -118,6 +119,37 @@ export const billingDataAccess = {
       .where(eq(consumptionRecord.projectId, projectId))
       .orderBy(desc(consumptionRecord.occurredAt))
     return rows.map(mapConsumptionRow)
+  },
+
+  async listDailyConsumptionsByProject(
+    projectId: string,
+    options?: { productLine?: string },
+  ): Promise<DailyConsumption[]> {
+    const filters = [eq(consumptionRecord.projectId, projectId)]
+    if (options?.productLine) {
+      filters.push(eq(consumptionRecord.productLine, options.productLine))
+    }
+
+    const usageDateExpr = sql<string>`date(${consumptionRecord.occurredAt})`
+
+    const rows = await db
+      .select({
+        usageDate: usageDateExpr,
+        productLine: consumptionRecord.productLine,
+        amount: sql<string>`coalesce(sum(${consumptionRecord.amount}), 0)`,
+        recordCount: sql<number>`count(*)::int`,
+      })
+      .from(consumptionRecord)
+      .where(and(...filters))
+      .groupBy(usageDateExpr, consumptionRecord.productLine)
+      .orderBy(desc(usageDateExpr), consumptionRecord.productLine)
+
+    return rows.map((row) => ({
+      usageDate: String(row.usageDate).slice(0, 10),
+      productLine: row.productLine as DailyConsumption['productLine'],
+      amount: toNumber(row.amount),
+      recordCount: Number(row.recordCount ?? 0),
+    }))
   },
 
   async listTasksByProject(projectId: string): Promise<Task[]> {

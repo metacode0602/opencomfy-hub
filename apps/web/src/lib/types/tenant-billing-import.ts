@@ -4,7 +4,12 @@ export type TenantBillingImportDialogPhase = 'idle' | 'fetching' | 'preview' | '
 
 export type TenantBillingImportAction = 'create' | 'update' | 'skip'
 
-export type TenantBillingImportTab = 'metalOrders' | 'monthlyBills' | 'recharges' | 'billDetails'
+export type TenantBillingImportTab =
+  | 'metalOrders'
+  | 'monthlyBills'
+  | 'recharges'
+  | 'dailyUsageBills'
+  | 'billDetails'
 
 export type TenantBillingImportSectionSummary = {
   total: number
@@ -64,6 +69,19 @@ export type BillDetailPreviewItem = {
   balanceAmountRmb: number
 }
 
+export type DailyUsageBillPreviewItem = {
+  key: string
+  action: TenantBillingImportAction
+  usageDate: string
+  taskType: string
+  productLine: string
+  periodStart: string
+  periodEnd: string
+  totalAmountRmb: number
+  couponAmountRmb: number
+  balanceAmountRmb: number
+}
+
 export type TenantBillingImportPreviewInput = {
   tenantId: string
   platformTenantId: string
@@ -80,6 +98,7 @@ export type TenantBillingImportPreviewResult = {
     metalOrders: TenantBillingImportSection<MetalOrderPreviewItem>
     monthlyBills: TenantBillingImportSection<MonthlyBillPreviewItem>
     recharges: TenantBillingImportSection<RechargePreviewItem>
+    dailyUsageBills: TenantBillingImportSection<DailyUsageBillPreviewItem>
     billDetails: TenantBillingImportSection<BillDetailPreviewItem>
   }
 }
@@ -95,5 +114,6 @@ export type TenantBillingImportCommitResult = {
   metalOrders: TenantBillingImportCommitSectionResult
   monthlyBills: TenantBillingImportCommitSectionResult
   recharges: TenantBillingImportCommitSectionResult
+  dailyUsageBills: TenantBillingImportCommitSectionResult
   billDetails: TenantBillingImportCommitSectionResult
 }

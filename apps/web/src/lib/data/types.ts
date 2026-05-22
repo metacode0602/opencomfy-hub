@@ -186,6 +186,14 @@ export interface Consumption {
   createdAt: string
 }
 
+/** 项目消费按日汇总（由 consumption_record 聚合） */
+export interface DailyConsumption {
+  usageDate: string
+  productLine: Consumption['productLine']
+  amount: number
+  recordCount: number
+}
+
 export interface Coupon {
   id: string
   tenantId: string

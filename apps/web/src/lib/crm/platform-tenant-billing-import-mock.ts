@@ -66,6 +66,7 @@ export async function mockBatchImportBillingForPlatformTenants(input: {
         ...commitResult.metalOrders.errors,
         ...commitResult.monthlyBills.errors,
         ...commitResult.recharges.errors,
+        ...commitResult.dailyUsageBills.errors,
         ...commitResult.billDetails.errors,
       ]
 
