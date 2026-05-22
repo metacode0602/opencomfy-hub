@@ -109,6 +109,7 @@ export type DeviceInventoryParsedRow = {
   rate_limit?: string
   cooperation_type?: DeviceCooperationType
   device_spec?: string
+  device_purpose?: string
   received_at?: string
   remark?: string
   login_username?: string
@@ -202,6 +203,7 @@ export type SupplierDevice = {
   rate_limit?: string | null
   cooperation_type?: DeviceCooperationType
   device_spec?: string | null
+  device_purpose?: string | null
   received_at?: string | null
   remark?: string | null
   login_username?: string | null

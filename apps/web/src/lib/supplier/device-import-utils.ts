@@ -102,8 +102,21 @@ export function maskInventoryRowsForPreview(
 
 export function findDeviceByImportKeys(
   devices: SupplierDevice[],
-  row: { external_device_id?: string; internal_ip?: string },
+  row: {
+    external_device_id?: string | null
+    internal_ip?: string
+    sn?: string
+    asset_no?: string
+  },
 ): SupplierDevice | undefined {
+  if (row.sn?.trim()) {
+    const hit = devices.find((d) => d.sn === row.sn?.trim())
+    if (hit) return hit
+  }
+  if (row.asset_no?.trim()) {
+    const hit = devices.find((d) => d.asset_no === row.asset_no?.trim())
+    if (hit) return hit
+  }
   if (row.external_device_id) {
     const hit = devices.find((d) => d.external_device_id === row.external_device_id)
     if (hit) return hit
@@ -171,6 +184,7 @@ export function buildDevicesFromInventoryImport(params: {
       rate_limit: row.rate_limit ?? null,
       cooperation_type: cooperationType,
       device_spec: row.device_spec ?? null,
+      device_purpose: row.device_purpose ?? null,
       received_at: row.received_at ?? null,
       remark: row.remark ?? null,
       login_username: row.login_username ?? null,

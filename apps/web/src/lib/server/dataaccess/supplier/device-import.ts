@@ -13,6 +13,7 @@ import {
   buildChangeLogsFromChangelogImport,
   buildDevicesFromInventoryImport,
   buildFaultIncidentsFromRecordsImport,
+  findDeviceByImportKeys,
   generateImportBatchCode,
   maskInventoryRowsForPreview,
 } from '@/lib/supplier/device-import-utils'
@@ -20,7 +21,6 @@ import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataacces
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { ensurePricingRecordsForImportedCardTypes } from '@/lib/server/dataaccess/supplier/ensure-pricing-on-device-import'
 import {
-  refreshSupplierGpuInventoryForDataCenter,
   refreshSupplierGpuInventoryForDataCenters,
 } from '@/lib/server/dataaccess/supplier/gpu-inventory-sync'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
@@ -36,7 +36,7 @@ import {
   supplierDeviceChangeLog,
   supplierOpsUploadBatch,
 } from '@workspace/db/schema'
-import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
+import { and, count, desc, eq, inArray } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -123,6 +123,7 @@ function mapDbDeviceToDomain(
     rate_limit: row.rateLimit,
     cooperation_type: (row.cooperationType ?? 'idle_time') as SupplierDevice['cooperation_type'],
     device_spec: row.deviceSpec,
+    device_purpose: row.devicePurpose,
     received_at: row.receivedAt?.toISOString() ?? null,
     remark: row.remark,
     login_username: row.loginUsername,
@@ -149,37 +150,31 @@ function parseIsoDate(value: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d
 }
 
-async function loadExistingDeviceKeys(
-  devices: SupplierDevice[],
-): Promise<{ sns: Set<string>; assetNos: Set<string> }> {
-  const sns = [...new Set(devices.map((d) => d.sn).filter(Boolean))]
-  const assetNos = [...new Set(devices.map((d) => d.asset_no).filter(Boolean))]
-  if (sns.length === 0 && assetNos.length === 0) {
-    return { sns: new Set(), assetNos: new Set() }
-  }
-
-  const conditions = []
-  if (sns.length > 0) conditions.push(inArray(supplierDevice.sn, sns))
-  if (assetNos.length > 0) conditions.push(inArray(supplierDevice.assetNo, assetNos))
-
-  const rows = await db
-    .select({ sn: supplierDevice.sn, assetNo: supplierDevice.assetNo })
-    .from(supplierDevice)
-    .where(conditions.length === 1 ? conditions[0]! : or(...conditions))
-
-  return {
-    sns: new Set(rows.map((r) => r.sn)),
-    assetNos: new Set(rows.map((r) => r.assetNo).filter((v): v is string => Boolean(v))),
-  }
+function findImportRowForDevice(
+  device: SupplierDevice,
+  okRows: DeviceInventoryParsedRow[],
+): DeviceInventoryParsedRow | undefined {
+  return okRows.find(
+    (r) =>
+      (r.sn && r.sn === device.sn) ||
+      (r.asset_no && r.asset_no === device.asset_no) ||
+      (r.external_device_id && r.external_device_id === device.external_device_id) ||
+      (r.internal_ip && r.internal_ip === device.internal_ip),
+  )
 }
 
-function isDuplicateDevice(
-  device: SupplierDevice,
-  existing: { sns: Set<string>; assetNos: Set<string> },
-): boolean {
-  if (existing.sns.has(device.sn)) return true
-  if (device.asset_no && existing.assetNos.has(device.asset_no)) return true
-  return false
+function trackImportedCardType(
+  map: Map<string, Set<string>>,
+  dataCenterId: string,
+  gpuCardTypeId: string,
+) {
+  if (!dataCenterId || !gpuCardTypeId) return
+  const existing = map.get(dataCenterId)
+  if (existing) {
+    existing.add(gpuCardTypeId)
+    return
+  }
+  map.set(dataCenterId, new Set([gpuCardTypeId]))
 }
 
 export const deviceImportDataAccess = {
@@ -309,12 +304,27 @@ export const deviceImportDataAccess = {
     })
 
     const gpuCache = new Map<string, string>()
-    const committedCardTypeIds: string[] = []
-    const committedDeviceIds = new Set<string>()
+    const cardTypesByDataCenter = new Map<string, Set<string>>()
+    const affectedDataCenterIds = new Set<string>([dc.id])
     const warnings: string[] = []
-    let committedCount = 0
-    let skippedCount = 0
-    const existingDeviceKeys = await loadExistingDeviceKeys(newDevices)
+    let insertedCount = 0
+    let updatedCount = 0
+    const existingDevices = await listSupplierDevicesForImport(params.supplierId)
+    const existingComputeNodes =
+      existingDevices.length > 0
+        ? await db
+            .select()
+            .from(computeNode)
+            .where(
+              inArray(
+                computeNode.supplierDeviceId,
+                existingDevices.map((d) => d.id),
+              ),
+            )
+        : []
+    const computeNodeByDeviceId = new Map(
+      existingComputeNodes.map((node) => [node.supplierDeviceId, node]),
+    )
 
     try {
       await db.transaction(async (tx) => {
@@ -348,19 +358,86 @@ export const deviceImportDataAccess = {
         })
 
         for (const device of newDevices) {
-          if (isDuplicateDevice(device, existingDeviceKeys)) {
-            skippedCount++
-            warnings.push(`设备 ${device.sn} 已存在，已跳过`)
+          const row = findImportRowForDevice(device, okRows)
+          const existing = findDeviceByImportKeys(existingDevices, {
+            sn: device.sn,
+            asset_no: device.asset_no,
+            external_device_id: device.external_device_id ?? undefined,
+            internal_ip: device.internal_ip,
+          })
+          const gpuCardTypeId = await resolveGpuCardTypeId(row?.gpu_card_type_code, gpuCache)
+          const node = nodes.find((n) => n.device_id === device.id)
+
+          if (existing) {
+            await tx
+              .update(supplierDevice)
+              .set({
+                onboardingBatchId: batchId,
+                dataCenterId: dc.id,
+                gpuCardTypeId,
+                externalDeviceId: device.external_device_id,
+                idcCode: device.idc_code,
+                idcRegion: device.idc_region || null,
+                gpuCount: Number(device.gpu_count) || 8,
+                internalIp: device.internal_ip || null,
+                opsStatus: device.ops_status ?? '预留闲置中',
+                lifecycleStatus: device.lifecycle_status,
+                inMaintenance: device.in_maintenance ?? false,
+                onboardingSubstage: device.onboarding_substage,
+                bandwidthGroup: device.bandwidth_group,
+                rateLimit: device.rate_limit,
+                cooperationType: device.cooperation_type ?? 'idle_time',
+                deviceSpec: device.device_spec,
+                devicePurpose: device.device_purpose,
+                receivedAt: parseIsoDate(device.received_at),
+                remark: device.remark,
+                loginUsername: device.login_username,
+                loginPassword: device.login_password,
+                updatedAt: now,
+              })
+              .where(eq(supplierDevice.id, existing.id))
+
+            updatedCount++
+            const pricingDataCenterId = existing.data_center_id || dc.id
+            affectedDataCenterIds.add(pricingDataCenterId)
+            trackImportedCardType(cardTypesByDataCenter, pricingDataCenterId, gpuCardTypeId)
+            warnings.push(`设备 ${existing.sn} 已存在，已更新`)
+
+            if (node) {
+              const existingNode = computeNodeByDeviceId.get(existing.id)
+              if (existingNode) {
+                await tx
+                  .update(computeNode)
+                  .set({
+                    nodeRole: node.node_role,
+                    mgmtIp: node.mgmt_ip || null,
+                    clusterName: node.cluster_name,
+                    nodeName: node.node_name,
+                    expectedService: node.expected_service,
+                    clusterId: node.cluster_id || null,
+                    lifecycleStatus: node.lifecycle_status,
+                    updatedAt: now,
+                  })
+                  .where(eq(computeNode.id, existingNode.id))
+              } else {
+                await tx.insert(computeNode).values({
+                  id: node.id,
+                  supplierDeviceId: existing.id,
+                  nodeRole: node.node_role,
+                  mgmtIp: node.mgmt_ip || null,
+                  clusterName: node.cluster_name,
+                  nodeName: node.node_name,
+                  expectedService: node.expected_service,
+                  clusterId: node.cluster_id || null,
+                  lifecycleStatus: node.lifecycle_status,
+                  createdAt: now,
+                  updatedAt: now,
+                })
+              }
+            }
             continue
           }
 
-          const row = okRows.find(
-            (r) =>
-              r.external_device_id === device.external_device_id ||
-              r.internal_ip === device.internal_ip ||
-              r.sn === device.sn,
-          )
-          const gpuCardTypeId = await resolveGpuCardTypeId(row?.gpu_card_type_code, gpuCache)
           await tx.insert(supplierDevice).values({
             id: device.id,
             supplierId: params.supplierId,
@@ -384,6 +461,7 @@ export const deviceImportDataAccess = {
             rateLimit: device.rate_limit,
             cooperationType: device.cooperation_type ?? 'idle_time',
             deviceSpec: device.device_spec,
+            devicePurpose: device.device_purpose,
             receivedAt: parseIsoDate(device.received_at),
             remark: device.remark,
             loginUsername: device.login_username,
@@ -392,56 +470,60 @@ export const deviceImportDataAccess = {
             createdAt: now,
             updatedAt: now,
           })
-          committedCount++
-          committedCardTypeIds.push(gpuCardTypeId)
-          committedDeviceIds.add(device.id)
-          existingDeviceKeys.sns.add(device.sn)
-          if (device.asset_no) existingDeviceKeys.assetNos.add(device.asset_no)
-        }
+          insertedCount++
+          trackImportedCardType(cardTypesByDataCenter, dc.id, gpuCardTypeId)
 
-        for (const node of nodes) {
-          if (!committedDeviceIds.has(node.device_id)) continue
-          await tx.insert(computeNode).values({
-            id: node.id,
-            supplierDeviceId: node.device_id,
-            nodeRole: node.node_role,
-            mgmtIp: node.mgmt_ip || null,
-            clusterName: node.cluster_name,
-            nodeName: node.node_name,
-            expectedService: node.expected_service,
-            clusterId: node.cluster_id || null,
-            lifecycleStatus: node.lifecycle_status,
-            createdAt: now,
-            updatedAt: now,
-          })
-        }
-
-        if (committedCount > 0) {
-          const pricingEnsure = await ensurePricingRecordsForImportedCardTypes(tx, {
-            supplierId: params.supplierId,
-            dataCenterId: dc.id,
-            gpuCardTypeIds: committedCardTypeIds,
-            defaultCooperationMode: supplierRow.defaultCooperationMode,
-            syncedAt: now,
-          })
-          if (pricingEnsure.createdCardTypeIds.length > 0) {
-            warnings.push(
-              `新增 ${pricingEnsure.createdCardTypeIds.length} 条机房卡型成本占位（单价 0，新增收入，状态不可用，请在卡型成本中完善）`,
-            )
-            supplierLog('device-import', 'pricing placeholders created', {
-              count: pricingEnsure.createdCardTypeIds.length,
-              gpuCardTypeIds: pricingEnsure.createdCardTypeIds,
+          if (node) {
+            await tx.insert(computeNode).values({
+              id: node.id,
+              supplierDeviceId: device.id,
+              nodeRole: node.node_role,
+              mgmtIp: node.mgmt_ip || null,
+              clusterName: node.cluster_name,
+              nodeName: node.node_name,
+              expectedService: node.expected_service,
+              clusterId: node.cluster_id || null,
+              lifecycleStatus: node.lifecycle_status,
+              createdAt: now,
+              updatedAt: now,
             })
           }
+        }
 
-          const invSync = await refreshSupplierGpuInventoryForDataCenter(tx, {
+        const committedCount = insertedCount + updatedCount
+
+        if (committedCount > 0) {
+          let createdPricingCount = 0
+          for (const [dataCenterId, cardTypeIds] of cardTypesByDataCenter) {
+            const pricingEnsure = await ensurePricingRecordsForImportedCardTypes(tx, {
+              supplierId: params.supplierId,
+              dataCenterId,
+              gpuCardTypeIds: [...cardTypeIds],
+              defaultCooperationMode: supplierRow.defaultCooperationMode,
+              syncedAt: now,
+            })
+            createdPricingCount += pricingEnsure.createdCardTypeIds.length
+            if (pricingEnsure.createdCardTypeIds.length > 0) {
+              supplierLog('device-import', 'pricing placeholders created', {
+                dataCenterId,
+                count: pricingEnsure.createdCardTypeIds.length,
+                gpuCardTypeIds: pricingEnsure.createdCardTypeIds,
+              })
+            }
+          }
+          if (createdPricingCount > 0) {
+            warnings.push(
+              `新增 ${createdPricingCount} 条机房卡型成本占位（单价 0，新增收入，状态不可用，请在卡型成本中完善）`,
+            )
+          }
+
+          await refreshSupplierGpuInventoryForDataCenters(tx, {
             supplierId: params.supplierId,
-            dataCenterId: dc.id,
+            dataCenterIds: [...affectedDataCenterIds],
             syncedAt: now,
           })
           supplierLog('device-import', 'gpu inventory synced', {
-            dataCenterId: dc.id,
-            upserted: invSync.upserted,
+            dataCenterIds: [...affectedDataCenterIds],
           })
         }
 
@@ -450,7 +532,12 @@ export const deviceImportDataAccess = {
           supplierId: params.supplierId,
           type: 'ops_import',
           title: `设备主数据导入 ${batchCode}`,
-          description: `写入 ${committedCount} 台物理机`,
+          description:
+            insertedCount > 0 && updatedCount > 0
+              ? `新增 ${insertedCount} 台，更新 ${updatedCount} 台物理机`
+              : updatedCount > 0
+                ? `更新 ${updatedCount} 台物理机`
+                : `写入 ${insertedCount} 台物理机`,
           authorStaffId: params.operatorStaffId ?? null,
           authorName: params.operatorName ?? '运营',
           authorRole: 'ops',
@@ -472,17 +559,20 @@ export const deviceImportDataAccess = {
       throw e
     }
 
+    const committedCount = insertedCount + updatedCount
+
     supplierLog('device-import', 'commitInventory done', {
       batchId,
       committedCount,
-      skippedCount,
+      insertedCount,
+      updatedCount,
     })
 
     return {
       batchId,
       batchCode,
       committedCount,
-      skippedCount,
+      skippedCount: 0,
       warnings,
     }
   },

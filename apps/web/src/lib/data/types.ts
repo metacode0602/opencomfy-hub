@@ -483,6 +483,8 @@ export interface DataCenterDevice {
   dataCenterId: string
   dataCenterName: string
   supplierId: string
+  /** 供应商简称（列表 JOIN 填充） */
+  supplierShortName?: string
   cardTypeId: string
   cardTypeName: string
   quantity: number
@@ -533,6 +535,13 @@ export interface PhysicalDevice {
   inMaintenance: boolean
   cooperationType: DeviceCooperationType
   deviceSpec: string | null
+  devicePurpose: string | null
+  /** compute_node.cluster_name */
+  clusterName: string | null
+  /** compute_node.node_role */
+  nodeRole: string | null
+  /** compute_node.expected_service */
+  expectedService: string | null
   createdAt: string
   updatedAt: string
 }
@@ -541,6 +550,47 @@ export interface PhysicalDeviceStats {
   total: number
   online: number
   onboarding: number
+}
+
+export interface PhysicalComputeNode {
+  id: string
+  nodeRole: string
+  mgmtIp: string | null
+  clusterId: string | null
+  clusterName: string | null
+  nodeName: string | null
+  expectedService: string | null
+  lifecycleStatus: string
+}
+
+export type PhysicalDeviceFlowRecordKind =
+  | 'state_transition'
+  | 'changelog_import'
+  | 'activity'
+
+export interface PhysicalDeviceFlowRecord {
+  id: string
+  kind: PhysicalDeviceFlowRecordKind
+  title: string
+  description?: string | null
+  fromState?: string | null
+  toState?: string | null
+  reasonCode?: string | null
+  operatorName?: string | null
+  ticketNo?: string | null
+  batchCode?: string | null
+  occurredAt: string
+}
+
+export interface PhysicalDeviceDetail {
+  device: PhysicalDevice & {
+    supplierName: string
+    contractNo: string | null
+    onboardingBatchCode: string | null
+    onboardingBatchKind: string | null
+  }
+  computeNodes: PhysicalComputeNode[]
+  flowRecords: PhysicalDeviceFlowRecord[]
 }
 
 /** L1 聚合库存变更记录（Mock） */

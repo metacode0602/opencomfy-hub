@@ -200,9 +200,9 @@ export function SupplierDeviceImportPanel({
 
   const invalidateAfterCommit = () => {
     void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
-    void utils.supplier.listPhysicalDevices.invalidate({ supplierId })
-    void utils.supplier.getPhysicalDeviceStats.invalidate({ supplierId })
-    void utils.supplier.listGpuInventory.invalidate({ supplierId })
+    void utils.supplier.listPhysicalDevices.invalidate()
+    void utils.supplier.getPhysicalDeviceStats.invalidate()
+    void utils.supplier.listGpuInventory.invalidate()
     void utils.supplier.listDataCenters.invalidate({ supplierId })
     void utils.supplier.unitCosts.listRecords.invalidate({ supplierId })
     void utils.supplier.getById.invalidate({ id: supplierId })
@@ -659,6 +659,7 @@ function PreviewTable({
             <TableHead>设备ID</TableHead>
             <TableHead>IP地址</TableHead>
             <TableHead>设备状态</TableHead>
+            <TableHead>设备用途</TableHead>
             <TableHead>合作类型</TableHead>
             <TableHead>设备配置</TableHead>
             <TableHead>维修中</TableHead>
@@ -672,6 +673,9 @@ function PreviewTable({
               <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
               <TableCell>{r.internal_ip ?? '—'}</TableCell>
               <TableCell>{r.ops_status}</TableCell>
+              <TableCell className="max-w-[120px] truncate text-xs" title={r.device_purpose}>
+                {r.device_purpose ?? '—'}
+              </TableCell>
               <TableCell>
                 {r.cooperation_type
                   ? DEVICE_COOPERATION_TYPE_LABELS[r.cooperation_type]

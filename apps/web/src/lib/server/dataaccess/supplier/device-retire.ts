@@ -77,6 +77,7 @@ function mapDbDeviceToDomain(
     rate_limit: row.rateLimit,
     cooperation_type: (row.cooperationType ?? 'idle_time') as SupplierDevice['cooperation_type'],
     device_spec: row.deviceSpec,
+    device_purpose: row.devicePurpose,
     received_at: row.receivedAt?.toISOString() ?? null,
     remark: row.remark,
     login_username: row.loginUsername,

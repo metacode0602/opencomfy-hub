@@ -39,13 +39,30 @@ import {
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
-import type { PhysicalDevice } from '@/lib/data/types'
+import { ListPagination } from '@/components/shared/list-pagination'
+import { useListPagination } from '@/hooks/use-list-pagination'
+import type { DeviceCooperationType, PhysicalDevice } from '@/lib/data/types'
+import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return '操作失败，请稍后重试'
+}
+
+function formatDeviceIp(device: PhysicalDevice): string {
+  if (device.internalIp && device.externalIp) {
+    return `${device.internalIp} / ${device.externalIp}`
+  }
+  return device.internalIp ?? device.externalIp ?? '—'
+}
+
+function formatClusterAndRole(device: PhysicalDevice): string {
+  if (device.clusterName && device.nodeRole) {
+    return `${device.clusterName} · ${device.nodeRole}`
+  }
+  return device.clusterName ?? device.nodeRole ?? '—'
 }
 
 export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?: string }) {
@@ -73,6 +90,7 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
       toast.success(`设备 ${device.sn} 已标记上线`)
       void utils.supplier.listPhysicalDevices.invalidate()
       void utils.supplier.getPhysicalDeviceStats.invalidate()
+      void utils.supplier.listGpuInventory.invalidate()
     },
     onError: (err) => {
       const message = getErrorMessage(err)
@@ -85,7 +103,24 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
   })
 
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [cardTypeFilter, setCardTypeFilter] = useState('all')
+  const [opsStatusFilter, setOpsStatusFilter] = useState('all')
+  const [cooperationTypeFilter, setCooperationTypeFilter] = useState<'all' | DeviceCooperationType>('all')
+  const [lifecycleFilter, setLifecycleFilter] = useState('all')
+  const [maintenanceFilter, setMaintenanceFilter] = useState<'all' | 'yes' | 'no'>('all')
+
+  const filterOptions = useMemo(() => {
+    const cardTypes = new Set<string>()
+    const opsStatuses = new Set<string>()
+    for (const d of devices) {
+      if (d.cardTypeName) cardTypes.add(d.cardTypeName)
+      if (d.opsStatus) opsStatuses.add(d.opsStatus)
+    }
+    return {
+      cardTypes: [...cardTypes].sort((a, b) => a.localeCompare(b, 'zh-CN')),
+      opsStatuses: [...opsStatuses].sort((a, b) => a.localeCompare(b, 'zh-CN')),
+    }
+  }, [devices])
 
   const filtered = useMemo(() => {
     return devices.filter((d) => {
@@ -94,11 +129,46 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
         !q ||
         d.sn.toLowerCase().includes(q) ||
         d.assetNo.toLowerCase().includes(q) ||
-        d.idcCode.toLowerCase().includes(q)
-      const matchStatus = statusFilter === 'all' || d.lifecycleStatus === statusFilter
-      return matchQ && matchStatus
+        d.idcCode.toLowerCase().includes(q) ||
+        (d.internalIp?.toLowerCase().includes(q) ?? false) ||
+        (d.externalIp?.toLowerCase().includes(q) ?? false)
+      const matchCardType = cardTypeFilter === 'all' || d.cardTypeName === cardTypeFilter
+      const matchOpsStatus = opsStatusFilter === 'all' || d.opsStatus === opsStatusFilter
+      const matchCooperation =
+        cooperationTypeFilter === 'all' || d.cooperationType === cooperationTypeFilter
+      const matchLifecycle = lifecycleFilter === 'all' || d.lifecycleStatus === lifecycleFilter
+      const matchMaintenance =
+        maintenanceFilter === 'all' ||
+        (maintenanceFilter === 'yes' ? d.inMaintenance : !d.inMaintenance)
+      return (
+        matchQ &&
+        matchCardType &&
+        matchOpsStatus &&
+        matchCooperation &&
+        matchLifecycle &&
+        matchMaintenance
+      )
     })
-  }, [devices, search, statusFilter])
+  }, [
+    devices,
+    search,
+    cardTypeFilter,
+    opsStatusFilter,
+    cooperationTypeFilter,
+    lifecycleFilter,
+    maintenanceFilter,
+  ])
+
+  const pagination = useListPagination(filtered, {
+    resetDeps: [
+      search,
+      cardTypeFilter,
+      opsStatusFilter,
+      cooperationTypeFilter,
+      lifecycleFilter,
+      maintenanceFilter,
+    ],
+  })
 
   const displayStats = stats ?? {
     total: devices.length,
@@ -165,31 +235,92 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
         </div>
       )}
 
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
+      <div className="space-y-3">
+        <div className="relative max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="搜索 SN、资产号、机房..."
+            placeholder="搜索 SN、资产号、机房、IP..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="生命周期" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="接入中">接入中</SelectItem>
-            <SelectItem value="在线">在线</SelectItem>
-            <SelectItem value="维护中">维护中</SelectItem>
-            <SelectItem value="离线">离线</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap gap-3">
+          <Select value={cardTypeFilter} onValueChange={setCardTypeFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="GPU 卡型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部卡型</SelectItem>
+              {filterOptions.cardTypes.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={opsStatusFilter} onValueChange={setOpsStatusFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="运营状态" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部运营状态</SelectItem>
+              {filterOptions.opsStatuses.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={cooperationTypeFilter}
+            onValueChange={(v) => setCooperationTypeFilter(v as 'all' | DeviceCooperationType)}
+          >
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="合作类型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部合作类型</SelectItem>
+              {(Object.keys(DEVICE_COOPERATION_TYPE_LABELS) as DeviceCooperationType[]).map(
+                (type) => (
+                  <SelectItem key={type} value={type}>
+                    {DEVICE_COOPERATION_TYPE_LABELS[type]}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
+          <Select value={lifecycleFilter} onValueChange={setLifecycleFilter}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="生命周期" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部生命周期</SelectItem>
+              <SelectItem value="待接入">待接入</SelectItem>
+              <SelectItem value="接入中">接入中</SelectItem>
+              <SelectItem value="在线">在线</SelectItem>
+              <SelectItem value="维护中">维护中</SelectItem>
+              <SelectItem value="离线">离线</SelectItem>
+              <SelectItem value="退订">退订</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={maintenanceFilter}
+            onValueChange={(v) => setMaintenanceFilter(v as 'all' | 'yes' | 'no')}
+          >
+            <SelectTrigger className="w-[130px]">
+              <SelectValue placeholder="维修中" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              <SelectItem value="yes">维修中</SelectItem>
+              <SelectItem value="no">非维修中</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <Card>
+      <Card className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -197,20 +328,27 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
               <TableHead>供应商</TableHead>
               <TableHead>机房</TableHead>
               <TableHead>卡型</TableHead>
+              <TableHead>设备用途</TableHead>
+              <TableHead>运营状态</TableHead>
+              <TableHead>预期集群服务</TableHead>
+              <TableHead>合作类型</TableHead>
+              <TableHead>K8s 集群 / 角色</TableHead>
+              <TableHead>IP 地址</TableHead>
+              <TableHead>维修中</TableHead>
               <TableHead>生命周期</TableHead>
               <TableHead>子阶段</TableHead>
               <TableHead className="w-[60px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {pagination.totalItems === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={14} className="text-center text-muted-foreground py-8">
                   暂无物理机，请通过「运维数据导入」入库
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((d) => (
+              pagination.items.map((d) => (
                 <PhysicalDeviceRow
                   key={d.id}
                   device={d}
@@ -222,6 +360,13 @@ export function PhysicalDevicesContent({ supplierIdFilter }: { supplierIdFilter?
             )}
           </TableBody>
         </Table>
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.totalItems}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+        />
       </Card>
     </div>
   )
@@ -254,6 +399,29 @@ function PhysicalDeviceRow({
       </TableCell>
       <TableCell>{device.idcCode}</TableCell>
       <TableCell>{device.cardTypeName}</TableCell>
+      <TableCell className="max-w-[120px] truncate text-sm" title={device.devicePurpose ?? undefined}>
+        {device.devicePurpose ?? '—'}
+      </TableCell>
+      <TableCell className="text-sm">{device.opsStatus ?? '—'}</TableCell>
+      <TableCell className="max-w-[140px] truncate text-sm" title={device.expectedService ?? undefined}>
+        {device.expectedService ?? '—'}
+      </TableCell>
+      <TableCell className="text-sm">
+        {DEVICE_COOPERATION_TYPE_LABELS[device.cooperationType]}
+      </TableCell>
+      <TableCell className="max-w-[160px] truncate text-sm" title={formatClusterAndRole(device)}>
+        {formatClusterAndRole(device)}
+      </TableCell>
+      <TableCell className="font-mono text-xs">{formatDeviceIp(device)}</TableCell>
+      <TableCell>
+        {device.inMaintenance ? (
+          <Badge variant="outline" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/30">
+            是
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground text-sm">否</span>
+        )}
+      </TableCell>
       <TableCell>
         <Badge
           variant="outline"

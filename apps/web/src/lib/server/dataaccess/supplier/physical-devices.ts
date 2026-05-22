@@ -1,17 +1,28 @@
 import { db } from '@/lib/db'
-import type { PhysicalDevice, PhysicalDeviceStats } from '@/lib/data/types'
-import { mapPhysicalDeviceRow } from '@/lib/server/mappers/supply'
+import type { PhysicalDevice, PhysicalDeviceDetail, PhysicalDeviceStats } from '@/lib/data/types'
+import {
+  mapActivityFlowRecord,
+  mapChangelogFlowRecord,
+  mapComputeNodeRow,
+  mapPhysicalDeviceRow,
+  mapStateTransitionFlowRecord,
+} from '@/lib/server/mappers/supply'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import {
   accessConditionSheet,
+  computeNode,
   entityStateTransitionLog,
   gpuCardType,
+  onboardingBatch,
   supplier,
   supplierActivity,
+  supplierContract,
   supplierDevice,
+  supplierDeviceChangeLog,
+  userStaff,
 } from '@workspace/db/schema'
-import { and, count, eq, sql } from 'drizzle-orm'
+import { and, count, desc, eq, sql } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -30,16 +41,24 @@ export const physicalDevicesDataAccess = {
         device: supplierDevice,
         supplierShortName: supplier.shortName,
         cardTypeName: gpuCardType.name,
+        clusterName: computeNode.clusterName,
+        nodeRole: computeNode.nodeRole,
+        expectedService: computeNode.expectedService,
       })
       .from(supplierDevice)
       .innerJoin(supplier, eq(supplierDevice.supplierId, supplier.id))
       .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+      .leftJoin(computeNode, eq(computeNode.supplierDeviceId, supplierDevice.id))
       .where(conditions)
       .orderBy(sql`${supplierDevice.updatedAt} DESC`)
 
     supplierLog('physical-devices', 'list done', { count: rows.length })
-    return rows.map(({ device, supplierShortName, cardTypeName }) =>
-      mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }),
+    return rows.map(({ device, supplierShortName, cardTypeName, clusterName, nodeRole, expectedService }) =>
+      mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }, {
+        clusterName,
+        nodeRole,
+        expectedService,
+      }),
     )
   },
 
@@ -75,6 +94,101 @@ export const physicalDevicesDataAccess = {
       total: Number(totalRow?.value ?? 0),
       online: Number(onlineRow?.value ?? 0),
       onboarding: Number(onboardingRow?.value ?? 0),
+    }
+  },
+
+  async getDetail(deviceId: string): Promise<PhysicalDeviceDetail | null> {
+    supplierLog('physical-devices', 'getDetail start', { deviceId })
+
+    const [hit] = await db
+      .select({
+        device: supplierDevice,
+        supplierShortName: supplier.shortName,
+        supplierName: supplier.name,
+        cardTypeName: gpuCardType.name,
+        contractNo: supplierContract.contractNo,
+        onboardingBatchCode: onboardingBatch.batchCode,
+        onboardingBatchKind: onboardingBatch.batchKind,
+      })
+      .from(supplierDevice)
+      .innerJoin(supplier, eq(supplierDevice.supplierId, supplier.id))
+      .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+      .leftJoin(supplierContract, eq(supplierDevice.contractId, supplierContract.id))
+      .leftJoin(onboardingBatch, eq(supplierDevice.onboardingBatchId, onboardingBatch.id))
+      .where(eq(supplierDevice.id, deviceId))
+      .limit(1)
+
+    if (!hit) {
+      supplierLog('physical-devices', 'getDetail not found', { deviceId })
+      return null
+    }
+
+    const [nodeRows, transitionRows, changelogRows, activityRows] = await Promise.all([
+      db
+        .select()
+        .from(computeNode)
+        .where(eq(computeNode.supplierDeviceId, deviceId))
+        .orderBy(computeNode.nodeRole),
+      db
+        .select({
+          log: entityStateTransitionLog,
+          operatorName: userStaff.displayName,
+        })
+        .from(entityStateTransitionLog)
+        .leftJoin(userStaff, eq(entityStateTransitionLog.operatorStaffId, userStaff.id))
+        .where(
+          and(
+            eq(entityStateTransitionLog.entityType, 'device'),
+            eq(entityStateTransitionLog.entityId, deviceId),
+          ),
+        )
+        .orderBy(desc(entityStateTransitionLog.occurredAt)),
+      db
+        .select({
+          log: supplierDeviceChangeLog,
+          batchCode: onboardingBatch.batchCode,
+        })
+        .from(supplierDeviceChangeLog)
+        .innerJoin(
+          onboardingBatch,
+          eq(supplierDeviceChangeLog.onboardingBatchId, onboardingBatch.id),
+        )
+        .where(eq(supplierDeviceChangeLog.supplierDeviceId, deviceId))
+        .orderBy(desc(supplierDeviceChangeLog.occurredAt)),
+      db
+        .select()
+        .from(supplierActivity)
+        .where(and(eq(supplierActivity.refDomain, 'device'), eq(supplierActivity.refId, deviceId)))
+        .orderBy(desc(supplierActivity.occurredAt)),
+    ])
+
+    const flowRecords = [
+      ...transitionRows.map(({ log, operatorName }) =>
+        mapStateTransitionFlowRecord(log, operatorName),
+      ),
+      ...changelogRows.map(({ log, batchCode }) => mapChangelogFlowRecord(log, batchCode)),
+      ...activityRows.map((row) => mapActivityFlowRecord(row)),
+    ].sort((a, b) => (a.occurredAt < b.occurredAt ? 1 : -1))
+
+    supplierLog('physical-devices', 'getDetail done', {
+      deviceId,
+      flowRecords: flowRecords.length,
+      computeNodes: nodeRows.length,
+    })
+
+    return {
+      device: {
+        ...mapPhysicalDeviceRow(hit.device, {
+          supplierShortName: hit.supplierShortName,
+          cardTypeName: hit.cardTypeName,
+        }),
+        supplierName: hit.supplierName,
+        contractNo: hit.contractNo,
+        onboardingBatchCode: hit.onboardingBatchCode,
+        onboardingBatchKind: hit.onboardingBatchKind,
+      },
+      computeNodes: nodeRows.map(mapComputeNodeRow),
+      flowRecords,
     }
   },
 

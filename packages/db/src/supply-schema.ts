@@ -526,6 +526,8 @@ export const supplierDevice = pgTable(
     /** 闲时合作 idle_time / 整租合作 whole_rent */
     cooperationType: varchar("cooperation_type", { length: 32 }).notNull().default("idle_time"),
     deviceSpec: text("device_spec"),
+    /** Excel「设备用途」 */
+    devicePurpose: varchar("device_purpose", { length: 255 }),
     receivedAt: timestamp("received_at", { withTimezone: true }),
     remark: text("remark"),
     loginUsername: varchar("login_username", { length: 128 }),

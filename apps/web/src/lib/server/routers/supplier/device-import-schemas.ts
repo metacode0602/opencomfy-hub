@@ -16,6 +16,7 @@ export const deviceInventoryRowSchema = z.object({
   rate_limit: z.string().optional(),
   cooperation_type: z.enum(['idle_time', 'whole_rent']).optional(),
   device_spec: z.string().optional(),
+  device_purpose: z.string().optional(),
   received_at: z.string().optional(),
   remark: z.string().optional(),
   login_username: z.string().optional(),

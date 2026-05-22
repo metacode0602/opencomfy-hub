@@ -76,6 +76,15 @@ function assertEffectiveRange(effectiveFrom: string, effectiveTo?: string | null
   }
 }
 
+async function resolveValidStaffId(staffId?: string | null): Promise<string | null> {
+  if (!staffId) return null
+  const row = await db.query.userStaff.findFirst({
+    where: eq(userStaff.id, staffId),
+    columns: { id: true },
+  })
+  return row?.id ?? null
+}
+
 async function fetchRecordById(recordId: string) {
   const rows = await db
     .select({
@@ -301,8 +310,10 @@ export const unitCostsDataAccess = {
       (newUnitPrice != null && newUnitPrice !== prevUnit) ||
       (newShare != null && newShare !== prevShare)
 
+    const changedByStaffId = await resolveValidStaffId(input.changedByStaffId)
+
     await db.transaction(async (tx) => {
-      if (priceChanged && input.changedByStaffId) {
+      if (priceChanged && changedByStaffId) {
         await tx.insert(supplierPricingHistory).values({
           id: newId(),
           pricingRecordId: input.recordId,
@@ -317,7 +328,7 @@ export const unitCostsDataAccess = {
           newRevenueSharePercent:
             newShare != null ? String(newShare) : null,
           changedAt: new Date(),
-          changedByStaffId: input.changedByStaffId,
+          changedByStaffId,
           reason: input.reason?.trim() || null,
         })
       }
@@ -333,7 +344,7 @@ export const unitCostsDataAccess = {
           pricingTiers: input.pricingTiers ?? null,
           effectiveFrom,
           effectiveTo,
-          updatedByStaffId: input.changedByStaffId ?? existing.updatedByStaffId,
+          updatedByStaffId: changedByStaffId ?? existing.updatedByStaffId,
           updatedAt: sql`now()`,
         })
         .where(eq(supplierPricingRecord.id, input.recordId))

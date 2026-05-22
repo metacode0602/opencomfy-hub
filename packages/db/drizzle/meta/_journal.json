@@ -176,6 +176,13 @@
       "when": 1779435797783,
       "tag": "0025_complete_galactus",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1779437107308,
+      "tag": "0026_mushy_cobalt_man",
+      "breakpoints": true
     }
   ]
 }

@@ -35,7 +35,7 @@ import {
   supplierPricingRecord,
   userStaff,
 } from '@workspace/db/schema'
-import { count, eq, inArray, sql, sum } from 'drizzle-orm'
+import { and, count, eq, gt, inArray, sql, sum } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -189,22 +189,34 @@ export const suppliersDataAccess = {
     )
   },
 
-  async listGpuInventoryBySupplier(supplierId: string): Promise<DataCenterDevice[]> {
+  async listGpuInventory(params?: { supplierId?: string }): Promise<DataCenterDevice[]> {
+    const conditions = [gt(supplierGpuInventory.quantity, 0)]
+    if (params?.supplierId) {
+      conditions.push(eq(supplierGpuInventory.supplierId, params.supplierId))
+    }
+
     const rows = await db
       .select({
         inventory: supplierGpuInventory,
         dataCenterName: dataCenter.name,
         cardTypeName: gpuCardType.name,
+        supplierShortName: supplier.shortName,
       })
       .from(supplierGpuInventory)
       .innerJoin(dataCenter, eq(supplierGpuInventory.dataCenterId, dataCenter.id))
       .innerJoin(gpuCardType, eq(supplierGpuInventory.gpuCardTypeId, gpuCardType.id))
-      .where(eq(supplierGpuInventory.supplierId, supplierId))
-      .orderBy(dataCenter.name, gpuCardType.name)
+      .innerJoin(supplier, eq(supplierGpuInventory.supplierId, supplier.id))
+      .where(and(...conditions))
+      .orderBy(supplier.shortName, dataCenter.name, gpuCardType.name)
 
-    return rows.map(({ inventory, dataCenterName, cardTypeName }) =>
-      mapGpuInventoryRow(inventory, { dataCenterName, cardTypeName }),
+    return rows.map(({ inventory, dataCenterName, cardTypeName, supplierShortName }) =>
+      mapGpuInventoryRow(inventory, { dataCenterName, cardTypeName, supplierShortName }),
     )
+  },
+
+  /** @deprecated 使用 listGpuInventory({ supplierId }) */
+  async listGpuInventoryBySupplier(supplierId: string): Promise<DataCenterDevice[]> {
+    return this.listGpuInventory({ supplierId })
   },
 
   async listContractsBySupplier(supplierId: string): Promise<SupplierContract[]> {

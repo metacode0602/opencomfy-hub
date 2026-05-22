@@ -124,6 +124,7 @@ export function parseDeviceInventoryTable(
   const iBw = pickIndex(headers, ["带宽组", "bandwidth_group"])
   const iRate = pickIndex(headers, ["限速", "rate_limit"])
   const iCoop = pickIndex(headers, ["合作类型", "cooperation_type"])
+  const iPurpose = pickIndex(headers, ["设备用途", "device_purpose"])
   const iSpec = pickIndex(headers, ["设备配置", "device_spec"])
   const iReceived = pickIndex(headers, ["设备接收时间", "received_at"])
   const iRemark = pickIndex(headers, ["备注", "remark"])
@@ -176,6 +177,7 @@ export function parseDeviceInventoryTable(
       rate_limit: cell(cells, iRate) || undefined,
       cooperation_type: cooperation.type,
       device_spec: cell(cells, iSpec) || undefined,
+      device_purpose: cell(cells, iPurpose) || undefined,
       received_at: cell(cells, iReceived) || undefined,
       remark: cell(cells, iRemark) || undefined,
       login_username: cell(cells, iLoginUser) || undefined,

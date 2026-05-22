@@ -5,7 +5,9 @@ import type {
   DataCenterDevice,
   DeviceCooperationType,
   GPUCardType,
+  PhysicalComputeNode,
   PhysicalDevice,
+  PhysicalDeviceFlowRecord,
   Supplier,
   SupplierBill,
   SupplierBillDetail,
@@ -21,12 +23,21 @@ import type {
   SupplierRow,
 } from '@workspace/db/schema'
 import type {
+  computeNode,
+  entityStateTransitionLog,
   gpuCardType,
+  supplierActivity,
   supplierBill,
   supplierBillDetail,
+  supplierDeviceChangeLog,
   supplierPricingHistory,
   supplierPricingRecord,
 } from '@workspace/db/schema'
+
+type ComputeNodeRow = typeof computeNode.$inferSelect
+type EntityStateTransitionLogRow = typeof entityStateTransitionLog.$inferSelect
+type SupplierActivityRow = typeof supplierActivity.$inferSelect
+type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSelect
 
 type SupplierBillRow = typeof supplierBill.$inferSelect
 type SupplierBillDetailRow = typeof supplierBillDetail.$inferSelect
@@ -131,13 +142,14 @@ export function mapDataCenterRow(
 
 export function mapGpuInventoryRow(
   row: SupplierGpuInventoryRow,
-  names: { dataCenterName: string; cardTypeName: string },
+  names: { dataCenterName: string; cardTypeName: string; supplierShortName?: string },
 ): DataCenterDevice {
   return {
     id: row.id,
     dataCenterId: row.dataCenterId,
     dataCenterName: names.dataCenterName,
     supplierId: row.supplierId,
+    supplierShortName: names.supplierShortName,
     cardTypeId: row.gpuCardTypeId,
     cardTypeName: names.cardTypeName,
     quantity: row.quantity,
@@ -299,9 +311,85 @@ export function mapGpuCardTypeRow(row: GpuCardTypeRow): GPUCardType {
   }
 }
 
+export function mapComputeNodeRow(row: ComputeNodeRow): PhysicalComputeNode {
+  return {
+    id: row.id,
+    nodeRole: row.nodeRole,
+    mgmtIp: row.mgmtIp,
+    clusterId: row.clusterId,
+    clusterName: row.clusterName,
+    nodeName: row.nodeName,
+    expectedService: row.expectedService,
+    lifecycleStatus: row.lifecycleStatus,
+  }
+}
+
+export function mapStateTransitionFlowRecord(
+  row: EntityStateTransitionLogRow,
+  operatorName: string | null,
+): PhysicalDeviceFlowRecord {
+  return {
+    id: row.id,
+    kind: 'state_transition',
+    title: `${row.fromState} → ${row.toState}`,
+    fromState: row.fromState,
+    toState: row.toState,
+    reasonCode: row.reasonCode,
+    operatorName: operatorName ?? '系统',
+    occurredAt: toIsoDate(row.occurredAt),
+  }
+}
+
+export function mapChangelogFlowRecord(
+  row: SupplierDeviceChangeLogRow,
+  batchCode: string,
+): PhysicalDeviceFlowRecord {
+  const statusParts: string[] = []
+  if (row.previousOpsStatus || row.newOpsStatus) {
+    statusParts.push(`运营状态 ${row.previousOpsStatus ?? '—'} → ${row.newOpsStatus ?? '—'}`)
+  }
+  if (row.previousLifecycleStatus || row.newLifecycleStatus) {
+    statusParts.push(
+      `生命周期 ${row.previousLifecycleStatus ?? '—'} → ${row.newLifecycleStatus ?? '—'}`,
+    )
+  }
+  const description =
+    row.changeContent ??
+    row.description ??
+    (statusParts.length > 0 ? statusParts.join(' · ') : null)
+
+  return {
+    id: row.id,
+    kind: 'changelog_import',
+    title: row.changeAction,
+    description,
+    fromState: row.previousLifecycleStatus,
+    toState: row.newLifecycleStatus,
+    ticketNo: row.ticketNo,
+    batchCode,
+    occurredAt: toIsoDate(row.occurredAt),
+  }
+}
+
+export function mapActivityFlowRecord(row: SupplierActivityRow): PhysicalDeviceFlowRecord {
+  return {
+    id: row.id,
+    kind: 'activity',
+    title: row.title,
+    description: row.description,
+    operatorName: row.authorName ?? '运营',
+    occurredAt: toIsoDate(row.occurredAt),
+  }
+}
+
 export function mapPhysicalDeviceRow(
   row: SupplierDeviceRow,
   names: { supplierShortName: string; cardTypeName: string },
+  computeNode?: {
+    clusterName: string | null
+    nodeRole: string | null
+    expectedService: string | null
+  } | null,
 ): PhysicalDevice {
   return {
     id: row.id,
@@ -326,6 +414,10 @@ export function mapPhysicalDeviceRow(
     inMaintenance: row.inMaintenance,
     cooperationType: (row.cooperationType ?? 'idle_time') as DeviceCooperationType,
     deviceSpec: row.deviceSpec,
+    devicePurpose: row.devicePurpose,
+    clusterName: computeNode?.clusterName ?? null,
+    nodeRole: computeNode?.nodeRole ?? null,
+    expectedService: computeNode?.expectedService ?? null,
     createdAt: toIsoDate(row.createdAt),
     updatedAt: toIsoDate(row.updatedAt),
   }

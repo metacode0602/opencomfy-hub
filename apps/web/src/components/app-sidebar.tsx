@@ -74,6 +74,11 @@ const data = {
       icon: <Computer className="size-4" />,
     },
     {
+      title: "设备库存",
+      url: "/supplier/gpu-inventory",
+      icon: <Cpu className="size-4" />,
+    },    
+    {
       title: "设备下架",
       url: "/supplier/offline-tasks",
       icon: <DownloadIcon className="size-4" />,

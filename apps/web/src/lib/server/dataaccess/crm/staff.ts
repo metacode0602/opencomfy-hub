@@ -160,6 +160,26 @@ export const staffDataAccess = {
     return rows.map(mapUserStaffRow)
   },
 
+  async resolveStaffIdForAuthUser(user: {
+    id: string
+    email?: string | null
+  }): Promise<string | null> {
+    const byId = await db.query.userStaff.findFirst({
+      where: and(eq(userStaff.id, user.id), eq(userStaff.status, 'active')),
+      columns: { id: true },
+    })
+    if (byId) return byId.id
+
+    const email = user.email?.trim()
+    if (!email) return null
+
+    const byEmail = await db.query.userStaff.findFirst({
+      where: and(eq(userStaff.email, email), eq(userStaff.status, 'active')),
+      columns: { id: true },
+    })
+    return byEmail?.id ?? null
+  },
+
   async getById(id: string): Promise<(UserStaff & { assignmentCount: number }) | null> {
     await ensureCrmSeeded()
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })

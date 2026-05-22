@@ -1,13 +1,14 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   Activity,
   ArrowLeft,
   CheckCircle2,
   ChevronRight,
-  Network,
+  Clock,
+  Loader2,
   Server,
   Shield,
 } from 'lucide-react'
@@ -24,15 +25,21 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
-import { LIFECYCLE_STATUS_COLORS, onboardingBatchDetailPath } from '@/lib/supplier/onboarding-batch-utils'
+import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import {
-  useAssigneeLabel,
-  useBatchCode,
-  useContractNo,
-  useSupplierLabel,
-} from '@/lib/supplier/supplier-domain-lookups'
-import type { SupplierActivity, SupplierDevice } from '@/lib/types/supplier-domain'
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
+import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/data/types'
+import type { PhysicalDeviceFlowRecord, PhysicalDeviceFlowRecordKind } from '@/lib/data/types'
+import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
+import { trpc } from '@/lib/trpc/client'
 
 function formatDt(iso: string | null | undefined) {
   if (!iso) return '—'
@@ -52,181 +59,121 @@ const reasonLabels: Record<string, string> = {
   OPS_STATUS_CHANGE: '运营变更',
 }
 
-const activityTypeLabels: Record<string, string> = {
-  device_online: '上线',
-  device_onboarding: '接入',
-  ops_import: '导入',
-  internal_test_hold: '测试',
-  fault_opened: '故障',
-  fault_closed: '故障',
+const flowKindLabels: Record<PhysicalDeviceFlowRecordKind, string> = {
+  state_transition: '状态流转',
+  changelog_import: '变更导入',
+  activity: '运营事件',
 }
 
-function ChangeLogItem({
-  fromState,
-  toState,
-  reasonCode,
-  operatorId,
-  occurredAt,
-}: {
-  fromState: string
-  toState: string
-  reasonCode: string
-  operatorId: string
-  occurredAt: string
-}) {
-  const operator = useAssigneeLabel(operatorId)
+const flowKindColors: Record<PhysicalDeviceFlowRecordKind, string> = {
+  state_transition: 'bg-blue-500/10 text-blue-400 border-blue-500/30',
+  changelog_import: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+  activity: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+}
+
+function onboardingBatchHref(batchKind: string | null, batchId: string | null): string | null {
+  if (!batchKind || !batchId) return null
+  switch (batchKind) {
+    case 'online':
+      return `/supplier/online-tasks/${batchId}`
+    case 'order_access':
+      return `/supplier/order-access/${batchId}`
+    case 'device_retire':
+      return `/supplier/offline-tasks/${batchId}`
+    default:
+      return null
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return '加载失败，请稍后重试'
+}
+
+function FlowRecordItem({ record }: { record: PhysicalDeviceFlowRecord }) {
+  const reasonLabel = record.reasonCode ? reasonLabels[record.reasonCode] ?? record.reasonCode : null
+
   return (
-    <li className="p-4 flex gap-4">
-      <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-        <Activity className="w-4 h-4 text-primary" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium">
-            {fromState} → {toState}
+    <li className="relative pl-8 pb-8 last:pb-0">
+      <span className="absolute left-[11px] top-2 bottom-0 w-px bg-border last:hidden" />
+      <span className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+        <Activity className="w-3.5 h-3.5 text-primary" />
+      </span>
+      <div className="rounded-lg border border-border p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-medium text-foreground">{record.title}</span>
+              <Badge variant="outline" className={`text-xs ${flowKindColors[record.kind]}`}>
+                {flowKindLabels[record.kind]}
+              </Badge>
+              {reasonLabel && (
+                <Badge variant="outline" className="text-xs">
+                  {reasonLabel}
+                </Badge>
+              )}
+            </div>
+          </div>
+          <span className="text-xs text-muted-foreground shrink-0 flex items-center gap-1">
+            <Clock className="w-3 h-3" />
+            {formatDt(record.occurredAt)}
           </span>
-          <Badge variant="outline" className="text-xs">
-            {reasonLabels[reasonCode] ?? reasonCode}
-          </Badge>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          {operator} · {formatDt(occurredAt)}
-        </p>
+
+        {record.description && (
+          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{record.description}</p>
+        )}
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {record.operatorName && <span>操作人：{record.operatorName}</span>}
+          {record.ticketNo && <span>工单：{record.ticketNo}</span>}
+          {record.batchCode && <span>批次：{record.batchCode}</span>}
+        </div>
       </div>
     </li>
   )
 }
 
-function TaskRelationItem({
-  taskType,
-  assigneeId,
-  taskStatus,
-}: {
-  taskType: string
-  assigneeId: string
-  taskStatus: string
-}) {
-  const assignee = useAssigneeLabel(assigneeId)
-  return (
-    <div className="flex justify-between items-start gap-4 p-3 rounded-md border border-border">
-      <span className="font-medium text-sm">{taskType}</span>
-      <span className="text-xs text-muted-foreground">{assignee} · {taskStatus}</span>
-    </div>
-  )
-}
-
 export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) {
-  const device = useSupplierDomainMockStore((s) => s.devices.find((d) => d.id === deviceId))
-  const computeNodes = useSupplierDomainMockStore((s) => s.computeNodes)
-  const poolBindings = useSupplierDomainMockStore((s) => s.resourcePoolBindings)
-  const transitionLogs = useSupplierDomainMockStore((s) => s.entityStateTransitionLogs)
-  const deviceChangeLogs = useSupplierDomainMockStore((s) => s.deviceChangeLogs)
-  const activities = useSupplierDomainMockStore((s) => s.supplierActivities)
-  const faultIncidents = useSupplierDomainMockStore((s) => s.faultIncidents)
-  const testHolds = useSupplierDomainMockStore((s) => s.internalTestHolds)
-  const onboardingTasks = useSupplierDomainMockStore((s) => s.onboardingTasks)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertEntityStateTransitionLog = useSupplierDomainMockStore((s) => s.upsertEntityStateTransitionLog)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
+  const [onlineConfirmOpen, setOnlineConfirmOpen] = useState(false)
+  const utils = trpc.useUtils()
 
-  const supplierName = useSupplierLabel(device?.supplier_id ?? '')
-  const contractNo = useContractNo(device?.contract_id ?? '')
-  const batchCode = useBatchCode(device?.onboarding_batch_id ?? '')
-  const onboardingBatch = useSupplierDomainMockStore((s) =>
-    device?.onboarding_batch_id
-      ? s.onboardingBatches.find((b) => b.id === device.onboarding_batch_id)
-      : undefined,
-  )
+  const {
+    data: detail,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = trpc.supplier.getPhysicalDeviceDetail.useQuery({ deviceId }, { retry: 1 })
 
-  const detailNodes = useMemo(
-    () => (device ? computeNodes.filter((n) => n.device_id === device.id) : []),
-    [computeNodes, device],
-  )
-  const detailPool = useMemo(
-    () => (device ? poolBindings.find((p) => p.device_id === device.id) : undefined),
-    [poolBindings, device],
-  )
-  const changeLogs = useMemo(
-    () =>
-      transitionLogs
-        .filter((log) => log.entity_type === 'device' && log.entity_id === deviceId)
-        .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
-    [transitionLogs, deviceId],
-  )
-  const importedChangeLogs = useMemo(
-    () =>
-      deviceChangeLogs
-        .filter((log) => log.supplier_device_id === deviceId)
-        .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
-    [deviceChangeLogs, deviceId],
-  )
-  const relatedActivities = useMemo(
-    () =>
-      activities
-        .filter((a) => a.ref_domain === 'device' && a.ref_id === deviceId)
-        .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
-    [activities, deviceId],
-  )
-  const relatedFaults = useMemo(
-    () => faultIncidents.filter((f) => f.device_id === deviceId),
-    [faultIncidents, deviceId],
-  )
-  const relatedHolds = useMemo(
-    () =>
-      device
-        ? testHolds.filter(
-            (h) =>
-              h.data_center_id === device.data_center_id && h.card_type === device.card_type,
-          )
-        : [],
-    [testHolds, device],
-  )
-  const relatedTasks = useMemo(
-    () => onboardingTasks.filter((t) => t.device_id === deviceId),
-    [onboardingTasks, deviceId],
-  )
+  const markOnlineMutation = trpc.supplier.markPhysicalDeviceOnline.useMutation({
+    onSuccess: (device) => {
+      toast.success(`设备 ${device.sn} 已标记上线`)
+      void utils.supplier.getPhysicalDeviceDetail.invalidate({ deviceId })
+      void utils.supplier.listPhysicalDevices.invalidate()
+      void utils.supplier.getPhysicalDeviceStats.invalidate()
+      void utils.supplier.listGpuInventory.invalidate()
+    },
+    onError: (err) => {
+      const message = getErrorMessage(err)
+      if (message.includes('已在线')) {
+        toast.info(message)
+      } else {
+        toast.error(message)
+      }
+    },
+  })
 
-  const markOnline = (target: SupplierDevice) => {
-    if (target.lifecycle_status === '在线') {
-      toast.info('设备已在线')
-      return
-    }
-    const now = new Date().toISOString()
-    const from = target.lifecycle_status
-    upsertDevice({
-      ...target,
-      lifecycle_status: '在线',
-      onboarding_substage: '已完成',
-      platform_resource_id: target.platform_resource_id ?? `res-${target.sn.toLowerCase()}`,
-    })
-    upsertEntityStateTransitionLog({
-      id: createId('esl'),
-      entity_type: 'device',
-      entity_id: target.id,
-      from_state: from,
-      to_state: '在线',
-      operator_id: 'staff-mock-01',
-      reason_code: 'ONBOARDING_DONE',
-      occurred_at: now,
-    })
-    const activity: SupplierActivity = {
-      id: createId('act'),
-      supplier_id: target.supplier_id,
-      type: 'device_online',
-      title: `设备 ${target.sn} 已上线`,
-      description: `机房 ${target.idc_code}`,
-      author_name: '运营（mock）',
-      author_role: 'ops',
-      ref_domain: 'device',
-      ref_id: target.id,
-      occurred_at: now,
-    }
-    upsertSupplierActivity(activity)
-    toast.success('已标记上线')
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        加载设备详情...
+      </div>
+    )
   }
 
-  if (!device) {
+  if (isError || !detail) {
     return (
       <div className="space-y-4">
         <Link href="/supplier/devices">
@@ -235,12 +182,30 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
             返回设备管理
           </Button>
         </Link>
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            未找到该物理机，可能尚未入库或 ID 无效
-          </CardContent>
-        </Card>
+        <Alert variant="destructive">
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{isError ? getErrorMessage(error) : '未找到该物理机'}</span>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              重试
+            </Button>
+          </AlertDescription>
+        </Alert>
       </div>
+    )
+  }
+
+  const { device, computeNodes, flowRecords } = detail
+  const batchHref = onboardingBatchHref(device.onboardingBatchKind, device.onboardingBatchId)
+
+  const confirmMarkOnline = () => {
+    if (device.lifecycleStatus === '在线') {
+      toast.info('设备已在线')
+      setOnlineConfirmOpen(false)
+      return
+    }
+    markOnlineMutation.mutate(
+      { deviceId: device.id },
+      { onSettled: () => setOnlineConfirmOpen(false) },
     )
   }
 
@@ -256,56 +221,134 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
           <div>
             <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-semibold font-mono">{device.sn}</h1>
-              <Badge variant="outline" className={LIFECYCLE_STATUS_COLORS[device.lifecycle_status] ?? ''}>
-                {device.lifecycle_status}
+              <Badge
+                variant="outline"
+                className={LIFECYCLE_STATUS_COLORS[device.lifecycleStatus] ?? ''}
+              >
+                {device.lifecycleStatus}
               </Badge>
+              {device.inMaintenance && (
+                <Badge variant="outline" className="bg-yellow-500/10 text-yellow-400 border-yellow-500/30">
+                  维护中
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
-              {device.asset_no} · {device.idc_code} · {device.card_type}
+              {device.assetNo} · {device.idcCode} · {device.cardTypeName}
             </p>
           </div>
         </div>
-        {device.lifecycle_status !== '在线' && (
-          <Button className="gap-2" onClick={() => markOnline(device)}>
-            <CheckCircle2 className="w-4 h-4" />
+        {device.lifecycleStatus !== '在线' && (
+          <Button
+            className="gap-2"
+            onClick={() => setOnlineConfirmOpen(true)}
+            disabled={markOnlineMutation.isPending}
+          >
+            {markOnlineMutation.isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4" />
+            )}
             确认上线
           </Button>
         )}
       </div>
 
+      <AlertDialog open={onlineConfirmOpen} onOpenChange={setOnlineConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认将设备标记为上线？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将把设备 <span className="font-mono">{device.sn}</span>（{device.assetNo} ·{' '}
+              {device.idcCode}）标记为在线状态，此操作将更新设备生命周期并计入 GPU 库存。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={markOnlineMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={markOnlineMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault()
+                confirmMarkOnline()
+              }}
+            >
+              {markOnlineMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  处理中...
+                </>
+              ) : (
+                '确认上线'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="grid grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">GPU</p>
-            <p className="text-xl font-semibold mt-1">{device.gpu_count} × {device.card_type}</p>
+            <p className="text-xl font-semibold mt-1">
+              {device.gpuCount} × {device.cardTypeName}
+            </p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">接入子阶段</p>
-            <p className="text-xl font-semibold mt-1">{device.onboarding_substage}</p>
+            <p className="text-xl font-semibold mt-1">{device.onboardingSubstage ?? '—'}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">计算节点</p>
-            <p className="text-xl font-semibold mt-1">{detailNodes.length}</p>
+            <p className="text-xl font-semibold mt-1">{computeNodes.length}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">变更记录</p>
-            <p className="text-xl font-semibold mt-1">{changeLogs.length}</p>
+            <p className="text-sm text-muted-foreground">流转记录</p>
+            <p className="text-xl font-semibold mt-1">{flowRecords.length}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="overview">
+      <Tabs defaultValue="flow">
         <TabsList>
+          <TabsTrigger value="flow">流转记录 ({flowRecords.length})</TabsTrigger>
           <TabsTrigger value="overview">基本信息</TabsTrigger>
-          <TabsTrigger value="changes">变更记录 ({changeLogs.length})</TabsTrigger>
-          <TabsTrigger value="relations">关联资源</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="flow" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="w-4 h-4" />
+                设备流转记录
+              </CardTitle>
+              <CardDescription>
+                汇总状态变更审计、变更表导入与运营事件，按时间倒序展示
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {flowRecords.length === 0 ? (
+                <p className="py-12 text-center text-muted-foreground text-sm">
+                  暂无流转记录，设备入库或状态变更后将在此展示
+                </p>
+              ) : (
+                <ol className="space-y-0">
+                  {flowRecords.map((record) => (
+                    <FlowRecordItem key={`${record.kind}-${record.id}`} record={record} />
+                  ))}
+                </ol>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="overview" className="mt-4 space-y-6">
           <div className="grid grid-cols-2 gap-6">
@@ -316,33 +359,47 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <InfoRow label="设备 ID" value={<code>{device.id}</code>} />
-                <InfoRow label="资产号" value={device.asset_no} />
+                <InfoRow label="资产号" value={device.assetNo} />
                 <InfoRow label="序列号 SN" value={<span className="font-mono">{device.sn}</span>} />
                 <InfoRow
                   label="供应商"
                   value={
-                    <Link href={`/supplier/suppliers/${device.supplier_id}`} className="text-primary hover:underline">
-                      {supplierName}
+                    <Link
+                      href={`/supplier/suppliers/${device.supplierId}`}
+                      className="text-primary hover:underline"
+                    >
+                      {device.supplierName}
                     </Link>
                   }
                 />
-                <InfoRow label="商务合同" value={contractNo} />
+                <InfoRow label="商务合同" value={device.contractNo ?? '—'} />
                 <InfoRow
                   label="接入批次"
                   value={
-                    <Link
-                      href={
-                        onboardingBatch
-                          ? onboardingBatchDetailPath(onboardingBatch)
-                          : '/supplier/online-tasks'
-                      }
-                      className="text-primary hover:underline inline-flex items-center gap-1"
-                    >
-                      {batchCode}
-                      <ChevronRight className="w-3 h-3" />
-                    </Link>
+                    device.onboardingBatchCode ? (
+                      batchHref ? (
+                        <Link
+                          href={batchHref}
+                          className="text-primary hover:underline inline-flex items-center gap-1"
+                        >
+                          {device.onboardingBatchCode}
+                          <ChevronRight className="w-3 h-3" />
+                        </Link>
+                      ) : (
+                        device.onboardingBatchCode
+                      )
+                    ) : (
+                      '—'
+                    )
                   }
                 />
+                <InfoRow
+                  label="合作类型"
+                  value={DEVICE_COOPERATION_TYPE_LABELS[device.cooperationType]}
+                />
+                <InfoRow label="设备用途" value={device.devicePurpose ?? '—'} />
+                <InfoRow label="运营状态" value={device.opsStatus ?? '—'} />
+                <InfoRow label="最近更新" value={formatDt(device.updatedAt)} />
               </CardContent>
             </Card>
 
@@ -352,17 +409,36 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                 <CardDescription>机房、IP 与平台资源映射</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <InfoRow label="机房编码" value={device.idc_code} />
-                <InfoRow label="区域" value={device.idc_region} />
-                <InfoRow label="公网 IP" value={<span className="font-mono">{device.external_ip}</span>} />
-                <InfoRow label="内网 IP" value={<span className="font-mono">{device.internal_ip}</span>} />
+                <InfoRow label="机房编码" value={device.idcCode} />
+                <InfoRow label="区域" value={device.idcRegion ?? '—'} />
+                <InfoRow
+                  label="公网 IP"
+                  value={
+                    device.externalIp ? (
+                      <span className="font-mono">{device.externalIp}</span>
+                    ) : (
+                      '—'
+                    )
+                  }
+                />
+                <InfoRow
+                  label="内网 IP"
+                  value={
+                    device.internalIp ? (
+                      <span className="font-mono">{device.internalIp}</span>
+                    ) : (
+                      '—'
+                    )
+                  }
+                />
                 <InfoRow
                   label="平台资源 ID"
-                  value={device.platform_resource_id ? <code>{device.platform_resource_id}</code> : '—'}
+                  value={
+                    device.platformResourceId ? <code>{device.platformResourceId}</code> : '—'
+                  }
                 />
-                {detailPool && (
-                  <InfoRow label="资源池" value={detailPool.pool_code ?? detailPool.resource_pool_id ?? '—'} />
-                )}
+                <InfoRow label="外部设备 ID" value={device.externalDeviceId ?? '—'} />
+                <InfoRow label="入库时间" value={formatDt(device.createdAt)} />
               </CardContent>
             </Card>
           </div>
@@ -371,11 +447,11 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Server className="w-4 h-4" />
-                计算节点 ({detailNodes.length})
+                计算节点 ({computeNodes.length})
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {detailNodes.length === 0 ? (
+              {computeNodes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">暂无节点</p>
               ) : (
                 <Table>
@@ -384,16 +460,18 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                       <TableHead>角色</TableHead>
                       <TableHead>管理 IP</TableHead>
                       <TableHead>集群</TableHead>
+                      <TableHead>节点名</TableHead>
                       <TableHead>状态</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {detailNodes.map((node) => (
+                    {computeNodes.map((node) => (
                       <TableRow key={node.id}>
-                        <TableCell>{node.node_role}</TableCell>
-                        <TableCell className="font-mono text-xs">{node.mgmt_ip}</TableCell>
-                        <TableCell>{node.cluster_id}</TableCell>
-                        <TableCell>{node.lifecycle_status}</TableCell>
+                        <TableCell>{node.nodeRole}</TableCell>
+                        <TableCell className="font-mono text-xs">{node.mgmtIp ?? '—'}</TableCell>
+                        <TableCell>{node.clusterName ?? node.clusterId ?? '—'}</TableCell>
+                        <TableCell>{node.nodeName ?? '—'}</TableCell>
+                        <TableCell>{node.lifecycleStatus}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -401,200 +479,6 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
               )}
             </CardContent>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="changes" className="mt-4 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="w-4 h-4" />
-                状态变更审计
-              </CardTitle>
-              <CardDescription>来自 entity_state_transition_log，不可修改</CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              {changeLogs.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground text-sm">暂无状态变更记录</p>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {changeLogs.map((log) => (
-                    <ChangeLogItem
-                      key={log.id}
-                      fromState={log.from_state}
-                      toState={log.to_state}
-                      reasonCode={log.reason_code}
-                      operatorId={log.operator_id}
-                      occurredAt={log.occurred_at}
-                    />
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Excel 变更导入审计</CardTitle>
-              <CardDescription>来自 supplier_device_change_log（设备变更表批次）</CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              {importedChangeLogs.length === 0 ? (
-                <p className="p-8 text-center text-muted-foreground text-sm">暂无导入变更记录</p>
-              ) : (
-                <ul className="divide-y divide-border">
-                  {importedChangeLogs.map((log) => (
-                    <li key={log.id} className="p-4 text-sm space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{log.change_action}</span>
-                        {log.ticket_no && (
-                          <Badge variant="outline" className="text-xs font-mono">
-                            {log.ticket_no}
-                          </Badge>
-                        )}
-                      </div>
-                      {log.change_content && (
-                        <p className="text-muted-foreground">{log.change_content}</p>
-                      )}
-                      {(log.previous_ops_status || log.new_ops_status) && (
-                        <p className="text-xs text-muted-foreground">
-                          状态 {log.previous_ops_status ?? '—'} → {log.new_ops_status ?? '—'}
-                          {log.new_lifecycle_status ? ` · 生命周期 → ${log.new_lifecycle_status}` : ''}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">{formatDt(log.occurred_at)}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-
-          {relatedActivities.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">运营活动时间线</CardTitle>
-                <CardDescription>用户可见事件投影</CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <ul className="divide-y divide-border">
-                  {relatedActivities.map((a) => (
-                    <li key={a.id} className="p-4">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{a.title}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {activityTypeLabels[a.type] ?? a.type}
-                        </Badge>
-                      </div>
-                      {a.description && (
-                        <p className="text-sm text-muted-foreground mt-1">{a.description}</p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {a.author_name} · {formatDt(a.occurred_at)}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="relations" className="mt-4 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">接入任务</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relatedTasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground">暂无设备级任务</p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedTasks.map((task) => (
-                    <TaskRelationItem
-                      key={task.id}
-                      taskType={task.task_type}
-                      assigneeId={task.assignee_id}
-                      taskStatus={task.task_status}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">故障事件</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relatedFaults.length === 0 ? (
-                <p className="text-sm text-muted-foreground">暂无关联故障</p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedFaults.map((fault) => (
-                    <Link
-                      key={fault.id}
-                      href="/supplier/fault-incidents"
-                      className="block hover:bg-muted/30 rounded-md transition-colors"
-                    >
-                      <div className="flex justify-between items-start gap-4 p-3 rounded-md border border-border">
-                        <span className="font-medium text-sm">{fault.title}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {fault.severity} · {fault.incident_status}
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">测试占用</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {relatedHolds.length === 0 ? (
-                <p className="text-sm text-muted-foreground">暂无测试占用</p>
-              ) : (
-                <div className="space-y-2">
-                  {relatedHolds.map((hold) => (
-                    <Link
-                      key={hold.id}
-                      href="/supplier/test-holds"
-                      className="block hover:bg-muted/30 rounded-md transition-colors"
-                    >
-                      <div className="flex justify-between items-start gap-4 p-3 rounded-md border border-border">
-                        <span className="font-medium text-sm">
-                          {hold.user_name} · {hold.card_type} × {hold.unit_count}台
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {formatDt(hold.hold_from)} — {formatDt(hold.hold_until)}
-                        </span>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {detailPool && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Network className="w-4 h-4" />
-                  资源池绑定
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <InfoRow label="池编码" value={detailPool.pool_code ?? '—'} />
-                <InfoRow label="Workload" value={detailPool.workload_profile} />
-                <InfoRow label="独占池" value={detailPool.is_exclusive_pool ? '是' : '否'} />
-              </CardContent>
-            </Card>
-          )}
         </TabsContent>
       </Tabs>
     </div>

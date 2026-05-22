@@ -11,6 +11,7 @@ import { platformDatacenterImportDataAccess } from '@/lib/server/dataaccess/supp
 import { platformSupplierImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-import'
 import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/supplier-import'
+import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { SuanliSupplyOpenApiError } from '@/lib/server/integrations/suanli-supply-api'
@@ -146,11 +147,13 @@ export const supplierRouter = createTRPCRouter({
     }),
 
   listGpuInventory: protectedProcedure
-    .input(z.object({ supplierId: z.string() }))
+    .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
-        await suppliersDataAccess.assertSupplierExists(input.supplierId)
-        return await suppliersDataAccess.listGpuInventoryBySupplier(input.supplierId)
+        if (input.supplierId) {
+          await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        }
+        return await suppliersDataAccess.listGpuInventory({ supplierId: input.supplierId })
       } catch (e) {
         mapImportError(e)
       }
@@ -229,6 +232,20 @@ export const supplierRouter = createTRPCRouter({
           await suppliersDataAccess.assertSupplierExists(input.supplierId)
         }
         return await physicalDevicesDataAccess.getStats({ supplierId: input.supplierId })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  getPhysicalDeviceDetail: protectedProcedure
+    .input(z.object({ deviceId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const detail = await physicalDevicesDataAccess.getDetail(input.deviceId)
+        if (!detail) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '设备不存在' })
+        }
+        return detail
       } catch (e) {
         mapImportError(e)
       }
@@ -551,10 +568,11 @@ export const supplierRouter = createTRPCRouter({
 
     create: adminProcedure.input(unitCostUpsertSchema).mutation(async ({ input, ctx }) => {
       try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await unitCostsDataAccess.createRecord({
           ...input,
           pricingMode: input.pricingMode,
-          updatedByStaffId: ctx.user.id,
+          updatedByStaffId: staffId,
         })
       } catch (e) {
         mapImportError(e)
@@ -567,6 +585,7 @@ export const supplierRouter = createTRPCRouter({
         if (!row) {
           throw new TRPCError({ code: 'NOT_FOUND', message: '成本配置不存在' })
         }
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await unitCostsDataAccess.updateRecord({
           supplierId: row.supplierId,
           dataCenterId: row.dataCenterId,
@@ -579,7 +598,7 @@ export const supplierRouter = createTRPCRouter({
           effectiveTo: input.effectiveTo,
           recordId: input.recordId,
           reason: input.reason,
-          changedByStaffId: ctx.user.id,
+          changedByStaffId: staffId,
         })
       } catch (e) {
         mapImportError(e)
