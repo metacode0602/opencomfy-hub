@@ -60,6 +60,7 @@ export function maskPassword(pwd: string): string {
 
 export const IMPORT_STATUS_LABELS: Record<string, string> = {
   draft: "草稿",
+  none: "未上传清单",
   uploaded: "已上传",
   parsing: "解析中",
   parsed: "待确认入库",
@@ -79,7 +80,7 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
 export function buildDevicesFromBatch(params: {
   batchId: string
   supplierId: string
-  contractId: string
+  contractId: string | null
   dataCenterId: string
   idcCode: string
   idcRegion: string

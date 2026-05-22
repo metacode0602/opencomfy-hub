@@ -448,7 +448,16 @@ export const onboardingBatch = pgTable(
     batchCode: varchar("batch_code", { length: 64 }).notNull(),
     batchStatus: varchar("batch_status", { length: 32 }).notNull(),
     plannedReadyAt: timestamp("planned_ready_at", { withTimezone: true }),
-    accessMethod: varchar("access_method", { length: 32 }).notNull(),
+    /** 上架计划明细（卡型 + 合作类型 + 数量） */
+    plannedLinesJson: jsonb("planned_lines_json").notNull().default([]),
+    plannedDeviceCount: integer("planned_device_count").notNull().default(0),
+    listUploadMode: varchar("list_upload_mode", { length: 32 }).notNull().default("none"),
+    workOrderNo: varchar("work_order_no", { length: 64 }), /** 关联工单号 */
+    onlineReason: varchar("online_reason", { length: 64 }), /** 上架原因（`batch_kind=online` 时填写） */
+    orderNo: varchar("order_no", { length: 128 }), /** 关联订单编号（`batch_kind=order_access` 时填写） */
+    remark: text("remark"),
+    parentBatchId: text("parent_batch_id"), /** 导入批次指向业务批次；仅 `device_inventory` / `device_changelog` 使用 */
+    accessMethod: varchar("access_method", { length: 32 }).notNull(), /** 接入方式 */
     importFileName: varchar("import_file_name", { length: 255 }),
     importFileUri: varchar("import_file_uri", { length: 1024 }),
     importFileMimeType: varchar("import_file_mime_type", { length: 128 }),
@@ -483,6 +492,7 @@ export const onboardingBatch = pgTable(
       table.dataCenterId,
       table.createdAt,
     ),
+    index("onboarding_batch_work_order_no_idx").on(table.workOrderNo),
   ],
 )
 

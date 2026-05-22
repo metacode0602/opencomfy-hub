@@ -15,6 +15,7 @@ import type {
   SupplierPricingHistory,
   SupplierPricingRecord,
 } from '@/lib/data/types'
+import type { SupplierActivity } from '@/lib/types/supplier-domain'
 import type {
   DataCenterRow,
   SupplierContractRow,
@@ -369,6 +370,30 @@ export function mapChangelogFlowRecord(
     ticketNo: row.ticketNo,
     batchCode,
     occurredAt: toIsoDate(row.occurredAt),
+  }
+}
+
+function normalizeAuthorRole(
+  role: string | null | undefined,
+): SupplierActivity['author_role'] {
+  if (role === 'business' || role === 'ops' || role === 'system') {
+    return role
+  }
+  return 'ops'
+}
+
+export function mapSupplierActivityRow(row: SupplierActivityRow): SupplierActivity {
+  return {
+    id: row.id,
+    supplier_id: row.supplierId,
+    type: row.type,
+    title: row.title,
+    description: row.description,
+    author_name: row.authorName ?? '运营',
+    author_role: normalizeAuthorRole(row.authorRole),
+    ref_domain: row.refDomain,
+    ref_id: row.refId,
+    occurred_at: toIsoDate(row.occurredAt),
   }
 }
 

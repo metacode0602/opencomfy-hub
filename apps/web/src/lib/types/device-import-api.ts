@@ -25,4 +25,8 @@ export interface DeviceImportCommitResult {
   committedCount: number
   skippedCount: number
   warnings: string[]
+  /** 变更表工单号关联的业务批次 ID */
+  linkedBusinessBatchId?: string | null
+  /** 本次回写 onboarding_batch_id 的设备数 */
+  boundDeviceCount?: number
 }

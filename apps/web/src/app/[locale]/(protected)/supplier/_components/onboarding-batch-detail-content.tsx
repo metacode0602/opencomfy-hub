@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
+  AlertCircle,
   ArrowLeft,
   CheckCircle2,
   ChevronRight,
@@ -22,22 +23,20 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
+import { Progress } from '@workspace/ui/components/progress'
+import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI, onlineReasonLabel } from '@/lib/supplier-ops/ui-meta'
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
-import type {
-  OnboardingParsedRow,
-  OnboardingTask,
-  SupplierActivity,
-} from '@/lib/types/supplier-domain'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
+import type { OnboardingParsedRow } from '@/lib/types/supplier-domain'
+import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/types/supplier-domain'
+import { trpc } from '@/lib/trpc/client'
 import {
   batchKindFromRoute,
-  buildDevicesFromBatch,
   IMPORT_STATUS_LABELS,
   LIFECYCLE_STATUS_COLORS,
   onboardingBatchDetailPath,
 } from '@/lib/supplier/onboarding-batch-utils'
-import { useAssigneeLabel, useDeviceLabel } from '@/lib/supplier/supplier-domain-lookups'
+import type { OnboardingBatchDetailTask } from '@/lib/types/onboarding-batch-api'
 
 type RouteKind = Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
 
@@ -52,8 +51,14 @@ function formatDt(iso: string | null | undefined) {
   })
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return '加载失败，请稍后重试'
+}
+
 const importStatusColor: Record<string, string> = {
   draft: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  none: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
   parsed: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   committed: 'bg-green-500/20 text-green-400 border-green-500/30',
   parse_failed: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -79,31 +84,36 @@ export function OnboardingBatchDetailContent({
   batchId: string
   routeKind: RouteKind
 }) {
+  const utils = trpc.useUtils()
   const ui = OPS_KIND_UI[routeKind]
   const expectedKind = batchKindFromRoute(routeKind)
 
-  const batch = useSupplierDomainMockStore((s) =>
-    s.onboardingBatches.find((b) => b.id === batchId),
+  const {
+    data: detail,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = trpc.supplier.onboardingBatch.getDetailPage.useQuery(
+    { batchId },
+    { retry: 1 },
   )
-  const devices = useSupplierDomainMockStore((s) => s.devices)
-  const tasks = useSupplierDomainMockStore((s) => s.onboardingTasks)
-  const upsertOnboardingBatch = useSupplierDomainMockStore((s) => s.upsertOnboardingBatch)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertOnboardingTask = useSupplierDomainMockStore((s) => s.upsertOnboardingTask)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const upsertEntityStateTransitionLog = useSupplierDomainMockStore((s) => s.upsertEntityStateTransitionLog)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
 
-  const [committing, setCommitting] = useState(false)
+  const commitListMutation = trpc.supplier.onboardingBatch.commitList.useMutation({
+    onSuccess: (result) => {
+      toast.success(`已入库 ${result.committedCount} 台设备`)
+      void utils.supplier.onboardingBatch.getDetailPage.invalidate({ batchId })
+      void utils.supplier.onboardingBatch.list.invalidate()
+    },
+    onError: (e) => toast.error(e.message),
+  })
 
-  const detailDevices = useMemo(
-    () => (batch ? devices.filter((d) => d.onboarding_batch_id === batch.id) : []),
-    [batch, devices],
-  )
-  const detailTasks = useMemo(
-    () => (batch ? tasks.filter((t) => t.onboarding_batch_id === batch.id) : []),
-    [batch, tasks],
-  )
+  const [activeTab, setActiveTab] = useState<string | null>(null)
+
+  const batch = detail?.batch
+  const progress = detail?.progress
+  const devices = detail?.devices ?? []
+  const tasks = detail?.tasks ?? []
 
   const parsedRows = useMemo(() => {
     if (!batch?.parsed_rows_json?.length) return []
@@ -117,79 +127,59 @@ export function OnboardingBatchDetailContent({
     return { ok, warn, err }
   }, [parsedRows])
 
-  const commitBatch = () => {
+  const defaultTab = useMemo(() => {
+    if (!batch) return 'progress'
+    if (batch.import_status !== 'none' && parsedRows.length > 0) return 'import'
+    return 'progress'
+  }, [batch, parsedRows.length])
+
+  const currentTab = activeTab ?? defaultTab
+
+  const onlineRate = useMemo(() => {
+    if (!progress?.planned) return 0
+    return Math.min(100, (progress.online / progress.planned) * 100)
+  }, [progress])
+
+  const handleCommit = () => {
     if (!batch) return
-    if (batch.batch_kind !== 'online' && batch.batch_kind !== 'order_access') {
-      toast.error('该批次类型请使用「运维导入」确认入库')
-      return
-    }
-    if (!batch.parsed_rows_json?.length) {
-      toast.error('无解析数据，无法入库')
-      return
-    }
-    setCommitting(true)
-    const rows = batch.parsed_rows_json as OnboardingParsedRow[]
-    const newDevices = buildDevicesFromBatch({
-      batchId: batch.id,
-      supplierId: batch.supplier_id,
-      contractId: batch.contract_id,
-      dataCenterId: batch.data_center_id,
-      idcCode: batch.idc_code,
-      idcRegion: batch.idc_region,
-      cardTypeDefault: 'A100-80G',
-      rows,
-      createId,
-    })
-    for (const d of newDevices) {
-      upsertDevice(d)
-      upsertEntityStateTransitionLog({
-        id: createId('esl'),
-        entity_type: 'device',
-        entity_id: d.id,
-        from_state: '待接入',
-        to_state: '接入中',
-        operator_id: 'staff-mock-01',
-        reason_code: 'BATCH_COMMITTED',
-        occurred_at: new Date().toISOString(),
-      })
-    }
-    upsertOnboardingTask({
-      id: createId('task'),
-      onboarding_batch_id: batch.id,
-      device_id: null,
-      task_type: '批次联调',
-      assignee_id: 'staff-mock-02',
-      task_status: '待开始',
-      started_at: null,
-      finished_at: null,
-    })
-    const now = new Date().toISOString()
-    upsertOnboardingBatch({
-      ...batch,
-      import_status: 'committed',
-      batch_status: '接入中',
-      committed_device_count: newDevices.length,
-      committed_at: now,
-      updated_at: now,
-    })
-    const activity: SupplierActivity = {
-      id: createId('act'),
-      supplier_id: batch.supplier_id,
-      type: 'ops_import',
-      title: `${ui.title}批次 ${batch.batch_code} 已入库`,
-      description: `共入库 ${newDevices.length} 台物理机`,
-      author_name: '运营（mock）',
-      author_role: 'ops',
-      ref_domain: 'batch',
-      ref_id: batch.id,
-      occurred_at: now,
-    }
-    upsertSupplierActivity(activity)
-    setCommitting(false)
-    toast.success(`已入库 ${newDevices.length} 台设备`)
+    commitListMutation.mutate({ batchId: batch.id })
   }
 
-  if (!batch) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+        <Loader2 className="w-5 h-5 animate-spin" />
+        加载批次详情...
+      </div>
+    )
+  }
+
+  if (isError) {
+    const isNotFound = error?.data?.code === 'NOT_FOUND'
+    return (
+      <div className="space-y-4">
+        <Link href={ui.basePath}>
+          <Button variant="ghost" size="sm" className="gap-2">
+            <ArrowLeft className="w-4 h-4" />
+            返回{ui.title}
+          </Button>
+        </Link>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{isNotFound ? '未找到该批次，可能尚未创建或 ID 无效' : getErrorMessage(error)}</span>
+            {!isNotFound && (
+              <Button variant="outline" size="sm" onClick={() => void refetch()}>
+                重试
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  if (!batch || !progress) {
     return (
       <div className="space-y-4">
         <Link href={ui.basePath}>
@@ -229,6 +219,8 @@ export function OnboardingBatchDetailContent({
     )
   }
 
+  const hasImport = batch.import_status !== 'none'
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -248,12 +240,17 @@ export function OnboardingBatchDetailContent({
             </div>
             <p className="text-sm text-muted-foreground mt-2">
               {batch.supplier_short_name} · {batch.idc_code} · {batch.data_center_name}
+              {batch.work_order_no ? ` · 工单 ${batch.work_order_no}` : ''}
             </p>
           </div>
         </div>
         {batch.import_status === 'parsed' && (
-          <Button className="gap-2" disabled={committing} onClick={commitBatch}>
-            {committing ? (
+          <Button
+            className="gap-2"
+            disabled={commitListMutation.isPending}
+            onClick={handleCommit}
+          >
+            {commitListMutation.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <CheckCircle2 className="w-4 h-4" />
@@ -266,134 +263,207 @@ export function OnboardingBatchDetailContent({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">解析行数</p>
-            <p className="text-2xl font-semibold mt-1">{batch.parsed_row_count}</p>
+            <p className="text-sm text-muted-foreground">计划上架</p>
+            <p className="text-2xl font-semibold mt-1">{progress.planned}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">校验通过</p>
-            <p className="text-2xl font-semibold mt-1">{parseStats.ok}</p>
+            <p className="text-sm text-muted-foreground">已关联</p>
+            <p className="text-2xl font-semibold mt-1">{progress.linked}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">已入库设备</p>
-            <p className="text-2xl font-semibold mt-1">
-              {batch.committed_device_count}
-              {batch.parsed_success_count > 0 ? ` / ${batch.parsed_success_count}` : ''}
-            </p>
+            <p className="text-sm text-muted-foreground">已上线</p>
+            <p className="text-2xl font-semibold mt-1">{progress.online}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">计划就绪</p>
+            <p className="text-sm text-muted-foreground">计划完成</p>
             <p className="text-sm font-medium mt-2">{formatDt(batch.planned_ready_at)}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="import">
+      <Card>
+        <CardContent className="p-4 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">上线进度</span>
+            <span className="font-medium">
+              {progress.online} / {progress.planned} 台（{onlineRate.toFixed(0)}%）
+            </span>
+          </div>
+          <Progress value={onlineRate} className="h-2" />
+        </CardContent>
+      </Card>
+
+      <Tabs value={currentTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="import">导入明细</TabsTrigger>
+          <TabsTrigger value="progress">上架进度</TabsTrigger>
+          {hasImport && <TabsTrigger value="import">导入明细</TabsTrigger>}
           <TabsTrigger value="overview">批次概览</TabsTrigger>
-          <TabsTrigger value="devices">已入库设备 ({detailDevices.length})</TabsTrigger>
-          <TabsTrigger value="tasks">关联任务 ({detailTasks.length})</TabsTrigger>
+          <TabsTrigger value="devices">已入库设备 ({devices.length})</TabsTrigger>
+          <TabsTrigger value="tasks">关联任务 ({tasks.length})</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="import" className="space-y-4 mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4" />
-                清单文件
-              </CardTitle>
-              <CardDescription>
-                {batch.import_file_name} · 解析于 {formatDt(batch.parsed_at)}
-                {batch.committed_at ? ` · 入库于 ${formatDt(batch.committed_at)}` : ''}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">通过 </span>
-                <span className="font-medium text-green-500">{parseStats.ok}</span>
-              </div>
-              {parseStats.warn > 0 && (
-                <div>
-                  <span className="text-muted-foreground">警告 </span>
-                  <span className="font-medium text-yellow-500">{parseStats.warn}</span>
-                </div>
-              )}
-              {parseStats.err > 0 && (
-                <div>
-                  <span className="text-muted-foreground">失败 </span>
-                  <span className="font-medium text-destructive">{parseStats.err}</span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {parsedRows.length === 0 ? (
+        <TabsContent value="progress" className="space-y-4 mt-4">
+          {progress.planLines.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                暂无解析数据，请先在列表页完成 CSV 上传与解析
+                暂无上架计划明细
               </CardContent>
             </Card>
           ) : (
             <Card>
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-12">行</TableHead>
-                        <TableHead>公网 IP</TableHead>
-                        <TableHead>内网 IP</TableHead>
-                        <TableHead>账号</TableHead>
-                        <TableHead>密码</TableHead>
-                        <TableHead>SN</TableHead>
-                        <TableHead>资产号</TableHead>
-                        <TableHead>GPU</TableHead>
-                        <TableHead>卡型</TableHead>
-                        <TableHead>校验</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {parsedRows.map((r) => (
-                        <TableRow key={r.row_no}>
-                          <TableCell>{r.row_no}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.public_ip}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.private_ip}</TableCell>
-                          <TableCell>{r.root_account}</TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {r.root_password}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">{r.sn ?? '—'}</TableCell>
-                          <TableCell className="font-mono text-xs">{r.asset_no ?? '—'}</TableCell>
-                          <TableCell>{r.gpu_count ?? '—'}</TableCell>
-                          <TableCell>{r.card_type_code ?? '—'}</TableCell>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>卡型</TableHead>
+                      <TableHead>合作类型</TableHead>
+                      <TableHead className="text-right">计划</TableHead>
+                      <TableHead className="text-right">已关联</TableHead>
+                      <TableHead className="text-right">已上线</TableHead>
+                      <TableHead>进度</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {progress.planLines.map((line) => {
+                      const lineRate =
+                        line.planned_quantity > 0
+                          ? Math.min(100, (line.online / line.planned_quantity) * 100)
+                          : 0
+                      const lineKey = `${line.gpu_card_type_id}-${line.cooperation_type}`
+                      return (
+                        <TableRow key={lineKey}>
+                          <TableCell className="font-medium">{line.gpu_card_type_code}</TableCell>
                           <TableCell>
-                            <Badge
-                              variant="outline"
-                              className={parseStatusColor[r.parse_status] ?? ''}
-                            >
-                              {parseStatusLabel[r.parse_status] ?? r.parse_status}
-                            </Badge>
-                            {r.parse_message && (
-                              <p className="text-xs text-muted-foreground mt-1 max-w-[140px]">
-                                {r.parse_message}
-                              </p>
-                            )}
+                            {DEVICE_COOPERATION_TYPE_LABELS[line.cooperation_type]}
+                          </TableCell>
+                          <TableCell className="text-right">{line.planned_quantity}</TableCell>
+                          <TableCell className="text-right">{line.linked}</TableCell>
+                          <TableCell className="text-right">{line.online}</TableCell>
+                          <TableCell className="min-w-[120px]">
+                            <Progress value={lineRate} className="h-1.5" />
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           )}
         </TabsContent>
+
+        {hasImport && (
+          <TabsContent value="import" className="space-y-4 mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileSpreadsheet className="w-4 h-4" />
+                  清单文件
+                </CardTitle>
+                <CardDescription>
+                  {batch.import_file_name}
+                  {batch.parsed_at ? ` · 解析于 ${formatDt(batch.parsed_at)}` : ''}
+                  {batch.committed_at ? ` · 入库于 ${formatDt(batch.committed_at)}` : ''}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-4 text-sm">
+                <div>
+                  <span className="text-muted-foreground">解析行数 </span>
+                  <span className="font-medium">{batch.parsed_row_count}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">通过 </span>
+                  <span className="font-medium text-green-500">{parseStats.ok}</span>
+                </div>
+                {parseStats.warn > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">警告 </span>
+                    <span className="font-medium text-yellow-500">{parseStats.warn}</span>
+                  </div>
+                )}
+                {parseStats.err > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">失败 </span>
+                    <span className="font-medium text-destructive">{parseStats.err}</span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-muted-foreground">已入库 </span>
+                  <span className="font-medium">{batch.committed_device_count}</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {parsedRows.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-muted-foreground">
+                  {batch.import_status === 'draft'
+                    ? '清单尚未上传，请在创建流程中上传 CSV'
+                    : '暂无解析数据'}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card>
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">行</TableHead>
+                          <TableHead>公网 IP</TableHead>
+                          <TableHead>内网 IP</TableHead>
+                          <TableHead>账号</TableHead>
+                          <TableHead>密码</TableHead>
+                          <TableHead>SN</TableHead>
+                          <TableHead>资产号</TableHead>
+                          <TableHead>GPU</TableHead>
+                          <TableHead>卡型</TableHead>
+                          <TableHead>校验</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {parsedRows.map((r) => (
+                          <TableRow key={r.row_no}>
+                            <TableCell>{r.row_no}</TableCell>
+                            <TableCell className="font-mono text-xs">{r.public_ip}</TableCell>
+                            <TableCell className="font-mono text-xs">{r.private_ip}</TableCell>
+                            <TableCell>{r.root_account}</TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {r.root_password}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{r.sn ?? '—'}</TableCell>
+                            <TableCell className="font-mono text-xs">{r.asset_no ?? '—'}</TableCell>
+                            <TableCell>{r.gpu_count ?? '—'}</TableCell>
+                            <TableCell>{r.card_type_code ?? '—'}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={parseStatusColor[r.parse_status] ?? ''}
+                              >
+                                {parseStatusLabel[r.parse_status] ?? r.parse_status}
+                              </Badge>
+                              {r.parse_message && (
+                                <p className="text-xs text-muted-foreground mt-1 max-w-[140px]">
+                                  {r.parse_message}
+                                </p>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        )}
 
         <TabsContent value="overview" className="mt-4">
           <Card>
@@ -419,8 +489,16 @@ export function OnboardingBatchDetailContent({
                   </p>
                 </div>
                 <div>
-                  <p className="text-muted-foreground">合同 / 接入条件</p>
-                  <p className="font-medium mt-1 font-mono text-xs">{batch.contract_id}</p>
+                  <p className="text-muted-foreground">商务合同</p>
+                  <p className="font-medium mt-1">
+                    {detail.contractNo ?? (batch.contract_id ? batch.contract_id : '未关联')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">工单号</p>
+                  <p className="font-medium mt-1 font-mono text-xs">
+                    {batch.work_order_no ?? '—'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">计划完成时间</p>
@@ -464,7 +542,10 @@ export function OnboardingBatchDetailContent({
                 </div>
               </div>
               {batch.parse_error && (
-                <p className="text-sm text-destructive">解析错误：{batch.parse_error}</p>
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>解析错误：{batch.parse_error}</AlertDescription>
+                </Alert>
               )}
               <Link
                 href={`/supplier/suppliers/${batch.supplier_id}`}
@@ -478,12 +559,14 @@ export function OnboardingBatchDetailContent({
         </TabsContent>
 
         <TabsContent value="devices" className="mt-4">
-          {detailDevices.length === 0 ? (
+          {devices.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
                 {batch.import_status === 'committed'
                   ? '暂无关联设备记录'
-                  : '确认入库后将在此展示物理机列表'}
+                  : batch.import_status === 'none'
+                    ? '本批次未上传清单，设备将在后续接入流程中关联'
+                    : '确认入库后将在此展示物理机列表'}
               </CardContent>
             </Card>
           ) : (
@@ -493,6 +576,7 @@ export function OnboardingBatchDetailContent({
                   <TableRow>
                     <TableHead>SN</TableHead>
                     <TableHead>资产号</TableHead>
+                    <TableHead>卡型</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>子阶段</TableHead>
                     <TableHead>公网 IP</TableHead>
@@ -500,10 +584,11 @@ export function OnboardingBatchDetailContent({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {detailDevices.map((d) => (
+                  {devices.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-mono text-xs">{d.sn}</TableCell>
                       <TableCell className="font-mono text-xs">{d.asset_no}</TableCell>
+                      <TableCell>{d.card_type_code ?? '—'}</TableCell>
                       <TableCell>
                         <Badge
                           variant="outline"
@@ -513,7 +598,7 @@ export function OnboardingBatchDetailContent({
                         </Badge>
                       </TableCell>
                       <TableCell>{d.onboarding_substage}</TableCell>
-                      <TableCell className="font-mono text-xs">{d.external_ip}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.external_ip ?? '—'}</TableCell>
                       <TableCell>
                         <Button variant="ghost" size="sm" asChild>
                           <Link href={`/supplier/devices/${d.id}`}>详情</Link>
@@ -528,14 +613,14 @@ export function OnboardingBatchDetailContent({
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-4 space-y-3">
-          {detailTasks.length === 0 ? (
+          {tasks.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                入库后将自动创建批次联调任务
+                暂无关联任务；入库后将自动创建批次联调任务
               </CardContent>
             </Card>
           ) : (
-            detailTasks.map((t) => <OnboardingTaskCard key={t.id} task={t} />)
+            tasks.map((t) => <OnboardingTaskCard key={t.id} task={t} />)
           )}
         </TabsContent>
       </Tabs>
@@ -543,16 +628,14 @@ export function OnboardingBatchDetailContent({
   )
 }
 
-function OnboardingTaskCard({ task }: { task: OnboardingTask }) {
-  const assignee = useAssigneeLabel(task.assignee_id)
-  const deviceLabel = useDeviceLabel(task.device_id ?? '')
+function OnboardingTaskCard({ task }: { task: OnboardingBatchDetailTask }) {
+  const deviceLabel = task.device_sn ?? (task.device_id ? task.device_id : '批次级')
   return (
     <Card>
       <CardHeader className="py-3">
         <CardTitle className="text-sm">{task.task_type}</CardTitle>
         <CardDescription>
-          {assignee} · {task.task_status}
-          {task.device_id ? ` · ${deviceLabel}` : ' · 批次级'}
+          {task.assignee_name ?? task.assignee_id} · {task.task_status} · {deviceLabel}
         </CardDescription>
       </CardHeader>
     </Card>

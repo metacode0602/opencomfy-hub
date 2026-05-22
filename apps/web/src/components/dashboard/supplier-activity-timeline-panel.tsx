@@ -1,12 +1,12 @@
 'use client'
 
-import { useMemo } from 'react'
 import Link from 'next/link'
-import { Activity, ChevronRight } from 'lucide-react'
+import { Activity, ChevronRight, Loader2 } from 'lucide-react'
 import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@workspace/ui/components/card'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
+import { trpc } from '@/lib/trpc/client'
 import { BATCH_KIND_LABELS } from '@/lib/supplier/device-import-utils'
+import type { OnboardingBatchKind } from '@/lib/types/supplier-domain'
 
 const typeLabels: Record<string, string> = {
   batch_started: '批次',
@@ -31,25 +31,34 @@ function formatDt(iso: string) {
 }
 
 export function SupplierActivityTimelinePanel({ supplierId }: { supplierId: string }) {
-  const activities = useSupplierDomainMockStore((s) => s.supplierActivities)
-
-  const items = useMemo(
-    () =>
-      activities
-        .filter((a) => a.supplier_id === supplierId)
-        .sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1)),
-    [activities, supplierId],
+  const {
+    data: items = [],
+    isLoading,
+    isError,
+    error,
+  } = trpc.supplier.listSupplierActivities.useQuery(
+    { supplierId, limit: 100 },
+    { enabled: Boolean(supplierId) },
   )
 
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-medium text-foreground">活动时间线</h2>
-        <p className="text-sm text-muted-foreground">合同、接入、上线、故障与测试等运营事件（Mock）</p>
+        <p className="text-sm text-muted-foreground">合同、接入、上线、故障与测试等运营事件</p>
       </div>
       <Card>
         <CardContent className="p-0">
-          {items.length === 0 ? (
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 p-8 text-muted-foreground text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              加载中…
+            </div>
+          ) : isError ? (
+            <p className="p-8 text-center text-destructive text-sm">
+              {error.message || '加载活动记录失败'}
+            </p>
+          ) : items.length === 0 ? (
             <p className="p-8 text-center text-muted-foreground text-sm">暂无活动记录</p>
           ) : (
             <ul className="divide-y divide-border">
@@ -86,11 +95,14 @@ export function SupplierActivityTimelinePanel({ supplierId }: { supplierId: stri
 }
 
 export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: string }) {
-  const allBatches = useSupplierDomainMockStore((s) => s.onboardingBatches)
-
-  const batches = useMemo(
-    () => allBatches.filter((b) => b.supplier_id === supplierId),
-    [allBatches, supplierId],
+  const {
+    data: batches = [],
+    isLoading,
+    isError,
+    error,
+  } = trpc.supplier.onboardingBatch.listBySupplier.useQuery(
+    { supplierId },
+    { enabled: Boolean(supplierId) },
   )
 
   return (
@@ -106,7 +118,20 @@ export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: str
         </Link>
       </div>
       <div className="grid gap-3">
-        {batches.length === 0 ? (
+        {isLoading ? (
+          <Card>
+            <CardContent className="flex items-center justify-center gap-2 p-8 text-muted-foreground text-sm">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              加载中…
+            </CardContent>
+          </Card>
+        ) : isError ? (
+          <Card>
+            <CardContent className="p-8 text-center text-destructive text-sm">
+              {error.message || '加载接入批次失败'}
+            </CardContent>
+          </Card>
+        ) : batches.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center text-muted-foreground text-sm">暂无接入批次</CardContent>
           </Card>
@@ -119,7 +144,7 @@ export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: str
                   <Badge variant="outline">{b.batch_status}</Badge>
                 </div>
                 <CardDescription>
-                  {BATCH_KIND_LABELS[b.batch_kind] ?? b.batch_kind} · {b.idc_code} · 已入库 {b.committed_device_count} 台
+                  {BATCH_KIND_LABELS[b.batch_kind as OnboardingBatchKind] ?? b.batch_kind} · {b.idc_code} · 已入库 {b.committed_device_count} 台
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4">

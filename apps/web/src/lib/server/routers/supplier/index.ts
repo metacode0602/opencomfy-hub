@@ -7,6 +7,8 @@ import { gpuCardTypesDataAccess } from '@/lib/server/dataaccess/supplier/gpu-car
 import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-import'
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
 import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
+import { onboardingBatchDataAccess } from '@/lib/server/dataaccess/supplier/onboarding-batch'
+import { supplierActivityDataAccess } from '@/lib/server/dataaccess/supplier/supplier-activity'
 import { platformDatacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-datacenter-import'
 import { platformSupplierImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-import'
 import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/physical-devices'
@@ -24,6 +26,14 @@ import {
   faultRecordsRowSchema,
 } from '@/lib/server/routers/supplier/device-import-schemas'
 import { deviceRetireRequestSchema } from '@/lib/server/routers/supplier/device-retire-schemas'
+import {
+  onboardingBatchCommitListSchema,
+  onboardingBatchCreateSchema,
+  onboardingBatchListBySupplierSchema,
+  onboardingBatchListSchema,
+  onboardingBatchParseListSchema,
+} from '@/lib/server/routers/supplier/onboarding-batch-schemas'
+import { supplierActivityListSchema } from '@/lib/server/routers/supplier/supplier-activity-schemas'
 import {
   gpuCardTypeListSchema,
   gpuCardTypeUpdateSchema,
@@ -94,7 +104,12 @@ function mapImportError(error: unknown): never {
       message.includes('不可变更') ||
       message.includes('已有平台价') ||
       message.includes('请填写') ||
-      message.includes('须大于')
+      message.includes('清单行数') ||
+      message.includes('卡型') ||
+      message.includes('上架计划') ||
+      message.includes('合作类型') ||
+      message.includes('机房不一致') ||
+      message.includes('工单号指向')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
@@ -122,6 +137,17 @@ export const supplierRouter = createTRPCRouter({
           throw new TRPCError({ code: 'NOT_FOUND', message: '供应商不存在' })
         }
         return row
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  listSupplierActivities: protectedProcedure
+    .input(supplierActivityListSchema)
+    .query(async ({ input }) => {
+      try {
+        await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        return await supplierActivityDataAccess.listBySupplierId(input)
       } catch (e) {
         mapImportError(e)
       }
@@ -400,6 +426,97 @@ export const supplierRouter = createTRPCRouter({
           ...input,
           operatorStaffId: ctx.user.id,
           operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+  }),
+
+  onboardingBatch: createTRPCRouter({
+    list: protectedProcedure.input(onboardingBatchListSchema).query(async ({ input }) => {
+      try {
+        return await onboardingBatchDataAccess.list(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    listBySupplier: protectedProcedure
+      .input(onboardingBatchListBySupplierSchema)
+      .query(async ({ input }) => {
+        try {
+          await suppliersDataAccess.assertSupplierExists(input.supplierId)
+          return await onboardingBatchDataAccess.listBySupplierId(input.supplierId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const batch = await onboardingBatchDataAccess.getById(input.id)
+          if (!batch) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '接入批次不存在' })
+          }
+          return batch
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getProgress: protectedProcedure
+      .input(z.object({ batchId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          return await onboardingBatchDataAccess.getProgress(input.batchId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getDetailPage: protectedProcedure
+      .input(z.object({ batchId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const detail = await onboardingBatchDataAccess.getDetailPage(input.batchId)
+          if (!detail) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '接入批次不存在' })
+          }
+          return detail
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    create: adminProcedure.input(onboardingBatchCreateSchema).mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await onboardingBatchDataAccess.create({
+          ...input,
+          operatorStaffId: staffId,
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    parseList: adminProcedure.input(onboardingBatchParseListSchema).mutation(async ({ input }) => {
+      try {
+        return await onboardingBatchDataAccess.parseList(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    commitList: adminProcedure.input(onboardingBatchCommitListSchema).mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await onboardingBatchDataAccess.commitList({
+          ...input,
+          operatorStaffId: staffId,
         })
       } catch (e) {
         mapImportError(e)

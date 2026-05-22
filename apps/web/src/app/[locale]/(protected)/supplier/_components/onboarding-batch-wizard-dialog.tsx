@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { ChevronRight, Loader2, Upload } from 'lucide-react'
+import { ChevronRight, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -31,20 +31,104 @@ import {
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { ACCESS_METHOD_OPTIONS, ONLINE_REASON_OPTIONS, OPS_KIND_UI } from '@/lib/supplier-ops/ui-meta'
-import { parseInventoryCsv } from '@/lib/supplier-ops/parse-inventory-csv'
-import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
-import type { OnboardingBatch, OnboardingParsedRow, SupplierActivity } from '@/lib/types/supplier-domain'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
 import {
-  batchKindFromRoute,
-  buildDevicesFromBatch,
-  generateBatchCode,
-  inventoryRowsToParsed,
-  maskPassword,
-} from '@/lib/supplier/onboarding-batch-utils'
+  ACCESS_METHOD_OPTIONS,
+  ONBOARDING_GPU_CARD_OPTIONS,
+  ONLINE_REASON_OPTIONS,
+  OPS_KIND_UI,
+} from '@/lib/supplier-ops/ui-meta'
+import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
+import {
+  DEVICE_COOPERATION_TYPE_LABELS,
+  type DeviceCooperationType,
+  type OnboardingBatchPlanLine,
+  type OnboardingParsedRow,
+} from '@/lib/types/supplier-domain'
+import { trpc } from '@/lib/trpc/client'
+import { batchKindFromRoute } from '@/lib/supplier/onboarding-batch-utils'
 
 type WizardStep = 'meta' | 'upload' | 'preview'
+
+type PlanLineDraft = {
+  key: string
+  gpuCardTypeCode: string
+  cooperationType: DeviceCooperationType | ''
+  quantity: string
+}
+
+function emptyPlanLine(): PlanLineDraft {
+  return {
+    key: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    gpuCardTypeCode: '',
+    cooperationType: '',
+    quantity: '',
+  }
+}
+
+function planLineKey(gpuCardTypeCode: string, cooperationType: DeviceCooperationType) {
+  return `${gpuCardTypeCode}::${cooperationType}`
+}
+
+function validatePlanLines(lines: PlanLineDraft[]): {
+  ok: boolean
+  error?: string
+  total: number
+  normalized: Array<{
+    gpuCardTypeId?: string
+    gpuCardTypeCode: string
+    cooperationType: DeviceCooperationType
+    plannedQuantity: number
+  }>
+} {
+  if (lines.length === 0) {
+    return { ok: false, error: '请至少添加一行上架计划', total: 0, normalized: [] }
+  }
+
+  const seen = new Set<string>()
+  const normalized: Array<{
+    gpuCardTypeId?: string
+    gpuCardTypeCode: string
+    cooperationType: DeviceCooperationType
+    plannedQuantity: number
+  }> = []
+  let total = 0
+
+  for (const line of lines) {
+    if (!line.gpuCardTypeCode) {
+      return { ok: false, error: '请为每一行选择卡型', total: 0, normalized: [] }
+    }
+    if (!line.cooperationType) {
+      return { ok: false, error: '请为每一行选择合作类型', total: 0, normalized: [] }
+    }
+    const qty = line.quantity.trim() ? Number(line.quantity) : NaN
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return { ok: false, error: '请为每一行填写有效的上架数量（正整数）', total: 0, normalized: [] }
+    }
+    const key = planLineKey(line.gpuCardTypeCode, line.cooperationType)
+    if (seen.has(key)) {
+      return { ok: false, error: '卡型与合作类型组合在本批次内不可重复', total: 0, normalized: [] }
+    }
+    seen.add(key)
+    total += qty
+    normalized.push({
+      gpuCardTypeCode: line.gpuCardTypeCode,
+      gpuCardTypeId: line.gpuCardTypeCode,
+      cooperationType: line.cooperationType,
+      plannedQuantity: qty,
+    })
+  }
+
+  return { ok: true, total, normalized }
+}
+
+function formatPlanSummary(lines: OnboardingBatchPlanLine[]) {
+  return lines
+    .map(
+      (l) =>
+        `${l.gpu_card_type_code} · ${DEVICE_COOPERATION_TYPE_LABELS[l.cooperation_type]} × ${l.planned_quantity}`,
+    )
+    .join('；')
+}
 
 export function OnboardingBatchWizardDialog({
   routeKind,
@@ -55,25 +139,22 @@ export function OnboardingBatchWizardDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const utils = trpc.useUtils()
   const ui = OPS_KIND_UI[routeKind]
-  const batchKind = batchKindFromRoute(routeKind)
+  const batchKind = batchKindFromRoute(routeKind) as 'online' | 'order_access'
   const isOnlineTasks = routeKind === 'online-tasks'
   const isOrderAccess = routeKind === 'order-access'
 
-  const suppliers = useSupplierDomainMockStore((s) => s.suppliers)
-  const dataCenters = useSupplierDomainMockStore((s) => s.dataCenters)
-  const contracts = useSupplierDomainMockStore((s) => s.contracts)
-  const accessSheets = useSupplierDomainMockStore((s) => s.accessSheets)
-  const upsertOnboardingBatch = useSupplierDomainMockStore((s) => s.upsertOnboardingBatch)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertOnboardingTask = useSupplierDomainMockStore((s) => s.upsertOnboardingTask)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const upsertEntityStateTransitionLog = useSupplierDomainMockStore((s) => s.upsertEntityStateTransitionLog)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
+  const { data: suppliers = [] } = trpc.supplier.list.useQuery(undefined, { enabled: open })
+  const { data: activeCardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery(undefined, {
+    enabled: open,
+  })
+
+  const createMutation = trpc.supplier.onboardingBatch.create.useMutation()
+  const parseListMutation = trpc.supplier.onboardingBatch.parseList.useMutation()
+  const commitListMutation = trpc.supplier.onboardingBatch.commitList.useMutation()
 
   const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
-  const [parsing, setParsing] = useState(false)
-  const [committing, setCommitting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [supplierId, setSupplierId] = useState('')
@@ -84,24 +165,59 @@ export function OnboardingBatchWizardDialog({
   const [onlineReason, setOnlineReason] = useState('')
   const [orderNo, setOrderNo] = useState('')
   const [remark, setRemark] = useState('')
-  const [plannedQuantity, setPlannedQuantity] = useState('')
+  const [planLines, setPlanLines] = useState<PlanLineDraft[]>([emptyPlanLine()])
   const [uploadList, setUploadList] = useState(false)
+  const [batchId, setBatchId] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
   const [parsedRows, setParsedRows] = useState<OnboardingParsedRow[]>([])
   const [parseError, setParseError] = useState<string | null>(null)
-  const [draftBatchId, setDraftBatchId] = useState<string | null>(null)
 
-  const supplierDcs = useMemo(
-    () => dataCenters.filter((dc) => dc.supplier_id === supplierId),
-    [dataCenters, supplierId],
+  const { data: dataCenters = [] } = trpc.supplier.listDataCenters.useQuery(
+    { supplierId },
+    { enabled: open && Boolean(supplierId) },
   )
-  const supplierContracts = useMemo(
-    () => contracts.filter((c) => c.supplier_id === supplierId && c.status === '生效'),
-    [contracts, supplierId],
+  const { data: contracts = [] } = trpc.supplier.listContracts.useQuery(
+    { supplierId },
+    { enabled: open && Boolean(supplierId) },
   )
 
-  const plannedQuantityNum = plannedQuantity.trim() ? Number(plannedQuantity) : NaN
-  const hasValidQuantity = Number.isInteger(plannedQuantityNum) && plannedQuantityNum > 0
+  const activeContracts = useMemo(
+    () => contracts.filter((c) => c.status === 'active'),
+    [contracts],
+  )
+
+  const cardTypeOptions = useMemo(() => {
+    if (activeCardTypes.length > 0) {
+      return activeCardTypes
+        .map((c) => ({
+          code: c.code ?? c.id,
+          label: c.name,
+          id: c.id,
+        }))
+        .filter((c) => Boolean(c.code))
+    }
+    return ONBOARDING_GPU_CARD_OPTIONS.map((c) => ({
+      code: c.code,
+      label: c.label,
+      id: c.code,
+    }))
+  }, [activeCardTypes])
+
+  const planValidation = useMemo(() => validatePlanLines(planLines), [planLines])
+  const totalPlannedQuantity = planValidation.total
+
+  const submitting =
+    createMutation.isPending || parseListMutation.isPending || commitListMutation.isPending
+
+  const updatePlanLine = (key: string, patch: Partial<PlanLineDraft>) => {
+    setPlanLines((prev) => prev.map((line) => (line.key === key ? { ...line, ...patch } : line)))
+  }
+
+  const addPlanLine = () => setPlanLines((prev) => [...prev, emptyPlanLine()])
+
+  const removePlanLine = (key: string) => {
+    setPlanLines((prev) => (prev.length <= 1 ? prev : prev.filter((line) => line.key !== key)))
+  }
 
   const resetWizard = () => {
     setWizardStep('meta')
@@ -113,14 +229,12 @@ export function OnboardingBatchWizardDialog({
     setOnlineReason('')
     setOrderNo('')
     setRemark('')
-    setPlannedQuantity('')
+    setPlanLines([emptyPlanLine()])
     setUploadList(false)
+    setBatchId(null)
     setFileName('')
     setParsedRows([])
     setParseError(null)
-    setDraftBatchId(null)
-    setParsing(false)
-    setCommitting(false)
     if (fileRef.current) fileRef.current.value = ''
   }
 
@@ -129,204 +243,121 @@ export function OnboardingBatchWizardDialog({
     if (!next) resetWizard()
   }
 
-  const createDraftBatch = (): OnboardingBatch | null => {
-    const supplier = suppliers.find((s) => s.id === supplierId)
-    const dc = dataCenters.find((d) => d.id === dataCenterId)
-    const sheet = accessSheets.find((a) => a.contract_id === contractId && a.is_current)
-    if (!supplier || !dc || !contractId || !sheet) {
-      toast.error('请完整选择供应商、机房与生效合同')
-      return null
-    }
-    if (!hasValidQuantity) {
-      toast.error('请填写有效的上架数量（正整数）')
-      return null
-    }
-    if (isOnlineTasks && !onlineReason) {
-      toast.error('请选择上架原因')
-      return null
-    }
-    if (isOrderAccess && !orderNo.trim()) {
-      toast.error('请填写订单编号')
-      return null
-    }
-    if (isOrderAccess && !remark.trim()) {
-      toast.error('请填写备注')
-      return null
-    }
-    const now = new Date().toISOString()
-    const batch: OnboardingBatch = {
-      id: draftBatchId ?? createId('batch'),
-      batch_kind: batchKind,
-      supplier_id: supplier.id,
-      supplier_code: supplier.code,
-      supplier_name: supplier.name,
-      supplier_short_name: supplier.short_name,
-      data_center_id: dc.id,
-      idc_code: dc.code,
-      data_center_name: dc.name,
-      idc_region: dc.location,
-      contract_id: contractId,
-      access_condition_sheet_id: sheet.id,
-      batch_code: generateBatchCode(batchKind),
-      batch_status: '待开始',
-      planned_ready_at: plannedReady ? new Date(plannedReady).toISOString() : null,
-      online_reason: isOnlineTasks ? onlineReason : null,
-      order_no: isOrderAccess ? orderNo.trim() : null,
-      remark: remark.trim() || null,
-      access_method: accessMethod,
-      import_file_name: fileName || '未上传',
-      import_status: 'draft',
-      parsed_row_count: 0,
-      parsed_success_count: 0,
-      parsed_rows_json: null,
-      parsed_at: null,
-      committed_device_count: 0,
-      committed_at: null,
-      created_at: now,
-      updated_at: now,
-    }
-    upsertOnboardingBatch(batch)
-    setDraftBatchId(batch.id)
-    return batch
+  const invalidateList = () => {
+    void utils.supplier.onboardingBatch.list.invalidate({ batchKind })
   }
 
-  const confirmWithoutUpload = () => {
-    const batch = createDraftBatch()
-    if (!batch) return
-    toast.success(`已创建批次 ${batch.batch_code}，计划上架 ${plannedQuantityNum} 台`)
+  const buildCreateInput = () => {
+    if (!planValidation.ok) return null
+    return {
+      batchKind,
+      supplierId,
+      dataCenterId,
+      contractId: contractId || undefined,
+      accessMethod,
+      plannedReadyAt: plannedReady || undefined,
+      onlineReason: isOnlineTasks ? onlineReason : undefined,
+      orderNo: isOrderAccess ? orderNo.trim() : undefined,
+      remark: remark.trim() || undefined,
+      uploadList,
+      planLines: planValidation.normalized.map((line) => {
+        const card = cardTypeOptions.find((c) => c.code === line.gpuCardTypeCode)
+        return {
+          ...line,
+          gpuCardTypeId: card?.id,
+        }
+      }),
+    }
+  }
+
+  const submitCreate = async () => {
+    const input = buildCreateInput()
+    if (!input) {
+      toast.error(planValidation.error ?? '请完善上架计划')
+      return null
+    }
+    try {
+      const result = await createMutation.mutateAsync(input)
+      setBatchId(result.batchId)
+      invalidateList()
+      return result
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '创建批次失败')
+      return null
+    }
+  }
+
+  const confirmWithoutUpload = async () => {
+    const result = await submitCreate()
+    if (!result) return
+    toast.success(
+      `已创建批次 ${result.batchCode}，计划上架 ${result.plannedDeviceCount} 台（工单 ${result.workOrderNo}）`,
+    )
     handleOpenChange(false)
   }
 
-  const onMetaNext = () => {
+  const onMetaNext = async () => {
     if (uploadList) {
-      if (!createDraftBatch()) return
+      const result = await submitCreate()
+      if (!result) return
       setWizardStep('upload')
       return
     }
-    confirmWithoutUpload()
+    await confirmWithoutUpload()
   }
 
   const onParseFile = async (file: File) => {
-    setParseError(null)
-    setParsing(true)
-    const text = await file.text()
-    const result = parseInventoryCsv(text)
-    setParsing(false)
-    if (!result.ok) {
-      setParseError(result.error)
-      setParsedRows([])
+    if (!batchId) {
+      toast.error('请先完成批次创建')
       return
     }
-    const rows = inventoryRowsToParsed(result.rows)
-    setParsedRows(rows)
-    setFileName(file.name)
-    setWizardStep('preview')
-
-    const batch = createDraftBatch()
-    if (!batch) return
-    const updated: OnboardingBatch = {
-      ...batch,
-      import_file_name: file.name,
-      import_status: 'parsed',
-      parsed_row_count: rows.length,
-      parsed_success_count: rows.filter((r) => r.parse_status === 'ok').length,
-      parsed_rows_json: rows.map((r) => ({ ...r, root_password: maskPassword(r.root_password) })),
-      parsed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    setParseError(null)
+    try {
+      const text = await file.text()
+      const result = await parseListMutation.mutateAsync({
+        batchId,
+        fileName: file.name,
+        csvText: text,
+      })
+      setParsedRows(result.rows)
+      setFileName(file.name)
+      setWizardStep('preview')
+      toast.success(`解析成功，共 ${result.rowCount} 行`)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : '解析失败'
+      setParseError(message)
+      toast.error(message)
     }
-    upsertOnboardingBatch(updated)
-    toast.success(`解析成功，共 ${rows.length} 行`)
   }
 
-  const commitBatch = (batch: OnboardingBatch) => {
-    if (batch.batch_kind !== 'online' && batch.batch_kind !== 'order_access') {
-      toast.error('该批次类型请使用「运维导入」确认入库')
-      return
+  const onCommitList = async () => {
+    if (!batchId) return
+    try {
+      const result = await commitListMutation.mutateAsync({ batchId })
+      invalidateList()
+      toast.success(`已入库 ${result.committedCount} 台设备`)
+      handleOpenChange(false)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '入库失败')
     }
-    if (!batch.parsed_rows_json?.length) {
-      toast.error('无解析数据，无法入库')
-      return
-    }
-    setCommitting(true)
-    const rows = batch.parsed_rows_json as OnboardingParsedRow[]
-    const newDevices = buildDevicesFromBatch({
-      batchId: batch.id,
-      supplierId: batch.supplier_id,
-      contractId: batch.contract_id,
-      dataCenterId: batch.data_center_id,
-      idcCode: batch.idc_code,
-      idcRegion: batch.idc_region,
-      cardTypeDefault: 'A100-80G',
-      rows,
-      createId,
-    })
-    for (const d of newDevices) {
-      upsertDevice(d)
-      upsertEntityStateTransitionLog({
-        id: createId('esl'),
-        entity_type: 'device',
-        entity_id: d.id,
-        from_state: '待接入',
-        to_state: '接入中',
-        operator_id: 'staff-mock-01',
-        reason_code: 'BATCH_COMMITTED',
-        occurred_at: new Date().toISOString(),
-      })
-    }
-    upsertOnboardingTask({
-      id: createId('task'),
-      onboarding_batch_id: batch.id,
-      device_id: null,
-      task_type: '批次联调',
-      assignee_id: 'staff-mock-02',
-      task_status: '待开始',
-      started_at: null,
-      finished_at: null,
-    })
-    const now = new Date().toISOString()
-    upsertOnboardingBatch({
-      ...batch,
-      import_status: 'committed',
-      batch_status: '接入中',
-      committed_device_count: newDevices.length,
-      committed_at: now,
-      updated_at: now,
-    })
-    const activity: SupplierActivity = {
-      id: createId('act'),
-      supplier_id: batch.supplier_id,
-      type: 'ops_import',
-      title: `${ui.title}批次 ${batch.batch_code} 已入库`,
-      description: `共入库 ${newDevices.length} 台物理机`,
-      author_name: '运营（mock）',
-      author_role: 'ops',
-      ref_domain: 'batch',
-      ref_id: batch.id,
-      occurred_at: now,
-    }
-    upsertSupplierActivity(activity)
-    setCommitting(false)
-    toast.success(`已入库 ${newDevices.length} 台设备`)
-    handleOpenChange(false)
   }
 
   const metaFormValid =
     supplierId &&
     dataCenterId &&
-    contractId &&
-    hasValidQuantity &&
+    planValidation.ok &&
     (!isOnlineTasks || onlineReason) &&
     (!isOrderAccess || (orderNo.trim() && remark.trim()))
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl min-w-[50vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{ui.dialogTitle}</DialogTitle>
           <DialogDescription>
             {isOrderAccess
-              ? '填写订单编号与备注 → 选择供应商与机房 → 上传 CSV 清单 → 预览 → 确认入库（Mock，后续接 tRPC）'
-              : '选择供应商与机房 → 上传 CSV 清单 → 预览 → 确认入库（Mock，后续接 tRPC）'}
+              ? '填写订单信息与上架计划 → 可选上传清单 → 确认'
+              : '选择供应商与机房，填写上架计划 → 可选上传清单 → 确认'}
           </DialogDescription>
         </DialogHeader>
 
@@ -335,39 +366,55 @@ export function OnboardingBatchWizardDialog({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>供应商</Label>
-                <Select value={supplierId} onValueChange={(v) => { setSupplierId(v); setDataCenterId(''); setContractId('') }}>
-                  <SelectTrigger>
+                <Select
+                  value={supplierId}
+                  onValueChange={(v) => {
+                    setSupplierId(v)
+                    setDataCenterId('')
+                    setContractId('')
+                  }}
+                >
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="选择供应商" />
                   </SelectTrigger>
                   <SelectContent>
                     {suppliers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.short_name}</SelectItem>
+                      <SelectItem key={s.id} value={s.id}>{s.shortName}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>机房</Label>
-                <Select value={dataCenterId} onValueChange={setDataCenterId} disabled={!supplierId}>
-                  <SelectTrigger>
+                <Select
+                  value={dataCenterId}
+                  onValueChange={setDataCenterId}
+                  disabled={!supplierId}
+                >
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="选择机房" />
                   </SelectTrigger>
                   <SelectContent>
-                    {supplierDcs.map((dc) => (
+                    {dataCenters.map((dc) => (
                       <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>商务合同</Label>
-                <Select value={contractId} onValueChange={setContractId} disabled={!supplierId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="生效中合同" />
+                <Label>商务合同（可选）</Label>
+                <Select
+                  value={contractId || '__none__'}
+                  onValueChange={(v) => setContractId(v === '__none__' ? '' : v)}
+                  disabled={!supplierId}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="不关联合同" />
                   </SelectTrigger>
                   <SelectContent>
-                    {supplierContracts.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.contract_no}</SelectItem>
+                    <SelectItem value="__none__">不关联合同</SelectItem>
+                    {activeContracts.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.contractNo}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -375,7 +422,7 @@ export function OnboardingBatchWizardDialog({
               <div className="space-y-2">
                 <Label>接入方式</Label>
                 <Select value={accessMethod} onValueChange={setAccessMethod}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -385,18 +432,7 @@ export function OnboardingBatchWizardDialog({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>上架数量</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="请输入计划上架台数"
-                  value={plannedQuantity}
-                  onChange={(e) => setPlannedQuantity(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
+              <div className="space-y-2 col-span-2">
                 <Label>计划完成时间（可选）</Label>
                 <Input type="datetime-local" value={plannedReady} onChange={(e) => setPlannedReady(e.target.value)} />
               </div>
@@ -405,7 +441,7 @@ export function OnboardingBatchWizardDialog({
                   <div className="space-y-2 col-span-2">
                     <Label>上架原因</Label>
                     <Select value={onlineReason} onValueChange={setOnlineReason}>
-                      <SelectTrigger>
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder="请选择上架原因" />
                       </SelectTrigger>
                       <SelectContent>
@@ -416,7 +452,7 @@ export function OnboardingBatchWizardDialog({
                     </Select>
                   </div>
                   <div className="space-y-2 col-span-2">
-                    <Label>备注</Label>
+                    <Label>备注（可选）</Label>
                     <Textarea
                       placeholder="补充说明本次上架背景、优先级或特殊要求"
                       value={remark}
@@ -448,6 +484,91 @@ export function OnboardingBatchWizardDialog({
                 </>
               )}
             </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>上架计划</Label>
+                <Button type="button" variant="outline" size="sm" className="gap-1" onClick={addPlanLine}>
+                  <Plus className="w-3.5 h-3.5" />
+                  添加一行
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                每行选择卡型、合作类型与数量；卡型 + 合作类型在本批次内不可重复。
+              </p>
+              <div className="space-y-2 rounded-md border p-3">
+                {planLines.map((line, index) => (
+                  <div key={line.key} className="grid grid-cols-[1fr_1fr_100px_36px] gap-2 items-end">
+                    <div className="space-y-1">
+                      {index === 0 && <span className="text-xs text-muted-foreground">卡型</span>}
+                      <Select
+                        value={line.gpuCardTypeCode}
+                        onValueChange={(v) => updatePlanLine(line.key, { gpuCardTypeCode: v })}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择卡型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {cardTypeOptions.map((c) => (
+                            <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      {index === 0 && <span className="text-xs text-muted-foreground">合作类型</span>}
+                      <Select
+                        value={line.cooperationType}
+                        onValueChange={(v) =>
+                          updatePlanLine(line.key, { cooperationType: v as DeviceCooperationType })
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="合作类型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(Object.keys(DEVICE_COOPERATION_TYPE_LABELS) as DeviceCooperationType[]).map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {DEVICE_COOPERATION_TYPE_LABELS[t]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      {index === 0 && <span className="text-xs text-muted-foreground">数量</span>}
+                      <Input
+                        type="number"
+                        min={1}
+                        step={1}
+                        placeholder="台数"
+                        value={line.quantity}
+                        onChange={(e) => updatePlanLine(line.key, { quantity: e.target.value })}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0"
+                      disabled={planLines.length <= 1}
+                      onClick={() => removePlanLine(line.key)}
+                      aria-label="删除行"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              {planValidation.ok ? (
+                <p className="text-xs text-muted-foreground">
+                  合计计划上架 <span className="font-medium text-foreground">{totalPlannedQuantity}</span> 台
+                </p>
+              ) : planLines.some((l) => l.gpuCardTypeCode || l.cooperationType || l.quantity) ? (
+                <p className="text-xs text-destructive">{planValidation.error}</p>
+              ) : null}
+            </div>
+
             <label className="flex cursor-pointer items-center gap-2">
               <Checkbox
                 checked={uploadList}
@@ -457,7 +578,8 @@ export function OnboardingBatchWizardDialog({
             </label>
             <DialogFooter>
               <Button variant="outline" onClick={() => handleOpenChange(false)}>取消</Button>
-              <Button onClick={onMetaNext} disabled={!metaFormValid}>
+              <Button onClick={() => void onMetaNext()} disabled={!metaFormValid || submitting}>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 {uploadList ? (
                   <>
                     下一步：上传清单
@@ -473,6 +595,9 @@ export function OnboardingBatchWizardDialog({
 
         {wizardStep === 'upload' && (
           <div className="space-y-4 py-4">
+            <p className="text-sm text-muted-foreground">
+              计划总台数 {totalPlannedQuantity} 台；清单行数不得超过该值。
+            </p>
             <div
               className="border border-dashed border-border rounded-lg p-8 text-center cursor-pointer hover:bg-muted/30"
               onClick={() => fileRef.current?.click()}
@@ -493,7 +618,7 @@ export function OnboardingBatchWizardDialog({
                 if (f) void onParseFile(f)
               }}
             />
-            {parsing && (
+            {parseListMutation.isPending && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 解析中...
@@ -509,7 +634,7 @@ export function OnboardingBatchWizardDialog({
         {wizardStep === 'preview' && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              文件 {fileName}，共 {parsedRows.length} 行校验通过
+              文件 {fileName}，共 {parsedRows.length} 行校验通过（计划 {totalPlannedQuantity} 台）
             </p>
             <div className="max-h-48 overflow-auto border rounded-md">
               <Table>
@@ -535,16 +660,8 @@ export function OnboardingBatchWizardDialog({
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setWizardStep('upload')}>重新上传</Button>
-              <Button
-                disabled={committing || !draftBatchId}
-                onClick={() => {
-                  const b = useSupplierDomainMockStore
-                    .getState()
-                    .onboardingBatches.find((x) => x.id === draftBatchId)
-                  if (b) commitBatch(b)
-                }}
-              >
-                {committing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              <Button disabled={submitting || !batchId} onClick={() => void onCommitList()}>
+                {commitListMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
                 确认入库
               </Button>
             </DialogFooter>

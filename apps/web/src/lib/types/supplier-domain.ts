@@ -64,6 +64,7 @@ export type OnboardingBatchKind =
 
 export type OnboardingImportStatus =
   | "draft"
+  | "none"
   | "uploaded"
   | "parsing"
   | "parsed"
@@ -92,6 +93,14 @@ export type DeviceCooperationType = "idle_time" | "whole_rent"
 export const DEVICE_COOPERATION_TYPE_LABELS: Record<DeviceCooperationType, string> = {
   idle_time: "闲时合作",
   whole_rent: "整租合作",
+}
+
+/** 接入批次计划行：卡型 + 合作类型 + 数量（组合在本批次内唯一） */
+export type OnboardingBatchPlanLine = {
+  gpu_card_type_id?: string | null
+  gpu_card_type_code: string
+  cooperation_type: DeviceCooperationType
+  planned_quantity: number
 }
 
 /** 设备主数据表 Excel 解析行（batch_kind=device_inventory） */
@@ -148,8 +157,8 @@ export type OnboardingBatch = {
   idc_code: string
   data_center_name: string
   idc_region: string
-  contract_id: string
-  access_condition_sheet_id: string
+  contract_id: string | null
+  access_condition_sheet_id: string | null
   batch_code: string
   batch_status: string
   planned_ready_at: string | null
@@ -159,6 +168,12 @@ export type OnboardingBatch = {
   order_no: string | null
   /** 批次备注 */
   remark: string | null
+  /** 计划上架明细；`planned_device_count` 为其 quantity 之和 */
+  planned_lines?: OnboardingBatchPlanLine[] | null
+  /** 计划上架总台数（各计划行 quantity 合计） */
+  planned_device_count?: number
+  /** 关联工单号 */
+  work_order_no?: string | null
   access_method: string
   import_file_name: string
   import_status: OnboardingImportStatus

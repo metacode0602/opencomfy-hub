@@ -112,7 +112,9 @@ function collectCascadeForSupplier(
       .map((t) => t.id),
   )
   const batchIds = new Set(
-    s.onboardingBatches.filter((b) => contractIds.has(b.contract_id)).map((b) => b.id),
+    s.onboardingBatches
+      .filter((b) => b.contract_id != null && contractIds.has(b.contract_id))
+      .map((b) => b.id),
   )
   const deviceIds = new Set(s.devices.filter((d) => d.supplier_id === supplierId).map((d) => d.id))
   const nodeIds = new Set(s.computeNodes.filter((n) => deviceIds.has(n.device_id)).map((n) => n.id))

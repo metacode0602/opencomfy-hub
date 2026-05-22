@@ -79,10 +79,12 @@ const IMPORT_META: Record<
   },
   device_changelog: {
     title: '设备变更表',
-    description: '每次上传新建批次；仅写入 supplier_device_change_log，并刷新设备状态',
+    description:
+      '每次上传新建变更批次；写入变更审计并刷新设备状态。工单列填写业务批次 WO- 工单号或批次号（ONB-/ORD-），且导入机房须与批次机房一致，可将设备挂接到无清单的业务批次',
     tableTarget: 'supplier_device_change_log',
     batchTable: 'onboarding_batch（device_changelog）',
-    columnsHint: '设备ID、内网IP、操作时间、变更动作、变更内容、工单',
+    columnsHint:
+      '设备ID、内网IP、操作时间、变更动作、变更内容、工单（WO- 或批次号）；设备须已在本机房主数据中登记',
     icon: History,
   },
   fault_records: {
@@ -206,6 +208,8 @@ export function SupplierDeviceImportPanel({
     void utils.supplier.listDataCenters.invalidate({ supplierId })
     void utils.supplier.unitCosts.listRecords.invalidate({ supplierId })
     void utils.supplier.getById.invalidate({ id: supplierId })
+    void utils.supplier.onboardingBatch.list.invalidate()
+    void utils.supplier.onboardingBatch.listBySupplier.invalidate({ supplierId })
   }
 
   const onParseFile = async (file: File) => {
@@ -300,7 +304,12 @@ export function SupplierDeviceImportPanel({
           fileName,
           rows: changelogRows,
         })
-        toast.success(`已写入 ${result.committedCount} 条变更记录`)
+        const bound = result.boundDeviceCount ?? 0
+        toast.success(
+          bound > 0
+            ? `已写入 ${result.committedCount} 条变更，${bound} 台设备已挂接业务批次`
+            : `已写入 ${result.committedCount} 条变更记录`,
+        )
       } else {
         result = await commitFaultMutation.mutateAsync({
           supplierId,

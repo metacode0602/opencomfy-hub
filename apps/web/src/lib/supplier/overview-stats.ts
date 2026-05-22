@@ -126,7 +126,7 @@ function regionForInventoryRow(row: DataCenterDevice): string {
 }
 
 function normalizeCardType(name: string): string {
-  return name.toLowerCase().replace(/\s+/g, ' ').trim()
+  return name?.toLowerCase().replace(/\s+/g, ' ').trim() ?? ''
 }
 
 function inventoryMatchesFilters(

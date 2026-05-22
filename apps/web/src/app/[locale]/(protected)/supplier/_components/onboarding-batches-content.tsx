@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {
   CheckCircle2,
   Eye,
+  Loader2,
   MoreHorizontal,
   Plus,
   Search,
@@ -37,11 +38,9 @@ import {
 } from '@workspace/ui/components/dropdown-menu'
 import { OPS_KIND_UI, onlineReasonLabel } from '@/lib/supplier-ops/ui-meta'
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
-import type { OnboardingBatch, OnboardingParsedRow, SupplierActivity } from '@/lib/types/supplier-domain'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
+import { trpc } from '@/lib/trpc/client'
 import {
   batchKindFromRoute,
-  buildDevicesFromBatch,
   IMPORT_STATUS_LABELS,
   onboardingBatchDetailPath,
 } from '@/lib/supplier/onboarding-batch-utils'
@@ -58,8 +57,16 @@ function formatDt(iso: string | null | undefined) {
   })
 }
 
+function formatPlanSummary(
+  lines: Array<{ gpu_card_type_code: string; planned_quantity: number }> | null | undefined,
+) {
+  if (!lines?.length) return '—'
+  return lines.map((l) => `${l.gpu_card_type_code}×${l.planned_quantity}`).join('、')
+}
+
 const importStatusColor: Record<string, string> = {
   draft: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  none: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
   parsed: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
   committed: 'bg-green-500/20 text-green-400 border-green-500/30',
   parse_failed: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -71,42 +78,33 @@ export function OnboardingBatchesContent({
 }: {
   routeKind: Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
 }) {
+  const utils = trpc.useUtils()
   const ui = OPS_KIND_UI[routeKind]
-  const batchKind = batchKindFromRoute(routeKind)
+  const batchKind = batchKindFromRoute(routeKind) as 'online' | 'order_access'
   const isOnlineTasks = routeKind === 'online-tasks'
   const isOrderAccess = routeKind === 'order-access'
-
-  const onboardingBatches = useSupplierDomainMockStore((s) => s.onboardingBatches)
-  const batches = useMemo(
-    () => onboardingBatches.filter((b) => b.batch_kind === batchKind),
-    [onboardingBatches, batchKind],
-  )
-  const upsertOnboardingBatch = useSupplierDomainMockStore((s) => s.upsertOnboardingBatch)
-  const upsertDevice = useSupplierDomainMockStore((s) => s.upsertDevice)
-  const upsertOnboardingTask = useSupplierDomainMockStore((s) => s.upsertOnboardingTask)
-  const upsertSupplierActivity = useSupplierDomainMockStore((s) => s.upsertSupplierActivity)
-  const upsertEntityStateTransitionLog = useSupplierDomainMockStore((s) => s.upsertEntityStateTransitionLog)
-  const createId = useSupplierDomainMockStore((s) => s.createId)
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [importFilter, setImportFilter] = useState('all')
   const [wizardOpen, setWizardOpen] = useState(false)
 
-  const filtered = useMemo(() => {
-    return batches.filter((b) => {
-      const q = search.trim().toLowerCase()
-      const matchQ =
-        !q ||
-        b.batch_code.toLowerCase().includes(q) ||
-        b.supplier_name.toLowerCase().includes(q) ||
-        b.idc_code.toLowerCase().includes(q) ||
-        (b.order_no?.toLowerCase().includes(q) ?? false)
-      const matchStatus = statusFilter === 'all' || b.batch_status === statusFilter
-      const matchImport = importFilter === 'all' || b.import_status === importFilter
-      return matchQ && matchStatus && matchImport
-    })
-  }, [batches, search, statusFilter, importFilter])
+  const { data, isLoading, isError } = trpc.supplier.onboardingBatch.list.useQuery({
+    batchKind,
+    search: search.trim() || undefined,
+    batchStatus: statusFilter,
+    importStatus: importFilter,
+  })
+
+  const commitListMutation = trpc.supplier.onboardingBatch.commitList.useMutation({
+    onSuccess: (result) => {
+      toast.success(`已入库 ${result.committedCount} 台设备`)
+      void utils.supplier.onboardingBatch.list.invalidate({ batchKind })
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const batches = data?.items ?? []
 
   const stats = useMemo(() => {
     return {
@@ -116,75 +114,6 @@ export function OnboardingBatchesContent({
       pendingParse: batches.filter((b) => b.import_status === 'parsed').length,
     }
   }, [batches])
-
-  const commitBatch = (batch: OnboardingBatch) => {
-    if (batch.batch_kind !== 'online' && batch.batch_kind !== 'order_access') {
-      toast.error('该批次类型请使用「运维导入」确认入库')
-      return
-    }
-    if (!batch.parsed_rows_json?.length) {
-      toast.error('无解析数据，无法入库')
-      return
-    }
-    const rows = batch.parsed_rows_json as OnboardingParsedRow[]
-    const newDevices = buildDevicesFromBatch({
-      batchId: batch.id,
-      supplierId: batch.supplier_id,
-      contractId: batch.contract_id,
-      dataCenterId: batch.data_center_id,
-      idcCode: batch.idc_code,
-      idcRegion: batch.idc_region,
-      cardTypeDefault: 'A100-80G',
-      rows,
-      createId,
-    })
-    for (const d of newDevices) {
-      upsertDevice(d)
-      upsertEntityStateTransitionLog({
-        id: createId('esl'),
-        entity_type: 'device',
-        entity_id: d.id,
-        from_state: '待接入',
-        to_state: '接入中',
-        operator_id: 'staff-mock-01',
-        reason_code: 'BATCH_COMMITTED',
-        occurred_at: new Date().toISOString(),
-      })
-    }
-    upsertOnboardingTask({
-      id: createId('task'),
-      onboarding_batch_id: batch.id,
-      device_id: null,
-      task_type: '批次联调',
-      assignee_id: 'staff-mock-02',
-      task_status: '待开始',
-      started_at: null,
-      finished_at: null,
-    })
-    const now = new Date().toISOString()
-    upsertOnboardingBatch({
-      ...batch,
-      import_status: 'committed',
-      batch_status: '接入中',
-      committed_device_count: newDevices.length,
-      committed_at: now,
-      updated_at: now,
-    })
-    const activity: SupplierActivity = {
-      id: createId('act'),
-      supplier_id: batch.supplier_id,
-      type: 'ops_import',
-      title: `${ui.title}批次 ${batch.batch_code} 已入库`,
-      description: `共入库 ${newDevices.length} 台物理机`,
-      author_name: '运营（mock）',
-      author_role: 'ops',
-      ref_domain: 'batch',
-      ref_id: batch.id,
-      occurred_at: now,
-    }
-    upsertSupplierActivity(activity)
-    toast.success(`已入库 ${newDevices.length} 台设备`)
-  }
 
   return (
     <div className="space-y-6">
@@ -254,6 +183,7 @@ export function OnboardingBatchesContent({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部导入</SelectItem>
+              <SelectItem value="none">未上传清单</SelectItem>
               <SelectItem value="parsed">待确认入库</SelectItem>
               <SelectItem value="committed">已入库</SelectItem>
               <SelectItem value="draft">草稿</SelectItem>
@@ -268,6 +198,7 @@ export function OnboardingBatchesContent({
             <TableRow>
               <TableHead>批次号</TableHead>
               <TableHead>供应商 / 机房</TableHead>
+              <TableHead>上架计划</TableHead>
               <TableHead>导入状态</TableHead>
               <TableHead>批次状态</TableHead>
               <TableHead>已入库</TableHead>
@@ -278,14 +209,27 @@ export function OnboardingBatchesContent({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {isLoading ? (
               <TableRow>
-                <TableCell colSpan={isOnlineTasks || isOrderAccess ? 8 : 7} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={isOnlineTasks || isOrderAccess ? 9 : 8} className="text-center py-12">
+                  <Loader2 className="w-5 h-5 animate-spin inline-block mr-2" />
+                  加载中...
+                </TableCell>
+              </TableRow>
+            ) : isError ? (
+              <TableRow>
+                <TableCell colSpan={isOnlineTasks || isOrderAccess ? 9 : 8} className="text-center text-destructive py-12">
+                  加载失败，请稍后重试
+                </TableCell>
+              </TableRow>
+            ) : batches.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={isOnlineTasks || isOrderAccess ? 9 : 8} className="text-center text-muted-foreground py-12">
                   暂无批次，点击右上角新建
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((b) => (
+              batches.map((b) => (
                 <TableRow key={b.id}>
                   <TableCell className="font-medium">
                     <Link
@@ -301,6 +245,9 @@ export function OnboardingBatchesContent({
                       {b.idc_code} · {b.data_center_name}
                     </div>
                   </TableCell>
+                  <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={formatPlanSummary(b.planned_lines)}>
+                    {b.planned_device_count ?? 0} 台 · {formatPlanSummary(b.planned_lines)}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={importStatusColor[b.import_status] ?? ''}>
                       {IMPORT_STATUS_LABELS[b.import_status] ?? b.import_status}
@@ -309,7 +256,7 @@ export function OnboardingBatchesContent({
                   <TableCell>{b.batch_status}</TableCell>
                   <TableCell>
                     {b.committed_device_count}
-                    {b.parsed_success_count > 0 ? ` / ${b.parsed_success_count}` : ''}
+                    {(b.planned_device_count ?? 0) > 0 ? ` / ${b.planned_device_count}` : ''}
                   </TableCell>
                   {isOnlineTasks && (
                     <TableCell className="text-sm">
@@ -339,7 +286,10 @@ export function OnboardingBatchesContent({
                           </Link>
                         </DropdownMenuItem>
                         {b.import_status === 'parsed' && (
-                          <DropdownMenuItem onClick={() => commitBatch(b)}>
+                          <DropdownMenuItem
+                            disabled={commitListMutation.isPending}
+                            onClick={() => commitListMutation.mutate({ batchId: b.id })}
+                          >
                             <CheckCircle2 className="w-4 h-4 mr-2" />
                             确认入库
                           </DropdownMenuItem>

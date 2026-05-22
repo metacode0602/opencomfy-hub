@@ -209,21 +209,57 @@ export function buildDevicesFromInventoryImport(params: {
   return { devices, nodes }
 }
 
+export type ChangelogBusinessBatchLinkInput = {
+  businessBatchId: string
+  businessDataCenterId: string
+  ticketRefs: Set<string>
+}
+
 export function buildChangeLogsFromChangelogImport(params: {
   batchId: string
   rows: DeviceChangelogParsedRow[]
   devices: SupplierDevice[]
   createId: (prefix: string) => string
-}): { logs: SupplierDeviceChangeLog[]; updatedDevices: SupplierDevice[] } {
-  const { batchId, rows, devices, createId } = params
+  businessBatchLink?: ChangelogBusinessBatchLinkInput
+}): {
+  logs: SupplierDeviceChangeLog[]
+  updatedDevices: SupplierDevice[]
+  deviceIdsToBind: string[]
+  bindWarnings: string[]
+} {
+  const { batchId, rows, devices, createId, businessBatchLink } = params
   const now = new Date().toISOString()
   const logs: SupplierDeviceChangeLog[] = []
   const updatedDevices: SupplierDevice[] = []
   const deviceUpdates = new Map<string, SupplierDevice>()
+  const deviceIdsToBind = new Set<string>()
+  const bindWarnings: string[] = []
+
+  const ticketRefs = businessBatchLink?.ticketRefs
+  const businessDataCenterId = businessBatchLink?.businessDataCenterId
+  const businessBatchId = businessBatchLink?.businessBatchId
 
   for (const row of rows.filter((r) => r.parse_status !== "error")) {
     const device = findDeviceByImportKeys(devices, row)
     if (!device) continue
+
+    if (businessBatchLink && ticketRefs && rowTicketMatchesBatch(row.ticket_no, ticketRefs)) {
+      const deviceDc = device.data_center_id?.trim()
+      if (deviceDc && deviceDc !== businessDataCenterId) {
+        bindWarnings.push(
+          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 所属机房与业务批次机房不一致，未挂接批次`,
+        )
+      } else if (
+        device.onboarding_batch_id &&
+        device.onboarding_batch_id !== businessBatchId
+      ) {
+        bindWarnings.push(
+          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 已关联其他批次，未覆盖挂接`,
+        )
+      } else {
+        deviceIdsToBind.add(device.id)
+      }
+    }
 
     const prevOps = device.ops_status ?? ""
     const prevLife = device.lifecycle_status
@@ -266,7 +302,17 @@ export function buildChangeLogsFromChangelogImport(params: {
   }
 
   updatedDevices.push(...deviceUpdates.values())
-  return { logs, updatedDevices }
+  return {
+    logs,
+    updatedDevices,
+    deviceIdsToBind: [...deviceIdsToBind],
+    bindWarnings,
+  }
+}
+
+function rowTicketMatchesBatch(ticketNo: string | undefined | null, refs: Set<string>): boolean {
+  const t = ticketNo?.trim()
+  return Boolean(t && refs.has(t))
 }
 
 function KNOWN_OPS_FROM_CONTENT(s: string): boolean {

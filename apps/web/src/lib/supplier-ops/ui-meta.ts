@@ -17,6 +17,14 @@ export function onlineReasonLabel(value: string | null | undefined): string {
   return hit?.label ?? value
 }
 
+/** Mock / 离线兜底卡型选项（在线时优先用 tRPC gpuCardTypes.listActive） */
+export const ONBOARDING_GPU_CARD_OPTIONS = [
+  { code: "A100-80G", label: "A100 80GB" },
+  { code: "H100-80G", label: "H100 80GB" },
+  { code: "H800", label: "H800" },
+  { code: "L40S", label: "L40S" },
+] as const
+
 export const ACCESS_METHOD_OPTIONS = [
   { value: "ssh_jump", label: "SSH 跳板" },
   { value: "ipmi", label: "IPMI 带外" },
