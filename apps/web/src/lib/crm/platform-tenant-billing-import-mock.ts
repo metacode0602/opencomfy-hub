@@ -1,4 +1,4 @@
-import { validateBillingDateRange } from '@/lib/crm/tenant-billing-import-utils'
+import { validateBillingDateRange, formatBillingCommitSummary } from '@/lib/crm/tenant-billing-import-utils'
 import {
   mockCommitTenantBillingImport,
   mockFetchTenantBillingImportPreview,
@@ -7,28 +7,11 @@ import type {
   PlatformImportBillingBatchResult,
   PlatformImportBillingItemResult,
 } from '@/lib/types/platform-tenant-import'
-import type { TenantBillingImportCommitResult } from '@/lib/types/tenant-billing-import'
 
 export type PlatformBillingImportTarget = {
   platformTenantId: string
   tenantId: string
   tenantName: string
-}
-
-function formatBillingCommitSummary(result: TenantBillingImportCommitResult): string {
-  const parts: string[] = []
-  const push = (label: string, s: { created: number; updated: number }) => {
-    if (s.created + s.updated > 0) {
-      parts.push(`${label} 新增 ${s.created} / 更新 ${s.updated}`)
-    }
-  }
-  push('裸金属', result.metalOrders)
-  push('月度账单', result.monthlyBills)
-  push('充值', result.recharges)
-  if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
-    parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
-  }
-  return parts.join('；') || '无变更'
 }
 
 function delay(ms: number) {

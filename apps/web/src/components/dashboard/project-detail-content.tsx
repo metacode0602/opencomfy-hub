@@ -165,14 +165,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          <Button variant="outline">
-            <Download className="w-4 h-4 mr-2" />
-            导出数据
-          </Button>
-          <Button>
-            <Ticket className="w-4 h-4 mr-2" />
-            发放算力券
-          </Button>
         </div>
       </div>
 

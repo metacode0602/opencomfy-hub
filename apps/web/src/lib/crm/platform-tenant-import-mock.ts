@@ -2,6 +2,7 @@ import type {
   MockImportCustomerOption,
   PlatformImportCommitItem,
   PlatformImportCommitResult,
+  PlatformImportImportedTenant,
   PlatformImportPreviewResult,
   PlatformTenantApiRecord,
   PlatformTenantPreviewItem,
@@ -158,11 +159,20 @@ export async function mockCommitPlatformImport(
   let updatedTenants = 0
   let createdCustomers = 0
   const errors: PlatformImportCommitResult['errors'] = []
+  const importedTenants: PlatformImportImportedTenant[] = []
 
   for (const item of items) {
     const local = MOCK_LOCAL_BY_PLATFORM_ID[item.platformTenantId]
+    const api = MOCK_PLATFORM_RECORDS[item.platformTenantId]
+    const tenantName = api?.tenant_name ?? item.platformTenantId
+
     if (local) {
       updatedTenants++
+      importedTenants.push({
+        platformTenantId: item.platformTenantId,
+        tenantId: local.tenantId,
+        tenantName,
+      })
       continue
     }
     if (!item.customer) {
@@ -175,6 +185,11 @@ export async function mockCommitPlatformImport(
     if (item.customer.mode === 'create') {
       createdCustomers++
       createdTenants++
+      importedTenants.push({
+        platformTenantId: item.platformTenantId,
+        tenantId: `mock-tenant-${item.platformTenantId}`,
+        tenantName,
+      })
     } else if (item.customer.mode === 'existing') {
       const customerId = item.customer.customerId
       const exists = MOCK_IMPORT_CUSTOMERS.some((c) => c.id === customerId)
@@ -186,6 +201,11 @@ export async function mockCommitPlatformImport(
         continue
       }
       createdTenants++
+      importedTenants.push({
+        platformTenantId: item.platformTenantId,
+        tenantId: `mock-tenant-${item.platformTenantId}`,
+        tenantName,
+      })
     }
   }
 
@@ -193,6 +213,7 @@ export async function mockCommitPlatformImport(
     createdTenants,
     updatedTenants,
     createdCustomers,
+    importedTenants,
     errors,
   }
 }

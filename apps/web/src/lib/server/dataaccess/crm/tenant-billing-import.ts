@@ -3,6 +3,7 @@ import {
   billMonthFromPlatformPeriod,
   detailLineType,
   dueDateForBillMonth,
+  formatBillingCommitSummary,
   formatGpuSummary,
   mapMetalBillingUnit,
   mapMetalOrderStatus,
@@ -40,6 +41,7 @@ import type {
   TenantBillingImportPreviewResult,
   TenantBillingImportSection,
 } from '@/lib/types/tenant-billing-import'
+import type { PlatformImportBillingItemResult } from '@/lib/types/platform-tenant-import'
 import {
   billingTenant,
   commerceOrder,
@@ -828,6 +830,67 @@ export const tenantBillingImportDataAccess = {
     })
 
     return result
+  },
+
+  /**
+   * 拉取预览并直接写入（平台批量导入场景，跳过用户确认账单预览）
+   */
+  async directImport(input: {
+    tenantId: string
+    startDate?: string
+    endDate?: string
+  }): Promise<PlatformImportBillingItemResult> {
+    const tenant = await resolveTenant(input.tenantId)
+    const base = {
+      platformTenantId: tenant.platformTenantId!,
+      tenantName: tenant.name,
+    }
+
+    try {
+      const preview = await tenantBillingImportDataAccess.fetchPreview(input)
+      const toWrite = Object.values(preview.sections).reduce(
+        (n, s) => n + s.summary.toCreate + s.summary.toUpdate,
+        0,
+      )
+
+      if (toWrite === 0) {
+        return {
+          ...base,
+          success: true,
+          summary: '均已同步，无需写入',
+        }
+      }
+
+      const commitResult = await tenantBillingImportDataAccess.commitImport(preview.previewId)
+      const sectionErrors = [
+        ...commitResult.metalOrders.errors,
+        ...commitResult.monthlyBills.errors,
+        ...commitResult.recharges.errors,
+        ...commitResult.billDetails.errors,
+      ]
+      const summary = formatBillingCommitSummary(commitResult)
+
+      if (sectionErrors.length > 0) {
+        return {
+          ...base,
+          success: false,
+          summary,
+          error: sectionErrors.map((e) => e.message).join('；'),
+        }
+      }
+
+      return {
+        ...base,
+        success: true,
+        summary,
+      }
+    } catch (e) {
+      return {
+        ...base,
+        success: false,
+        error: e instanceof Error ? e.message : '账单导入失败',
+      }
+    }
   },
 }
 

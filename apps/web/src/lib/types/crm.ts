@@ -50,6 +50,13 @@ export type UserStaff = {
   mobile: string
   email: string | null
   status: string
+  department: string | null
+  position: string | null
+  roles: string[]
+  is_default_pre_sales: boolean
+  is_default_account_manager: boolean
+  is_default_delivery_manager: boolean
+  is_default_project_manager: boolean
 }
 
 export type AccountManagerAssignment = {

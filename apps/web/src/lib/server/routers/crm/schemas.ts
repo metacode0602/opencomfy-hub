@@ -63,6 +63,19 @@ export const projectStaffSchema = z.object({
   projectManagerStaffId: z.string().min(1),
 })
 
+export const tenantProjectImportFormSchema = z.object({
+  stage: z.enum(['lead', 'testing', 'converted']),
+  businessLineId: z.string().min(1),
+  preSalesStaffId: z.string(),
+  accountManagerStaffId: z.string().min(1),
+  deliveryManagerStaffId: z.string().min(1),
+  projectManagerStaffId: z.string(),
+  tagId: z.string(),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, '请选择有效的开始日期'),
+})
+
 export const projectUpsertSchema = z.object({
   customerId: z.string().min(1),
   primaryTenantId: z.string().optional(),
@@ -77,14 +90,40 @@ export const projectUpsertSchema = z.object({
   staff: projectStaffSchema,
 })
 
+export const staffDepartmentSchema = z.enum([
+  '中台',
+  '运营中心',
+  '产品',
+  '研发',
+  '运维',
+  '销售',
+])
+
+export const staffAppRoleSchema = z.enum(['admin', 'user', 'member'])
+
 export const staffUpsertSchema = z.object({
   displayName: z.string().min(1),
   mobile: z.string().min(1),
   email: z.string().nullable().optional(),
   employeeNo: z.string().nullable().optional(),
   status: z.string(),
-  department: z.string().nullable().optional(),
+  department: staffDepartmentSchema.nullable().optional(),
+  position: z.string().nullable().optional(),
+  roles: z.array(staffAppRoleSchema).optional().default([]),
+  isDefaultPreSales: z.boolean().optional().default(false),
+  isDefaultAccountManager: z.boolean().optional().default(false),
+  isDefaultDeliveryManager: z.boolean().optional().default(false),
+  isDefaultProjectManager: z.boolean().optional().default(false),
 })
+
+export const staffListSchema = z
+  .object({
+    search: z.string().optional(),
+    status: z.string().optional(),
+    department: z.string().optional(),
+    position: z.string().optional(),
+  })
+  .optional()
 
 export const billingTenantUpdateSchema = z.object({
   tenant: z.object({

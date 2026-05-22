@@ -99,7 +99,7 @@ export async function seedCrmFromMock(): Promise<void> {
         mobile: s.mobile,
         email: s.email,
         status: s.status,
-        department: 'CRM',
+        department: '中台',
       })
     }
 

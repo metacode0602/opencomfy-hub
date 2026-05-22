@@ -32,7 +32,8 @@ export function CreateProjectDialog({
   businessLines,
   onCreated,
 }: CreateProjectDialogProps) {
-  const [values, setValues] = useState(emptyProjectFormValues)
+  const { data: staff = [] } = trpc.crm.staff.listActive.useQuery(undefined, { enabled: open })
+  const [values, setValues] = useState(() => emptyProjectFormValues())
   const [submitError, setSubmitError] = useState<string | null>(null)
   const createMutation = trpc.crm.projects.create.useMutation({
     onSuccess: () => {
@@ -43,11 +44,11 @@ export function CreateProjectDialog({
   })
 
   useEffect(() => {
-    if (!open) {
-      setValues(emptyProjectFormValues)
+    if (open) {
+      setValues(emptyProjectFormValues(staff))
       setSubmitError(null)
     }
-  }, [open])
+  }, [open, staff])
 
   const handleChange = (patch: Partial<typeof values>) => {
     setValues((prev) => ({ ...prev, ...patch }))

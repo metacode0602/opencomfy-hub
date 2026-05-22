@@ -3,7 +3,7 @@ import type { UserStaff } from '@/lib/types/crm'
 import { mapUserStaffRow } from '@/lib/server/mappers/crm'
 import { ensureCrmSeeded } from './ensure-seeded'
 import { accountManagerAssignment, customer, userStaff } from '@workspace/db/schema'
-import { and, count, desc, eq, ilike, inArray, isNull, or } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, inArray, isNull, ne, or } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -16,10 +16,98 @@ export type StaffUpsertInput = {
   employeeNo?: string | null
   status: string
   department?: string | null
+  position?: string | null
+  roles?: string[]
+  isDefaultPreSales?: boolean
+  isDefaultAccountManager?: boolean
+  isDefaultDeliveryManager?: boolean
+  isDefaultProjectManager?: boolean
+}
+
+type StaffListFilters = {
+  search?: string
+  status?: string
+  department?: string
+  position?: string
+}
+
+function staffValuesFromInput(input: StaffUpsertInput) {
+  return {
+    displayName: input.displayName.trim(),
+    mobile: input.mobile.trim(),
+    email: input.email?.trim() || null,
+    employeeNo: input.employeeNo?.trim() || null,
+    status: input.status,
+    department: input.department ?? null,
+    position: input.position?.trim() || null,
+    roles: input.roles ?? [],
+    isDefaultPreSales: input.isDefaultPreSales ?? false,
+    isDefaultAccountManager: input.isDefaultAccountManager ?? false,
+    isDefaultDeliveryManager: input.isDefaultDeliveryManager ?? false,
+    isDefaultProjectManager: input.isDefaultProjectManager ?? false,
+  }
+}
+
+async function clearExclusiveDefaultFlags(
+  input: StaffUpsertInput,
+  excludeId?: string,
+): Promise<void> {
+  const clears: Promise<unknown>[] = []
+
+  if (input.isDefaultPreSales) {
+    clears.push(
+      db
+        .update(userStaff)
+        .set({ isDefaultPreSales: false })
+        .where(
+          excludeId
+            ? and(eq(userStaff.isDefaultPreSales, true), ne(userStaff.id, excludeId))
+            : eq(userStaff.isDefaultPreSales, true),
+        ),
+    )
+  }
+  if (input.isDefaultAccountManager) {
+    clears.push(
+      db
+        .update(userStaff)
+        .set({ isDefaultAccountManager: false })
+        .where(
+          excludeId
+            ? and(eq(userStaff.isDefaultAccountManager, true), ne(userStaff.id, excludeId))
+            : eq(userStaff.isDefaultAccountManager, true),
+        ),
+    )
+  }
+  if (input.isDefaultDeliveryManager) {
+    clears.push(
+      db
+        .update(userStaff)
+        .set({ isDefaultDeliveryManager: false })
+        .where(
+          excludeId
+            ? and(eq(userStaff.isDefaultDeliveryManager, true), ne(userStaff.id, excludeId))
+            : eq(userStaff.isDefaultDeliveryManager, true),
+        ),
+    )
+  }
+  if (input.isDefaultProjectManager) {
+    clears.push(
+      db
+        .update(userStaff)
+        .set({ isDefaultProjectManager: false })
+        .where(
+          excludeId
+            ? and(eq(userStaff.isDefaultProjectManager, true), ne(userStaff.id, excludeId))
+            : eq(userStaff.isDefaultProjectManager, true),
+        ),
+    )
+  }
+
+  await Promise.all(clears)
 }
 
 export const staffDataAccess = {
-  async list(filters: { search?: string; status?: string } = {}): Promise<
+  async list(filters: StaffListFilters = {}): Promise<
     (UserStaff & { assignmentCount: number })[]
   > {
     await ensureCrmSeeded()
@@ -27,6 +115,12 @@ export const staffDataAccess = {
     const conditions = []
     if (filters.status && filters.status !== 'all') {
       conditions.push(eq(userStaff.status, filters.status))
+    }
+    if (filters.department && filters.department !== 'all') {
+      conditions.push(eq(userStaff.department, filters.department))
+    }
+    if (filters.position?.trim()) {
+      conditions.push(ilike(userStaff.position, `%${filters.position.trim()}%`))
     }
     if (filters.search?.trim()) {
       const q = `%${filters.search.trim()}%`
@@ -36,6 +130,7 @@ export const staffDataAccess = {
           ilike(userStaff.mobile, q),
           ilike(userStaff.email, q),
           ilike(userStaff.employeeNo, q),
+          ilike(userStaff.position, q),
         )!,
       )
     }
@@ -81,32 +176,22 @@ export const staffDataAccess = {
   },
 
   async create(input: StaffUpsertInput): Promise<UserStaff> {
+    await clearExclusiveDefaultFlags(input)
+
     const id = newId()
-    await db.insert(userStaff).values({
-      id,
-      displayName: input.displayName.trim(),
-      mobile: input.mobile.trim(),
-      email: input.email?.trim() || null,
-      employeeNo: input.employeeNo?.trim() || null,
-      status: input.status,
-      department: input.department ?? null,
-    })
+    const values = staffValuesFromInput(input)
+    await db.insert(userStaff).values({ id, ...values })
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('创建员工失败')
     return mapUserStaffRow(row)
   },
 
   async update(id: string, input: StaffUpsertInput): Promise<UserStaff> {
+    await clearExclusiveDefaultFlags(input, id)
+
     await db
       .update(userStaff)
-      .set({
-        displayName: input.displayName.trim(),
-        mobile: input.mobile.trim(),
-        email: input.email?.trim() || null,
-        employeeNo: input.employeeNo?.trim() || null,
-        status: input.status,
-        department: input.department ?? null,
-      })
+      .set(staffValuesFromInput(input))
       .where(eq(userStaff.id, id))
 
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })

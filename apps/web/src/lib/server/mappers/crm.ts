@@ -67,6 +67,13 @@ export function mapUserStaffRow(row: {
   mobile: string
   email: string | null
   status: string
+  department: string | null
+  position?: string | null
+  roles?: string[] | null
+  isDefaultPreSales?: boolean
+  isDefaultAccountManager?: boolean
+  isDefaultDeliveryManager?: boolean
+  isDefaultProjectManager?: boolean
 }): UserStaff {
   return {
     id: row.id,
@@ -75,6 +82,13 @@ export function mapUserStaffRow(row: {
     mobile: row.mobile,
     email: row.email,
     status: row.status,
+    department: row.department,
+    position: row.position ?? null,
+    roles: row.roles ?? [],
+    is_default_pre_sales: row.isDefaultPreSales ?? false,
+    is_default_account_manager: row.isDefaultAccountManager ?? false,
+    is_default_delivery_manager: row.isDefaultDeliveryManager ?? false,
+    is_default_project_manager: row.isDefaultProjectManager ?? false,
   }
 }
 

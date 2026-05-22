@@ -11,6 +11,7 @@ import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import type {
   PlatformImportCommitItem,
   PlatformImportCommitResult,
+  PlatformImportImportedTenant,
   PlatformImportPreviewResult,
   PlatformTenantApiRecord,
   PlatformTenantPreviewItem,
@@ -161,6 +162,7 @@ export const platformTenantImportDataAccess = {
         createdTenants: 0,
         updatedTenants: 0,
         createdCustomers: 0,
+        importedTenants: [],
         errors: [],
       }
     }
@@ -186,6 +188,7 @@ export const platformTenantImportDataAccess = {
     let updatedTenants = 0
     let createdCustomers = 0
     const errors: PlatformImportCommitResult['errors'] = []
+    const importedTenants: PlatformImportImportedTenant[] = []
 
     for (const platformTenantId of allIds) {
       try {
@@ -213,6 +216,11 @@ export const platformTenantImportDataAccess = {
             })
             .where(eq(billingTenant.id, local.tenantId))
           updatedTenants++
+          importedTenants.push({
+            platformTenantId,
+            tenantId: local.tenantId,
+            tenantName: fields.name,
+          })
           continue
         }
 
@@ -277,6 +285,11 @@ export const platformTenantImportDataAccess = {
             credit_limit: fields.credit_limit,
           })
           createdTenants++
+          importedTenants.push({
+            platformTenantId,
+            tenantId,
+            tenantName: fields.name,
+          })
         })
       } catch (e) {
         crmWarn('platform-import', 'commit row failed', {
@@ -303,6 +316,7 @@ export const platformTenantImportDataAccess = {
       createdTenants,
       updatedTenants,
       createdCustomers,
+      importedTenants,
       errors,
     }
   },

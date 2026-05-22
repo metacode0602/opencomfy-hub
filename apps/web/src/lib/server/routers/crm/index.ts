@@ -13,6 +13,7 @@ import { projectTagsDataAccess } from '@/lib/server/dataaccess/crm/project-tags'
 import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-tenants'
 import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant-billing-lists'
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
+import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
@@ -25,6 +26,8 @@ import {
   platformImportCommitItemSchema,
   projectUpsertSchema,
   staffUpsertSchema,
+  staffListSchema,
+  tenantProjectImportFormSchema,
 } from './schemas'
 
 function mapPlatformImportError(e: unknown): never {
@@ -149,6 +152,32 @@ export const crmRouter = createTRPCRouter({
     listBills: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listBillsByProject(input.projectId)),
+    previewTenantProjectImport: adminProcedure
+      .input(
+        z.object({
+          rawTenantIds: z.string(),
+          form: tenantProjectImportFormSchema,
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantProjectImportDataAccess.preview(input)
+        } catch (e) {
+          mapPlatformImportError(e)
+        }
+      }),
+    commitTenantProjectImport: adminProcedure
+      .input(z.object({ previewId: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantProjectImportDataAccess.commit(input.previewId)
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '导入租户项目失败' })
+        }
+      }),
   }),
 
   tenants: createTRPCRouter({
@@ -204,6 +233,15 @@ export const crmRouter = createTRPCRouter({
           mapBillingImportError(e)
         }
       }),
+    directBillingImport: adminProcedure
+      .input(billingImportDateSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBillingImportDataAccess.directImport(input)
+        } catch (e) {
+          mapBillingImportError(e)
+        }
+      }),
     listRecharges: protectedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listRecharges(input.tenantId)),
@@ -238,8 +276,8 @@ export const crmRouter = createTRPCRouter({
 
   staff: createTRPCRouter({
     list: protectedProcedure
-      .input(z.object({ search: z.string().optional(), status: z.string().optional() }).optional())
-      .query(({ input }) => staffDataAccess.list(input)),
+      .input(staffListSchema)
+      .query(({ input }) => staffDataAccess.list(input ?? {})),
     listActive: protectedProcedure.query(() => staffDataAccess.listActive()),
     getById: protectedProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
       staffDataAccess.getById(input.id),

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Button } from "@workspace/ui/components/button"
+import { Checkbox } from "@workspace/ui/components/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@workspace/ui/components/select"
+import {
+  STAFF_APP_ROLES,
+  STAFF_DEFAULT_MANAGER_FIELDS,
+  STAFF_DEPARTMENTS,
+  type StaffAppRole,
+  type StaffDepartment,
+} from "@/lib/crm/staff-constants"
 import { trpc } from "@/lib/trpc/client"
 import { toast } from "sonner"
 
@@ -27,12 +35,24 @@ const STATUS_OPTIONS = [
   { value: "inactive", label: "停用" },
 ] as const
 
+function normalizeDepartment(value: string | null | undefined): StaffDepartment | "" {
+  if (!value) return ""
+  return STAFF_DEPARTMENTS.includes(value as StaffDepartment) ? (value as StaffDepartment) : ""
+}
+
 export type CrmStaffFormValues = {
   employee_no: string
   display_name: string
   mobile: string
   email: string
   status: string
+  department: StaffDepartment | ""
+  position: string
+  roles: StaffAppRole[]
+  is_default_pre_sales: boolean
+  is_default_account_manager: boolean
+  is_default_delivery_manager: boolean
+  is_default_project_manager: boolean
 }
 
 export const crmStaffEmptyValues: CrmStaffFormValues = {
@@ -41,6 +61,13 @@ export const crmStaffEmptyValues: CrmStaffFormValues = {
   mobile: "",
   email: "",
   status: "active",
+  department: "",
+  position: "",
+  roles: [],
+  is_default_pre_sales: false,
+  is_default_account_manager: false,
+  is_default_delivery_manager: false,
+  is_default_project_manager: false,
 }
 
 export function CrmStaffFormFields({
@@ -52,6 +79,15 @@ export function CrmStaffFormFields({
   onChange: (patch: Partial<CrmStaffFormValues>) => void
   idPrefix?: string
 }) {
+  const toggleRole = (role: StaffAppRole, checked: boolean) => {
+    const next = checked
+      ? values.roles.includes(role)
+        ? values.roles
+        : [...values.roles, role]
+      : values.roles.filter((r) => r !== role)
+    onChange({ roles: next })
+  }
+
   return (
     <div className="grid gap-4 py-2">
       <div className="grid gap-2">
@@ -100,6 +136,35 @@ export function CrmStaffFormFields({
           </Select>
         </div>
       </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-department`}>部门</Label>
+          <Select
+            value={values.department || undefined}
+            onValueChange={(v) => onChange({ department: v as StaffDepartment })}
+          >
+            <SelectTrigger id={`${idPrefix}-department`}>
+              <SelectValue placeholder="请选择部门" />
+            </SelectTrigger>
+            <SelectContent>
+              {STAFF_DEPARTMENTS.map((dept) => (
+                <SelectItem key={dept} value={dept}>
+                  {dept}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-position`}>职位</Label>
+          <Input
+            id={`${idPrefix}-position`}
+            value={values.position}
+            onChange={(e) => onChange({ position: e.target.value })}
+            placeholder="如 高级客户经理（可选）"
+          />
+        </div>
+      </div>
       <div className="grid gap-2">
         <Label htmlFor={`${idPrefix}-email`}>邮箱</Label>
         <Input
@@ -110,6 +175,49 @@ export function CrmStaffFormFields({
           placeholder="请输入邮箱（可选）"
         />
       </div>
+
+      <div className="grid gap-2">
+        <Label>角色</Label>
+        <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-md border p-3">
+          {STAFF_APP_ROLES.map((role) => (
+            <label
+              key={role.value}
+              className="flex cursor-pointer items-center gap-2"
+              htmlFor={`${idPrefix}-role-${role.value}`}
+            >
+              <Checkbox
+                id={`${idPrefix}-role-${role.value}`}
+                checked={values.roles.includes(role.value)}
+                onCheckedChange={(checked) => toggleRole(role.value, checked === true)}
+              />
+              <span className="text-sm">{role.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>项目角色默认人选</Label>
+        <p className="text-muted-foreground text-xs">
+          勾选后，新建项目或导入时将自动预选该员工作为对应角色（每种角色全局仅一位默认）。
+        </p>
+        <div className="grid grid-cols-1 gap-2 rounded-md border p-3 sm:grid-cols-2">
+          {STAFF_DEFAULT_MANAGER_FIELDS.map((field) => (
+            <label
+              key={field.key}
+              className="flex cursor-pointer items-center gap-2"
+              htmlFor={`${idPrefix}-${field.key}`}
+            >
+              <Checkbox
+                id={`${idPrefix}-${field.key}`}
+                checked={values[field.key]}
+                onCheckedChange={(checked) => onChange({ [field.key]: checked === true })}
+              />
+              <span className="text-sm">{field.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -117,6 +225,7 @@ export function CrmStaffFormFields({
 export function validateCrmStaffForm(values: CrmStaffFormValues): string | null {
   if (!values.display_name.trim()) return "请填写姓名"
   if (!values.mobile.trim()) return "请填写手机号"
+  if (!values.department) return "请选择部门"
   return null
 }
 
@@ -127,6 +236,13 @@ export function staffInputFromForm(values: CrmStaffFormValues) {
     email: values.email.trim() || null,
     employeeNo: values.employee_no.trim() || null,
     status: values.status,
+    department: values.department || null,
+    position: values.position.trim() || null,
+    roles: values.roles,
+    isDefaultPreSales: values.is_default_pre_sales,
+    isDefaultAccountManager: values.is_default_account_manager,
+    isDefaultDeliveryManager: values.is_default_delivery_manager,
+    isDefaultProjectManager: values.is_default_project_manager,
   }
 }
 
@@ -146,6 +262,13 @@ export function useCrmStaffFormState(staffId?: string) {
         mobile: existing.mobile,
         email: existing.email ?? "",
         status: existing.status,
+        department: normalizeDepartment(existing.department),
+        position: existing.position ?? "",
+        roles: (existing.roles ?? []) as StaffAppRole[],
+        is_default_pre_sales: existing.is_default_pre_sales,
+        is_default_account_manager: existing.is_default_account_manager,
+        is_default_delivery_manager: existing.is_default_delivery_manager,
+        is_default_project_manager: existing.is_default_project_manager,
       })
     } else if (!staffId) {
       setValues(crmStaffEmptyValues)
@@ -176,6 +299,7 @@ export function CrmStaffFormDialog({
     onSuccess: (row) => {
       toast.success("员工已创建")
       void utils.crm.staff.list.invalidate()
+      void utils.crm.staff.listActive.invalidate()
       onOpenChange(false)
       onSaved?.(row.id)
     },
@@ -185,6 +309,7 @@ export function CrmStaffFormDialog({
     onSuccess: (row) => {
       toast.success("员工已更新")
       void utils.crm.staff.list.invalidate()
+      void utils.crm.staff.listActive.invalidate()
       onOpenChange(false)
       onSaved?.(row.id)
     },
@@ -236,13 +361,13 @@ export function CrmStaffFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "新建员工" : "编辑员工"}</DialogTitle>
           <DialogDescription>
             {mode === "create"
               ? "添加内部员工，可用于客户经理分配与业务操作人。"
-              : "修改员工基本信息（mock 数据）。"}
+              : "修改员工基本信息。"}
           </DialogDescription>
         </DialogHeader>
         <CrmStaffFormFields

@@ -47,6 +47,7 @@ import { EditProjectDialog } from './edit-project-dialog'
 import { ProjectTagsDialog } from './project-tags-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
+import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
 import { IconUpload } from '@tabler/icons-react'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
@@ -62,6 +63,7 @@ export function ProjectsContent() {
   const [tagsOpen, setTagsOpen] = useState(false)
   const [taggingProject, setTaggingProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
 
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
@@ -97,6 +99,16 @@ export function ProjectsContent() {
           <p className="text-muted-foreground">管理所有项目，跟踪项目阶段和进度</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            type="button"
+            onClick={() => setTenantProjectImportOpen(true)}
+          >
+            <IconUpload className="size-4" />
+            导入租户项目
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -139,6 +151,13 @@ export function ProjectsContent() {
       <CrmProjectImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
+        onSuccess={() => void refetch()}
+      />
+
+      <CrmTenantProjectImportDialog
+        open={tenantProjectImportOpen}
+        onOpenChange={setTenantProjectImportOpen}
+        businessLines={businessLines}
         onSuccess={() => void refetch()}
       />
 
@@ -328,7 +347,6 @@ export function ProjectsContent() {
                         <DropdownMenuItem>转为已转正</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>查看账单</DropdownMenuItem>
-                        <DropdownMenuItem>发放算力券</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem className="text-destructive">
                           <Trash className="w-4 h-4 mr-2" />

@@ -1,3 +1,21 @@
+import type { TenantBillingImportCommitResult } from '@/lib/types/tenant-billing-import'
+
+export function formatBillingCommitSummary(result: TenantBillingImportCommitResult): string {
+  const parts: string[] = []
+  const push = (label: string, s: { created: number; updated: number }) => {
+    if (s.created + s.updated > 0) {
+      parts.push(`${label} 新增 ${s.created} / 更新 ${s.updated}`)
+    }
+  }
+  push('裸金属', result.metalOrders)
+  push('月度账单', result.monthlyBills)
+  push('充值', result.recharges)
+  if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
+    parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
+  }
+  return parts.join('；') || '无变更'
+}
+
 /** 租户账单同步 — 日期、金额、映射工具 */
 
 export const PLATFORM_AMOUNT_DIVISOR = 10_000

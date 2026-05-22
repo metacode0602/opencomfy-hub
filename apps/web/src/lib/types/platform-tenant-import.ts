@@ -70,6 +70,12 @@ export type PlatformImportCommitItem = {
   customer?: PlatformImportCustomerAssignment
 }
 
+export type PlatformImportImportedTenant = {
+  platformTenantId: string
+  tenantId: string
+  tenantName: string
+}
+
 export type PlatformImportBillingItemResult = {
   platformTenantId: string
   tenantName: string
@@ -89,8 +95,10 @@ export type PlatformImportCommitResult = {
   createdTenants: number
   updatedTenants: number
   createdCustomers: number
+  /** 租户导入成功的平台 ID → CRM 租户映射（供后续账单同步） */
+  importedTenants: PlatformImportImportedTenant[]
   errors: { platformTenantId: string; message: string }[]
-  /** 勾选「导入账单数据」且租户导入成功后填充 */
+  /** 勾选「导入账单数据」且租户导入成功后填充（客户端合并） */
   billing?: PlatformImportBillingBatchResult
 }
 

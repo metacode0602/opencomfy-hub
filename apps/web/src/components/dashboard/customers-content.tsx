@@ -268,10 +268,6 @@ export function CustomersContent() {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>
-                          <Gift className="w-4 h-4 mr-2" />
-                          发放算力券
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
                           <FolderKanban className="w-4 h-4 mr-2" />
                           查看项目
                         </DropdownMenuItem>

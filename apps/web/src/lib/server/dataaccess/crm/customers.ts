@@ -15,7 +15,7 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
-import { and, count, eq, ilike, inArray, or, sql, sum } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, or, sum, type SQL } from 'drizzle-orm'
 
 export type CustomerListFilters = {
   search?: string
@@ -38,135 +38,116 @@ export type CustomerUpsertInput = {
   expectedScale?: CustomerExpectedScale | null
 }
 
-async function loadCustomerMetrics(customerIds: string[]) {
-  if (customerIds.length === 0) return new Map<string, { projectCount: number; totalRecharge: number; totalConsumption: number; balance: number }>()
+const rechargeByTenant = db
+  .select({
+    tenantId: recharge.tenantId,
+    totalRecharge: sum(recharge.amount).as('total_recharge'),
+  })
+  .from(recharge)
+  .where(eq(recharge.status, 'completed'))
+  .groupBy(recharge.tenantId)
+  .as('recharge_by_tenant')
 
-  const tenants = await db
-    .select({ id: billingTenant.id, customerId: billingTenant.customerId, balance: billingTenant.balance })
-    .from(billingTenant)
-    .where(inArray(billingTenant.customerId, customerIds))
+const consumptionByTenant = db
+  .select({
+    tenantId: consumptionRecord.tenantId,
+    totalConsumption: sum(consumptionRecord.amount).as('total_consumption'),
+  })
+  .from(consumptionRecord)
+  .groupBy(consumptionRecord.tenantId)
+  .as('consumption_by_tenant')
 
-  const tenantIds = tenants.map((t) => t.id)
-  const tenantByCustomer = new Map<string, string[]>()
-  for (const t of tenants) {
-    const list = tenantByCustomer.get(t.customerId) ?? []
-    list.push(t.id)
-    tenantByCustomer.set(t.customerId, list)
+const tenantMetricsByCustomer = db
+  .select({
+    customerId: billingTenant.customerId,
+    balance: sum(billingTenant.balance).as('balance'),
+    totalRecharge: sum(rechargeByTenant.totalRecharge).as('total_recharge'),
+    totalConsumption: sum(consumptionByTenant.totalConsumption).as('total_consumption'),
+  })
+  .from(billingTenant)
+  .leftJoin(rechargeByTenant, eq(billingTenant.id, rechargeByTenant.tenantId))
+  .leftJoin(consumptionByTenant, eq(billingTenant.id, consumptionByTenant.tenantId))
+  .groupBy(billingTenant.customerId)
+  .as('tenant_metrics_by_customer')
+
+const projectCountByCustomer = db
+  .select({
+    customerId: crmProject.customerId,
+    projectCount: count().as('project_count'),
+  })
+  .from(crmProject)
+  .groupBy(crmProject.customerId)
+  .as('project_count_by_customer')
+
+function buildCustomerListConditions(filters: CustomerListFilters = {}) {
+  const conditions: SQL[] = []
+  if (filters.type && filters.type !== 'all') {
+    conditions.push(eq(customer.type, filters.type))
   }
-
-  const projectCounts = await db
-    .select({ customerId: crmProject.customerId, value: count() })
-    .from(crmProject)
-    .where(inArray(crmProject.customerId, customerIds))
-    .groupBy(crmProject.customerId)
-
-  const rechargeSums =
-    tenantIds.length > 0
-      ? await db
-          .select({ tenantId: recharge.tenantId, value: sum(recharge.amount) })
-          .from(recharge)
-          .where(and(inArray(recharge.tenantId, tenantIds), eq(recharge.status, 'completed')))
-          .groupBy(recharge.tenantId)
-      : []
-
-  const consumptionSums =
-    tenantIds.length > 0
-      ? await db
-          .select({ tenantId: consumptionRecord.tenantId, value: sum(consumptionRecord.amount) })
-          .from(consumptionRecord)
-          .where(inArray(consumptionRecord.tenantId, tenantIds))
-          .groupBy(consumptionRecord.tenantId)
-      : []
-
-  const projectCountMap = new Map(projectCounts.map((r) => [r.customerId, Number(r.value)]))
-  const rechargeMap = new Map(rechargeSums.map((r) => [r.tenantId!, Number(r.value ?? 0)]))
-  const consumptionMap = new Map(consumptionSums.map((r) => [r.tenantId!, Number(r.value ?? 0)]))
-
-  const result = new Map<string, { projectCount: number; totalRecharge: number; totalConsumption: number; balance: number }>()
-  for (const id of customerIds) {
-    const tids = tenantByCustomer.get(id) ?? []
-    let balance = 0
-    let totalRecharge = 0
-    let totalConsumption = 0
-    for (const tid of tids) {
-      const tenantRow = tenants.find((t) => t.id === tid)
-      balance += Number(tenantRow?.balance ?? 0)
-      totalRecharge += rechargeMap.get(tid) ?? 0
-      totalConsumption += consumptionMap.get(tid) ?? 0
-    }
-    result.set(id, {
-      projectCount: projectCountMap.get(id) ?? 0,
-      totalRecharge,
-      totalConsumption,
-      balance,
-    })
+  if (filters.status && filters.status !== 'all') {
+    conditions.push(eq(customer.status, filters.status))
   }
-  return result
+  if (filters.search?.trim()) {
+    const q = `%${filters.search.trim()}%`
+    conditions.push(
+      or(
+        ilike(customer.name, q),
+        ilike(customer.contactPerson, q),
+        ilike(customer.certCode, q),
+      )!,
+    )
+  }
+  return conditions
 }
 
-async function enrichCustomer(row: typeof customer.$inferSelect, salesManagerName?: string): Promise<Customer> {
-  const metrics = await loadCustomerMetrics([row.id])
-  const m = metrics.get(row.id)!
-  return mapCustomerRow(row, { ...m, salesManagerName })
+function toMetricNumber(value: string | number | null | undefined): number {
+  if (value == null) return 0
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+async function queryCustomersWithMetrics(
+  extraConditions: SQL[] = [],
+): Promise<Customer[]> {
+  const conditions = extraConditions.length ? and(...extraConditions) : undefined
+
+  const rows = await db
+    .select({
+      customer: customer,
+      salesManagerName: userStaff.displayName,
+      projectCount: projectCountByCustomer.projectCount,
+      balance: tenantMetricsByCustomer.balance,
+      totalRecharge: tenantMetricsByCustomer.totalRecharge,
+      totalConsumption: tenantMetricsByCustomer.totalConsumption,
+    })
+    .from(customer)
+    .leftJoin(userStaff, eq(customer.salesManagerId, userStaff.id))
+    .leftJoin(projectCountByCustomer, eq(customer.id, projectCountByCustomer.customerId))
+    .leftJoin(tenantMetricsByCustomer, eq(customer.id, tenantMetricsByCustomer.customerId))
+    .where(conditions)
+    .orderBy(desc(customer.createdAt))
+
+  return rows.map((row) =>
+    mapCustomerRow(row.customer, {
+      projectCount: toMetricNumber(row.projectCount),
+      totalRecharge: toMetricNumber(row.totalRecharge),
+      totalConsumption: toMetricNumber(row.totalConsumption),
+      balance: toMetricNumber(row.balance),
+      salesManagerName: row.salesManagerName ?? undefined,
+    }),
+  )
 }
 
 export const customersDataAccess = {
   async list(filters: CustomerListFilters = {}): Promise<Customer[]> {
     await ensureCrmSeeded()
-
-    const conditions = []
-    if (filters.type && filters.type !== 'all') {
-      conditions.push(eq(customer.type, filters.type))
-    }
-    if (filters.status && filters.status !== 'all') {
-      conditions.push(eq(customer.status, filters.status))
-    }
-    if (filters.search?.trim()) {
-      const q = `%${filters.search.trim()}%`
-      conditions.push(
-        or(
-          ilike(customer.name, q),
-          ilike(customer.contactPerson, q),
-          ilike(customer.certCode, q),
-        )!,
-      )
-    }
-
-    const rows = await db
-      .select()
-      .from(customer)
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(sql`${customer.createdAt} desc`)
-
-    const ids = rows.map((r) => r.id)
-    const metrics = await loadCustomerMetrics(ids)
-
-    const salesIds = [...new Set(rows.map((r) => r.salesManagerId).filter(Boolean))] as string[]
-    const salesRows =
-      salesIds.length > 0
-        ? await db.select().from(userStaff).where(inArray(userStaff.id, salesIds))
-        : []
-    const salesNameMap = new Map(salesRows.map((s) => [s.id, s.displayName]))
-
-    return rows.map((row) =>
-      mapCustomerRow(row, {
-        ...(metrics.get(row.id) ?? { projectCount: 0, totalRecharge: 0, totalConsumption: 0, balance: 0 }),
-        salesManagerName: row.salesManagerId ? salesNameMap.get(row.salesManagerId) : undefined,
-      }),
-    )
+    return queryCustomersWithMetrics(buildCustomerListConditions(filters))
   },
 
   async getById(id: string): Promise<Customer | null> {
     await ensureCrmSeeded()
-    const row = await db.query.customer.findFirst({ where: eq(customer.id, id) })
-    if (!row) return null
-
-    let salesManagerName: string | undefined
-    if (row.salesManagerId) {
-      const sm = await db.query.userStaff.findFirst({ where: eq(userStaff.id, row.salesManagerId) })
-      salesManagerName = sm?.displayName
-    }
-    return enrichCustomer(row, salesManagerName)
+    const rows = await queryCustomersWithMetrics([eq(customer.id, id)])
+    return rows[0] ?? null
   },
 
   async create(input: CustomerUpsertInput): Promise<Customer> {

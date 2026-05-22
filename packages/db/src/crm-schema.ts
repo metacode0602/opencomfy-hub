@@ -231,12 +231,31 @@ export const userStaff = pgTable(
     email: varchar("email", { length: 255 }),
     status: varchar("status", { length: 32 }).notNull(), // active | inactive
     department: varchar("department", { length: 128 }),
+    position: varchar("position", { length: 128 }),
+    /** 应用角色：admin | user | member */
+    roles: jsonb("roles").$type<string[]>().notNull().default([]),
+    isDefaultPreSales: boolean("is_default_pre_sales").notNull().default(false),
+    isDefaultAccountManager: boolean("is_default_account_manager").notNull().default(false),
+    isDefaultDeliveryManager: boolean("is_default_delivery_manager").notNull().default(false),
+    isDefaultProjectManager: boolean("is_default_project_manager").notNull().default(false),
     ...crmTimestamps,
   },
   (table) => [
     uniqueIndex("user_staff_employee_no_uk").on(table.employeeNo),
     uniqueIndex("user_staff_email_uk").on(table.email),
     index("user_staff_status_idx").on(table.status),
+    uniqueIndex("user_staff_default_pre_sales_uk")
+      .on(table.isDefaultPreSales)
+      .where(sql`${table.isDefaultPreSales} = true`),
+    uniqueIndex("user_staff_default_account_manager_uk")
+      .on(table.isDefaultAccountManager)
+      .where(sql`${table.isDefaultAccountManager} = true`),
+    uniqueIndex("user_staff_default_delivery_manager_uk")
+      .on(table.isDefaultDeliveryManager)
+      .where(sql`${table.isDefaultDeliveryManager} = true`),
+    uniqueIndex("user_staff_default_project_manager_uk")
+      .on(table.isDefaultProjectManager)
+      .where(sql`${table.isDefaultProjectManager} = true`),
   ],
 )
 

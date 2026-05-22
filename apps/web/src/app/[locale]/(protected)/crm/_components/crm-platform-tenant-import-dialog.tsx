@@ -32,10 +32,10 @@ import {
 import { Textarea } from "@workspace/ui/components/textarea"
 import { Badge } from "@workspace/ui/components/badge"
 import { Alert, AlertDescription } from "@workspace/ui/components/alert"
+import { cn } from "@workspace/ui/lib/utils"
 import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
-import { mockBatchImportBillingForPlatformTenants } from "@/lib/crm/platform-tenant-billing-import-mock"
 import {
   defaultCreateCustomerFromPlatform,
   parsePlatformTenantIds,
@@ -170,8 +170,13 @@ export function CrmPlatformTenantImportDialog({
 
   const previewMutation = trpc.crm.tenants.previewPlatformImport.useMutation()
   const commitMutation = trpc.crm.tenants.commitPlatformImport.useMutation()
+  const directBillingImportMutation = trpc.crm.tenants.directBillingImport.useMutation()
 
-  const loading = previewMutation.isPending || commitMutation.isPending || isCommitting
+  const loading =
+    previewMutation.isPending ||
+    commitMutation.isPending ||
+    directBillingImportMutation.isPending ||
+    isCommitting
 
   const reset = React.useCallback(() => {
     setStep("input")
@@ -256,23 +261,8 @@ export function CrmPlatformTenantImportDialog({
     billingDateRangeError,
   ])
 
-  const resolveTenantIdForBilling = (item: PlatformTenantPreviewItem): string => {
-    if (item.local?.tenantId) return item.local.tenantId
-    return `mock-tenant-${item.platformTenantId}`
-  }
-
-  const buildBillingTargets = (
-    tenantResult: PlatformImportCommitResult,
-  ): { platformTenantId: string; tenantId: string; tenantName: string }[] => {
-    const failedIds = new Set(tenantResult.errors.map((e) => e.platformTenantId))
-    return actionableItems
-      .filter((item) => !failedIds.has(item.platformTenantId))
-      .map((item) => ({
-        platformTenantId: item.platformTenantId,
-        tenantId: resolveTenantIdForBilling(item),
-        tenantName: item.platform.tenantName,
-      }))
-  }
+  const buildBillingTargets = (tenantResult: PlatformImportCommitResult) =>
+    tenantResult.importedTenants
 
   const updateAssignment = (
     platformTenantId: string,
@@ -364,14 +354,35 @@ export function CrmPlatformTenantImportDialog({
         const targets = buildBillingTargets(result)
         if (targets.length > 0) {
           setCommitPhase("billing")
-          billing = await mockBatchImportBillingForPlatformTenants({
-            tenants: targets,
-            startDate: billingStartDate || undefined,
-            endDate: billingEndDate || undefined,
-            onProgress: (current, total, tenantName) => {
-              setBillingProgress({ current, total, tenantName })
-            },
-          })
+          const billingItems: PlatformImportBillingBatchResult["items"] = []
+          for (let i = 0; i < targets.length; i++) {
+            const target = targets[i]!
+            setBillingProgress({
+              current: i + 1,
+              total: targets.length,
+              tenantName: target.tenantName,
+            })
+            try {
+              const row = await directBillingImportMutation.mutateAsync({
+                tenantId: target.tenantId,
+                startDate: billingStartDate || undefined,
+                endDate: billingEndDate || undefined,
+              })
+              billingItems.push(row)
+            } catch (e) {
+              billingItems.push({
+                platformTenantId: target.platformTenantId,
+                tenantName: target.tenantName,
+                success: false,
+                error: e instanceof Error ? e.message : "账单导入失败",
+              })
+            }
+          }
+          billing = {
+            items: billingItems,
+            successCount: billingItems.filter((item) => item.success).length,
+            failedCount: billingItems.filter((item) => !item.success).length,
+          }
         }
       }
 
@@ -408,10 +419,28 @@ export function CrmPlatformTenantImportDialog({
     preview &&
     `共 ${preview.items.length} 条，平台返回 ${preview.items.filter((i) => !i.missingOnPlatform).length} 条，本地已有 ${preview.items.filter((i) => i.local).length} 条`
 
+  const showCustomerConfirmCheckbox =
+    step === "preview" &&
+    Boolean(preview) &&
+    !isCommitting &&
+    needsCustomerChoice.some(
+      (i) => assignmentById.get(i.platformTenantId)?.customer.mode === "create",
+    )
+
+  const customerConfirmCheckbox = (
+    <label className="flex cursor-pointer items-start gap-2 text-sm">
+      <Checkbox
+        checked={confirmedNoCustomerUpdate}
+        onCheckedChange={(v) => setConfirmedNoCustomerUpdate(v === true)}
+      />
+      <span>我已确认：不会修改已有客户的资料（仅新建客户或关联已有客户）</span>
+    </label>
+  )
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-4xl">
-        <DialogHeader>
+      <DialogContent className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-4xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {step === "input" && "从平台导入租户"}
             {step === "preview" && "确认导入"}
@@ -427,7 +456,14 @@ export function CrmPlatformTenantImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "min-h-0",
+            showCustomerConfirmCheckbox
+              ? "flex flex-col overflow-hidden"
+              : "overflow-y-auto overscroll-contain pr-1",
+          )}
+        >
           {step === "input" && (
             <div className="space-y-4 px-1">
               <div className="space-y-3">
@@ -513,66 +549,62 @@ export function CrmPlatformTenantImportDialog({
           )}
 
           {step === "preview" && preview && !isCommitting && (
-            <div className="space-y-4 px-1">
-              {preview.missingPlatformIds.length > 0 && (
-                <Alert variant="destructive">
-                  <IconAlertTriangle className="size-4" />
-                  <AlertDescription>
-                    平台未返回：{preview.missingPlatformIds.join("、")}
-                  </AlertDescription>
-                </Alert>
-              )}
+            <>
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-1 pr-1">
+                {preview.missingPlatformIds.length > 0 && (
+                  <Alert variant="destructive">
+                    <IconAlertTriangle className="size-4" />
+                    <AlertDescription>
+                      平台未返回：{preview.missingPlatformIds.join("、")}
+                    </AlertDescription>
+                  </Alert>
+                )}
 
-              {importBillingData && (
-                <Alert>
-                  <AlertDescription className="text-xs sm:text-sm">
-                    已勾选导入账单数据
-                    {billingStartDate || billingEndDate
-                      ? ` · 日期范围 ${billingStartDate || "—"} ~ ${billingEndDate || "—"}`
-                      : " · 全部历史"}
-                    。确认导入后将逐租户自动拉取并写入，无需再次确认账单预览。
-                  </AlertDescription>
-                </Alert>
-              )}
+                {importBillingData && (
+                  <Alert>
+                    <AlertDescription className="text-xs sm:text-sm">
+                      已勾选导入账单数据
+                      {billingStartDate || billingEndDate
+                        ? ` · 日期范围 ${billingStartDate || "—"} ~ ${billingEndDate || "—"}`
+                        : " · 全部历史"}
+                      。确认导入后将逐租户自动拉取并写入，无需再次确认账单预览。
+                    </AlertDescription>
+                  </Alert>
+                )}
 
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-24">平台 ID</TableHead>
-                      <TableHead>租户名</TableHead>
-                      <TableHead>手机</TableHead>
-                      <TableHead className="text-right">余额</TableHead>
-                      <TableHead className="w-20">本地</TableHead>
-                      <TableHead className="min-w-[280px]">客户关联</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {preview.items.map((item) => (
-                      <PreviewRow
-                        key={item.platformTenantId}
-                        item={item}
-                        assignment={assignmentById.get(item.platformTenantId)}
-                        onModeChange={setAssignmentMode}
-                        onAssignmentChange={updateAssignment}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-24">平台 ID</TableHead>
+                        <TableHead>租户名</TableHead>
+                        <TableHead>手机</TableHead>
+                        <TableHead className="text-right">余额</TableHead>
+                        <TableHead className="w-20">本地</TableHead>
+                        <TableHead className="min-w-[280px]">客户关联</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {preview.items.map((item) => (
+                        <PreviewRow
+                          key={item.platformTenantId}
+                          item={item}
+                          assignment={assignmentById.get(item.platformTenantId)}
+                          onModeChange={setAssignmentMode}
+                          onAssignmentChange={updateAssignment}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
 
-              {needsCustomerChoice.some(
-                (i) => assignmentById.get(i.platformTenantId)?.customer.mode === "create",
-              ) && (
-                <label className="flex cursor-pointer items-start gap-2 text-sm">
-                  <Checkbox
-                    checked={confirmedNoCustomerUpdate}
-                    onCheckedChange={(v) => setConfirmedNoCustomerUpdate(v === true)}
-                  />
-                  <span>我已确认：不会修改已有客户的资料（仅新建客户或关联已有客户）</span>
-                </label>
+              {showCustomerConfirmCheckbox && (
+                <div className="bg-background shrink-0 border-t px-1 pt-3">
+                  {customerConfirmCheckbox}
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {step === "done" && commitResult && (
@@ -657,7 +689,7 @@ export function CrmPlatformTenantImportDialog({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="shrink-0 gap-2 sm:gap-0">
           {step === "input" && (
             <>
               <Button type="button" variant="outline" onClick={() => handleClose(false)}>

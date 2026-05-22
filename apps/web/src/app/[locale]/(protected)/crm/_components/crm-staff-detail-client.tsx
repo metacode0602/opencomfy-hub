@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -23,6 +24,7 @@ import { toast } from "sonner"
 import { CrmDeleteDialog } from "./crm-delete-dialog"
 import { CrmStaffFormDialog } from "./crm-staff-form-dialog"
 import { CrmStaffStatusBadge } from "./crm-staff-status-badge"
+import { staffAppRoleLabel } from "@/lib/crm/staff-constants"
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -114,9 +116,56 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
             <Row label="姓名" value={staff.display_name} />
             <Row label="手机" value={staff.mobile} />
             <Row label="邮箱" value={staff.email ?? "—"} />
+            <Row label="部门" value={staff.department ?? "—"} />
+            <Row label="职位" value={staff.position ?? "—"} />
+            <div>
+              <div className="text-muted-foreground mb-0.5 text-xs">角色</div>
+              <div className="flex flex-wrap gap-1">
+                {staff.roles.length === 0 ? (
+                  <span className="text-sm">—</span>
+                ) : (
+                  staff.roles.map((role) => (
+                    <Badge key={role} variant="secondary" className="text-xs">
+                      {staffAppRoleLabel(role)}
+                    </Badge>
+                  ))
+                )}
+              </div>
+            </div>
             <div>
               <div className="text-muted-foreground mb-0.5 text-xs">状态</div>
               <CrmStaffStatusBadge status={staff.status} />
+            </div>
+            <div className="sm:col-span-2">
+              <div className="text-muted-foreground mb-0.5 text-xs">项目角色默认</div>
+              <div className="flex flex-wrap gap-1">
+                {staff.is_default_pre_sales && (
+                  <Badge variant="outline" className="text-xs">
+                    默认售前经理
+                  </Badge>
+                )}
+                {staff.is_default_account_manager && (
+                  <Badge variant="outline" className="text-xs">
+                    默认客户经理
+                  </Badge>
+                )}
+                {staff.is_default_delivery_manager && (
+                  <Badge variant="outline" className="text-xs">
+                    默认交付经理
+                  </Badge>
+                )}
+                {staff.is_default_project_manager && (
+                  <Badge variant="outline" className="text-xs">
+                    默认项目经理
+                  </Badge>
+                )}
+                {!staff.is_default_pre_sales &&
+                  !staff.is_default_account_manager &&
+                  !staff.is_default_delivery_manager &&
+                  !staff.is_default_project_manager && (
+                    <span className="text-sm">—</span>
+                  )}
+              </div>
             </div>
           </CardContent>
         </Card>

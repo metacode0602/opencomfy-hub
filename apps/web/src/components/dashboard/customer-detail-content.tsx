@@ -36,12 +36,16 @@ import type { Customer } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
 import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@workspace/ui/components/chart'
+import {
   AreaChart,
   Area,
   XAxis,
   YAxis,
-  Tooltip,
-  ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
@@ -66,6 +70,20 @@ const monthlyConsumption = [
   { month: '4月', amount: 75000 },
   { month: '5月', amount: 88000 },
 ]
+
+const consumptionChartConfig = {
+  amount: {
+    label: '消费金额',
+    color: '#6366f1',
+  },
+} satisfies ChartConfig
+
+const productLineChartConfig = Object.fromEntries(
+  consumptionByProduct.map((item) => [
+    item.name,
+    { label: item.name, color: item.color },
+  ]),
+) satisfies ChartConfig
 
 export function CustomerDetailContent({ customer }: CustomerDetailContentProps) {
   const [activeTab, setActiveTab] = useState('overview')
@@ -231,8 +249,11 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                 <CardTitle className="text-base">消费趋势</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
+                {activeTab === 'overview' && (
+                  <ChartContainer
+                    config={consumptionChartConfig}
+                    className="aspect-auto h-[240px] w-full min-w-0"
+                  >
                     <AreaChart data={monthlyConsumption}>
                       <defs>
                         <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
@@ -252,13 +273,14 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                         tick={{ fill: '#71717a', fontSize: 12 }}
                         tickFormatter={(value) => `${value / 1000}k`}
                       />
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#18181b',
-                          border: '1px solid #27272a',
-                          borderRadius: '8px',
-                        }}
-                        formatter={(value) => [`¥${Number(value ?? 0).toLocaleString()}`, '消费金额']}
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value) =>
+                              `¥${Number(value ?? 0).toLocaleString()}`
+                            }
+                          />
+                        }
                       />
                       <Area
                         type="monotone"
@@ -269,8 +291,8 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                         fill="url(#colorAmount)"
                       />
                     </AreaChart>
-                  </ResponsiveContainer>
-                </div>
+                  </ChartContainer>
+                )}
               </CardContent>
             </Card>
 
@@ -280,45 +302,50 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                 <CardTitle className="text-base">产品线分布</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="h-[240px] flex items-center">
-                  <ResponsiveContainer width="60%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={consumptionByProduct}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={80}
-                        paddingAngle={2}
-                        dataKey="value"
-                      >
-                        {consumptionByProduct.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip 
-                        contentStyle={{ 
-                          backgroundColor: '#18181b',
-                          border: '1px solid #27272a',
-                          borderRadius: '8px',
-                        }}
-                        formatter={(value) => [`${Number(value ?? 0).toLocaleString()}%`, '占比']}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="flex-1 space-y-2">
-                    {consumptionByProduct.map((item) => (
-                      <div key={item.name} className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: item.color }}
+                {activeTab === 'overview' && (
+                  <div className="grid h-[240px] w-full min-w-0 grid-cols-5 items-center gap-2">
+                    <ChartContainer
+                      config={productLineChartConfig}
+                      className="col-span-3 aspect-auto h-full w-full min-w-0 [&>div]:aspect-auto"
+                    >
+                      <PieChart>
+                        <Pie
+                          data={consumptionByProduct}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={80}
+                          paddingAngle={2}
+                          dataKey="value"
+                          nameKey="name"
+                        >
+                          {consumptionByProduct.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value) => `${Number(value ?? 0).toLocaleString()}%`}
+                            />
+                          }
                         />
-                        <span className="text-sm text-muted-foreground">{item.name}</span>
-                        <span className="text-sm font-medium ml-auto">{item.value}%</span>
-                      </div>
-                    ))}
+                      </PieChart>
+                    </ChartContainer>
+                    <div className="col-span-2 min-w-0 space-y-2">
+                      {consumptionByProduct.map((item) => (
+                        <div key={item.name} className="flex items-center gap-2">
+                          <div 
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className="text-sm text-muted-foreground">{item.name}</span>
+                          <span className="text-sm font-medium ml-auto">{item.value}%</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </div>

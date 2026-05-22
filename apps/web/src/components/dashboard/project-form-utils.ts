@@ -1,4 +1,5 @@
 import { getBusinessLineById } from '@/lib/data/mock-data'
+import { resolveDefaultStaffId } from '@/lib/crm/staff-constants'
 import type { UserStaff } from '@/lib/types/crm'
 import type { BusinessLine, Project } from '@/lib/data/types'
 import type { ProjectFormValues } from './project-form-fields'
@@ -7,19 +8,21 @@ export function getStaffIdByName(name: string, staff: UserStaff[]): string | und
   return staff.find((m) => m.display_name === name)?.id
 }
 
-export const emptyProjectFormValues: ProjectFormValues = {
-  customerId: '',
-  primaryTenantId: '',
-  name: '',
-  description: '',
-  stage: 'lead',
-  businessLineId: '',
-  preSalesStaffId: '',
-  accountManagerStaffId: '',
-  deliveryManagerStaffId: '',
-  projectManagerStaffId: '',
-  monthlyBudget: '',
-  startDate: '',
+export function emptyProjectFormValues(staff: UserStaff[] = []): ProjectFormValues {
+  return {
+    customerId: '',
+    primaryTenantId: '',
+    name: '',
+    description: '',
+    stage: 'lead',
+    businessLineId: '',
+    preSalesStaffId: resolveDefaultStaffId(staff, 'pre_sales') ?? '',
+    accountManagerStaffId: resolveDefaultStaffId(staff, 'account_manager') ?? '',
+    deliveryManagerStaffId: resolveDefaultStaffId(staff, 'delivery_manager') ?? '',
+    projectManagerStaffId: resolveDefaultStaffId(staff, 'project_manager') ?? '',
+    monthlyBudget: '',
+    startDate: '',
+  }
 }
 
 export function projectToFormValues(project: Project, staff: UserStaff[] = []): ProjectFormValues {

@@ -263,10 +263,12 @@ export const projectsDataAccess = {
       })
 
       for (const { key, role } of STAFF_ROLES) {
+        const userStaffId = input.staff[key]
+        if (!userStaffId) continue
         await tx.insert(projectStaffAssignment).values({
           id: newId(),
           projectId: id,
-          userStaffId: input.staff[key],
+          userStaffId,
           roleType: role,
           effectiveFrom: now,
           effectiveTo: null,
