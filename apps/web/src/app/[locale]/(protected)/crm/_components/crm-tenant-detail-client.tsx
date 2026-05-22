@@ -23,8 +23,13 @@ import { Switch } from "@workspace/ui/components/switch"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
 import { toast } from "sonner"
-import { IconLoader2 } from "@tabler/icons-react"
+import { IconCloudDownload, IconLoader2 } from "@tabler/icons-react"
 import type { BillingTenantDetail, BillingTenantUpdateInput } from "@/lib/types/billing-tenant"
+import { CrmTenantBillingImportDialog } from "./crm-tenant-billing-import-dialog"
+import { CrmTenantRechargesList } from "./crm-tenant-recharges-list"
+import { CrmTenantMonthlyBillsList } from "./crm-tenant-monthly-bills-list"
+import { CrmTenantMetalOrdersList } from "./crm-tenant-metal-orders-list"
+import { CrmTenantReservedPackOrdersList } from "./crm-tenant-reserved-pack-orders-list"
 
 type FormState = {
   tenantName: string
@@ -103,6 +108,7 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
 
   const [form, setForm] = React.useState<FormState | null>(null)
   const [dirty, setDirty] = React.useState(false)
+  const [billingImportOpen, setBillingImportOpen] = React.useState(false)
 
   React.useEffect(() => {
     if (data) {
@@ -164,7 +170,31 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
         <Button variant="outline" size="sm" asChild>
           <LocaleLink href={`/crm/customers/${data.customerId}`}>查看客户</LocaleLink>
         </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          type="button"
+          onClick={() => setBillingImportOpen(true)}
+        >
+          <IconCloudDownload className="mr-1.5 size-4" />
+          从平台同步账单
+        </Button>
       </div>
+
+      <CrmTenantBillingImportDialog
+        open={billingImportOpen}
+        onOpenChange={setBillingImportOpen}
+        tenantId={tenantId}
+        tenantName={data.name}
+        platformTenantId={data.platformTenantId}
+        onImported={() => {
+          void utils.crm.tenants.getById.invalidate({ id: tenantId })
+          void utils.crm.tenants.listRecharges.invalidate({ tenantId })
+          void utils.crm.tenants.listMonthlyBills.invalidate({ tenantId })
+          void utils.crm.tenants.listMetalOrders.invalidate({ tenantId })
+          void utils.crm.tenants.listReservedPackOrders.invalidate({ tenantId })
+        }}
+      />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
@@ -300,6 +330,13 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
             ) : null}
           </CardFooter>
         </Card>
+      </div>
+
+      <div className="mt-6 space-y-6">
+        <CrmTenantRechargesList tenantId={tenantId} />
+        <CrmTenantMonthlyBillsList tenantId={tenantId} />
+        <CrmTenantMetalOrdersList tenantId={tenantId} />
+        <CrmTenantReservedPackOrdersList tenantId={tenantId} />
       </div>
     </div>
   )

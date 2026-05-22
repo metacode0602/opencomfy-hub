@@ -35,13 +35,16 @@ import { Alert, AlertDescription } from "@workspace/ui/components/alert"
 import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
+import { mockBatchImportBillingForPlatformTenants } from "@/lib/crm/platform-tenant-billing-import-mock"
 import {
   defaultCreateCustomerFromPlatform,
   parsePlatformTenantIds,
   PLATFORM_TENANT_IMPORT_MAX_IDS,
 } from "@/lib/crm/platform-tenant-import-utils"
+import { validateBillingDateRange } from "@/lib/crm/tenant-billing-import-utils"
 import { trpc } from "@/lib/trpc/client"
 import type {
+  PlatformImportBillingBatchResult,
   PlatformImportCommitItem,
   PlatformImportCommitResult,
   PlatformImportCustomerAssignment,
@@ -50,6 +53,7 @@ import type {
 } from "@/lib/types/platform-tenant-import"
 
 type Step = "input" | "preview" | "done"
+type CommitPhase = "tenants" | "billing"
 
 type RowAssignment = {
   platformTenantId: string
@@ -153,11 +157,21 @@ export function CrmPlatformTenantImportDialog({
   const [assignments, setAssignments] = React.useState<RowAssignment[]>([])
   const [confirmedNoCustomerUpdate, setConfirmedNoCustomerUpdate] = React.useState(false)
   const [commitResult, setCommitResult] = React.useState<PlatformImportCommitResult | null>(null)
+  const [importBillingData, setImportBillingData] = React.useState(false)
+  const [billingStartDate, setBillingStartDate] = React.useState("")
+  const [billingEndDate, setBillingEndDate] = React.useState("")
+  const [commitPhase, setCommitPhase] = React.useState<CommitPhase>("tenants")
+  const [billingProgress, setBillingProgress] = React.useState<{
+    current: number
+    total: number
+    tenantName: string
+  } | null>(null)
+  const [isCommitting, setIsCommitting] = React.useState(false)
 
   const previewMutation = trpc.crm.tenants.previewPlatformImport.useMutation()
   const commitMutation = trpc.crm.tenants.commitPlatformImport.useMutation()
 
-  const loading = previewMutation.isPending || commitMutation.isPending
+  const loading = previewMutation.isPending || commitMutation.isPending || isCommitting
 
   const reset = React.useCallback(() => {
     setStep("input")
@@ -166,6 +180,12 @@ export function CrmPlatformTenantImportDialog({
     setAssignments([])
     setConfirmedNoCustomerUpdate(false)
     setCommitResult(null)
+    setImportBillingData(false)
+    setBillingStartDate("")
+    setBillingEndDate("")
+    setCommitPhase("tenants")
+    setBillingProgress(null)
+    setIsCommitting(false)
   }, [])
 
   React.useEffect(() => {
@@ -194,11 +214,22 @@ export function CrmPlatformTenantImportDialog({
     [actionableItems],
   )
 
+  const billingDateRangeError = React.useMemo(() => {
+    if (!importBillingData) return null
+    try {
+      validateBillingDateRange(billingStartDate, billingEndDate)
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : "账单日期范围无效"
+    }
+  }, [importBillingData, billingStartDate, billingEndDate])
+
   const validationError = React.useMemo(() => {
     if (step !== "preview") return null
     if (actionableItems.length === 0) {
       return "没有可导入的租户，请检查平台 ID 或重新拉取"
     }
+    if (billingDateRangeError) return billingDateRangeError
     for (const item of needsCustomerChoice) {
       const a = assignmentById.get(item.platformTenantId)
       if (!a) return `请为平台租户 ${item.platformTenantId} 配置客户关联`
@@ -216,7 +247,32 @@ export function CrmPlatformTenantImportDialog({
       return "请勾选确认：不会修改已有客户的资料"
     }
     return null
-  }, [step, actionableItems, needsCustomerChoice, assignmentById, confirmedNoCustomerUpdate])
+  }, [
+    step,
+    actionableItems,
+    needsCustomerChoice,
+    assignmentById,
+    confirmedNoCustomerUpdate,
+    billingDateRangeError,
+  ])
+
+  const resolveTenantIdForBilling = (item: PlatformTenantPreviewItem): string => {
+    if (item.local?.tenantId) return item.local.tenantId
+    return `mock-tenant-${item.platformTenantId}`
+  }
+
+  const buildBillingTargets = (
+    tenantResult: PlatformImportCommitResult,
+  ): { platformTenantId: string; tenantId: string; tenantName: string }[] => {
+    const failedIds = new Set(tenantResult.errors.map((e) => e.platformTenantId))
+    return actionableItems
+      .filter((item) => !failedIds.has(item.platformTenantId))
+      .map((item) => ({
+        platformTenantId: item.platformTenantId,
+        tenantId: resolveTenantIdForBilling(item),
+        tenantName: item.platform.tenantName,
+      }))
+  }
 
   const updateAssignment = (
     platformTenantId: string,
@@ -264,6 +320,10 @@ export function CrmPlatformTenantImportDialog({
       toast.error(`单次最多 ${PLATFORM_TENANT_IMPORT_MAX_IDS} 个 ID`)
       return
     }
+    if (importBillingData && billingDateRangeError) {
+      toast.error(billingDateRangeError)
+      return
+    }
     try {
       const result = await previewMutation.mutateAsync({ platformTenantIds: ids })
       setPreview(result)
@@ -293,22 +353,49 @@ export function CrmPlatformTenantImportDialog({
         customer: assignmentById.get(item.platformTenantId)!.customer,
       }
     })
+    setIsCommitting(true)
+    setCommitPhase("tenants")
+    setBillingProgress(null)
     try {
       const result = await commitMutation.mutateAsync({ items: commitItems })
-      setCommitResult(result)
+
+      let billing: PlatformImportBillingBatchResult | undefined
+      if (importBillingData) {
+        const targets = buildBillingTargets(result)
+        if (targets.length > 0) {
+          setCommitPhase("billing")
+          billing = await mockBatchImportBillingForPlatformTenants({
+            tenants: targets,
+            startDate: billingStartDate || undefined,
+            endDate: billingEndDate || undefined,
+            onProgress: (current, total, tenantName) => {
+              setBillingProgress({ current, total, tenantName })
+            },
+          })
+        }
+      }
+
+      const finalResult: PlatformImportCommitResult = { ...result, billing }
+      setCommitResult(finalResult)
       setStep("done")
+
       const fail = result.errors.length
-      if (fail > 0) {
+      const billingFail = billing?.failedCount ?? 0
+      if (fail > 0 || billingFail > 0) {
         toast.warning(
-          `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}，${fail} 条失败`,
+          `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}${billing ? `；账单 ${billing.successCount}/${billing.items.length} 成功` : ""}${fail > 0 ? `；${fail} 个租户失败` : ""}${billingFail > 0 ? `；${billingFail} 个账单失败` : ""}`,
         )
       } else {
         toast.success(
-          `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}，新建客户 ${result.createdCustomers}`,
+          `导入完成：新增租户 ${result.createdTenants}，更新 ${result.updatedTenants}，新建客户 ${result.createdCustomers}${billing ? `；账单已同步 ${billing.successCount} 个租户` : ""}`,
         )
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "导入失败")
+    } finally {
+      setIsCommitting(false)
+      setCommitPhase("tenants")
+      setBillingProgress(null)
     }
   }
 
@@ -342,29 +429,108 @@ export function CrmPlatformTenantImportDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {step === "input" && (
-            <div className="space-y-3 px-1">
-              <Label htmlFor="platform-tenant-ids">平台租户 ID</Label>
-              <Textarea
-                id="platform-tenant-ids"
-                placeholder={"16462\n16463, 16464"}
-                rows={6}
-                value={idsRaw}
-                disabled={loading}
-                onChange={(e) => setIdsRaw(e.target.value)}
-              />
-              <p className="text-muted-foreground text-xs">
-                支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。
-              </p>
+            <div className="space-y-4 px-1">
+              <div className="space-y-3">
+                <Label htmlFor="platform-tenant-ids">平台租户 ID</Label>
+                <Textarea
+                  id="platform-tenant-ids"
+                  placeholder={"16462\n16463, 16464"}
+                  rows={6}
+                  value={idsRaw}
+                  disabled={loading}
+                  onChange={(e) => setIdsRaw(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">
+                  支持半角/中文逗号、空格、换行分隔；仅保留纯数字 ID。
+                </p>
+              </div>
+
+              <div className="space-y-3 rounded-md border p-3">
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <Checkbox
+                    checked={importBillingData}
+                    disabled={loading}
+                    onCheckedChange={(v) => {
+                      const checked = v === true
+                      setImportBillingData(checked)
+                      if (!checked) {
+                        setBillingStartDate("")
+                        setBillingEndDate("")
+                      }
+                    }}
+                  />
+                  <span>同时导入账单数据（裸金属、月度账单、充值、账单明细）</span>
+                </label>
+
+                {importBillingData && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="platform-billing-start">开始日期（可选）</Label>
+                      <Input
+                        id="platform-billing-start"
+                        type="date"
+                        value={billingStartDate}
+                        disabled={loading}
+                        onChange={(e) => setBillingStartDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="platform-billing-end">结束日期（可选）</Label>
+                      <Input
+                        id="platform-billing-end"
+                        type="date"
+                        value={billingEndDate}
+                        disabled={loading}
+                        onChange={(e) => setBillingEndDate(e.target.value)}
+                      />
+                    </div>
+                    <p className="text-muted-foreground sm:col-span-2 text-xs">
+                      开始与结束须同时填写或同时留空；留空表示拉取全部历史。确认导入租户后将自动同步各租户账单，无需再次确认账单预览。
+                    </p>
+                    {billingDateRangeError ? (
+                      <p className="text-destructive sm:col-span-2 text-xs">{billingDateRangeError}</p>
+                    ) : null}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {step === "preview" && preview && !commitMutation.isPending && (
+          {step === "preview" && preview && isCommitting && (
+            <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 px-1 py-8">
+              <IconLoader2 className="text-muted-foreground size-8 animate-spin" />
+              <p className="text-sm font-medium">
+                {commitPhase === "tenants"
+                  ? "正在导入租户…"
+                  : billingProgress
+                    ? `正在导入账单 (${billingProgress.current}/${billingProgress.total})：${billingProgress.tenantName}`
+                    : "正在导入账单…"}
+              </p>
+              {importBillingData && commitPhase === "tenants" ? (
+                <p className="text-muted-foreground text-xs">租户导入完成后将自动同步账单</p>
+              ) : null}
+            </div>
+          )}
+
+          {step === "preview" && preview && !isCommitting && (
             <div className="space-y-4 px-1">
               {preview.missingPlatformIds.length > 0 && (
                 <Alert variant="destructive">
                   <IconAlertTriangle className="size-4" />
                   <AlertDescription>
                     平台未返回：{preview.missingPlatformIds.join("、")}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {importBillingData && (
+                <Alert>
+                  <AlertDescription className="text-xs sm:text-sm">
+                    已勾选导入账单数据
+                    {billingStartDate || billingEndDate
+                      ? ` · 日期范围 ${billingStartDate || "—"} ~ ${billingEndDate || "—"}`
+                      : " · 全部历史"}
+                    。确认导入后将逐租户自动拉取并写入，无需再次确认账单预览。
                   </AlertDescription>
                 </Alert>
               )}
@@ -415,7 +581,7 @@ export function CrmPlatformTenantImportDialog({
                 <Stat label="新增租户" value={commitResult.createdTenants} />
                 <Stat label="更新租户" value={commitResult.updatedTenants} />
                 <Stat label="新建客户" value={commitResult.createdCustomers} />
-                <Stat label="失败" value={commitResult.errors.length} />
+                <Stat label="租户失败" value={commitResult.errors.length} />
               </div>
               {commitResult.errors.length > 0 && (
                 <div className="max-h-40 overflow-auto rounded-md border">
@@ -435,6 +601,56 @@ export function CrmPlatformTenantImportDialog({
                       ))}
                     </TableBody>
                   </Table>
+                </div>
+              )}
+
+              {commitResult.billing && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-sm font-medium">账单导入</h4>
+                    <Badge variant="outline">
+                      成功 {commitResult.billing.successCount} / {commitResult.billing.items.length}
+                    </Badge>
+                    {commitResult.billing.failedCount > 0 ? (
+                      <Badge variant="destructive">失败 {commitResult.billing.failedCount}</Badge>
+                    ) : null}
+                  </div>
+                  <div className="max-h-48 overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>平台 ID</TableHead>
+                          <TableHead>租户</TableHead>
+                          <TableHead className="w-16">状态</TableHead>
+                          <TableHead>结果</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {commitResult.billing.items.map((row) => (
+                          <TableRow key={row.platformTenantId}>
+                            <TableCell className="font-mono text-sm">{row.platformTenantId}</TableCell>
+                            <TableCell className="max-w-[120px] truncate" title={row.tenantName}>
+                              {row.tenantName}
+                            </TableCell>
+                            <TableCell>
+                              {row.success ? (
+                                <Badge variant="default">成功</Badge>
+                              ) : (
+                                <Badge variant="destructive">失败</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {row.success ? (
+                                <span className="text-muted-foreground">{row.summary ?? "—"}</span>
+                              ) : (
+                                <span className="text-destructive">{row.error ?? "未知错误"}</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
               )}
             </div>
@@ -482,13 +698,15 @@ export function CrmPlatformTenantImportDialog({
                 disabled={loading || Boolean(validationError)}
                 onClick={() => void onCommit()}
               >
-                {loading ? (
+                {isCommitting ? (
                   <>
                     <IconLoader2 className="mr-2 size-4 animate-spin" />
-                    导入中…
+                    {commitPhase === "billing" && billingProgress
+                      ? `账单 (${billingProgress.current}/${billingProgress.total})…`
+                      : "导入中…"}
                   </>
                 ) : (
-                  "确认导入"
+                  importBillingData ? "确认导入租户与账单" : "确认导入"
                 )}
               </Button>
             </>

@@ -11,7 +11,12 @@ import { calendarDataAccess } from '@/lib/server/dataaccess/crm/calendar'
 import { businessLinesDataAccess } from '@/lib/server/dataaccess/crm/business-lines'
 import { projectTagsDataAccess } from '@/lib/server/dataaccess/crm/project-tags'
 import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-tenants'
+import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant-billing-lists'
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
+import {
+  SuanliBillingApiError,
+  tenantBillingImportDataAccess,
+} from '@/lib/server/dataaccess/crm/tenant-billing-import'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
@@ -34,6 +39,31 @@ function mapPlatformImportError(e: unknown): never {
   }
   throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '平台租户导入失败' })
 }
+
+function mapBillingImportError(e: unknown): never {
+  if (e instanceof SuanliBillingApiError) {
+    throw new TRPCError({
+      code: e.code === '401' || e.code === '403' ? 'UNAUTHORIZED' : 'BAD_REQUEST',
+      message: e.message,
+    })
+  }
+  if (e instanceof Error) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '账单同步失败' })
+}
+
+const billingImportDateSchema = z.object({
+  tenantId: z.string().min(1),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+})
 
 const listFilterSchema = z.object({
   search: z.string().optional(),
@@ -156,6 +186,39 @@ export const crmRouter = createTRPCRouter({
           mapPlatformImportError(e)
         }
       }),
+    fetchBillingImportPreview: adminProcedure
+      .input(billingImportDateSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBillingImportDataAccess.fetchPreview(input)
+        } catch (e) {
+          mapBillingImportError(e)
+        }
+      }),
+    commitBillingImport: adminProcedure
+      .input(z.object({ previewId: z.string().uuid() }))
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBillingImportDataAccess.commitImport(input.previewId)
+        } catch (e) {
+          mapBillingImportError(e)
+        }
+      }),
+    listRecharges: protectedProcedure
+      .input(z.object({ tenantId: z.string().min(1) }))
+      .query(({ input }) => tenantBillingListsDataAccess.listRecharges(input.tenantId)),
+    listMonthlyBills: protectedProcedure
+      .input(z.object({ tenantId: z.string().min(1) }))
+      .query(({ input }) => tenantBillingListsDataAccess.listMonthlyBills(input.tenantId)),
+    getMonthlyBillDetails: protectedProcedure
+      .input(z.object({ billId: z.string().min(1) }))
+      .query(({ input }) => tenantBillingListsDataAccess.getMonthlyBillDetails(input.billId)),
+    listMetalOrders: protectedProcedure
+      .input(z.object({ tenantId: z.string().min(1) }))
+      .query(({ input }) => tenantBillingListsDataAccess.listMetalOrders(input.tenantId)),
+    listReservedPackOrders: protectedProcedure
+      .input(z.object({ tenantId: z.string().min(1) }))
+      .query(({ input }) => tenantBillingListsDataAccess.listReservedPackOrders(input.tenantId)),
   }),
 
   projectTags: createTRPCRouter({

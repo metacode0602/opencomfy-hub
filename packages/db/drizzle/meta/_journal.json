@@ -64,6 +64,34 @@
       "when": 1779354897186,
       "tag": "0009_futuristic_tinkerer",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779404884318,
+      "tag": "0010_lazy_black_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0011_tenant_bill_platform_period",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779413176483,
+      "tag": "0012_ambiguous_mole_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779415361072,
+      "tag": "0013_tenant_money_precision",
+      "breakpoints": true
     }
   ]
 }

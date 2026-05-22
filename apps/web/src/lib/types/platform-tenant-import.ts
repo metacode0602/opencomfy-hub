@@ -70,11 +70,28 @@ export type PlatformImportCommitItem = {
   customer?: PlatformImportCustomerAssignment
 }
 
+export type PlatformImportBillingItemResult = {
+  platformTenantId: string
+  tenantName: string
+  success: boolean
+  /** 写入摘要，如「裸金属 新增 2 / 更新 1；月度账单 新增 1」 */
+  summary?: string
+  error?: string
+}
+
+export type PlatformImportBillingBatchResult = {
+  items: PlatformImportBillingItemResult[]
+  successCount: number
+  failedCount: number
+}
+
 export type PlatformImportCommitResult = {
   createdTenants: number
   updatedTenants: number
   createdCustomers: number
   errors: { platformTenantId: string; message: string }[]
+  /** 勾选「导入账单数据」且租户导入成功后填充 */
+  billing?: PlatformImportBillingBatchResult
 }
 
 export type MockImportCustomerOption = {

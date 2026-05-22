@@ -30,6 +30,9 @@ import {
 /** 金额 decimal(15,4) */
 const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
 
+/** 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数） */
+const tenantMoney = (name: string) => numeric(name, { precision: 20, scale: 4 })
+
 const crmTimestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -95,8 +98,8 @@ export const billingTenant = pgTable(
     status: varchar("status", { length: 32 }).notNull(),
     phone: varchar("phone", { length: 32 }),
     overdue_at: timestamp("overdue_at", { withTimezone: true }),
-    credit_limit: numeric("credit_limit", { precision: 15, scale: 4 }),
-    balance: money("balance").notNull().default("0"),
+    credit_limit: tenantMoney("credit_limit"),
+    balance: tenantMoney("balance").notNull().default("0"),
     ...crmTimestamps,
   },
   (table) => [
@@ -331,12 +334,15 @@ export const recharge = pgTable(
       .notNull()
       .references(() => billingTenant.id, { onDelete: "restrict" }),
     projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
-    amount: money("amount").notNull(),
-    paymentMethod: varchar("payment_method", { length: 32 }).notNull(),
-    status: varchar("status", { length: 32 }).notNull(),
-    transactionId: varchar("transaction_id", { length: 128 }),
+    amount: money("amount").notNull(), //充值金额
+    paymentMethod: varchar("payment_method", { length: 32 }).notNull(), //支付方式：银行转账、支付宝、微信、发票
+    status: varchar("status", { length: 32 }).notNull(), //充值状态：待支付、已支付、已取消
+    transactionId: varchar("transaction_id", { length: 128 }), //交易流水号
+    refundId: varchar("refund_id", { length: 128 }), //退款流水号
+    refundAmount: money("refund_amount").notNull().default("0"), //退款金额
+    remark: text("remark"), //充值备注
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }), //充值完成时间
   },
   (table) => [
     uniqueIndex("recharge_transaction_id_uk").on(table.transactionId),
@@ -423,13 +429,22 @@ export const commerceOrder = pgTable(
   "commerce_order",
   {
     id: text("id").primaryKey(),
-    orderNo: varchar("order_no", { length: 64 }),
-    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }),
-    tenantId: text("tenant_id").references(() => billingTenant.id, { onDelete: "set null" }),
-    projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
-    productLine: varchar("product_line", { length: 64 }),
-    status: varchar("status", { length: 32 }).notNull(),
-    amount: money("amount").notNull(),
+    orderNo: varchar("order_no", { length: 64 }), //订单编号
+    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }), //客户ID
+    tenantId: text("tenant_id").references(() => billingTenant.id, { onDelete: "set null" }), //租户ID
+    projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }), //项目ID
+    productLine: varchar("product_line", { length: 64 }), //产品线
+    status: varchar("status", { length: 32 }).notNull(), //订单状态
+    dataCenterId: text("data_center_id"), //关联的机房Id
+    dataCenterName: varchar("data_center_name", { length: 255 }), //机房名称
+    amount: money("amount").notNull(), //订单总金额
+    balanceAmount: money("balance_amount").notNull(), //余额消费金额
+    couponAmount: money("coupon_amount").notNull().default("0"), //券消费金额
+    discountAmount: money("discount_amount").notNull().default("0"), //优惠金额
+    deviceCount: integer("device_count"), //设备数量
+    deviceModel: varchar("device_model", { length: 64 }), //设备型号
+    gpuCount: integer("gpu_count"), //GPU数量
+    unit: varchar("unit", { length: 32 }), //单位，小时、天、月、个
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
   },
@@ -468,12 +483,16 @@ export const tenantBill = pgTable(
     projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
     billMonth: varchar("bill_month", { length: 7 }).notNull(), // YYYY-MM
     totalAmount: money("total_amount").notNull(),
+    balanceAmount: money("balance_amount").notNull(), // 余额消费总额
+    couponAmount: money("coupon_amount").notNull(), // 券消费总额
     status: varchar("status", { length: 32 }).notNull(),
     dueDate: date("due_date").notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }),
+    platformPeriodStart: timestamp("platform_period_start", { withTimezone: true }),
+    platformPeriodEnd: timestamp("platform_period_end", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("tenant_bill_project_month_uk").on(table.projectId, table.billMonth),
+    uniqueIndex("tenant_bill_tenant_month_uk").on(table.tenantId, table.billMonth),
     index("tenant_bill_tenant_id_idx").on(table.tenantId),
   ],
 )
@@ -490,7 +509,10 @@ export const tenantBillDetail = pgTable(
     usage: numeric("usage"),
     unit: varchar("unit", { length: 32 }),
     unitPrice: money("unit_price"),
-    amount: money("amount").notNull(),
+    amount: money("amount").notNull(), // 消费总金额
+    balanceAmount: money("balance_amount").notNull(), // 余额消费金额
+    couponAmount: money("coupon_amount").notNull(), // 券消费金额
+    type: varchar("type", { length: 32 }).notNull(), // 付费类型： 预付费、后付费
   },
   (table) => [index("tenant_bill_detail_bill_id_idx").on(table.billId)],
 )

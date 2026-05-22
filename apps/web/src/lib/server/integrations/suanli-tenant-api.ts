@@ -6,6 +6,23 @@ import adminInstance from './request'
 
 const BATCH_SIZE = 100
 
+/** 平台部分数值字段以 string 返回（如 limit_coin: '-200000000000'） */
+function preprocessNumeric(val: unknown): number | null {
+  if (val == null || val === '') return null
+  if (typeof val === 'number') return val
+  if (typeof val === 'string') {
+    const n = Number(val)
+    return Number.isNaN(n) ? null : n
+  }
+  return null
+}
+
+const flexibleNumericNullable = z.preprocess(
+  preprocessNumeric,
+  z.number().nullable().optional(),
+)
+const flexibleNumericOptional = flexibleNumericNullable.transform((v) => v ?? undefined)
+
 const platformTenantRecordSchema = z.object({
   id: z.number(),
   tenant_type: z.string().nullable().optional(),
@@ -13,7 +30,7 @@ const platformTenantRecordSchema = z.object({
   admin_id: z.number().optional(),
   create_time: z.string().optional(),
   merchant_id: z.number().optional(),
-  coin: z.number().optional(),
+  coin: flexibleNumericOptional,
   billing_type: z.string().nullable().optional(),
   strategy_type: z.string().nullable().optional(),
   company_name: z.string().nullable().optional(),
@@ -23,7 +40,7 @@ const platformTenantRecordSchema = z.object({
   remark: z.string().nullable().optional(),
   admin_phone: z.string().nullable().optional(),
   admin_nickname: z.string().nullable().optional(),
-  limit_coin: z.number().nullable().optional(),
+  limit_coin: flexibleNumericNullable,
   insufficient_balance: z.union([z.string(), z.boolean(), z.number()]).nullable().optional(),
   merchant_mark: z.string().nullable().optional(),
 })
@@ -68,7 +85,6 @@ async function fetchTenantBatch(
         page_size: pageSize,
       },
     })
-    console.warn("fetchTenantBatch: data:", data)
     const parsed = tenantListDataSchema.safeParse(data)
     if (!parsed.success) {
       crmWarn('suanli-api', 'response schema mismatch', {
@@ -114,14 +130,13 @@ export async function fetchPlatformTenantsByIds(
   return map
 }
 
-/** 平台 coin/limit_coin → 元（可通过 SUANLI_COIN_UNIT=fen 按分换算） */
+/** 平台 coin/limit_coin（点数）→ 人民币元 */
+export const PLATFORM_COIN_DIVISOR = 1_000_000
+
+/** 平台 coin/limit_coin（点数）→ 元，入库前除以 1_000_000 */
 export function platformCoinToYuan(value: number | null | undefined): number {
   if (value == null || Number.isNaN(value)) return 0
-  const unit = (process.env.SUANLI_COIN_UNIT ?? 'yuan').toLowerCase()
-  if (unit === 'fen' || unit === 'cent') {
-    return value / 100
-  }
-  return value
+  return value / PLATFORM_COIN_DIVISOR
 }
 
 /** 解析 insufficient_balance → overdue_at */
