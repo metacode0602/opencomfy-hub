@@ -134,6 +134,48 @@
       "when": 1779431586829,
       "tag": "0019_wonderful_leper_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1779431934620,
+      "tag": "0020_damp_lady_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1779432783243,
+      "tag": "0021_past_revanche",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1779433050057,
+      "tag": "0022_clammy_champions",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1779434316037,
+      "tag": "0023_wise_ben_grimm",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779435000000,
+      "tag": "0024_supplier_pricing_config_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1779435797783,
+      "tag": "0025_complete_galactus",
+      "breakpoints": true
     }
   ]
 }

@@ -39,13 +39,15 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
-import {
-  parseDeviceChangelogCsv,
-  parseDeviceInventoryCsv,
-  parseFaultRecordsCsv,
-} from '@/lib/supplier-ops/parse-device-import-csv'
+import { parseDeviceImportFile } from '@/lib/supplier-ops/parse-device-import-file'
 import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
-import { FAULT_IMPORT_STATUS_LABELS } from '@/lib/supplier/device-import-utils'
+import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/types/supplier-domain'
+import {
+  DEVICE_IMPORT_ACCEPT,
+  DEVICE_IMPORT_MAX_BYTES,
+  FAULT_IMPORT_STATUS_LABELS,
+  isDeviceImportFileName,
+} from '@/lib/supplier/device-import-utils'
 import type {
   DeviceChangelogParsedRow,
   DeviceInventoryParsedRow,
@@ -71,7 +73,8 @@ const IMPORT_META: Record<
     description: '导入 supplier_device、compute_node；含登录凭据（列表脱敏）',
     tableTarget: 'supplier_device + compute_node',
     batchTable: 'onboarding_batch（device_inventory）',
-    columnsHint: '设备ID、内网IP、设备标识、显卡型号、设备状态、维修中、登录用户名/密码、K8s集群等',
+    columnsHint:
+      '设备ID、设备标识、IP地址、K8s集群、集群角色、显卡型号、显卡数量、设备状态、设备用途、预期集群提供服务、登录用户名/密码、设备配置、设备接收时间、合作类型、带宽组、备注、集群中节点名称、维修中',
     icon: Server,
   },
   device_changelog: {
@@ -199,17 +202,34 @@ export function SupplierDeviceImportPanel({
     void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
     void utils.supplier.listPhysicalDevices.invalidate({ supplierId })
     void utils.supplier.getPhysicalDeviceStats.invalidate({ supplierId })
+    void utils.supplier.listGpuInventory.invalidate({ supplierId })
+    void utils.supplier.listDataCenters.invalidate({ supplierId })
+    void utils.supplier.unitCosts.listRecords.invalidate({ supplierId })
+    void utils.supplier.getById.invalidate({ id: supplierId })
   }
 
   const onParseFile = async (file: File) => {
     setParseError(null)
+    if (!isDeviceImportFileName(file.name)) {
+      setParseError('仅支持 .xlsx / .xls / .csv / .tsv 文件')
+      toast.error('仅支持 .xlsx / .xls / .csv / .tsv 文件')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+    if (file.size > DEVICE_IMPORT_MAX_BYTES) {
+      setParseError('文件不能超过 10MB')
+      toast.error('文件不能超过 10MB')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+
     setParsing(true)
     try {
-      const text = await file.text()
+      const buffer = await file.arrayBuffer()
       setFileName(file.name)
 
       if (activeKind === 'device_inventory') {
-        const result = parseDeviceInventoryCsv(text)
+        const result = parseDeviceImportFile(buffer, file.name, 'device_inventory')
         if (!result.ok) {
           setParseError(result.error)
           return
@@ -221,7 +241,7 @@ export function SupplierDeviceImportPanel({
       }
 
       if (activeKind === 'device_changelog') {
-        const result = parseDeviceChangelogCsv(text)
+        const result = parseDeviceImportFile(buffer, file.name, 'device_changelog')
         if (!result.ok) {
           setParseError(result.error)
           return
@@ -232,7 +252,7 @@ export function SupplierDeviceImportPanel({
         return
       }
 
-      const result = parseFaultRecordsCsv(text)
+      const result = parseDeviceImportFile(buffer, file.name, 'fault_records')
       if (!result.ok) {
         setParseError(result.error)
         return
@@ -430,8 +450,17 @@ export function SupplierDeviceImportPanel({
         </TabsContent>
       </Tabs>
 
-      <Dialog open={wizardOpen} onOpenChange={(o) => { setWizardOpen(o); if (!o) resetWizard() }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={wizardOpen}
+        modal={false}
+        onOpenChange={(o) => { setWizardOpen(o); if (!o) resetWizard() }}
+      >
+        <DialogContent
+          className="max-w-4xl min-w-[70vw] max-h-[90vh] flex flex-col"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
+          <div className="min-h-0 overflow-y-auto overscroll-contain pr-1 -mr-1">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5" />
@@ -455,14 +484,22 @@ export function SupplierDeviceImportPanel({
                       <Loader2 className="w-4 h-4 animate-spin" />
                       加载机房...
                     </p>
+                  ) : dataCenters.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">该供应商暂无机房，请先在「机房管理」中添加</p>
                   ) : (
-                    <Select value={dataCenterId} onValueChange={setDataCenterId}>
-                      <SelectTrigger>
+                    <Select
+                      value={dataCenterId || undefined}
+                      onValueChange={setDataCenterId}
+                    >
+                      <SelectTrigger className="w-full">
                         <SelectValue placeholder="选择机房" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent position="popper" className="z-[100]">
                         {dataCenters.map((dc) => (
-                          <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
+                          <SelectItem key={dc.id} value={dc.id}>
+                            {dc.name}
+                            {dc.code ? ` · ${dc.code}` : ''}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -472,11 +509,14 @@ export function SupplierDeviceImportPanel({
               {activeKind === 'fault_records' && dataCenters.length > 0 && (
                 <div className="space-y-2">
                   <Label>默认机房编码（可选）</Label>
-                  <Select value={dataCenterId} onValueChange={setDataCenterId}>
-                    <SelectTrigger>
+                  <Select
+                    value={dataCenterId || undefined}
+                    onValueChange={setDataCenterId}
+                  >
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder={dataCenters[0]?.code ?? '选择机房'} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent position="popper" className="z-[100]">
                       {dataCenters.map((dc) => (
                         <SelectItem key={dc.id} value={dc.id}>{dc.code} · {dc.name}</SelectItem>
                       ))}
@@ -503,13 +543,15 @@ export function SupplierDeviceImportPanel({
                 onClick={() => fileRef.current?.click()}
               >
                 <Upload className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-                <p className="text-sm font-medium">点击上传 CSV / TSV</p>
-                <p className="text-xs text-muted-foreground mt-1">首行为表头，UTF-8 编码</p>
+                <p className="text-sm font-medium">点击上传 Excel / CSV</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  支持 .xlsx / .xls / .csv / .tsv；首行为表头，CSV 须 UTF-8，最大 10MB
+                </p>
               </div>
               <input
                 ref={fileRef}
                 type="file"
-                accept=".csv,.tsv,.txt"
+                accept={DEVICE_IMPORT_ACCEPT}
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
@@ -553,6 +595,7 @@ export function SupplierDeviceImportPanel({
               </DialogFooter>
             </div>
           )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
@@ -614,8 +657,10 @@ function PreviewTable({
           <TableRow>
             <TableHead>行</TableHead>
             <TableHead>设备ID</TableHead>
-            <TableHead>内网IP</TableHead>
+            <TableHead>IP地址</TableHead>
             <TableHead>设备状态</TableHead>
+            <TableHead>合作类型</TableHead>
+            <TableHead>设备配置</TableHead>
             <TableHead>维修中</TableHead>
             <TableHead>校验</TableHead>
           </TableRow>
@@ -627,6 +672,14 @@ function PreviewTable({
               <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
               <TableCell>{r.internal_ip ?? '—'}</TableCell>
               <TableCell>{r.ops_status}</TableCell>
+              <TableCell>
+                {r.cooperation_type
+                  ? DEVICE_COOPERATION_TYPE_LABELS[r.cooperation_type]
+                  : '—'}
+              </TableCell>
+              <TableCell className="max-w-[120px] truncate text-xs" title={r.device_spec}>
+                {r.device_spec ?? '—'}
+              </TableCell>
               <TableCell>{r.in_maintenance ? '是' : '否'}</TableCell>
               <TableCell>
                 <ParseStatusBadge status={r.parse_status} />

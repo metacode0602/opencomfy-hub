@@ -13,6 +13,7 @@ import {
   isHttpUrl,
   mapCooperationMode,
   normalizePlatformTenantId,
+  resolveExternalTenantId,
 } from "@/lib/supplier/supplier-import-utils"
 import { crmError, crmLog, crmWarn } from "@/lib/server/dataaccess/crm/logger"
 import type { dataCenter, supplier } from "@workspace/db/schema"
@@ -472,6 +473,7 @@ export function mapSupplierApplicationToDbFields(
     defaultCooperationMode: row.cooperation_mode ?? "card_time",
     status: row.status ?? "negotiating",
     externalOnboardingId: row.external_onboarding_id ?? null,
+    externalTenantId: resolveExternalTenantId(row),
     platformTenantId: normalizePlatformTenantId(row.platform_tenant_id) ?? null,
     onboardingType: row.onboarding_type ?? null,
     identityNo: row.identity_no ?? null,

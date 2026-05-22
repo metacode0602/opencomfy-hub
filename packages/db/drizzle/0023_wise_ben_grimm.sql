@@ -1,0 +1,1 @@
+ALTER TABLE "supplier_device" ADD COLUMN "cooperation_type" varchar(32) DEFAULT 'idle_time' NOT NULL;

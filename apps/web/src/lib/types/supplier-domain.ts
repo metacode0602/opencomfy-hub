@@ -86,6 +86,14 @@ export type OnboardingParsedRow = {
   parse_message?: string | null
 }
 
+/** 设备合作类型：闲时合作 / 整租合作 */
+export type DeviceCooperationType = "idle_time" | "whole_rent"
+
+export const DEVICE_COOPERATION_TYPE_LABELS: Record<DeviceCooperationType, string> = {
+  idle_time: "闲时合作",
+  whole_rent: "整租合作",
+}
+
 /** 设备主数据表 Excel 解析行（batch_kind=device_inventory） */
 export type DeviceInventoryParsedRow = {
   row_no: number
@@ -99,6 +107,7 @@ export type DeviceInventoryParsedRow = {
   in_maintenance?: boolean
   bandwidth_group?: string
   rate_limit?: string
+  cooperation_type?: DeviceCooperationType
   device_spec?: string
   received_at?: string
   remark?: string
@@ -191,6 +200,7 @@ export type SupplierDevice = {
   in_maintenance?: boolean
   bandwidth_group?: string | null
   rate_limit?: string | null
+  cooperation_type?: DeviceCooperationType
   device_spec?: string | null
   received_at?: string | null
   remark?: string | null

@@ -6,6 +6,7 @@ import {
   deriveShortName,
   deriveSupplierCode,
   normalizePlatformTenantId,
+  resolveExternalTenantId,
 } from '@/lib/supplier/supplier-import-utils'
 import type {
   SupplierImportCommitResult,
@@ -103,6 +104,7 @@ export function rowToDbFields(row: SupplierImportParsedRow) {
     defaultCooperationMode: row.cooperation_mode ?? 'card_time',
     status: row.status ?? 'negotiating',
     externalOnboardingId: row.external_onboarding_id ?? null,
+    externalTenantId: resolveExternalTenantId(row),
     platformTenantId: normalizePlatformTenantId(row.platform_tenant_id) ?? null,
     onboardingType: row.onboarding_type ?? null,
     identityNo: row.identity_no ?? null,

@@ -56,13 +56,19 @@ import { Label } from '@workspace/ui/components/label'
 import { RadioGroup } from '@workspace/ui/components/radio-group'
 import { Textarea } from '@workspace/ui/components/textarea'
 import { CreateCardPricingDialog } from '@/components/dashboard/create-card-pricing-dialog'
-import { trpc } from '@/lib/trpc/client'
 import {
-  mockDataCenters,
-  mockSupplierPricingHistory,
-  mockSupplierPricingRecords,
-  mockSuppliers,
-} from '@/lib/data/mock-data'
+  formatPlatformPeriodDateTime,
+  formatPlatformPeriodRange,
+  fromDatetimeLocalValue,
+  toDatetimeLocalValue,
+} from '@/lib/platform-pricing/datetime'
+import { PricingConfigStatusBadge } from '@/components/dashboard/pricing-config-status-badge'
+import {
+  isPricingRecordUnavailable,
+  pricingRecordRowClassName,
+  pricingValueClassName,
+} from '@/lib/supplier/pricing-record-status'
+import { trpc } from '@/lib/trpc/client'
 import type {
   ContractPricingMode,
   ContractPricingTier,
@@ -76,20 +82,13 @@ import {
   manufacturerNames,
 } from '@/lib/data/types'
 
-function formatDateTime(iso?: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  return formatPlatformPeriodDateTime(value)
 }
 
-function formatDate(iso?: string) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('zh-CN')
+function formatEffectiveRange(from: string, to?: string | null) {
+  return formatPlatformPeriodRange(from, to ?? null)
 }
 
 function getRecordPricingMode(record: SupplierPricingRecord): ContractPricingMode {
@@ -119,14 +118,6 @@ function historyChangeLabel(row: SupplierPricingHistory) {
   return { prev, next, unit: '' }
 }
 
-function buildInitialPricing(): SupplierPricingRecord[] {
-  return mockSupplierPricingRecords.map((r) => ({ ...r }))
-}
-
-function buildInitialHistory(): SupplierPricingHistory[] {
-  return [...mockSupplierPricingHistory]
-}
-
 export interface UnitCostsContentProps {
   /** 锁定为指定供应商（用于供应商详情页嵌入） */
   supplierId?: string
@@ -135,8 +126,15 @@ export interface UnitCostsContentProps {
 }
 
 export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: UnitCostsContentProps = {}) {
-  const [pricingRecords, setPricingRecords] = useState<SupplierPricingRecord[]>(buildInitialPricing)
-  const [history, setHistory] = useState<SupplierPricingHistory[]>(buildInitialHistory)
+  const utils = trpc.useUtils()
+  const listInput = lockedSupplierId ? { supplierId: lockedSupplierId } : undefined
+
+  const { data: pricingRecords = [], isLoading: recordsLoading } =
+    trpc.supplier.unitCosts.listRecords.useQuery(listInput)
+  const { data: history = [] } = trpc.supplier.unitCosts.listHistory.useQuery(listInput)
+  const { data: suppliers = [] } = trpc.supplier.list.useQuery(undefined, {
+    enabled: !lockedSupplierId,
+  })
   const { data: activeCardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
 
   const [searchTerm, setSearchTerm] = useState('')
@@ -144,6 +142,28 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
   const [dataCenterFilter, setDataCenterFilter] = useState('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
   const [cardTypeFilter, setCardTypeFilter] = useState('all')
+
+  const scopeSupplierId =
+    lockedSupplierId ?? (supplierFilter !== 'all' ? supplierFilter : undefined)
+  const { data: scopedDataCenters = [] } = trpc.supplier.listDataCenters.useQuery(
+    { supplierId: scopeSupplierId! },
+    { enabled: Boolean(scopeSupplierId) },
+  )
+
+  const createMutation = trpc.supplier.unitCosts.create.useMutation({
+    onSuccess: async () => {
+      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
+      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      setCreateDialogOpen(false)
+    },
+  })
+  const updateMutation = trpc.supplier.unitCosts.update.useMutation({
+    onSuccess: async () => {
+      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
+      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      setEditDialogOpen(false)
+    },
+  })
 
   const [historySearch, setHistorySearch] = useState('')
   const [historySupplierFilter, setHistorySupplierFilter] = useState('all')
@@ -157,6 +177,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
   const [editUnitPrice, setEditUnitPrice] = useState('')
   const [editSharePercent, setEditSharePercent] = useState('')
   const [editEffectiveFrom, setEditEffectiveFrom] = useState('')
+  const [editEffectiveTo, setEditEffectiveTo] = useState('')
   const [editReason, setEditReason] = useState('')
 
   const selectedRecord = useMemo(
@@ -214,16 +235,22 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
   }, [scopedPricingRecords])
 
   const dataCenterOptions = useMemo(() => {
-    const scopeId = lockedSupplierId ?? (supplierFilter === 'all' ? null : supplierFilter)
-    if (!scopeId) return mockDataCenters
-    return mockDataCenters.filter((dc) => dc.supplierId === scopeId)
-  }, [supplierFilter, lockedSupplierId])
+    if (scopedDataCenters.length > 0) return scopedDataCenters
+    const seen = new Map<string, { id: string; name: string }>()
+    for (const row of pricingRecords) {
+      if (!seen.has(row.dataCenterId)) {
+        seen.set(row.dataCenterId, { id: row.dataCenterId, name: row.dataCenterName })
+      }
+    }
+    return [...seen.values()]
+  }, [scopedDataCenters, pricingRecords])
 
   const openEdit = (record: SupplierPricingRecord) => {
     setSelectedId(record.id)
     setEditUnitPrice(record.unitPricePerHour?.toString() ?? '')
     setEditSharePercent(record.revenueSharePercent?.toString() ?? '')
-    setEditEffectiveFrom(record.effectiveFrom)
+    setEditEffectiveFrom(toDatetimeLocalValue(record.effectiveFrom))
+    setEditEffectiveTo(record.effectiveTo ? toDatetimeLocalValue(record.effectiveTo) : '')
     setEditReason('')
     setEditDialogOpen(true)
   }
@@ -241,7 +268,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
   const confirmEdit = () => {
     if (!selectedId || !selectedRecord) return
 
-    const now = new Date().toISOString()
+    const pricingMode = getRecordPricingMode(selectedRecord)
     const isCardTime = selectedRecord.cooperationMode === 'card_time'
     const newUnitPrice = isCardTime ? parseFloat(editUnitPrice) : undefined
     const newShare = !isCardTime ? parseFloat(editSharePercent) : undefined
@@ -249,47 +276,21 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
     if (isCardTime && (newUnitPrice == null || Number.isNaN(newUnitPrice))) return
     if (!isCardTime && (newShare == null || Number.isNaN(newShare))) return
 
-    const hasChange = isCardTime
-      ? newUnitPrice !== selectedRecord.unitPricePerHour
-      : newShare !== selectedRecord.revenueSharePercent
+    const effectiveFrom = fromDatetimeLocalValue(editEffectiveFrom)
+    const effectiveTo = editEffectiveTo.trim()
+      ? fromDatetimeLocalValue(editEffectiveTo)
+      : null
 
-    if (hasChange) {
-      const historyRow: SupplierPricingHistory = {
-        id: `sph-${Date.now()}`,
-        pricingRecordId: selectedId,
-        supplierId: selectedRecord.supplierId,
-        supplierName: selectedRecord.supplierName,
-        dataCenterId: selectedRecord.dataCenterId,
-        dataCenterName: selectedRecord.dataCenterName,
-        cardTypeId: selectedRecord.cardTypeId,
-        cardTypeName: selectedRecord.cardTypeName,
-        cooperationMode: selectedRecord.cooperationMode,
-        previousUnitPricePerHour: selectedRecord.unitPricePerHour,
-        newUnitPricePerHour: newUnitPrice,
-        previousRevenueSharePercent: selectedRecord.revenueSharePercent,
-        newRevenueSharePercent: newShare,
-        changedAt: now,
-        changedBy: '当前用户',
-        reason: editReason || undefined,
-      }
-      setHistory((prev) => [historyRow, ...prev])
-    }
-
-    setPricingRecords((prev) =>
-      prev.map((r) =>
-        r.id === selectedId
-          ? {
-              ...r,
-              unitPricePerHour: newUnitPrice,
-              revenueSharePercent: newShare,
-              effectiveFrom: editEffectiveFrom || r.effectiveFrom,
-              updatedAt: now,
-              updatedBy: '当前用户',
-            }
-          : r,
-      ),
-    )
-    setEditDialogOpen(false)
+    updateMutation.mutate({
+      recordId: selectedId,
+      pricingMode,
+      unitPricePerHour: newUnitPrice,
+      revenueSharePercent: newShare,
+      pricingTiers: selectedRecord.pricingTiers,
+      effectiveFrom,
+      effectiveTo,
+      reason: editReason || undefined,
+    })
   }
 
   if (view === 'detail' && selectedRecord) {
@@ -307,8 +308,11 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
         setEditSharePercent={setEditSharePercent}
         editEffectiveFrom={editEffectiveFrom}
         setEditEffectiveFrom={setEditEffectiveFrom}
+        editEffectiveTo={editEffectiveTo}
+        setEditEffectiveTo={setEditEffectiveTo}
         editReason={editReason}
         setEditReason={setEditReason}
+        isSubmitting={updateMutation.isPending}
         onConfirmEdit={confirmEdit}
       />
     )
@@ -321,7 +325,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
           <div>
             <h1 className="text-2xl font-semibold text-foreground">卡型单价管理</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              按供应商 × 机房 × 卡型维护合作模式下的单价或分成比例，并追溯历史变更
+              按供应商 × 机房 × 卡型维护计价模式下的单价或分成比例，并追溯历史变更
             </p>
           </div>
           <Button className="gap-2" onClick={() => setCreateDialogOpen(true)}>
@@ -403,7 +407,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">全部供应商</SelectItem>
-                      {mockSuppliers.map((s) => (
+                      {suppliers.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
                           {s.shortName}
                         </SelectItem>
@@ -439,7 +443,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                 </Select>
                 <Select value={modeFilter} onValueChange={setModeFilter}>
                   <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="合作模式" />
+                    <SelectValue placeholder="计价模式" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部模式</SelectItem>
@@ -459,16 +463,23 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                   <TableHead className="text-muted-foreground">机房</TableHead>
                   <TableHead className="text-muted-foreground">卡型</TableHead>
                   <TableHead className="text-muted-foreground">计价方式</TableHead>
+                  <TableHead className="text-muted-foreground">状态</TableHead>
                   <TableHead className="text-muted-foreground">单价 / 分成</TableHead>
-                  <TableHead className="text-muted-foreground">生效日期</TableHead>
+                  <TableHead className="text-muted-foreground">生效时间</TableHead>
                   <TableHead className="text-muted-foreground">最近更新</TableHead>
                   <TableHead className="text-muted-foreground w-[50px]" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredPricing.length === 0 ? (
+                {recordsLoading ? (
                   <TableRow className="border-border">
-                    <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-12">
+                      加载中…
+                    </TableCell>
+                  </TableRow>
+                ) : filteredPricing.length === 0 ? (
+                  <TableRow className="border-border">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground py-12">
                       暂无匹配的配置
                     </TableCell>
                   </TableRow>
@@ -476,7 +487,7 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                   filteredPricing.map((row) => (
                     <TableRow
                       key={row.id}
-                      className="border-border cursor-pointer"
+                      className={`border-border cursor-pointer ${pricingRecordRowClassName(row)}`}
                       onClick={() => openDetail(row.id)}
                     >
                       <TableCell>
@@ -498,10 +509,18 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                       <TableCell>
                         <PricingModeBadge mode={getRecordPricingMode(row)} />
                       </TableCell>
-                      <TableCell className="font-medium text-foreground">
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <PricingConfigStatusBadge record={row} />
+                        {!isPricingRecordUnavailable(row) ? (
+                          <span className="text-xs text-muted-foreground">可用</span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className={pricingValueClassName(row)}>
                         {pricingValueLabel(row)}
                       </TableCell>
-                      <TableCell className="text-foreground">{formatDate(row.effectiveFrom)}</TableCell>
+                      <TableCell className="text-foreground text-sm whitespace-nowrap">
+                        {formatEffectiveRange(row.effectiveFrom, row.effectiveTo)}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {formatDateTime(row.updatedAt)}
                       </TableCell>
@@ -517,7 +536,9 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
                               查看详情与历史
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => openEdit(row)}>
-                              调整单价 / 分成
+                              {isPricingRecordUnavailable(row)
+                                ? '完善单价 / 分成'
+                                : '调整单价 / 分成'}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -535,9 +556,23 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
         onOpenChange={setCreateDialogOpen}
         existingRecords={pricingRecords}
         cardTypes={activeCardTypes}
+        suppliers={suppliers}
+        dataCenters={scopedDataCenters}
+        lockedSupplierId={lockedSupplierId}
+        isSubmitting={createMutation.isPending}
         onCreated={(record) => {
-          setPricingRecords((prev) => [record, ...prev])
-          setCreateDialogOpen(false)
+          const pricingMode = record.pricingMode ?? 'card_time'
+          createMutation.mutate({
+            supplierId: record.supplierId,
+            dataCenterId: record.dataCenterId,
+            gpuCardTypeId: record.cardTypeId,
+            pricingMode,
+            unitPricePerHour: record.unitPricePerHour,
+            revenueSharePercent: record.revenueSharePercent,
+            pricingTiers: record.pricingTiers,
+            effectiveFrom: record.effectiveFrom,
+            effectiveTo: record.effectiveTo ?? null,
+          })
         }}
       />
 
@@ -551,8 +586,11 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
         setSharePercent={setEditSharePercent}
         effectiveFrom={editEffectiveFrom}
         setEffectiveFrom={setEditEffectiveFrom}
+        effectiveTo={editEffectiveTo}
+        setEffectiveTo={setEditEffectiveTo}
         reason={editReason}
         setReason={setEditReason}
+        isSubmitting={updateMutation.isPending}
         onConfirm={confirmEdit}
       />
     </div>
@@ -601,8 +639,11 @@ function EditPricingDialog({
   setSharePercent,
   effectiveFrom,
   setEffectiveFrom,
+  effectiveTo,
+  setEffectiveTo,
   reason,
   setReason,
+  isSubmitting,
   onConfirm,
 }: {
   open: boolean
@@ -614,8 +655,11 @@ function EditPricingDialog({
   setSharePercent: (v: string) => void
   effectiveFrom: string
   setEffectiveFrom: (v: string) => void
+  effectiveTo: string
+  setEffectiveTo: (v: string) => void
   reason: string
   setReason: (v: string) => void
+  isSubmitting?: boolean
   onConfirm: () => void
 }) {
   if (!record) return null
@@ -665,12 +709,24 @@ function EditPricingDialog({
             </div>
           )}
           <div className="grid gap-2">
-            <Label>生效日期</Label>
+            <Label>生效时间</Label>
             <Input
-              type="date"
+              type="datetime-local"
+              step={1}
               value={effectiveFrom}
               onChange={(e) => setEffectiveFrom(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">格式：yyyy-MM-dd HH:mm:ss</p>
+          </div>
+          <div className="grid gap-2">
+            <Label>结束时间（可选）</Label>
+            <Input
+              type="datetime-local"
+              step={1}
+              value={effectiveTo}
+              onChange={(e) => setEffectiveTo(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">留空表示长期有效</p>
           </div>
           <div className="grid gap-2">
             <Label>变更备注</Label>
@@ -686,7 +742,9 @@ function EditPricingDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={onConfirm}>保存并记录历史</Button>
+          <Button onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? '保存中…' : '保存并记录历史'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -706,8 +764,11 @@ function UnitCostDetailView(props: {
   setEditSharePercent: (v: string) => void
   editEffectiveFrom: string
   setEditEffectiveFrom: (v: string) => void
+  editEffectiveTo: string
+  setEditEffectiveTo: (v: string) => void
   editReason: string
   setEditReason: (v: string) => void
+  isSubmitting?: boolean
   onConfirmEdit: () => void
 }) {
   const {
@@ -723,8 +784,11 @@ function UnitCostDetailView(props: {
     setEditSharePercent,
     editEffectiveFrom,
     setEditEffectiveFrom,
+    editEffectiveTo,
+    setEditEffectiveTo,
     editReason,
     setEditReason,
+    isSubmitting,
     onConfirmEdit,
   } = props
 
@@ -764,9 +828,9 @@ function UnitCostDetailView(props: {
         </Card>
         <Card className="bg-card border-border">
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">生效日期</p>
-            <p className="text-2xl font-semibold text-foreground mt-1">
-              {formatDate(record.effectiveFrom)}
+            <p className="text-sm text-muted-foreground">生效时间</p>
+            <p className="text-lg font-semibold text-foreground mt-1 whitespace-nowrap">
+              {formatEffectiveRange(record.effectiveFrom, record.effectiveTo)}
             </p>
           </CardContent>
         </Card>
@@ -871,8 +935,11 @@ function UnitCostDetailView(props: {
         setSharePercent={setEditSharePercent}
         effectiveFrom={editEffectiveFrom}
         setEffectiveFrom={setEditEffectiveFrom}
+        effectiveTo={editEffectiveTo}
+        setEffectiveTo={setEditEffectiveTo}
         reason={editReason}
         setReason={setEditReason}
+        isSubmitting={isSubmitting}
         onConfirm={onConfirmEdit}
       />
     </div>

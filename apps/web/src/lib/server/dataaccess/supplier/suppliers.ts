@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import type {
+  CooperationMode,
   DataCenter,
   DataCenterDevice,
   GPUCardType,
@@ -41,14 +42,18 @@ function newId() {
 }
 
 export const suppliersDataAccess = {
-  async list(): Promise<Supplier[]> {
-    const rows = await db
+  async list(input?: { externalTenantId?: string }): Promise<Supplier[]> {
+    const baseQuery = db
       .select({
         row: supplier,
         businessManagerName: userStaff.displayName,
       })
       .from(supplier)
       .leftJoin(userStaff, eq(supplier.businessManagerStaffId, userStaff.id))
+
+    const rows = input?.externalTenantId
+      ? await baseQuery.where(eq(supplier.externalTenantId, input.externalTenantId))
+      : await baseQuery
 
     const dcCounts = await db
       .select({ supplierId: dataCenter.supplierId, value: count() })
@@ -337,6 +342,51 @@ export const suppliersDataAccess = {
       throw new Error('供应商不存在')
     }
     return row
+  },
+
+  async update(input: {
+    id: string
+    name: string
+    shortName: string
+    status: Supplier['status']
+    cooperationMode: CooperationMode
+    revenueShareRatio?: number
+    businessManagerStaffId: string
+    contactPerson: string
+    contactPhone: string
+    contactEmail: string
+    address: string
+    bankAccount?: string
+    bankName?: string
+  }): Promise<Supplier> {
+    await this.assertSupplierExists(input.id)
+
+    await db
+      .update(supplier)
+      .set({
+        name: input.name,
+        shortName: input.shortName,
+        status: input.status,
+        defaultCooperationMode: input.cooperationMode,
+        defaultRevenueSharePercent:
+          input.cooperationMode === 'revenue_share' && input.revenueShareRatio != null
+            ? String(input.revenueShareRatio)
+            : null,
+        businessManagerStaffId: input.businessManagerStaffId,
+        contactPerson: input.contactPerson,
+        contactPhone: input.contactPhone,
+        contactEmail: input.contactEmail,
+        address: input.address,
+        bankAccount: input.bankAccount ?? null,
+        bankName: input.bankName ?? null,
+      })
+      .where(eq(supplier.id, input.id))
+
+    const updated = await this.getById(input.id)
+    if (!updated) {
+      throw new Error('供应商不存在')
+    }
+    return updated
   },
 }
 

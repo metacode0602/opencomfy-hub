@@ -18,6 +18,11 @@ import {
 } from '@/lib/supplier/device-import-utils'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
+import { ensurePricingRecordsForImportedCardTypes } from '@/lib/server/dataaccess/supplier/ensure-pricing-on-device-import'
+import {
+  refreshSupplierGpuInventoryForDataCenter,
+  refreshSupplierGpuInventoryForDataCenters,
+} from '@/lib/server/dataaccess/supplier/gpu-inventory-sync'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
 import {
   computeNode,
@@ -31,7 +36,7 @@ import {
   supplierDeviceChangeLog,
   supplierOpsUploadBatch,
 } from '@workspace/db/schema'
-import { and, count, desc, eq, inArray } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, or } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -47,6 +52,7 @@ async function loadSupplierRow(supplierId: string) {
       code: true,
       name: true,
       shortName: true,
+      defaultCooperationMode: true,
     },
   })
   if (!row) throw new Error('供应商不存在')
@@ -115,6 +121,7 @@ function mapDbDeviceToDomain(
     in_maintenance: row.inMaintenance,
     bandwidth_group: row.bandwidthGroup,
     rate_limit: row.rateLimit,
+    cooperation_type: (row.cooperationType ?? 'idle_time') as SupplierDevice['cooperation_type'],
     device_spec: row.deviceSpec,
     received_at: row.receivedAt?.toISOString() ?? null,
     remark: row.remark,
@@ -140,6 +147,39 @@ function parseIsoDate(value: string | null | undefined): Date | null {
   if (!value?.trim()) return null
   const d = new Date(value)
   return Number.isNaN(d.getTime()) ? null : d
+}
+
+async function loadExistingDeviceKeys(
+  devices: SupplierDevice[],
+): Promise<{ sns: Set<string>; assetNos: Set<string> }> {
+  const sns = [...new Set(devices.map((d) => d.sn).filter(Boolean))]
+  const assetNos = [...new Set(devices.map((d) => d.asset_no).filter(Boolean))]
+  if (sns.length === 0 && assetNos.length === 0) {
+    return { sns: new Set(), assetNos: new Set() }
+  }
+
+  const conditions = []
+  if (sns.length > 0) conditions.push(inArray(supplierDevice.sn, sns))
+  if (assetNos.length > 0) conditions.push(inArray(supplierDevice.assetNo, assetNos))
+
+  const rows = await db
+    .select({ sn: supplierDevice.sn, assetNo: supplierDevice.assetNo })
+    .from(supplierDevice)
+    .where(conditions.length === 1 ? conditions[0]! : or(...conditions))
+
+  return {
+    sns: new Set(rows.map((r) => r.sn)),
+    assetNos: new Set(rows.map((r) => r.assetNo).filter((v): v is string => Boolean(v))),
+  }
+}
+
+function isDuplicateDevice(
+  device: SupplierDevice,
+  existing: { sns: Set<string>; assetNos: Set<string> },
+): boolean {
+  if (existing.sns.has(device.sn)) return true
+  if (device.asset_no && existing.assetNos.has(device.asset_no)) return true
+  return false
 }
 
 export const deviceImportDataAccess = {
@@ -269,9 +309,12 @@ export const deviceImportDataAccess = {
     })
 
     const gpuCache = new Map<string, string>()
+    const committedCardTypeIds: string[] = []
+    const committedDeviceIds = new Set<string>()
     const warnings: string[] = []
     let committedCount = 0
     let skippedCount = 0
+    const existingDeviceKeys = await loadExistingDeviceKeys(newDevices)
 
     try {
       await db.transaction(async (tx) => {
@@ -305,83 +348,101 @@ export const deviceImportDataAccess = {
         })
 
         for (const device of newDevices) {
+          if (isDuplicateDevice(device, existingDeviceKeys)) {
+            skippedCount++
+            warnings.push(`设备 ${device.sn} 已存在，已跳过`)
+            continue
+          }
+
           const row = okRows.find(
             (r) =>
               r.external_device_id === device.external_device_id ||
               r.internal_ip === device.internal_ip ||
               r.sn === device.sn,
           )
-          try {
-            const gpuCardTypeId = await resolveGpuCardTypeId(row?.gpu_card_type_code, gpuCache)
-            await tx.insert(supplierDevice).values({
-              id: device.id,
-              supplierId: params.supplierId,
-              contractId,
-              onboardingBatchId: batchId,
-              dataCenterId: dc.id,
-              gpuCardTypeId,
-              externalDeviceId: device.external_device_id,
-              assetNo: device.asset_no,
-              sn: device.sn,
-              idcCode: device.idc_code,
-              idcRegion: device.idc_region || null,
-              gpuCount: Number(device.gpu_count) || 8,
-              externalIp: device.external_ip || null,
-              internalIp: device.internal_ip || null,
-              opsStatus: device.ops_status ?? '预留闲置中',
-              lifecycleStatus: device.lifecycle_status,
-              inMaintenance: device.in_maintenance ?? false,
-              onboardingSubstage: device.onboarding_substage,
-              bandwidthGroup: device.bandwidth_group,
-              rateLimit: device.rate_limit,
-              deviceSpec: device.device_spec,
-              receivedAt: parseIsoDate(device.received_at),
-              remark: device.remark,
-              loginUsername: device.login_username,
-              loginPassword: device.login_password,
-              platformResourceId: device.platform_resource_id,
-              createdAt: now,
-              updatedAt: now,
-            })
-            committedCount++
-          } catch (e) {
-            skippedCount++
-            const message = e instanceof Error ? e.message : '写入失败'
-            if (message.includes('unique') || message.includes('duplicate')) {
-              warnings.push(`设备 ${device.sn} 已存在，已跳过`)
-            } else {
-              warnings.push(`设备 ${device.sn}: ${message}`)
-            }
-            supplierWarn('device-import', 'device insert skipped', {
-              sn: device.sn,
-              message,
-            })
-          }
+          const gpuCardTypeId = await resolveGpuCardTypeId(row?.gpu_card_type_code, gpuCache)
+          await tx.insert(supplierDevice).values({
+            id: device.id,
+            supplierId: params.supplierId,
+            contractId,
+            onboardingBatchId: batchId,
+            dataCenterId: dc.id,
+            gpuCardTypeId,
+            externalDeviceId: device.external_device_id,
+            assetNo: device.asset_no,
+            sn: device.sn,
+            idcCode: device.idc_code,
+            idcRegion: device.idc_region || null,
+            gpuCount: Number(device.gpu_count) || 8,
+            externalIp: device.external_ip || null,
+            internalIp: device.internal_ip || null,
+            opsStatus: device.ops_status ?? '预留闲置中',
+            lifecycleStatus: device.lifecycle_status,
+            inMaintenance: device.in_maintenance ?? false,
+            onboardingSubstage: device.onboarding_substage,
+            bandwidthGroup: device.bandwidth_group,
+            rateLimit: device.rate_limit,
+            cooperationType: device.cooperation_type ?? 'idle_time',
+            deviceSpec: device.device_spec,
+            receivedAt: parseIsoDate(device.received_at),
+            remark: device.remark,
+            loginUsername: device.login_username,
+            loginPassword: device.login_password,
+            platformResourceId: device.platform_resource_id,
+            createdAt: now,
+            updatedAt: now,
+          })
+          committedCount++
+          committedCardTypeIds.push(gpuCardTypeId)
+          committedDeviceIds.add(device.id)
+          existingDeviceKeys.sns.add(device.sn)
+          if (device.asset_no) existingDeviceKeys.assetNos.add(device.asset_no)
         }
 
         for (const node of nodes) {
-          const deviceExists = newDevices.some((d) => d.id === node.device_id)
-          if (!deviceExists) continue
-          try {
-            await tx.insert(computeNode).values({
-              id: node.id,
-              supplierDeviceId: node.device_id,
-              nodeRole: node.node_role,
-              mgmtIp: node.mgmt_ip || null,
-              clusterName: node.cluster_name,
-              nodeName: node.node_name,
-              expectedService: node.expected_service,
-              clusterId: node.cluster_id || null,
-              lifecycleStatus: node.lifecycle_status,
-              createdAt: now,
-              updatedAt: now,
-            })
-          } catch (e) {
-            supplierWarn('device-import', 'compute node insert failed', {
-              deviceId: node.device_id,
-              err: e instanceof Error ? e.message : String(e),
+          if (!committedDeviceIds.has(node.device_id)) continue
+          await tx.insert(computeNode).values({
+            id: node.id,
+            supplierDeviceId: node.device_id,
+            nodeRole: node.node_role,
+            mgmtIp: node.mgmt_ip || null,
+            clusterName: node.cluster_name,
+            nodeName: node.node_name,
+            expectedService: node.expected_service,
+            clusterId: node.cluster_id || null,
+            lifecycleStatus: node.lifecycle_status,
+            createdAt: now,
+            updatedAt: now,
+          })
+        }
+
+        if (committedCount > 0) {
+          const pricingEnsure = await ensurePricingRecordsForImportedCardTypes(tx, {
+            supplierId: params.supplierId,
+            dataCenterId: dc.id,
+            gpuCardTypeIds: committedCardTypeIds,
+            defaultCooperationMode: supplierRow.defaultCooperationMode,
+            syncedAt: now,
+          })
+          if (pricingEnsure.createdCardTypeIds.length > 0) {
+            warnings.push(
+              `新增 ${pricingEnsure.createdCardTypeIds.length} 条机房卡型成本占位（单价 0，新增收入，状态不可用，请在卡型成本中完善）`,
+            )
+            supplierLog('device-import', 'pricing placeholders created', {
+              count: pricingEnsure.createdCardTypeIds.length,
+              gpuCardTypeIds: pricingEnsure.createdCardTypeIds,
             })
           }
+
+          const invSync = await refreshSupplierGpuInventoryForDataCenter(tx, {
+            supplierId: params.supplierId,
+            dataCenterId: dc.id,
+            syncedAt: now,
+          })
+          supplierLog('device-import', 'gpu inventory synced', {
+            dataCenterId: dc.id,
+            upserted: invSync.upserted,
+          })
         }
 
         await tx.insert(supplierActivity).values({
@@ -528,6 +589,18 @@ export const deviceImportDataAccess = {
               updatedAt: now,
             })
             .where(eq(supplierDevice.id, device.id))
+        }
+
+        if (logs.length > 0 || updatedDevices.length > 0) {
+          const dcIds = [
+            dc.id,
+            ...updatedDevices.map((d) => d.data_center_id).filter(Boolean),
+          ]
+          await refreshSupplierGpuInventoryForDataCenters(tx, {
+            supplierId: params.supplierId,
+            dataCenterIds: dcIds,
+            syncedAt: now,
+          })
         }
 
         await tx.insert(supplierActivity).values({

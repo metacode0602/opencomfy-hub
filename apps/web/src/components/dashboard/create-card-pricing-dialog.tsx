@@ -26,11 +26,18 @@ import type {
   ContractPricingMode,
   ContractPricingTier,
   CooperationMode,
+  DataCenter,
   GPUCardType,
   Supplier,
   SupplierPricingRecord,
 } from '@/lib/data/types'
+import {
+  fromDatetimeLocalValue,
+  nowPlatformDateTime,
+  toDatetimeLocalValue,
+} from '@/lib/platform-pricing/datetime'
 import { contractPricingModeNames, isSharePricingMode } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 
 type PricingCategory = 'card_time' | 'revenue_share'
 type PricingVariant = 'fixed' | 'tiered'
@@ -41,6 +48,12 @@ type CreateCardPricingDialogBaseProps = {
   existingRecords: SupplierPricingRecord[]
   cardTypes: GPUCardType[]
   onCreated: (record: SupplierPricingRecord) => void
+  /** 来自数据库的供应商列表（优先于 mock） */
+  suppliers?: Supplier[]
+  /** 来自数据库的机房列表（已按供应商筛选时可直接传入） */
+  dataCenters?: DataCenter[]
+  lockedSupplierId?: string
+  isSubmitting?: boolean
 }
 
 export type CreateCardPricingDialogProps =
@@ -102,9 +115,18 @@ export function CreateCardPricingDialog({
   existingRecords,
   cardTypes,
   onCreated,
-  supplier: lockedSupplier,
+  supplier: lockedSupplierProp,
+  suppliers: suppliersProp,
+  dataCenters: dataCentersProp,
+  lockedSupplierId,
+  isSubmitting = false,
 }: CreateCardPricingDialogProps) {
-  const [supplierId, setSupplierId] = useState(lockedSupplier?.id ?? '')
+  const supplierOptions = suppliersProp ?? mockSuppliers
+  const lockedSupplier =
+    lockedSupplierProp ??
+    (lockedSupplierId ? supplierOptions.find((s) => s.id === lockedSupplierId) : undefined)
+
+  const [supplierId, setSupplierId] = useState(lockedSupplier?.id ?? lockedSupplierId ?? '')
   const [dataCenterId, setDataCenterId] = useState('')
   const [cardTypeId, setCardTypeId] = useState('')
   const [category, setCategory] = useState<PricingCategory>('card_time')
@@ -113,17 +135,30 @@ export function CreateCardPricingDialog({
   const [sharePercent, setSharePercent] = useState('')
   const [tiers, setTiers] = useState<ContractPricingTier[]>([emptyTier(1), emptyTier(2)])
   const [effectiveFrom, setEffectiveFrom] = useState('')
+  const [effectiveTo, setEffectiveTo] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const pricingMode = pricingModeFromSelection(category, variant)
   const isTiered = variant === 'tiered'
   const isShare = category === 'revenue_share'
   const resolvedSupplierId = lockedSupplier?.id ?? supplierId
+  const isDbMode =
+    Boolean(suppliersProp?.length) ||
+    Boolean(lockedSupplierProp) ||
+    Boolean(lockedSupplierId)
+
+  const { data: fetchedDataCenters = [], isLoading: dataCentersLoading } =
+    trpc.supplier.listDataCenters.useQuery(
+      { supplierId: resolvedSupplierId },
+      { enabled: isDbMode && Boolean(resolvedSupplierId) },
+    )
 
   const dataCenterOptions = useMemo(() => {
+    if (isDbMode) return fetchedDataCenters
+    if (dataCentersProp && dataCentersProp.length > 0) return dataCentersProp
     if (!resolvedSupplierId) return []
     return mockDataCenters.filter((dc) => dc.supplierId === resolvedSupplierId)
-  }, [resolvedSupplierId])
+  }, [isDbMode, fetchedDataCenters, dataCentersProp, resolvedSupplierId])
 
   useEffect(() => {
     if (!open) {
@@ -135,7 +170,8 @@ export function CreateCardPricingDialog({
       setUnitPrice('')
       setSharePercent('')
       setTiers([emptyTier(1), emptyTier(2)])
-      setEffectiveFrom('')
+      setEffectiveFrom(toDatetimeLocalValue(nowPlatformDateTime()))
+      setEffectiveTo('')
       setSubmitError(null)
     }
   }, [open, lockedSupplier?.id])
@@ -180,7 +216,7 @@ export function CreateCardPricingDialog({
       return
     }
     if (!effectiveFrom) {
-      setSubmitError('请填写生效日期')
+      setSubmitError('请填写生效时间')
       return
     }
 
@@ -195,9 +231,8 @@ export function CreateCardPricingDialog({
       return
     }
 
-    const supplier =
-      lockedSupplier ?? mockSuppliers.find((s) => s.id === resolvedSupplierId)
-    const dataCenter = mockDataCenters.find((dc) => dc.id === dataCenterId)
+    const supplier = lockedSupplier ?? supplierOptions.find((s) => s.id === resolvedSupplierId)
+    const dataCenter = dataCenterOptions.find((dc) => dc.id === dataCenterId)
     const cardType = cardTypes.find((c) => c.id === cardTypeId)
     if (!supplier || !dataCenter || !cardType) {
       setSubmitError('所选供应商、机房或卡型无效')
@@ -255,6 +290,11 @@ export function CreateCardPricingDialog({
     }
 
     const now = new Date().toISOString()
+    const effectiveFromValue = fromDatetimeLocalValue(effectiveFrom)
+    const effectiveToValue = effectiveTo.trim()
+      ? fromDatetimeLocalValue(effectiveTo)
+      : null
+
     onCreated({
       id: `spr-new-${Date.now()}`,
       supplierId: supplier.id,
@@ -268,7 +308,8 @@ export function CreateCardPricingDialog({
       unitPricePerHour,
       revenueSharePercent,
       pricingTiers,
-      effectiveFrom,
+      effectiveFrom: effectiveFromValue,
+      effectiveTo: effectiveToValue,
       updatedAt: now,
       updatedBy: '当前用户',
     })
@@ -300,11 +341,11 @@ export function CreateCardPricingDialog({
                     setSubmitError(null)
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue placeholder="选择供应商" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockSuppliers.map((s) => (
+                    {supplierOptions.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
                         {s.shortName}
                       </SelectItem>
@@ -321,11 +362,19 @@ export function CreateCardPricingDialog({
                   setDataCenterId(v)
                   setSubmitError(null)
                 }}
-                disabled={!resolvedSupplierId}
+                disabled={!resolvedSupplierId || dataCentersLoading}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue
-                    placeholder={resolvedSupplierId ? '选择机房' : '请先选供应商'}
+                    placeholder={
+                      !resolvedSupplierId
+                        ? '请先选供应商'
+                        : dataCentersLoading
+                          ? '加载机房…'
+                          : dataCenterOptions.length === 0
+                            ? '该供应商暂无机房'
+                            : '选择机房'
+                    }
                   />
                 </SelectTrigger>
                 <SelectContent>
@@ -346,7 +395,7 @@ export function CreateCardPricingDialog({
                   setSubmitError(null)
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="选择卡型" />
                 </SelectTrigger>
                 <SelectContent>
@@ -536,12 +585,25 @@ export function CreateCardPricingDialog({
           )}
 
           <div className="grid gap-2">
-            <Label>生效日期 *</Label>
+            <Label>生效时间 *</Label>
             <Input
-              type="date"
+              type="datetime-local"
+              step={1}
               value={effectiveFrom}
               onChange={(e) => setEffectiveFrom(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">格式：yyyy-MM-dd HH:mm:ss</p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>结束时间（可选）</Label>
+            <Input
+              type="datetime-local"
+              step={1}
+              value={effectiveTo}
+              onChange={(e) => setEffectiveTo(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">留空表示长期有效</p>
           </div>
 
           {submitError && <p className="text-sm text-destructive">{submitError}</p>}
@@ -551,7 +613,9 @@ export function CreateCardPricingDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit}>创建配置</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? '创建中…' : '创建配置'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

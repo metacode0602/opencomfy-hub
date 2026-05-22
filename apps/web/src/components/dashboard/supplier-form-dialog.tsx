@@ -195,7 +195,7 @@ function SupplierFormFields({ form, onChange, activeStaff, idPrefix }: SupplierF
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label>合作模式</Label>
+          <Label>计价模式</Label>
           <Select
             value={form.cooperationMode}
             onValueChange={(v) =>
@@ -378,7 +378,7 @@ export type EditSupplierDialogProps = {
   onOpenChange: (open: boolean) => void
   supplier: Supplier | null
   activeStaff: UserStaff[]
-  onUpdated: (supplier: Supplier) => void
+  onUpdated: (supplier: Supplier) => void | Promise<void>
 }
 
 export function EditSupplierDialog({
@@ -399,18 +399,21 @@ export function EditSupplierDialog({
     }
   }, [open, supplier, activeStaff])
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!supplier) return
     const result = validateSupplierForm(form, activeStaff)
     if (!result.ok) return
 
     const fields = formToSupplierFields(form, result.businessManager)
-    onUpdated({
-      ...supplier,
-      ...fields,
-    })
-    onOpenChange(false)
-    toast.success('供应商信息已更新')
+    try {
+      await onUpdated({
+        ...supplier,
+        ...fields,
+      })
+      onOpenChange(false)
+    } catch {
+      // 保存失败时保持弹窗打开，错误提示由调用方处理
+    }
   }
 
   return (

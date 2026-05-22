@@ -166,6 +166,11 @@ export function normalizePlatformTenantId(raw?: string | null): string | undefin
   return s ? s : undefined
 }
 
+/** 导入行租户 ID → supplier.external_tenant_id（无租户 ID 时为空字符串） */
+export function resolveExternalTenantId(row: SupplierImportParsedRow): string {
+  return normalizePlatformTenantId(row.platform_tenant_id) ?? ''
+}
+
 function maskIdentity(no: string | undefined): string {
   if (!no) return '—'
   if (no.length <= 8) return no
@@ -311,6 +316,32 @@ export function buildSupplierImportPreview(
       )
     }
 
+    if (tenantId) {
+      const existingByExternalTenant = existingSuppliers.find(
+        (s) => s.externalTenantId === tenantId,
+      )
+      if (existingByExternalTenant) {
+        return {
+          row_no: row.row_no,
+          name: row.name,
+          onboarding_type: row.onboarding_type,
+          identity_no: maskIdentity(row.identity_no),
+          action: 'skip',
+          matched_supplier_id: existingByExternalTenant.id,
+          business_manager_note: 'keep_existing',
+          business_manager_label: existingByExternalTenant.businessManager,
+          parse_status: 'ok',
+          parse_message: '租户 ID 已存在，跳过',
+          field_warnings: softWarnings,
+          errors: [],
+          warnings: [],
+          errorFields: [],
+          errorColumnIndexes: [],
+          selectable: false,
+        }
+      }
+    }
+
     const matched = findMatchingSupplier(row, existingSuppliers)
     if (tenantId) {
       const other = existingSuppliers.find(
@@ -396,6 +427,7 @@ function parsedToSupplierFields(row: SupplierImportParsedRow): Partial<Supplier>
     cooperationMode: row.cooperation_mode ?? 'card_time',
     status: row.status ?? 'negotiating',
     externalOnboardingId: row.external_onboarding_id,
+    externalTenantId: resolveExternalTenantId(row) || undefined,
     platformTenantId: normalizePlatformTenantId(row.platform_tenant_id),
     onboardingType: row.onboarding_type,
     identityNo: row.identity_no,

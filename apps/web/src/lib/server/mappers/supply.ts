@@ -3,6 +3,7 @@ import type {
   CooperationMode,
   DataCenter,
   DataCenterDevice,
+  DeviceCooperationType,
   GPUCardType,
   PhysicalDevice,
   Supplier,
@@ -31,7 +32,16 @@ type SupplierBillRow = typeof supplierBill.$inferSelect
 type SupplierBillDetailRow = typeof supplierBillDetail.$inferSelect
 type SupplierPricingRecordRow = typeof supplierPricingRecord.$inferSelect
 type SupplierPricingHistoryRow = typeof supplierPricingHistory.$inferSelect
+import { normalizePlatformDateTime } from '@/lib/platform-pricing/datetime'
 import { toIsoDate, toNumber } from '@/lib/server/mappers/crm'
+
+function toPricingDateTime(value: Date | string | null | undefined): string {
+  if (!value) return ''
+  if (value instanceof Date) {
+    return normalizePlatformDateTime(value.toISOString())
+  }
+  return normalizePlatformDateTime(String(value))
+}
 
 function pricingModeToCooperationMode(mode: string): CooperationMode {
   return mode === 'revenue_share' || mode === 'tiered_revenue_share' ? 'revenue_share' : 'card_time'
@@ -60,6 +70,7 @@ export function mapSupplierRow(
     bankAccount: row.bankAccount ?? undefined,
     bankName: row.bankName ?? undefined,
     externalOnboardingId: row.externalOnboardingId ?? undefined,
+    externalTenantId: row.externalTenantId || undefined,
     platformTenantId: row.platformTenantId ?? undefined,
     onboardingType: (row.onboardingType as Supplier['onboardingType']) ?? undefined,
     identityNo: row.identityNo ?? undefined,
@@ -223,12 +234,14 @@ export function mapSupplierPricingRecordRow(
     dataCenterName: names.dataCenterName,
     cardTypeId: row.gpuCardTypeId,
     cardTypeName: names.cardTypeName,
+    configStatus: (row.configStatus ?? 'active') as SupplierPricingRecord['configStatus'],
     cooperationMode: pricingModeToCooperationMode(pricingMode),
     pricingMode,
     unitPricePerHour: row.unitPricePerHour ? toNumber(row.unitPricePerHour) : undefined,
     revenueSharePercent: row.revenueSharePercent ? toNumber(row.revenueSharePercent) : undefined,
     pricingTiers: (row.pricingTiers as SupplierPricingRecord['pricingTiers']) ?? undefined,
-    effectiveFrom: toIsoDate(row.effectiveFrom),
+    effectiveFrom: toPricingDateTime(row.effectiveFrom),
+    effectiveTo: row.effectiveTo ? toPricingDateTime(row.effectiveTo) : null,
     updatedAt: row.updatedAt.toISOString(),
     updatedBy: updatedBy ?? undefined,
   }
@@ -311,6 +324,8 @@ export function mapPhysicalDeviceRow(
     externalDeviceId: row.externalDeviceId,
     opsStatus: row.opsStatus,
     inMaintenance: row.inMaintenance,
+    cooperationType: (row.cooperationType ?? 'idle_time') as DeviceCooperationType,
+    deviceSpec: row.deviceSpec,
     createdAt: toIsoDate(row.createdAt),
     updatedAt: toIsoDate(row.updatedAt),
   }

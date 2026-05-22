@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
+import { unitCostsDataAccess } from '@/lib/server/dataaccess/unit-costs'
 import { platformPricingDataAccess } from '@/lib/server/dataaccess/platform-pricing'
 import { platformPricingError } from '@/lib/server/dataaccess/platform-pricing/logger'
 import { gpuCardTypesDataAccess } from '@/lib/server/dataaccess/supplier/gpu-card-types'
@@ -31,6 +32,12 @@ import {
   platformPriceUpdateSchema,
   platformPriceUpsertSchema,
 } from '@/lib/server/routers/supplier/platform-pricing-schemas'
+import { supplierListSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
+import {
+  unitCostListSchema,
+  unitCostUpdateSchema,
+  unitCostUpsertSchema,
+} from '@/lib/server/routers/supplier/unit-costs-schemas'
 import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -97,9 +104,9 @@ function mapImportError(error: unknown): never {
 }
 
 export const supplierRouter = createTRPCRouter({
-  list: protectedProcedure.query(async () => {
+  list: protectedProcedure.input(supplierListSchema).query(async ({ input }) => {
     try {
-      return await suppliersDataAccess.list()
+      return await suppliersDataAccess.list(input)
     } catch (e) {
       mapImportError(e)
     }
@@ -118,6 +125,14 @@ export const supplierRouter = createTRPCRouter({
         mapImportError(e)
       }
     }),
+
+  update: adminProcedure.input(supplierUpdateSchema).mutation(async ({ input }) => {
+    try {
+      return await suppliersDataAccess.update(input)
+    } catch (e) {
+      mapImportError(e)
+    }
+  }),
 
   listDataCenters: protectedProcedure
     .input(z.object({ supplierId: z.string() }))
@@ -515,6 +530,61 @@ export const supplierRouter = createTRPCRouter({
           mapImportError(e)
         }
       }),
+  }),
+
+  unitCosts: createTRPCRouter({
+    listRecords: protectedProcedure.input(unitCostListSchema).query(async ({ input }) => {
+      try {
+        return await unitCostsDataAccess.listRecords(input?.supplierId)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    listHistory: protectedProcedure.input(unitCostListSchema).query(async ({ input }) => {
+      try {
+        return await unitCostsDataAccess.listHistory(input?.supplierId)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    create: adminProcedure.input(unitCostUpsertSchema).mutation(async ({ input, ctx }) => {
+      try {
+        return await unitCostsDataAccess.createRecord({
+          ...input,
+          pricingMode: input.pricingMode,
+          updatedByStaffId: ctx.user.id,
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    update: adminProcedure.input(unitCostUpdateSchema).mutation(async ({ input, ctx }) => {
+      try {
+        const row = await unitCostsDataAccess.getRecordById(input.recordId)
+        if (!row) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '成本配置不存在' })
+        }
+        return await unitCostsDataAccess.updateRecord({
+          supplierId: row.supplierId,
+          dataCenterId: row.dataCenterId,
+          gpuCardTypeId: row.cardTypeId,
+          pricingMode: input.pricingMode,
+          unitPricePerHour: input.unitPricePerHour,
+          revenueSharePercent: input.revenueSharePercent,
+          pricingTiers: input.pricingTiers,
+          effectiveFrom: input.effectiveFrom,
+          effectiveTo: input.effectiveTo,
+          recordId: input.recordId,
+          reason: input.reason,
+          changedByStaffId: ctx.user.id,
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
   }),
 
   platformPricing: createTRPCRouter({

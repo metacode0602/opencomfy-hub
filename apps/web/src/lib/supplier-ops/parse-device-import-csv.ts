@@ -3,6 +3,7 @@ import type {
   DeviceInventoryParsedRow,
   FaultRecordsParsedRow,
 } from "@/lib/types/supplier-domain"
+import { mapDeviceCooperationType } from "@/lib/supplier/device-import-utils"
 
 export type ParseCsvResult<T> = { ok: true; rows: T[] } | { ok: false; error: string }
 
@@ -37,11 +38,35 @@ function splitLine(line: string): string[] {
   return out
 }
 
-function parseLines(text: string): string[][] {
+/** CSV/TSV 文本 → 行列表 */
+export function parseCsvTextToTable(text: string): string[][] {
   const rawLines = text.split(/\r?\n/).map((l) => l.trimEnd())
   const lines = rawLines.filter((l) => normCell(l).length > 0)
-  if (lines.length < 2) return []
   return lines.map(splitLine)
+}
+
+/** Excel 矩阵 → 行列表（与 CSV 解析共用后续逻辑） */
+export function importMatrixToTable(matrix: unknown[][]): string[][] {
+  const rows = matrix.map((row) =>
+    (Array.isArray(row) ? row : []).map((v) => {
+      if (v == null) return ""
+      if (v instanceof Date) {
+        return normCell(
+          v.toLocaleString("zh-CN", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }),
+        )
+      }
+      return normCell(String(v))
+    }),
+  )
+  return rows.filter((row) => row.some((c) => c.length > 0))
 }
 
 function pickIndex(headers: string[], aliases: string[]): number {
@@ -75,14 +100,22 @@ const KNOWN_OPS_STATUS = new Set([
 ])
 
 /** 设备主数据表：supplier_device + compute_node */
-export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInventoryParsedRow> {
-  const table = parseLines(text)
+export function parseDeviceInventoryTable(
+  table: string[][],
+): ParseCsvResult<DeviceInventoryParsedRow> {
   if (table.length < 2) {
     return { ok: false, error: "文件至少需要表头一行与一行数据" }
   }
   const headers = table[0]!
   const iDeviceId = pickIndex(headers, ["设备id", "设备ID", "external_device_id"])
-  const iInternalIp = pickIndex(headers, ["内网ip地址", "内网ip", "内网IP", "internal_ip"])
+  const iInternalIp = pickIndex(headers, [
+    "ip地址",
+    "IP地址",
+    "内网ip地址",
+    "内网ip",
+    "内网IP",
+    "internal_ip",
+  ])
   const iAsset = pickIndex(headers, ["设备标识", "asset_no", "sn"])
   const iGpuType = pickIndex(headers, ["显卡型号", "gpu_card_type", "卡型"])
   const iGpuCount = pickIndex(headers, ["显卡数量", "gpu_count"])
@@ -90,6 +123,7 @@ export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInve
   const iMaint = pickIndex(headers, ["维修中", "in_maintenance"])
   const iBw = pickIndex(headers, ["带宽组", "bandwidth_group"])
   const iRate = pickIndex(headers, ["限速", "rate_limit"])
+  const iCoop = pickIndex(headers, ["合作类型", "cooperation_type"])
   const iSpec = pickIndex(headers, ["设备配置", "device_spec"])
   const iReceived = pickIndex(headers, ["设备接收时间", "received_at"])
   const iRemark = pickIndex(headers, ["备注", "remark"])
@@ -119,6 +153,14 @@ export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInve
       parse_status = "warning"
       parse_message = `未知设备状态「${ops_status}」，入库时将尝试映射`
     }
+    const coopRaw = cell(cells, iCoop)
+    const cooperation = mapDeviceCooperationType(coopRaw || undefined)
+    if (cooperation.warning) {
+      if (parse_status === "ok") parse_status = "warning"
+      parse_message = parse_message
+        ? `${parse_message}；${cooperation.warning}`
+        : cooperation.warning
+    }
     const assetRaw = cell(cells, iAsset)
     rows.push({
       row_no: li + 1,
@@ -132,6 +174,7 @@ export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInve
       in_maintenance,
       bandwidth_group: cell(cells, iBw) || undefined,
       rate_limit: cell(cells, iRate) || undefined,
+      cooperation_type: cooperation.type,
       device_spec: cell(cells, iSpec) || undefined,
       received_at: cell(cells, iReceived) || undefined,
       remark: cell(cells, iRemark) || undefined,
@@ -149,15 +192,20 @@ export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInve
   return { ok: true, rows }
 }
 
+export function parseDeviceInventoryCsv(text: string): ParseCsvResult<DeviceInventoryParsedRow> {
+  return parseDeviceInventoryTable(parseCsvTextToTable(text))
+}
+
 /** 设备变更表：supplier_device_change_log */
-export function parseDeviceChangelogCsv(text: string): ParseCsvResult<DeviceChangelogParsedRow> {
-  const table = parseLines(text)
+export function parseDeviceChangelogTable(
+  table: string[][],
+): ParseCsvResult<DeviceChangelogParsedRow> {
   if (table.length < 2) {
     return { ok: false, error: "文件至少需要表头一行与一行数据" }
   }
   const headers = table[0]!
   const iDeviceId = pickIndex(headers, ["设备id", "设备ID"])
-  const iInternalIp = pickIndex(headers, ["内网ip", "内网IP"])
+  const iInternalIp = pickIndex(headers, ["内网ip", "内网IP", "ip地址", "IP地址"])
   const iOccurred = pickIndex(headers, ["操作时间", "occurred_at"])
   const iAction = pickIndex(headers, ["变更动作", "change_action"])
   const iContent = pickIndex(headers, ["变更内容", "change_content"])
@@ -200,9 +248,14 @@ export function parseDeviceChangelogCsv(text: string): ParseCsvResult<DeviceChan
   return { ok: true, rows }
 }
 
+export function parseDeviceChangelogCsv(text: string): ParseCsvResult<DeviceChangelogParsedRow> {
+  return parseDeviceChangelogTable(parseCsvTextToTable(text))
+}
+
 /** 故障记录表：fault_incident via supplier_ops_upload_batch */
-export function parseFaultRecordsCsv(text: string): ParseCsvResult<FaultRecordsParsedRow> {
-  const table = parseLines(text)
+export function parseDeviceFaultRecordsTable(
+  table: string[][],
+): ParseCsvResult<FaultRecordsParsedRow> {
   if (table.length < 2) {
     return { ok: false, error: "文件至少需要表头一行与一行数据" }
   }
@@ -245,4 +298,9 @@ export function parseFaultRecordsCsv(text: string): ParseCsvResult<FaultRecordsP
   }
   if (rows.length === 0) return { ok: false, error: "没有有效的数据行" }
   return { ok: true, rows }
+}
+
+/** @deprecated 使用 parseDeviceFaultRecordsTable */
+export function parseFaultRecordsCsv(text: string): ParseCsvResult<FaultRecordsParsedRow> {
+  return parseDeviceFaultRecordsTable(parseCsvTextToTable(text))
 }

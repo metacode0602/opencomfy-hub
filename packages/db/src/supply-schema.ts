@@ -50,6 +50,7 @@ export const supplier = pgTable(
   "supplier",
   {
     id: text("id").primaryKey(),
+    externalTenantId: text("external_tenant_id").notNull(), // 租户ID，对应外部平台的租户ID
     code: varchar("code", { length: 64 }).notNull(),
     name: varchar("name", { length: 255 }).notNull(),
     shortName: varchar("short_name", { length: 64 }).notNull(),
@@ -88,6 +89,7 @@ export const supplier = pgTable(
   },
   (table) => [
     uniqueIndex("supplier_code_uk").on(table.code),
+    uniqueIndex("supplier_external_tenant_id_uk").on(table.externalTenantId),
     uniqueIndex("supplier_external_onboarding_id_uk").on(table.externalOnboardingId),
     uniqueIndex("supplier_platform_tenant_id_uk").on(table.platformTenantId),
     index("supplier_status_idx").on(table.status),
@@ -324,12 +326,15 @@ export const supplierPricingRecord = pgTable(
       { onDelete: "set null" },
     ),
     pricingMode: varchar("pricing_mode", { length: 32 }).notNull(),
+    /** active 可用 / unavailable 不可用（导入占位，单价为 0） */
+    configStatus: varchar("config_status", { length: 32 }).notNull().default("active"),
     listPricePerHour: money("list_price_per_hour"),
     unitPricePerHour: money("unit_price_per_hour"),
     dealToListRatio: priceRatio("deal_to_list_ratio"),
     revenueSharePercent: numeric("revenue_share_percent", { precision: 7, scale: 4 }),
     pricingTiers: jsonb("pricing_tiers"),
-    effectiveFrom: date("effective_from").notNull(),
+    effectiveFrom: timestamp("effective_from", { mode: "string", precision: 0 }).notNull(),
+    effectiveTo: timestamp("effective_to", { mode: "string", precision: 0 }),
     updatedByStaffId: text("updated_by_staff_id").references(() => userStaff.id, {
       onDelete: "set null",
     }),
@@ -518,6 +523,8 @@ export const supplierDevice = pgTable(
     onboardingSubstage: varchar("onboarding_substage", { length: 64 }),
     bandwidthGroup: varchar("bandwidth_group", { length: 64 }),
     rateLimit: varchar("rate_limit", { length: 64 }),
+    /** 闲时合作 idle_time / 整租合作 whole_rent */
+    cooperationType: varchar("cooperation_type", { length: 32 }).notNull().default("idle_time"),
     deviceSpec: text("device_spec"),
     receivedAt: timestamp("received_at", { withTimezone: true }),
     remark: text("remark"),

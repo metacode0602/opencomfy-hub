@@ -97,12 +97,7 @@ const data = {
       title: "测试占用",
       url: "/supplier/test-holds",
       icon: <CheckCircleIcon className="size-4" />,
-    },
-    {
-      title: "系统卡型",
-      url: "/supplier/gpu-card-types",
-      icon: <Cpu className="size-4" />,
-    },
+    }
   ],
   navCrm: [
     {
@@ -153,12 +148,17 @@ const data = {
       icon: <CreditCard className="size-4" />,
     },
     {
+      title: "系统卡型",
+      url: "/supplier/gpu-card-types",
+      icon: <Cpu className="size-4" />,
+    },
+    {
       title: "平台定价",
       url: "/supplier/platform-pricing",
       icon: <Sparkles className="size-4" />,
     },
     {
-      title: "卡型单价",
+      title: "机房成本",
       url: "/supplier/unit-costs",
       icon: <DollarSignIcon className="size-4" />,
     },

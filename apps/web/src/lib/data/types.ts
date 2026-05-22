@@ -379,6 +379,8 @@ export interface Supplier {
   bankName?: string
   /** 入驻系统 ID（导入幂等） */
   externalOnboardingId?: string
+  /** 外部平台租户 ID（导入幂等） */
+  externalTenantId?: string
   platformTenantId?: string
   onboardingType?: SupplierOnboardingType
   identityNo?: string
@@ -499,6 +501,14 @@ export interface DataCenterDevice {
   updatedAt?: string
 }
 
+/** 设备合作类型（supplier_device.cooperation_type） */
+export type DeviceCooperationType = 'idle_time' | 'whole_rent'
+
+export const DEVICE_COOPERATION_TYPE_LABELS: Record<DeviceCooperationType, string> = {
+  idle_time: '闲时合作',
+  whole_rent: '整租合作',
+}
+
 /** 物理算力设备（supplier_device） */
 export interface PhysicalDevice {
   id: string
@@ -521,6 +531,8 @@ export interface PhysicalDevice {
   externalDeviceId: string | null
   opsStatus: string | null
   inMaintenance: boolean
+  cooperationType: DeviceCooperationType
+  deviceSpec: string | null
   createdAt: string
   updatedAt: string
 }
@@ -572,6 +584,9 @@ export interface SupplierBillDetail {
   tenantConsumption?: number // 客户实际消费（分成模式使用）
 }
 
+/** 机房卡型成本配置状态 */
+export type SupplierPricingConfigStatus = 'active' | 'unavailable'
+
 /** 供应商 × 机房 × 卡型 当前生效单价/分成配置 */
 export interface SupplierPricingRecord {
   id: string
@@ -581,6 +596,8 @@ export interface SupplierPricingRecord {
   dataCenterName: string
   cardTypeId: string
   cardTypeName: string
+  /** active 可用 / unavailable 不可用（导入占位） */
+  configStatus?: SupplierPricingConfigStatus
   cooperationMode: CooperationMode
   /** 固定卡时 / 阶梯卡时 / 固定分成 / 阶梯分成 */
   pricingMode?: ContractPricingMode
@@ -591,6 +608,8 @@ export interface SupplierPricingRecord {
   /** 阶梯卡时 / 阶梯分成档位 */
   pricingTiers?: ContractPricingTier[]
   effectiveFrom: string
+  /** yyyy-MM-dd HH:mm:ss，空表示长期有效 */
+  effectiveTo?: string | null
   updatedAt: string
   updatedBy?: string
 }

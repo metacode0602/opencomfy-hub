@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -50,7 +50,9 @@ import {
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
 import { SupplierDeviceImportPanel } from '@/components/dashboard/supplier-device-import-panel'
 import { SupplierDeviceRetireDialog } from '@/components/dashboard/supplier-device-retire-dialog'
+import { EditSupplierDialog } from '@/components/dashboard/supplier-form-dialog'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
+import { toast } from 'sonner'
 
 interface SupplierDetailContentProps {
   supplier: Supplier
@@ -69,15 +71,37 @@ const VALID_TABS = new Set([
   'ops-import',
 ])
 
-export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) {
+export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDetailContentProps) {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const tabFromUrl = searchParams.get('tab')
+  const [supplier, setSupplier] = useState(initialSupplier)
   const [activeTab, setActiveTab] = useState(
     tabFromUrl && VALID_TABS.has(tabFromUrl) ? tabFromUrl : 'overview',
   )
   const [retireDialogOpen, setRetireDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
   const domainSupplierId = resolveDomainSupplierId(supplier.id)
   const utils = trpc.useUtils()
+
+  const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery()
+
+  const updateSupplierMutation = trpc.supplier.update.useMutation({
+    onSuccess: (updated) => {
+      setSupplier(updated)
+      void utils.supplier.getById.invalidate({ id: updated.id })
+      void utils.supplier.list.invalidate()
+      router.refresh()
+      toast.success('供应商信息已更新')
+    },
+    onError: (error) => {
+      toast.error(error.message || '更新失败，请稍后重试')
+    },
+  })
+
+  useEffect(() => {
+    setSupplier(initialSupplier)
+  }, [initialSupplier])
 
   useEffect(() => {
     if (tabFromUrl && VALID_TABS.has(tabFromUrl)) setActiveTab(tabFromUrl)
@@ -151,11 +175,43 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline">编辑信息</Button>
-          <Button>同步数据</Button>
+          <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
+            编辑信息
+          </Button>
           <Button onClick={() => setRetireDialogOpen(true)}>设备下架</Button>
         </div>
       </div>
+
+      <EditSupplierDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        supplier={supplier}
+        activeStaff={activeStaff}
+        onUpdated={async (updated) => {
+          const businessManagerStaffId = activeStaff.find(
+            (s) => s.display_name === updated.businessManager,
+          )?.id
+          if (!businessManagerStaffId) {
+            toast.error('请选择有效的商务经理')
+            throw new Error('invalid business manager')
+          }
+          await updateSupplierMutation.mutateAsync({
+            id: updated.id,
+            name: updated.name,
+            shortName: updated.shortName,
+            status: updated.status,
+            cooperationMode: updated.cooperationMode,
+            revenueShareRatio: updated.revenueShareRatio,
+            businessManagerStaffId,
+            contactPerson: updated.contactPerson,
+            contactPhone: updated.contactPhone,
+            contactEmail: updated.contactEmail,
+            address: updated.address,
+            bankAccount: updated.bankAccount,
+            bankName: updated.bankName,
+          })
+        }}
+      />
 
       <SupplierDeviceRetireDialog
         open={retireDialogOpen}
@@ -172,7 +228,7 @@ export function SupplierDetailContent({ supplier }: SupplierDetailContentProps) 
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">合作模式</p>
+                <p className="text-sm text-muted-foreground">计价模式</p>
                 <div className="flex items-center gap-2 mt-1">
                   <Badge
                     variant="outline"

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   Factory,
   Search,
@@ -48,6 +49,7 @@ import { Tabs, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import { contractPricingModeNames, statusColors } from '@/lib/data/types'
 import type { Supplier } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
+import { toast } from 'sonner'
 import {
   CreateSupplierDialog,
   EditSupplierDialog,
@@ -66,9 +68,15 @@ const statusNames: Record<string, string> = {
   terminated: '已终止',
 }
 
-export function SuppliersContent() {
+interface SuppliersContentProps {
+  externalTenantId?: string
+}
+
+export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
+  const router = useRouter()
   const utils = trpc.useUtils()
-  const { data: suppliers = [], isLoading, refetch } = trpc.supplier.list.useQuery()
+  const listInput = externalTenantId ? { externalTenantId } : undefined
+  const { data: suppliers = [], isLoading, refetch } = trpc.supplier.list.useQuery(listInput)
   const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery()
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -82,11 +90,47 @@ export function SuppliersContent() {
     if (!open) setEditSupplier(null)
   }
 
+  const updateSupplierMutation = trpc.supplier.update.useMutation({
+    onSuccess: () => {
+      void utils.supplier.list.invalidate()
+      toast.success('供应商信息已更新')
+    },
+    onError: (error) => {
+      toast.error(error.message || '更新失败，请稍后重试')
+    },
+  })
+
+  const handleSupplierUpdated = async (updated: Supplier) => {
+    const businessManagerStaffId = activeStaff.find(
+      (s) => s.display_name === updated.businessManager,
+    )?.id
+    if (!businessManagerStaffId) {
+      toast.error('请选择有效的商务经理')
+      throw new Error('invalid business manager')
+    }
+    await updateSupplierMutation.mutateAsync({
+      id: updated.id,
+      name: updated.name,
+      shortName: updated.shortName,
+      status: updated.status,
+      cooperationMode: updated.cooperationMode,
+      revenueShareRatio: updated.revenueShareRatio,
+      businessManagerStaffId,
+      contactPerson: updated.contactPerson,
+      contactPhone: updated.contactPhone,
+      contactEmail: updated.contactEmail,
+      address: updated.address,
+      bankAccount: updated.bankAccount,
+      bankName: updated.bankName,
+    })
+  }
+
   const filteredSuppliers = suppliers.filter((supplier) => {
     const matchesSearch =
       supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       supplier.shortName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      supplier.businessManager.includes(searchTerm)
+      supplier.businessManager.includes(searchTerm) ||
+      supplier.externalTenantId?.includes(searchTerm)
     const matchesStatus = statusFilter === 'all' || supplier.status === statusFilter
     const matchesMode = modeFilter === 'all' || supplier.cooperationMode === modeFilter
     return matchesSearch && matchesStatus && matchesMode
@@ -209,12 +253,27 @@ export function SuppliersContent() {
 
       {/* Filters */}
       <Card className="bg-card border-border">
-        <CardContent className="p-4">
+        <CardContent className="p-4 space-y-3">
+          {externalTenantId && (
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="gap-2">
+                租户 ID: {externalTenantId}
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => router.push('/supplier/suppliers')}
+                  aria-label="清除租户 ID 筛选"
+                >
+                  ×
+                </button>
+              </Badge>
+            </div>
+          )}
           <div className="flex items-center gap-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="搜索供应商名称、商务经理..."
+                placeholder="搜索供应商名称、商务经理、租户 ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -234,7 +293,7 @@ export function SuppliersContent() {
             </Select>
             <Select value={modeFilter} onValueChange={setModeFilter}>
               <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="合作模式" />
+                <SelectValue placeholder="计价模式" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部模式</SelectItem>
@@ -261,7 +320,7 @@ export function SuppliersContent() {
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="text-muted-foreground">供应商</TableHead>
-                <TableHead className="text-muted-foreground">合作模式</TableHead>
+                <TableHead className="text-muted-foreground">计价模式</TableHead>
                 <TableHead className="text-muted-foreground">商务经理</TableHead>
                 <TableHead className="text-muted-foreground">机房数</TableHead>
                 <TableHead className="text-muted-foreground">设备数</TableHead>
@@ -470,7 +529,7 @@ export function SuppliersContent() {
         onOpenChange={handleEditOpenChange}
         supplier={editSupplier}
         activeStaff={activeStaff}
-        onUpdated={() => void refetch()}
+        onUpdated={handleSupplierUpdated}
       />
 
       {filteredSuppliers.length === 0 && (

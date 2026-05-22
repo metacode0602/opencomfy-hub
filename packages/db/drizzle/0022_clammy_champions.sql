@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "supplier_external_tenant_id_uk" ON "supplier" USING btree ("external_tenant_id");

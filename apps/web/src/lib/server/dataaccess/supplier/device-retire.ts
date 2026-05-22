@@ -75,6 +75,7 @@ function mapDbDeviceToDomain(
     in_maintenance: row.inMaintenance,
     bandwidth_group: row.bandwidthGroup,
     rate_limit: row.rateLimit,
+    cooperation_type: (row.cooperationType ?? 'idle_time') as SupplierDevice['cooperation_type'],
     device_spec: row.deviceSpec,
     received_at: row.receivedAt?.toISOString() ?? null,
     remark: row.remark,

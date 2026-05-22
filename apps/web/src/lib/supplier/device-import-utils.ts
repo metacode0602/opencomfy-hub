@@ -1,6 +1,7 @@
 import type {
   ComputeNode,
   DeviceChangelogParsedRow,
+  DeviceCooperationType,
   DeviceInventoryParsedRow,
   FaultIncident,
   FaultRecordsParsedRow,
@@ -34,6 +35,20 @@ export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
   device_retire: "设备下架",
 }
 
+export const DEVICE_IMPORT_ACCEPT = '.xlsx,.xls,.csv,.tsv,.txt'
+export const DEVICE_IMPORT_MAX_BYTES = 10 * 1024 * 1024
+
+export function isDeviceImportFileName(name: string): boolean {
+  const lower = name.toLowerCase()
+  return (
+    lower.endsWith('.xlsx') ||
+    lower.endsWith('.xls') ||
+    lower.endsWith('.csv') ||
+    lower.endsWith('.tsv') ||
+    lower.endsWith('.txt')
+  )
+}
+
 export const FAULT_IMPORT_STATUS_LABELS: Record<string, string> = {
   uploaded: "已上传",
   parsed: "待确认入库",
@@ -44,6 +59,18 @@ export const FAULT_IMPORT_STATUS_LABELS: Record<string, string> = {
 export function resolveLifecycleStatus(opsStatus: string, inMaintenance: boolean): string {
   if (inMaintenance) return "维护中"
   return OPS_STATUS_TO_LIFECYCLE[opsStatus] ?? "待接入"
+}
+
+export function mapDeviceCooperationType(raw: string | undefined): {
+  type: DeviceCooperationType
+  warning?: string
+} {
+  const s = raw?.trim()
+  if (!s) return { type: "idle_time" }
+  const normalized = s.replace(/\s+/g, "")
+  if (normalized.includes("整租")) return { type: "whole_rent" }
+  if (normalized.includes("闲时")) return { type: "idle_time" }
+  return { type: "idle_time", warning: `无法识别合作类型「${raw}」，默认闲时合作` }
 }
 
 export function generateImportBatchCode(batchKind: OnboardingBatchKind): string {
@@ -116,6 +143,7 @@ export function buildDevicesFromInventoryImport(params: {
   okRows.forEach((row, idx) => {
     const inMaint = row.in_maintenance ?? false
     const lifecycle = resolveLifecycleStatus(row.ops_status, inMaint)
+    const cooperationType = row.cooperation_type ?? "idle_time"
     const sn = row.sn?.trim() || row.asset_no?.trim() || `SN-${idcCode}-${String(idx + 1).padStart(4, "0")}`
     const asset = row.asset_no?.trim() || `AST-${idcCode}-${String(idx + 1).padStart(5, "0")}`
     const deviceId = createId("dev")
@@ -141,6 +169,7 @@ export function buildDevicesFromInventoryImport(params: {
       in_maintenance: inMaint,
       bandwidth_group: row.bandwidth_group ?? null,
       rate_limit: row.rate_limit ?? null,
+      cooperation_type: cooperationType,
       device_spec: row.device_spec ?? null,
       received_at: row.received_at ?? null,
       remark: row.remark ?? null,

@@ -14,6 +14,7 @@ export const deviceInventoryRowSchema = z.object({
   in_maintenance: z.boolean().optional(),
   bandwidth_group: z.string().optional(),
   rate_limit: z.string().optional(),
+  cooperation_type: z.enum(['idle_time', 'whole_rent']).optional(),
   device_spec: z.string().optional(),
   received_at: z.string().optional(),
   remark: z.string().optional(),

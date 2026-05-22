@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Cpu, DollarSign, MoreHorizontal, Percent, Plus, Search } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -38,29 +38,33 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
 import { CreateCardPricingDialog } from '@/components/dashboard/create-card-pricing-dialog'
+import { PricingConfigStatusBadge } from '@/components/dashboard/pricing-config-status-badge'
+import {
+  isPricingRecordUnavailable,
+  pricingRecordRowClassName,
+  pricingValueClassName,
+} from '@/lib/supplier/pricing-record-status'
 import type {
   ContractPricingMode,
   Supplier,
-  SupplierPricingHistory,
   SupplierPricingRecord,
 } from '@/lib/data/types'
 import { contractPricingModeNames } from '@/lib/data/types'
+import {
+  formatPlatformPeriodDateTime,
+  formatPlatformPeriodRange,
+  fromDatetimeLocalValue,
+  toDatetimeLocalValue,
+} from '@/lib/platform-pricing/datetime'
 import { trpc } from '@/lib/trpc/client'
 
-function formatDateTime(iso?: string | null) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+function formatDateTime(value?: string | null) {
+  if (!value) return '—'
+  return formatPlatformPeriodDateTime(value)
 }
 
-function formatDate(iso?: string) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('zh-CN')
+function formatEffectiveRange(from: string, to?: string | null) {
+  return formatPlatformPeriodRange(from, to ?? null)
 }
 
 function getRecordPricingMode(record: SupplierPricingRecord): ContractPricingMode {
@@ -100,25 +104,30 @@ interface SupplierUnitCostsPanelProps {
 }
 
 export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps) {
-  const { data: serverRecords = [], isLoading: recordsLoading } =
-    trpc.supplier.listPricingRecords.useQuery({ supplierId: supplier.id })
-  const { data: serverHistory = [] } = trpc.supplier.listPricingHistory.useQuery({
-    supplierId: supplier.id,
-  })
+  const listInput = { supplierId: supplier.id }
+  const utils = trpc.useUtils()
+
+  const { data: pricingRecords = [], isLoading: recordsLoading } =
+    trpc.supplier.unitCosts.listRecords.useQuery(listInput)
   const { data: dataCenterOptions = [] } = trpc.supplier.listDataCenters.useQuery({
     supplierId: supplier.id,
   })
-  const { data: activeCardTypes = [] } = trpc.supplier.listActiveGpuCardTypes.useQuery()
+  const { data: activeCardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
 
-  const [pricingRecords, setPricingRecords] = useState<SupplierPricingRecord[]>([])
-  const [history, setHistory] = useState<SupplierPricingHistory[]>([])
-
-  useEffect(() => {
-    if (!recordsLoading) {
-      setPricingRecords(serverRecords.map((r) => ({ ...r })))
-      setHistory(serverHistory.map((h) => ({ ...h })))
-    }
-  }, [recordsLoading, serverRecords, serverHistory])
+  const createMutation = trpc.supplier.unitCosts.create.useMutation({
+    onSuccess: async () => {
+      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
+      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      setCreateDialogOpen(false)
+    },
+  })
+  const updateMutation = trpc.supplier.unitCosts.update.useMutation({
+    onSuccess: async () => {
+      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
+      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      setEditDialogOpen(false)
+    },
+  })
 
   const [searchTerm, setSearchTerm] = useState('')
   const [dataCenterFilter, setDataCenterFilter] = useState('all')
@@ -131,14 +140,10 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
   const [editUnitPrice, setEditUnitPrice] = useState('')
   const [editSharePercent, setEditSharePercent] = useState('')
   const [editEffectiveFrom, setEditEffectiveFrom] = useState('')
+  const [editEffectiveTo, setEditEffectiveTo] = useState('')
   const [editReason, setEditReason] = useState('')
 
-  const supplierRecords = useMemo(
-    () => pricingRecords.filter((r) => r.supplierId === supplier.id),
-    [pricingRecords, supplier.id],
-  )
-
-  const filteredPricing = supplierRecords.filter((row) => {
+  const filteredPricing = pricingRecords.filter((row) => {
     const q = searchTerm.toLowerCase()
     const matchesSearch =
       row.dataCenterName.toLowerCase().includes(q) ||
@@ -158,7 +163,8 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
     setSelectedId(record.id)
     setEditUnitPrice(record.unitPricePerHour?.toString() ?? '')
     setEditSharePercent(record.revenueSharePercent?.toString() ?? '')
-    setEditEffectiveFrom(record.effectiveFrom)
+    setEditEffectiveFrom(toDatetimeLocalValue(record.effectiveFrom))
+    setEditEffectiveTo(record.effectiveTo ? toDatetimeLocalValue(record.effectiveTo) : '')
     setEditReason('')
     setEditDialogOpen(true)
   }
@@ -166,7 +172,7 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
   const confirmEdit = () => {
     if (!selectedId || !selectedRecord) return
 
-    const now = new Date().toISOString()
+    const pricingMode = getRecordPricingMode(selectedRecord)
     const isCardTime = selectedRecord.cooperationMode === 'card_time'
     const newUnitPrice = isCardTime ? parseFloat(editUnitPrice) : undefined
     const newShare = !isCardTime ? parseFloat(editSharePercent) : undefined
@@ -174,47 +180,18 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
     if (isCardTime && (newUnitPrice == null || Number.isNaN(newUnitPrice))) return
     if (!isCardTime && (newShare == null || Number.isNaN(newShare))) return
 
-    const hasChange = isCardTime
-      ? newUnitPrice !== selectedRecord.unitPricePerHour
-      : newShare !== selectedRecord.revenueSharePercent
-
-    if (hasChange) {
-      const historyRow: SupplierPricingHistory = {
-        id: `sph-${Date.now()}`,
-        pricingRecordId: selectedId,
-        supplierId: selectedRecord.supplierId,
-        supplierName: selectedRecord.supplierName,
-        dataCenterId: selectedRecord.dataCenterId,
-        dataCenterName: selectedRecord.dataCenterName,
-        cardTypeId: selectedRecord.cardTypeId,
-        cardTypeName: selectedRecord.cardTypeName,
-        cooperationMode: selectedRecord.cooperationMode,
-        previousUnitPricePerHour: selectedRecord.unitPricePerHour,
-        newUnitPricePerHour: newUnitPrice,
-        previousRevenueSharePercent: selectedRecord.revenueSharePercent,
-        newRevenueSharePercent: newShare,
-        changedAt: now,
-        changedBy: '当前用户',
-        reason: editReason || undefined,
-      }
-      setHistory((prev) => [historyRow, ...prev])
-    }
-
-    setPricingRecords((prev) =>
-      prev.map((r) =>
-        r.id === selectedId
-          ? {
-              ...r,
-              unitPricePerHour: newUnitPrice,
-              revenueSharePercent: newShare,
-              effectiveFrom: editEffectiveFrom || r.effectiveFrom,
-              updatedAt: now,
-              updatedBy: '当前用户',
-            }
-          : r,
-      ),
-    )
-    setEditDialogOpen(false)
+    updateMutation.mutate({
+      recordId: selectedId,
+      pricingMode,
+      unitPricePerHour: newUnitPrice,
+      revenueSharePercent: newShare,
+      pricingTiers: selectedRecord.pricingTiers,
+      effectiveFrom: fromDatetimeLocalValue(editEffectiveFrom),
+      effectiveTo: editEffectiveTo.trim()
+        ? fromDatetimeLocalValue(editEffectiveTo)
+        : null,
+      reason: editReason || undefined,
+    })
   }
 
   return (
@@ -270,7 +247,7 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
             </Select>
             <Select value={modeFilter} onValueChange={setModeFilter}>
               <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="合作模式" />
+                <SelectValue placeholder="计价模式" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部模式</SelectItem>
@@ -293,8 +270,9 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
               <TableHead className="text-muted-foreground">机房</TableHead>
               <TableHead className="text-muted-foreground">卡型</TableHead>
               <TableHead className="text-muted-foreground">计价方式</TableHead>
+              <TableHead className="text-muted-foreground">状态</TableHead>
               <TableHead className="text-muted-foreground">单价 / 分成</TableHead>
-              <TableHead className="text-muted-foreground">生效日期</TableHead>
+              <TableHead className="text-muted-foreground">生效时间</TableHead>
               <TableHead className="text-muted-foreground">最近更新</TableHead>
               <TableHead className="text-muted-foreground w-[50px]" />
             </TableRow>
@@ -302,13 +280,13 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
           <TableBody>
             {filteredPricing.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
                   暂无配置，点击「新增配置」添加机房卡型单价
                 </TableCell>
               </TableRow>
             ) : (
               filteredPricing.map((row) => (
-                <TableRow key={row.id} className="border-border">
+                <TableRow key={row.id} className={`border-border ${pricingRecordRowClassName(row)}`}>
                   <TableCell className="text-foreground">{row.dataCenterName}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -319,10 +297,18 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
                   <TableCell>
                     <PricingModeBadge mode={getRecordPricingMode(row)} />
                   </TableCell>
-                  <TableCell className="font-medium text-foreground">
+                  <TableCell>
+                    <PricingConfigStatusBadge record={row} />
+                    {!isPricingRecordUnavailable(row) ? (
+                      <span className="text-xs text-muted-foreground">可用</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className={pricingValueClassName(row)}>
                     {pricingValueLabel(row)}
                   </TableCell>
-                  <TableCell className="text-foreground">{formatDate(row.effectiveFrom)}</TableCell>
+                  <TableCell className="text-foreground text-sm whitespace-nowrap">
+                    {formatEffectiveRange(row.effectiveFrom, row.effectiveTo)}
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDateTime(row.updatedAt)}
                   </TableCell>
@@ -353,9 +339,21 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
         supplier={supplier}
         existingRecords={pricingRecords}
         cardTypes={activeCardTypes}
+        dataCenters={dataCenterOptions}
+        isSubmitting={createMutation.isPending}
         onCreated={(record) => {
-          setPricingRecords((prev) => [record, ...prev])
-          setCreateDialogOpen(false)
+          const pricingMode = record.pricingMode ?? 'card_time'
+          createMutation.mutate({
+            supplierId: record.supplierId,
+            dataCenterId: record.dataCenterId,
+            gpuCardTypeId: record.cardTypeId,
+            pricingMode,
+            unitPricePerHour: record.unitPricePerHour,
+            revenueSharePercent: record.revenueSharePercent,
+            pricingTiers: record.pricingTiers,
+            effectiveFrom: record.effectiveFrom,
+            effectiveTo: record.effectiveTo ?? null,
+          })
         }}
       />
 
@@ -369,8 +367,11 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
         setSharePercent={setEditSharePercent}
         effectiveFrom={editEffectiveFrom}
         setEffectiveFrom={setEditEffectiveFrom}
+        effectiveTo={editEffectiveTo}
+        setEffectiveTo={setEditEffectiveTo}
         reason={editReason}
         setReason={setEditReason}
+        isSubmitting={updateMutation.isPending}
         onConfirm={confirmEdit}
       />
     </div>
@@ -387,8 +388,11 @@ function EditPricingDialog({
   setSharePercent,
   effectiveFrom,
   setEffectiveFrom,
+  effectiveTo,
+  setEffectiveTo,
   reason,
   setReason,
+  isSubmitting,
   onConfirm,
 }: {
   open: boolean
@@ -400,8 +404,11 @@ function EditPricingDialog({
   setSharePercent: (v: string) => void
   effectiveFrom: string
   setEffectiveFrom: (v: string) => void
+  effectiveTo: string
+  setEffectiveTo: (v: string) => void
   reason: string
   setReason: (v: string) => void
+  isSubmitting?: boolean
   onConfirm: () => void
 }) {
   if (!record) return null
@@ -451,11 +458,21 @@ function EditPricingDialog({
             </div>
           )}
           <div className="grid gap-2">
-            <Label>生效日期</Label>
+            <Label>生效时间</Label>
             <Input
-              type="date"
+              type="datetime-local"
+              step={1}
               value={effectiveFrom}
               onChange={(e) => setEffectiveFrom(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>结束时间（可选）</Label>
+            <Input
+              type="datetime-local"
+              step={1}
+              value={effectiveTo}
+              onChange={(e) => setEffectiveTo(e.target.value)}
             />
           </div>
           <div className="grid gap-2">
@@ -472,7 +489,9 @@ function EditPricingDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={onConfirm}>保存并记录历史</Button>
+          <Button onClick={onConfirm} disabled={isSubmitting}>
+            {isSubmitting ? '保存中…' : '保存并记录历史'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
