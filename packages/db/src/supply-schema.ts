@@ -483,9 +483,15 @@ export const onboardingBatch = pgTable(
     committedDeviceCount: integer("committed_device_count").notNull().default(0),
     committedAt: timestamp("committed_at", { withTimezone: true }),
     retireReason: varchar("retire_reason", { length: 64 }),
+    /** device_unsubscribe | bare_metal_offboard */
+    retireActionType: varchar("retire_action_type", { length: 32 }),
+    /** line_plan | datacenter_closure */
+    retirePlanMode: varchar("retire_plan_mode", { length: 32 }),
     expectedCompletionDate: date("expected_completion_date"),
     retireRemark: text("retire_remark"),
     retiredDeviceCount: integer("retired_device_count").notNull().default(0),
+    /** 自动结案 / 动作不一致 / 超额挂接等排查标记 */
+    progressFlagsJson: jsonb("progress_flags_json"),
     createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
       onDelete: "set null",
     }),

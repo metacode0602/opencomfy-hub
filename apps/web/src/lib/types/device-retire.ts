@@ -104,12 +104,19 @@ export type DeviceRetireBatchListItem = {
   idcCode: string
   importStatus: string
   batchStatus: string
+  workOrderNo: string | null
+  plannedDeviceCount: number
+  touchedDeviceCount: number
   retiredDeviceCount: number
   parsedRowCount: number
   parsedSuccessCount: number
   parsedErrorCount: number
   retireReason: string | null
   retireReasonLabel: string | null
+  retirePlanMode: import('@/lib/types/datacenter-device-retire').RetirePlanMode | null
+  retireActionType: import('@/lib/types/datacenter-device-retire').RetireActionType | null
+  scenarioLabel: string | null
+  progressFlags: import('@/lib/supplier/retire-changelog-utils').RetireProgressFlags | null
   expectedCompletionDate: string | null
   importFileName: string | null
   committedAt: string | null
@@ -128,6 +135,7 @@ export type DeviceRetireBatchDeviceItem = {
   opsStatus: string
   previousLifecycleStatus: string | null
   previousOpsStatus: string | null
+  linkKind?: string | null
   parseStatus: 'ok' | 'warning' | 'error' | null
   rowNo: number | null
   warnings: string[]
@@ -139,14 +147,16 @@ export type DeviceRetireBatchDetail = DeviceRetireBatchListItem & {
   retireRemark: string | null
   parsedAt: string | null
   parsedRows: DeviceRetireParsedRow[]
+  plannedLines: import('@/lib/types/onboarding-batch-api').OnboardingBatchPlannedLineJson[]
   devices: DeviceRetireBatchDeviceItem[]
 }
 
 export const DEVICE_RETIRE_IMPORT_STATUS_LABELS: Record<string, string> = {
+  none: '无清单',
   draft: '草稿',
   uploaded: '已上传',
   parsing: '解析中',
-  parsed: '待确认',
+  parsed: '清单已存',
   parse_failed: '解析失败',
   committing: '下架中',
   committed: '已下架',

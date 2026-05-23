@@ -74,7 +74,7 @@ export function OfflineTasksContent() {
       <div>
         <h1 className="text-2xl font-semibold text-foreground">设备下架</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          查看各供应商机房的设备下架批次，点击批次号进入详情查看设备清单与状态。
+          查看各供应商机房的设备下架批次，点击批次号进入详情查看设备清单与状态。可在机房详情页发起设备下架。
         </p>
       </div>
 
@@ -162,8 +162,8 @@ export function OfflineTasksContent() {
                 <TableHead>供应商 / 机房</TableHead>
                 <TableHead>下架原因</TableHead>
                 <TableHead>期望完成</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>下架设备</TableHead>
+                <TableHead>批次状态</TableHead>
+                <TableHead>进度</TableHead>
                 <TableHead>提交时间</TableHead>
                 <TableHead className="w-[80px]" />
               </TableRow>
@@ -172,7 +172,7 @@ export function OfflineTasksContent() {
               {items.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
-                    暂无下架批次。可在供应商详情页发起设备下架。
+                    暂无下架批次。可在机房详情页发起设备下架。
                   </TableCell>
                 </TableRow>
               ) : (
@@ -197,21 +197,32 @@ export function OfflineTasksContent() {
                       {b.expectedCompletionDate ?? '—'}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={importStatusColor[b.importStatus] ?? ''}>
-                        {DEVICE_RETIRE_IMPORT_STATUS_LABELS[b.importStatus] ?? b.importStatus}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1">
+                        {b.scenarioLabel && (
+                          <Badge variant="outline" className="text-xs font-normal">
+                            {b.scenarioLabel}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs">
+                          {b.batchStatus}
+                        </Badge>
+                        {b.progressFlags?.needs_review && (
+                          <Badge variant="outline" className="text-xs bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                            待复核
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
-                      {b.retiredDeviceCount}
-                      {b.parsedRowCount > 0 ? ` / ${b.parsedRowCount}` : ''}
-                      {b.parsedErrorCount > 0 && (
-                        <span className="text-xs text-destructive ml-1">
-                          ({b.parsedErrorCount} 错误)
+                      {b.touchedDeviceCount} / {b.plannedDeviceCount}
+                      {b.retiredDeviceCount > 0 && (
+                        <span className="text-xs text-muted-foreground ml-1">
+                          (退订 {b.retiredDeviceCount})
                         </span>
                       )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {formatDt(b.committedAt ?? b.createdAt)}
+                      {formatDt(b.createdAt)}
                     </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" asChild>

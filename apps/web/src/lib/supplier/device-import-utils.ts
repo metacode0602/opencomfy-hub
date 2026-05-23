@@ -12,6 +12,13 @@ import type {
   SupplierOpsUploadBatch,
 } from "@/lib/types/supplier-domain"
 import { maskPassword } from "@/lib/supplier/onboarding-batch-utils"
+import type { RetireActionType } from "@/lib/types/datacenter-device-retire"
+import {
+  expectedRetireActionLabel,
+  isRetireActionCompatible,
+  resolveLifecycleFromChangelog,
+  resolveRetireLinkKind,
+} from "@/lib/supplier/retire-changelog-utils"
 import {
   CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
   OPS_STATUS_TO_LIFECYCLE_FROM_SEEDS,
@@ -252,6 +259,8 @@ export type ChangelogBusinessBatchLinkInput = {
   businessBatchId: string
   businessDataCenterId: string
   ticketRefs: Set<string>
+  batchKind?: "online" | "order_access" | "device_retire"
+  retireActionType?: RetireActionType | null
 }
 
 export type ChangelogDeviceLinkUpsert = {
@@ -287,7 +296,11 @@ function resolveOpsStatusFromChangelogRow(
   const defaultOps = CHANGE_ACTION_DEFAULT_OPS[row.change_action]
   if (defaultOps) {
     const newOps = defaultOps
-    const newLife = resolveLifecycleStatus(newOps, inMaint)
+    const newLife = resolveLifecycleFromChangelog({
+      changeAction: row.change_action,
+      newOps,
+      inMaintenance: inMaint,
+    })
     return {
       newOps,
       newLife,
@@ -322,6 +335,8 @@ export function buildChangeLogsFromChangelogImport(params: {
   const ticketRefs = businessBatchLink?.ticketRefs
   const businessDataCenterId = businessBatchLink?.businessDataCenterId
   const businessBatchId = businessBatchLink?.businessBatchId
+  const businessBatchKind = businessBatchLink?.batchKind
+  const retireActionType = businessBatchLink?.retireActionType
 
   for (const row of rows.filter((r) => r.parse_status !== "error")) {
     const device = findDeviceByImportKeys(devices, row)
@@ -348,13 +363,28 @@ export function buildChangeLogsFromChangelogImport(params: {
           `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 缺少卡型信息，未写入批次关联`,
         )
       } else if (!linkedDeviceIds.has(device.id)) {
+        if (
+          businessBatchKind === "device_retire" &&
+          retireActionType &&
+          !isRetireActionCompatible(retireActionType, row.change_action)
+        ) {
+          bindWarnings.push(
+            `第 ${row.row_no} 行：变更动作「${row.change_action}」与下架计划类型「${expectedRetireActionLabel(retireActionType)}」不一致；已挂接批次，请复核`,
+          )
+        }
         linkedDeviceIds.add(device.id)
+        const linkKind =
+          businessBatchKind === "device_retire"
+            ? resolveRetireLinkKind(row.change_action)
+            : newLife === "在线"
+              ? "online"
+              : "touched"
         deviceLinks.push({
           supplierDeviceId: device.id,
           gpuCardTypeId: device.gpu_card_type_id,
           cooperationType: device.cooperation_type ?? "idle_time",
           sourceChangeLogId: logId,
-          linkKind: newLife === "在线" ? "online" : "touched",
+          linkKind,
         })
       }
     }

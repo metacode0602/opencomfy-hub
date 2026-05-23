@@ -5,6 +5,7 @@ import type {
   DeviceRetireParsedRow,
   DeviceRetirePreviewResult,
 } from '@/lib/types/device-retire'
+import { endpointMatches, hasAnyEndpoint } from '@/lib/supplier/ip-endpoint-utils'
 
 const RETIRED_STATUSES = new Set(['已下线', '退订', 'retired'])
 
@@ -30,12 +31,13 @@ export function findDeviceForRetire(
   }
 
   if (row.external_ip) {
-    const hit = devices.find((d) => normKey(d.external_ip) === normKey(row.external_ip))
+    const hit = devices.find((d) => endpointMatches(d.external_ip, row.external_ip))
     if (hit) return hit
   }
 
   if (row.internal_ip) {
-    return devices.find((d) => normKey(d.internal_ip) === normKey(row.internal_ip))
+    const hit = devices.find((d) => endpointMatches(d.internal_ip, row.internal_ip))
+    if (hit) return hit
   }
 
   return undefined
@@ -87,7 +89,7 @@ export function validateDeviceRetireRow(
     }
   }
 
-  if (!row.external_ip && !row.internal_ip) {
+  if (!hasAnyEndpoint(row.external_ip, row.internal_ip)) {
     errors.push('外网IP与内网IP不能同时为空')
     if (extIpIdx >= 0) errorColumnIndexes.push(extIpIdx)
     if (intIpIdx >= 0) errorColumnIndexes.push(intIpIdx)

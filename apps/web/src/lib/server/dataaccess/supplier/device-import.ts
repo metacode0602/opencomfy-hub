@@ -695,6 +695,8 @@ export const deviceImportDataAccess = {
           businessBatchId: businessBatch.id,
           businessDataCenterId: businessBatch.dataCenterId,
           ticketRefs: ticketRefsForBatch(businessBatch),
+          batchKind: businessBatch.batchKind,
+          retireActionType: businessBatch.retireActionType,
         }
       : undefined
 
@@ -711,7 +713,7 @@ export const deviceImportDataAccess = {
     const warnings: string[] = [...bindWarnings]
     if (ticketNos.length > 0 && !businessBatch) {
       warnings.push(
-        '变更表工单号未匹配到上架/订单接入批次（请填写飞书工单号或批次号 ONB-/ORD-），仅写入变更审计',
+        '变更表工单号未匹配到上架/订单接入/下架批次（请填写飞书工单号或批次号 ONB-/ORD-/RET-），仅写入变更审计',
       )
     }
     if (unknownTicketNos.length > 0 && businessBatch) {
@@ -837,7 +839,13 @@ export const deviceImportDataAccess = {
         }
 
         if (businessBatch && deviceLinks.length > 0) {
-          await refreshBatchProgress(businessBatch.id, tx, now)
+          const hasActionMismatch = bindWarnings.some((w) => w.includes('不一致'))
+          await refreshBatchProgress(
+            businessBatch.id,
+            tx,
+            now,
+            hasActionMismatch ? { has_action_mismatch: true } : undefined,
+          )
         }
 
         const activityDescription = businessBatch

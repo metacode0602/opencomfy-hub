@@ -204,6 +204,13 @@
       "when": 1779495621019,
       "tag": "0029_unique_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779537091205,
+      "tag": "0030_warm_hercules",
+      "breakpoints": true
     }
   ]
 }

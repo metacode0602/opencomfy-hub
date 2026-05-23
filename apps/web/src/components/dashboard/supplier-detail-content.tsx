@@ -52,8 +52,6 @@ import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_com
 import { EditSupplierDialog } from '@/components/dashboard/supplier-form-dialog'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 import { toast } from 'sonner'
-import { SupplierDeviceRetireDialog } from './supplier-device-retire-dialog'
-
 interface SupplierDetailContentProps {
   supplier: Supplier
 }
@@ -78,7 +76,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
   const [activeTab, setActiveTab] = useState(
     tabFromUrl && VALID_TABS.has(tabFromUrl) ? tabFromUrl : 'overview',
   )
-  const [retireDialogOpen, setRetireDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const domainSupplierId = resolveDomainSupplierId(supplier.id)
   const utils = trpc.useUtils()
@@ -179,9 +176,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
           <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => setEditDialogOpen(true)}>
             编辑信息
           </Button>
-          <Button className="flex-1 sm:flex-none" onClick={() => setRetireDialogOpen(true)}>
-            设备下架
-          </Button>
         </div>
       </div>
 
@@ -213,16 +207,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
             bankAccount: updated.bankAccount,
             bankName: updated.bankName,
           })
-        }}
-      />
-
-      <SupplierDeviceRetireDialog
-        open={retireDialogOpen}
-        onOpenChange={setRetireDialogOpen}
-        supplierId={supplier.id}
-        supplierName={supplier.name}
-        onSuccess={() => {
-          void utils.supplier.listGpuInventory.invalidate({ supplierId: supplier.id })
         }}
       />
 

@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { onboardingBatch } from '@workspace/db/schema'
+import type { RetireActionType, RetirePlanMode } from '@/lib/types/datacenter-device-retire'
 import { and, eq, inArray, or } from 'drizzle-orm'
 
 export type ResolvedBusinessBatch = {
@@ -8,6 +9,9 @@ export type ResolvedBusinessBatch = {
   workOrderNo: string | null
   dataCenterId: string
   plannedDeviceCount: number
+  batchKind: 'online' | 'order_access' | 'device_retire'
+  retireActionType: RetireActionType | null
+  retirePlanMode: RetirePlanMode | null
 }
 
 export function ticketRefsForBatch(batch: {
@@ -44,12 +48,15 @@ export async function resolveBusinessBatchByTicketNo(
       workOrderNo: onboardingBatch.workOrderNo,
       dataCenterId: onboardingBatch.dataCenterId,
       plannedDeviceCount: onboardingBatch.plannedDeviceCount,
+      batchKind: onboardingBatch.batchKind,
+      retireActionType: onboardingBatch.retireActionType,
+      retirePlanMode: onboardingBatch.retirePlanMode,
     })
     .from(onboardingBatch)
     .where(
       and(
         eq(onboardingBatch.supplierId, supplierId),
-        inArray(onboardingBatch.batchKind, ['online', 'order_access']),
+        inArray(onboardingBatch.batchKind, ['online', 'order_access', 'device_retire']),
         or(
           eq(onboardingBatch.workOrderNo, normalized),
           eq(onboardingBatch.batchCode, normalized),
@@ -66,6 +73,9 @@ export async function resolveBusinessBatchByTicketNo(
     workOrderNo: row.workOrderNo,
     dataCenterId: row.dataCenterId,
     plannedDeviceCount: row.plannedDeviceCount,
+    batchKind: row.batchKind as ResolvedBusinessBatch['batchKind'],
+    retireActionType: (row.retireActionType as RetireActionType | null) ?? null,
+    retirePlanMode: (row.retirePlanMode as RetirePlanMode | null) ?? null,
   }
 }
 

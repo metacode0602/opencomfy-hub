@@ -16,15 +16,20 @@ import {
   type DeviceRetirePreviewResult,
   type DeviceRetireReason,
 } from '@/lib/types/device-retire'
+import { getRetireScenarioLabel } from '@/lib/supplier/datacenter-device-retire-ui'
+import type { RetireProgressFlags } from '@/lib/supplier/retire-changelog-utils'
+import type { RetireActionType, RetirePlanMode } from '@/lib/types/datacenter-device-retire'
+import type { OnboardingBatchPlannedLineJson } from '@/lib/types/onboarding-batch-api'
 import type { SupplierDevice } from '@/lib/types/supplier-domain'
-import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
+import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
+import { mapDbDeviceToDomain } from '@/lib/server/dataaccess/supplier/datacenter-retire-shared'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
 import {
   dataCenter,
-  entityStateTransitionLog,
   gpuCardType,
   onboardingBatch,
+  onboardingBatchDeviceLink,
   supplier,
   supplierActivity,
   supplierDevice,
@@ -46,42 +51,6 @@ function assertImportFile(fileName: string, buffer: Buffer) {
   }
   if (buffer.length > DEVICE_RETIRE_MAX_BYTES) {
     throw new Error('文件不能超过 10MB')
-  }
-}
-
-function mapDbDeviceToDomain(
-  row: typeof supplierDevice.$inferSelect,
-  cardTypeName: string,
-): SupplierDevice {
-  return {
-    id: row.id,
-    supplier_id: row.supplierId,
-    contract_id: row.contractId,
-    onboarding_batch_id: row.onboardingBatchId ?? '',
-    data_center_id: row.dataCenterId ?? '',
-    asset_no: row.assetNo ?? '',
-    sn: row.sn,
-    lifecycle_status: row.lifecycleStatus,
-    onboarding_substage: row.onboardingSubstage ?? '',
-    idc_region: row.idcRegion ?? '',
-    idc_code: row.idcCode,
-    gpu_count: String(row.gpuCount),
-    card_type: cardTypeName,
-    external_ip: row.externalIp ?? '',
-    internal_ip: row.internalIp ?? '',
-    platform_resource_id: row.platformResourceId,
-    external_device_id: row.externalDeviceId,
-    ops_status: row.opsStatus,
-    in_maintenance: row.inMaintenance,
-    bandwidth_group: row.bandwidthGroup,
-    rate_limit: row.rateLimit,
-    cooperation_type: (row.cooperationType ?? 'idle_time') as SupplierDevice['cooperation_type'],
-    device_spec: row.deviceSpec,
-    device_purpose: row.devicePurpose,
-    received_at: row.receivedAt?.toISOString() ?? null,
-    remark: row.remark,
-    login_username: row.loginUsername,
-    login_password: row.loginPassword,
   }
 }
 
@@ -196,12 +165,52 @@ async function buildPreviewFromFiles(params: {
   })
 }
 
+function normalizeParsedRows(json: unknown): DeviceRetireParsedRow[] {
+  if (!Array.isArray(json)) return []
+  return json.map((row) => {
+    if (row && typeof row === 'object' && 'parseStatus' in row) {
+      const r = row as {
+        rowNo: number
+        externalDeviceId?: string | null
+        assetNo?: string | null
+        externalIp?: string | null
+        internalIp?: string | null
+        parseStatus: 'ok' | 'error'
+        errors?: string[]
+        warnings?: string[]
+        matchedDeviceId?: string | null
+      }
+      return {
+        row_no: r.rowNo,
+        external_device_id: r.externalDeviceId ?? null,
+        asset_no: r.assetNo ?? null,
+        external_ip: r.externalIp ?? null,
+        internal_ip: r.internalIp ?? null,
+        originalCells: [],
+        parse_status: r.parseStatus,
+        errors: r.errors ?? [],
+        warnings: r.warnings ?? [],
+        errorColumnIndexes: [],
+        matched_device_id: r.matchedDeviceId ?? null,
+      }
+    }
+    return row as DeviceRetireParsedRow
+  })
+}
+
 function mapBatchListItem(
   row: typeof onboardingBatch.$inferSelect,
 ): DeviceRetireBatchListItem {
-  const parsedRows = (row.parsedRowsJson as DeviceRetireParsedRow[] | null) ?? []
+  const parsedRows = normalizeParsedRows(row.parsedRowsJson)
   const parsedErrorCount = parsedRows.filter((r) => r.parse_status === 'error').length
   const reason = row.retireReason as DeviceRetireReason | null
+  const retirePlanMode = (row.retirePlanMode as RetirePlanMode | null) ?? null
+  const retireActionType = (row.retireActionType as RetireActionType | null) ?? null
+  const progressFlags = (row.progressFlagsJson as RetireProgressFlags | null) ?? null
+  const scenarioLabel =
+    retirePlanMode && retireActionType
+      ? getRetireScenarioLabel(retirePlanMode, retireActionType)
+      : null
 
   return {
     id: row.id,
@@ -214,12 +223,19 @@ function mapBatchListItem(
     idcCode: row.idcCode,
     importStatus: row.importStatus,
     batchStatus: row.batchStatus,
+    workOrderNo: row.workOrderNo ?? null,
+    plannedDeviceCount: row.plannedDeviceCount,
+    touchedDeviceCount: row.touchedDeviceCount,
     retiredDeviceCount: row.retiredDeviceCount,
     parsedRowCount: row.parsedRowCount,
     parsedSuccessCount: row.parsedSuccessCount,
     parsedErrorCount,
     retireReason: reason,
     retireReasonLabel: reason ? getDeviceRetireReasonLabel(reason) : null,
+    retirePlanMode,
+    retireActionType,
+    scenarioLabel,
+    progressFlags,
     expectedCompletionDate: row.expectedCompletionDate ?? null,
     importFileName: row.importFileName,
     committedAt: row.committedAt?.toISOString() ?? null,
@@ -230,6 +246,7 @@ function mapBatchListItem(
 export const deviceRetireDataAccess = {
   async listBatches(params?: {
     supplierId?: string
+    dataCenterId?: string
     importStatus?: string
     search?: string
   }): Promise<{ items: DeviceRetireBatchListItem[]; total: number }> {
@@ -238,6 +255,9 @@ export const deviceRetireDataAccess = {
     const conditions = [eq(onboardingBatch.batchKind, 'device_retire')]
     if (params?.supplierId) {
       conditions.push(eq(onboardingBatch.supplierId, params.supplierId))
+    }
+    if (params?.dataCenterId) {
+      conditions.push(eq(onboardingBatch.dataCenterId, params.dataCenterId))
     }
     if (params?.importStatus && params.importStatus !== 'all') {
       conditions.push(eq(onboardingBatch.importStatus, params.importStatus))
@@ -276,26 +296,35 @@ export const deviceRetireDataAccess = {
 
     if (!row) return null
 
-    const parsedRows = (row.parsedRowsJson as DeviceRetireParsedRow[] | null) ?? []
+    const parsedRows = normalizeParsedRows(row.parsedRowsJson)
     const parsedRowMap = new Map(
       parsedRows
         .filter((r) => r.matched_device_id)
         .map((r) => [r.matched_device_id!, r]),
     )
+    const plannedLines = (row.plannedLinesJson as OnboardingBatchPlannedLineJson[] | null) ?? []
 
-    const changeRows = await db
+    const linkRows = await db
       .select({
-        changeLog: supplierDeviceChangeLog,
+        link: onboardingBatchDeviceLink,
         device: supplierDevice,
         cardTypeName: gpuCardType.name,
+        changeLog: supplierDeviceChangeLog,
       })
-      .from(supplierDeviceChangeLog)
-      .innerJoin(supplierDevice, eq(supplierDeviceChangeLog.supplierDeviceId, supplierDevice.id))
+      .from(onboardingBatchDeviceLink)
+      .innerJoin(supplierDevice, eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id))
       .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
-      .where(eq(supplierDeviceChangeLog.onboardingBatchId, batchId))
-      .orderBy(supplierDeviceChangeLog.importRowNo)
+      .leftJoin(
+        supplierDeviceChangeLog,
+        and(
+          eq(supplierDeviceChangeLog.supplierDeviceId, supplierDevice.id),
+          eq(supplierDeviceChangeLog.businessOnboardingBatchId, batchId),
+        ),
+      )
+      .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batchId))
+      .orderBy(supplierDeviceChangeLog.importRowNo, onboardingBatchDeviceLink.linkedAt)
 
-    const devicesFromLogs = changeRows.map(({ changeLog, device, cardTypeName }) => {
+    const devicesFromLinks = linkRows.map(({ link, device, cardTypeName, changeLog }) => {
       const parsed = parsedRowMap.get(device.id)
       return {
         deviceId: device.id,
@@ -307,35 +336,15 @@ export const deviceRetireDataAccess = {
         cardTypeName,
         lifecycleStatus: device.lifecycleStatus,
         opsStatus: device.opsStatus,
-        previousLifecycleStatus: changeLog.previousLifecycleStatus,
-        previousOpsStatus: changeLog.previousOpsStatus,
+        previousLifecycleStatus: changeLog?.previousLifecycleStatus ?? null,
+        previousOpsStatus: changeLog?.previousOpsStatus ?? null,
+        linkKind: link.linkKind,
         parseStatus: parsed?.parse_status ?? null,
-        rowNo: changeLog.importRowNo,
+        rowNo: changeLog?.importRowNo ?? null,
         warnings: parsed?.warnings ?? [],
         errors: parsed?.errors ?? [],
       }
     })
-
-    const loggedDeviceIds = new Set(devicesFromLogs.map((d) => d.deviceId))
-    const errorOnlyRows = parsedRows
-      .filter((r) => r.parse_status === 'error' && r.matched_device_id && !loggedDeviceIds.has(r.matched_device_id))
-      .map((r) => ({
-        deviceId: r.matched_device_id!,
-        sn: r.asset_no ?? '—',
-        assetNo: r.asset_no,
-        externalDeviceId: r.external_device_id,
-        externalIp: r.external_ip,
-        internalIp: r.internal_ip,
-        cardTypeName: '—',
-        lifecycleStatus: '—',
-        opsStatus: '—',
-        previousLifecycleStatus: null,
-        previousOpsStatus: null,
-        parseStatus: r.parse_status,
-        rowNo: r.row_no,
-        warnings: r.warnings,
-        errors: r.errors,
-      }))
 
     const base = mapBatchListItem(row)
     return {
@@ -344,7 +353,8 @@ export const deviceRetireDataAccess = {
       retireRemark: row.retireRemark,
       parsedAt: row.parsedAt?.toISOString() ?? null,
       parsedRows,
-      devices: [...devicesFromLogs, ...errorOnlyRows],
+      plannedLines,
+      devices: devicesFromLinks,
     }
   },
 
@@ -402,17 +412,16 @@ export const deviceRetireDataAccess = {
     const preview = await buildPreviewFromFiles(params)
     const okCount = preview.summary.ok + preview.summary.warning
     if (okCount === 0) {
-      throw new Error('没有通过校验的设备可下架')
+      throw new Error('没有通过校验的设备可创建下架批次')
     }
 
     const supplierRow = await loadSupplierRow(params.supplierId)
     const { contractId, accessSheetId } = await resolveOnboardingBatchRefs(params.supplierId)
-    const expectedDate = parseExpectedDate(params.meta.expectedCompletionDate)
+    parseExpectedDate(params.meta.expectedCompletionDate)
     const now = new Date()
     const batchIds: string[] = []
     const batchCodes: string[] = []
-    let retiredCount = 0
-    let skippedCount = preview.summary.error
+    const skippedCount = preview.summary.error
 
     try {
       await db.transaction(async (tx) => {
@@ -424,7 +433,7 @@ export const deviceRetireDataAccess = {
           batchCodes.push(batchCode)
 
           const commitRows = batchPreview.rows.filter((r) => r.parse_status !== 'error')
-          let batchRetired = 0
+          const plannedDeviceCount = commitRows.length
 
           await tx.insert(onboardingBatch).values({
             id: batchId,
@@ -440,126 +449,37 @@ export const deviceRetireDataAccess = {
             contractId,
             accessConditionSheetId: accessSheetId,
             batchCode,
-            batchStatus: '已完成',
+            batchStatus: '待开始',
             accessMethod: 'on_site',
             importFileName: batchPreview.fileName,
-            importStatus: 'committed',
+            importStatus: 'parsed',
             parsedRowCount: batchPreview.rows.length,
             parsedSuccessCount: commitRows.length,
             parsedRowsJson: batchPreview.rows,
             parsedAt: now,
+            plannedDeviceCount,
+            plannedLinesJson: [],
             committedDeviceCount: 0,
             retiredDeviceCount: 0,
-            committedAt: now,
+            committedAt: null,
             retireReason: params.meta.reason,
+            retireActionType: 'device_unsubscribe',
+            retirePlanMode: 'line_plan',
             expectedCompletionDate: params.meta.expectedCompletionDate,
             retireRemark: params.meta.remark?.trim() || null,
+            listUploadMode: 'legacy_excel',
+            progressFlagsJson: {},
             createdByStaffId: params.operatorStaffId ?? null,
             createdAt: now,
             updatedAt: now,
           })
 
-          for (const row of commitRows) {
-            const deviceId = row.matched_device_id
-            if (!deviceId) {
-              skippedCount += 1
-              supplierWarn('device-retire', 'skip row without device id', {
-                batchId,
-                rowNo: row.row_no,
-              })
-              continue
-            }
-
-            const [device] = await tx
-              .select()
-              .from(supplierDevice)
-              .where(
-                and(
-                  eq(supplierDevice.id, deviceId),
-                  eq(supplierDevice.supplierId, params.supplierId),
-                  eq(supplierDevice.dataCenterId, dc.id),
-                ),
-              )
-              .limit(1)
-
-            if (!device) {
-              skippedCount += 1
-              supplierWarn('device-retire', 'device not found at commit', {
-                batchId,
-                deviceId,
-                rowNo: row.row_no,
-              })
-              continue
-            }
-
-            const fromState = device.lifecycleStatus
-            const fromOps = device.opsStatus
-
-            await tx
-              .update(supplierDevice)
-              .set({
-                lifecycleStatus: '已下线',
-                opsStatus: '已退订',
-                platformResourceId: null,
-                inMaintenance: false,
-                updatedAt: now,
-              })
-              .where(eq(supplierDevice.id, deviceId))
-
-            await tx.insert(entityStateTransitionLog).values({
-              id: newId(),
-              entityType: 'device',
-              entityId: deviceId,
-              fromState,
-              toState: '已下线',
-              operatorStaffId: params.operatorStaffId ?? null,
-              reasonCode: 'UI_RETIRE_BATCH',
-              occurredAt: now,
-              payload: {
-                batchId,
-                batchCode,
-                reason: params.meta.reason,
-                expectedCompletionDate: params.meta.expectedCompletionDate,
-                rowNo: row.row_no,
-              },
-            })
-
-            await tx.insert(supplierDeviceChangeLog).values({
-              id: newId(),
-              supplierDeviceId: deviceId,
-              onboardingBatchId: batchId,
-              internalIp: device.internalIp,
-              occurredAt: now,
-              changeAction: '下架',
-              changeContent: getDeviceRetireReasonLabel(params.meta.reason),
-              description: params.meta.remark?.trim() || null,
-              importRowNo: row.row_no,
-              previousOpsStatus: fromOps,
-              newOpsStatus: '已退订',
-              previousLifecycleStatus: fromState,
-              newLifecycleStatus: '已下线',
-              createdAt: now,
-            })
-
-            batchRetired += 1
-            retiredCount += 1
-          }
-
-          await tx
-            .update(onboardingBatch)
-            .set({
-              retiredDeviceCount: batchRetired,
-              committedDeviceCount: batchRetired,
-              updatedAt: now,
-            })
-            .where(eq(onboardingBatch.id, batchId))
-
           await tx.insert(supplierActivity).values({
             id: newId(),
             supplierId: params.supplierId,
             type: 'device_retire',
-            title: `机房 ${dc.name} 下架 ${batchRetired} 台设备`,
-            description: `${getDeviceRetireReasonLabel(params.meta.reason)} · 期望 ${params.meta.expectedCompletionDate}`,
+            title: `机房 ${dc.name} 下架计划已创建（Legacy 清单 ${plannedDeviceCount} 台）`,
+            description: `${getDeviceRetireReasonLabel(params.meta.reason)} · 期望 ${params.meta.expectedCompletionDate} · 请运维通过变更表更新设备状态`,
             authorStaffId: params.operatorStaffId ?? null,
             authorName: params.operatorName ?? '运营',
             authorRole: 'ops',
@@ -569,17 +489,18 @@ export const deviceRetireDataAccess = {
               batchCode,
               dataCenterId: dc.id,
               dataCenterName: dc.name,
-              retiredCount: batchRetired,
+              plannedDeviceCount,
               skippedErrors: batchPreview.summary.error,
               reason: params.meta.reason,
+              legacyImport: true,
             },
             occurredAt: now,
           })
 
-          supplierLog('device-retire', 'batch committed', {
+          supplierLog('device-retire', 'batch created (legacy, no device mutation)', {
             batchId,
             batchCode,
-            retired: batchRetired,
+            plannedDeviceCount,
             errors: batchPreview.summary.error,
           })
         }
@@ -591,14 +512,13 @@ export const deviceRetireDataAccess = {
 
     supplierLog('device-retire', 'commit done', {
       supplierId: params.supplierId,
-      retiredCount,
       skippedCount,
       batchIds,
     })
 
     return {
       batchCount: preview.batches.length,
-      retiredCount,
+      retiredCount: 0,
       skippedCount,
       batchCodes,
       batchIds,

@@ -94,6 +94,12 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
     err: batch.parsedRows.filter((r) => r.parse_status === 'error').length,
   }
 
+  const progressPercent =
+    batch.plannedDeviceCount > 0
+      ? Math.min(100, Math.round((batch.touchedDeviceCount / batch.plannedDeviceCount) * 100))
+      : 0
+  const flags = batch.progressFlags
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
@@ -105,14 +111,33 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
         <div>
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-semibold">{batch.batchCode}</h1>
+            {batch.scenarioLabel && (
+              <Badge variant="outline">{batch.scenarioLabel}</Badge>
+            )}
             <Badge variant="outline" className={importStatusColor[batch.importStatus] ?? ''}>
               {DEVICE_RETIRE_IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus}
             </Badge>
             <Badge variant="secondary">{batch.batchStatus}</Badge>
+            {flags?.needs_review && (
+              <Badge variant="outline" className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                待复核
+              </Badge>
+            )}
+            {flags?.has_action_mismatch && (
+              <Badge variant="outline" className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30">
+                动作不一致
+              </Badge>
+            )}
+            {flags?.completion_mode === 'auto' && batch.batchStatus === '已完成' && (
+              <Badge variant="outline" className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                自动完成
+              </Badge>
+            )}
           </div>
           <p className="text-sm text-muted-foreground mt-2">
             {batch.supplierShortName ?? batch.supplierName} · {batch.idcCode} ·{' '}
             {batch.dataCenterName}
+            {batch.workOrderNo ? ` · 工单 ${batch.workOrderNo}` : ''}
           </p>
         </div>
       </div>
@@ -120,34 +145,41 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">解析行数</p>
-            <p className="text-2xl font-semibold mt-1">{batch.parsedRowCount}</p>
+            <p className="text-sm text-muted-foreground">计划数量</p>
+            <p className="text-2xl font-semibold mt-1">{batch.plannedDeviceCount}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">已下架</p>
+            <p className="text-sm text-muted-foreground">已挂接</p>
+            <p className="text-2xl font-semibold mt-1">
+              {batch.touchedDeviceCount}
+              {batch.plannedDeviceCount > 0 && (
+                <span className="text-sm font-normal text-muted-foreground ml-1">
+                  ({progressPercent}%)
+                </span>
+              )}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-sm text-muted-foreground">已退订/下线中</p>
             <p className="text-2xl font-semibold mt-1">{batch.retiredDeviceCount}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">错误行</p>
-            <p className="text-2xl font-semibold mt-1 text-destructive">{parseStats.err}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">期望完成</p>
-            <p className="text-sm font-medium mt-2">{batch.expectedCompletionDate ?? '—'}</p>
+            <p className="text-sm text-muted-foreground">建议清单行</p>
+            <p className="text-2xl font-semibold mt-1">{batch.parsedRowCount}</p>
           </CardContent>
         </Card>
       </div>
 
       <Tabs defaultValue="devices">
         <TabsList>
-          <TabsTrigger value="devices">下架设备 ({batch.devices.length})</TabsTrigger>
-          <TabsTrigger value="import">导入明细 ({batch.parsedRows.length})</TabsTrigger>
+          <TabsTrigger value="devices">已执行设备 ({batch.devices.length})</TabsTrigger>
+          <TabsTrigger value="import">建议清单 ({batch.parsedRows.length})</TabsTrigger>
           <TabsTrigger value="overview">批次概览</TabsTrigger>
         </TabsList>
 
@@ -155,7 +187,7 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
           {batch.devices.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                暂无已下架设备记录
+                暂无已通过变更表挂接的设备；请运维导入变更表后刷新本页
               </CardContent>
             </Card>
           ) : (
@@ -320,6 +352,14 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
                 <div>
                   <p className="text-muted-foreground">下架原因</p>
                   <p className="font-medium mt-1">{batch.retireReasonLabel ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">场景</p>
+                  <p className="font-medium mt-1">{batch.scenarioLabel ?? '—'}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">飞书工单</p>
+                  <p className="font-medium mt-1">{batch.workOrderNo ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">期望完成日期</p>

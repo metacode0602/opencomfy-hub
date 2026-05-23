@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import {
   AlertCircle,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Cpu,
   ExternalLink,
+  Eye,
   Loader2,
   MapPin,
   Server,
@@ -35,6 +36,7 @@ import { trpc } from '@/lib/trpc/client'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
+import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-device-retire-dialog'
 
 const inventoryStatusColors: Record<DataCenterDevice['status'], string> = {
   online: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -68,6 +70,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string }) {
+  const [retireDialogOpen, setRetireDialogOpen] = useState(false)
   const utils = trpc.useUtils()
   const {
     data: detail,
@@ -77,6 +80,12 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
     refetch,
   } = trpc.supplier.getDataCenterDetail.useQuery({ dataCenterId }, { retry: 1 })
 
+  const {
+    data: retireBatchesData,
+    isLoading: retireBatchesLoading,
+    isError: retireBatchesError,
+  } = trpc.supplier.deviceRetire.listBatches.useQuery({ dataCenterId })
+
   const invalidateAfterImport = () => {
     const supplierId = detail?.dataCenter.supplierId
     void utils.supplier.getDataCenterDetail.invalidate({ dataCenterId })
@@ -85,6 +94,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
     void utils.supplier.listGpuInventory.invalidate()
     void utils.supplier.listPhysicalDevices.invalidate()
     void utils.supplier.getPhysicalDeviceStats.invalidate()
+    void utils.supplier.deviceRetire.listBatches.invalidate({ dataCenterId })
     if (supplierId) {
       void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
       void utils.supplier.listDataCenters.invalidate({ supplierId })
@@ -93,6 +103,8 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
 
   const gpuInventory = detail?.gpuInventory ?? []
   const pagination = useListPagination(gpuInventory)
+  const retireBatches = retireBatchesData?.items ?? []
+  const retireBatchPagination = useListPagination(retireBatches)
 
   const onlineRate = useMemo(() => {
     if (!detail) return 0
@@ -135,7 +147,8 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
         <Link href="/supplier/datacenters">
           <Button variant="ghost" size="icon" className="mt-1">
             <ArrowLeft className="h-4 w-4" />
@@ -176,7 +189,19 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
             </Link>
           </div>
         </div>
+        </div>
+        <Button className="shrink-0 self-start" onClick={() => setRetireDialogOpen(true)}>
+          设备下架 / 裁撤
+        </Button>
       </div>
+
+      <DatacenterDeviceRetireDialog
+        open={retireDialogOpen}
+        onOpenChange={setRetireDialogOpen}
+        dataCenterId={dataCenter.id}
+        dataCenterName={dataCenter.name}
+        onSuccess={invalidateAfterImport}
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="border-border bg-card">
@@ -246,6 +271,131 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         sectionTitle="运维数据导入"
         sectionDescription="在本机房下导入设备主数据、变更记录或故障记录，导入完成后将自动刷新库存与设备统计"
       />
+
+      <Card className="overflow-x-auto border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">下架批次</CardTitle>
+          <CardDescription>
+            本机房发起的设备下架 / 裁撤计划；运维通过变更表挂接批次后更新进度
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0 pb-4">
+          {retireBatchesLoading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              加载批次列表...
+            </div>
+          ) : retireBatchesError ? (
+            <div className="py-12 text-center text-sm text-destructive">加载批次列表失败</div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-transparent">
+                    <TableHead className="text-muted-foreground">批次号</TableHead>
+                    <TableHead className="text-muted-foreground">场景</TableHead>
+                    <TableHead className="text-muted-foreground">下架原因</TableHead>
+                    <TableHead className="text-muted-foreground">飞书工单</TableHead>
+                    <TableHead className="text-muted-foreground">期望完成</TableHead>
+                    <TableHead className="text-muted-foreground">批次状态</TableHead>
+                    <TableHead className="text-muted-foreground">进度</TableHead>
+                    <TableHead className="text-muted-foreground">创建时间</TableHead>
+                    <TableHead className="w-[80px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {retireBatchPagination.totalItems === 0 ? (
+                    <TableRow className="border-border">
+                      <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                        暂无下架批次，可点击右上角「设备下架 / 裁撤」创建计划
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    retireBatchPagination.items.map((batch) => (
+                      <TableRow key={batch.id} className="border-border">
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/supplier/offline-tasks/${batch.id}`}
+                            className="text-primary hover:underline"
+                          >
+                            {batch.batchCode}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          {batch.scenarioLabel ? (
+                            <Badge variant="outline" className="text-xs font-normal">
+                              {batch.scenarioLabel}
+                            </Badge>
+                          ) : (
+                            '—'
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {batch.retireReasonLabel ?? '—'}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {batch.workOrderNo ? (
+                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
+                              {batch.workOrderNo}
+                            </code>
+                          ) : (
+                            '—'
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {batch.expectedCompletionDate ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-1">
+                            <Badge variant="secondary" className="text-xs">
+                              {batch.batchStatus}
+                            </Badge>
+                            {batch.progressFlags?.needs_review && (
+                              <Badge
+                                variant="outline"
+                                className="border-yellow-500/30 bg-yellow-500/20 text-xs text-yellow-400"
+                              >
+                                待复核
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {batch.touchedDeviceCount} / {batch.plannedDeviceCount}
+                          {batch.retiredDeviceCount > 0 && (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              (退订 {batch.retiredDeviceCount})
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDt(batch.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          <Button variant="ghost" size="icon" asChild>
+                            <Link href={`/supplier/offline-tasks/${batch.id}`}>
+                              <Eye className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+              {retireBatchPagination.totalItems > 0 && (
+                <ListPagination
+                  page={retireBatchPagination.page}
+                  totalPages={retireBatchPagination.totalPages}
+                  totalItems={retireBatchPagination.totalItems}
+                  pageSize={retireBatchPagination.pageSize}
+                  onPageChange={retireBatchPagination.setPage}
+                />
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="border-border bg-card">

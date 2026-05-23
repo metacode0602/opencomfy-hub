@@ -28,6 +28,11 @@ import {
 } from '@/lib/server/routers/supplier/device-import-schemas'
 import { deviceRetireRequestSchema } from '@/lib/server/routers/supplier/device-retire-schemas'
 import {
+  datacenterRetireContextSchema,
+  datacenterRetireRequestSchema,
+} from '@/lib/server/routers/supplier/datacenter-device-retire-schemas'
+import { datacenterDeviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-device-retire'
+import {
   onboardingBatchCommitListSchema,
   onboardingBatchCreateSchema,
   onboardingBatchListBySupplierSchema,
@@ -420,6 +425,7 @@ export const supplierRouter = createTRPCRouter({
         z
           .object({
             supplierId: z.string().optional(),
+            dataCenterId: z.string().optional(),
             importStatus: z.string().optional(),
             search: z.string().optional(),
           })
@@ -467,15 +473,51 @@ export const supplierRouter = createTRPCRouter({
 
     commit: adminProcedure.input(deviceRetireRequestSchema).mutation(async ({ input, ctx }) => {
       try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await deviceRetireDataAccess.commit({
           ...input,
-          operatorStaffId: ctx.user.id,
+          operatorStaffId: staffId,
           operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
         })
       } catch (e) {
         mapImportError(e)
       }
     }),
+
+    getDatacenterContext: protectedProcedure
+      .input(datacenterRetireContextSchema)
+      .query(async ({ input }) => {
+        try {
+          return await datacenterDeviceRetireDataAccess.getContext(input.dataCenterId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    previewDatacenter: adminProcedure
+      .input(datacenterRetireRequestSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await datacenterDeviceRetireDataAccess.preview(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    commitDatacenter: adminProcedure
+      .input(datacenterRetireRequestSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          return await datacenterDeviceRetireDataAccess.commit({
+            ...input,
+            operatorStaffId: staffId,
+            operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
+          })
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
   }),
 
   onboardingBatch: createTRPCRouter({

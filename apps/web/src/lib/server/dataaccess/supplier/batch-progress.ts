@@ -5,39 +5,61 @@ import {
   onboardingBatchDeviceLink,
   supplierDevice,
 } from '@workspace/db/schema'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
+import {
+  mergeRetireProgressFlags,
+  type RetireProgressFlags,
+} from '@/lib/supplier/retire-changelog-utils'
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 const ONBOARDING_LIFECYCLES = new Set(['待接入', '接入中'])
 
+export type BatchProgressResult = {
+  touched: number
+  online: number
+  onboarding: number
+  retired?: number
+}
+
 /**
- * 按 device_link + 设备当前状态刷新业务批次进度缓存（§6.1 设计）。
+ * 按 device_link + 设备当前状态刷新业务批次进度缓存。
  */
 export async function refreshBatchProgress(
   businessBatchId: string,
   tx?: DbTx,
   syncedAt = new Date(),
-): Promise<{ touched: number; online: number; onboarding: number }> {
+  progressFlagsPatch?: RetireProgressFlags,
+): Promise<BatchProgressResult> {
   supplierLog('batch-progress', 'refresh start', { businessBatchId })
 
   const run = async (runner: DbTx) => {
     const [batch] = await runner
       .select({
         id: onboardingBatch.id,
+        batchKind: onboardingBatch.batchKind,
+        batchStatus: onboardingBatch.batchStatus,
         plannedDeviceCount: onboardingBatch.plannedDeviceCount,
+        progressFlagsJson: onboardingBatch.progressFlagsJson,
       })
       .from(onboardingBatch)
-      .where(
-        and(
-          eq(onboardingBatch.id, businessBatchId),
-          inArray(onboardingBatch.batchKind, ['online', 'order_access']),
-        ),
-      )
+      .where(eq(onboardingBatch.id, businessBatchId))
       .limit(1)
 
     if (!batch) {
-      supplierWarn('batch-progress', 'refresh skipped: not a business batch', { businessBatchId })
+      supplierWarn('batch-progress', 'refresh skipped: batch not found', { businessBatchId })
+      return { touched: 0, online: 0, onboarding: 0 }
+    }
+
+    if (batch.batchKind === 'device_retire') {
+      return refreshDeviceRetireBatchProgress(runner, batch, syncedAt, progressFlagsPatch)
+    }
+
+    if (!['online', 'order_access'].includes(batch.batchKind)) {
+      supplierWarn('batch-progress', 'refresh skipped: unsupported batch kind', {
+        businessBatchId,
+        batchKind: batch.batchKind,
+      })
       return { touched: 0, online: 0, onboarding: 0 }
     }
 
@@ -74,7 +96,7 @@ export async function refreshBatchProgress(
       })
       .where(eq(onboardingBatch.id, businessBatchId))
 
-    supplierLog('batch-progress', 'refresh done', {
+    supplierLog('batch-progress', 'refresh done (onboarding)', {
       businessBatchId,
       touched,
       online,
@@ -94,6 +116,78 @@ export async function refreshBatchProgress(
     supplierError('batch-progress', 'refresh failed', e, { businessBatchId })
     throw e
   }
+}
+
+async function refreshDeviceRetireBatchProgress(
+  runner: DbTx,
+  batch: {
+    id: string
+    batchStatus: string
+    plannedDeviceCount: number
+    progressFlagsJson: unknown
+  },
+  syncedAt: Date,
+  progressFlagsPatch?: RetireProgressFlags,
+): Promise<BatchProgressResult> {
+  const [counts] = await runner
+    .select({
+      touched: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId})::int`.mapWith(
+        Number,
+      ),
+      retired: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId}) filter (where ${supplierDevice.lifecycleStatus} = '下线中' or ${supplierDevice.opsStatus} = '已退订')::int`.mapWith(
+        Number,
+      ),
+    })
+    .from(onboardingBatchDeviceLink)
+    .innerJoin(
+      supplierDevice,
+      eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
+    )
+    .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batch.id))
+
+  const touched = counts?.touched ?? 0
+  const retired = counts?.retired ?? 0
+  const planned = batch.plannedDeviceCount
+
+  let progressFlags = mergeRetireProgressFlags(
+    batch.progressFlagsJson as RetireProgressFlags | null,
+    progressFlagsPatch ?? {},
+  )
+
+  if (planned > 0 && touched > planned) {
+    progressFlags = mergeRetireProgressFlags(progressFlags, { has_over_plan_link: true })
+  }
+
+  let batchStatus = batch.batchStatus
+  if (planned > 0 && touched >= planned) {
+    batchStatus = '已完成'
+    progressFlags = mergeRetireProgressFlags(progressFlags, { completion_mode: 'auto' })
+  } else if (touched > 0 && batchStatus === '待开始') {
+    batchStatus = '下架中'
+  }
+
+  await runner
+    .update(onboardingBatch)
+    .set({
+      touchedDeviceCount: touched,
+      retiredDeviceCount: retired,
+      batchStatus,
+      progressFlagsJson: progressFlags,
+      progressSyncedAt: syncedAt,
+      updatedAt: syncedAt,
+    })
+    .where(eq(onboardingBatch.id, batch.id))
+
+  supplierLog('batch-progress', 'refresh done (device_retire)', {
+    businessBatchId: batch.id,
+    touched,
+    retired,
+    planned,
+    batchStatus,
+    progressFlags,
+  })
+
+  return { touched, online: 0, onboarding: 0, retired }
 }
 
 export { ONBOARDING_LIFECYCLES }
