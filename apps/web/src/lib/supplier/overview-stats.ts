@@ -42,6 +42,7 @@ export type InventoryOverviewRow = {
   maintenanceQuantity: number
   internalTestGpu: number
   sellableQuantity: number
+  offlineQuantity: number
   bareMetalQuantity: number
   elasticServiceQuantity: number
   status: DataCenterDevice['status']
@@ -56,6 +57,11 @@ export type SupplierOverviewRow = {
   onlineGpu: number
   onboardingGpu: number
   sellableGpu: number
+  offlineGpu: number
+  internalTestGpu: number
+  bareMetalQuantity: number
+  elasticServiceQuantity: number
+  maintenanceQuantity: number
   openFaults: number
   activeBatches: number
 }
@@ -296,6 +302,7 @@ export function buildInventoryOverviewRows(
         maintenanceQuantity,
         internalTestGpu,
         sellableQuantity,
+        offlineQuantity: 0,
         bareMetalQuantity: 0,
         elasticServiceQuantity: 0,
         status: row.status,
@@ -371,12 +378,22 @@ export function buildSupplierOverviewRows(
       onlineGpu: 0,
       onboardingGpu: 0,
       sellableGpu: 0,
+      offlineGpu: 0,
+      internalTestGpu: 0,
+      bareMetalQuantity: 0,
+      elasticServiceQuantity: 0,
+      maintenanceQuantity: 0,
       openFaults: 0,
       activeBatches: 0,
     }
     existing.totalGpu += row.quantity
     existing.onlineGpu += row.onlineQuantity
     existing.sellableGpu += row.sellableQuantity
+    existing.offlineGpu += row.offlineQuantity
+    existing.internalTestGpu += row.internalTestGpu
+    existing.bareMetalQuantity += row.bareMetalQuantity
+    existing.elasticServiceQuantity += row.elasticServiceQuantity
+    existing.maintenanceQuantity += row.maintenanceQuantity
     bySupplier.set(row.supplierId, existing)
   }
 

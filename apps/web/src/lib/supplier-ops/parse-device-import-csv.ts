@@ -4,6 +4,10 @@ import type {
   FaultRecordsParsedRow,
 } from "@/lib/types/supplier-domain"
 import { mapDeviceCooperationType } from "@/lib/supplier/device-import-utils"
+import {
+  DEVICE_CHANGE_ACTION_SEEDS,
+  DEVICE_OPS_STATUS_SEEDS,
+} from "@workspace/db/schema"
 
 export type ParseCsvResult<T> = { ok: true; rows: T[] } | { ok: false; error: string }
 
@@ -86,18 +90,9 @@ function parseBool(v: string): boolean {
   return s === "是" || s === "true" || s === "1" || s === "yes" || s === "y"
 }
 
-const KNOWN_OPS_STATUS = new Set([
-  "预留闲置中",
-  "在集群中",
-  "集群组件运行中",
-  "网关直连裸金属上架中",
-  "网关代理裸金属上架中",
-  "线下裸金属交付中",
-  "其他部门使用中",
-  "不可调度节点运行中",
-  "网关节点上架中",
-  "已退订",
-])
+const KNOWN_OPS_STATUS = new Set(DEVICE_OPS_STATUS_SEEDS.map((s) => s.stateCode))
+
+const KNOWN_CHANGE_ACTIONS = new Set(DEVICE_CHANGE_ACTION_SEEDS.map((s) => s.stateCode))
 
 /** 设备主数据表：supplier_device + compute_node */
 export function parseDeviceInventoryTable(
@@ -168,7 +163,7 @@ export function parseDeviceInventoryTable(
       external_device_id: cell(cells, iDeviceId) || undefined,
       internal_ip: cell(cells, iInternalIp) || undefined,
       asset_no: assetRaw || undefined,
-      sn: assetRaw || undefined,
+      sn: undefined,
       gpu_card_type_code: cell(cells, iGpuType) || undefined,
       gpu_count: cell(cells, iGpuCount) ? Number(cell(cells, iGpuCount)) || undefined : undefined,
       ops_status,
@@ -229,6 +224,10 @@ export function parseDeviceChangelogTable(
     }
     let parse_status: "ok" | "warning" | "error" = "ok"
     let parse_message: string | null = null
+    if (!KNOWN_CHANGE_ACTIONS.has(change_action)) {
+      parse_status = "warning"
+      parse_message = `未知变更动作「${change_action}」，入库时将仍记录原文`
+    }
     if (!cell(cells, iDeviceId) && !cell(cells, iInternalIp)) {
       parse_status = "warning"
       parse_message = "缺少设备ID与内网IP，commit 时可能无法匹配设备"

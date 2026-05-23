@@ -140,17 +140,17 @@ export function SupplierOnboardingBatchesPanel({ supplierId }: { supplierId: str
             <Card key={b.id}>
               <CardHeader className="py-4">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{b.batch_code}</CardTitle>
-                  <Badge variant="outline">{b.batch_status}</Badge>
+                  <CardTitle className="text-base">{b.batchCode}</CardTitle>
+                  <Badge variant="outline">{b.batchStatus}</Badge>
                 </div>
                 <CardDescription>
-                  {BATCH_KIND_LABELS[b.batch_kind as OnboardingBatchKind] ?? b.batch_kind} · {b.idc_code} · 已入库 {b.committed_device_count} 台
+                  {BATCH_KIND_LABELS[b.batchKind as OnboardingBatchKind] ?? b.batchKind} · {b.idcCode} · 已入库 {b.committedDeviceCount} 台
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0 pb-4">
                 <Link
                   href={
-                    b.batch_kind === 'online'
+                    b.batchKind === 'online'
                       ? `/supplier/online-tasks/${b.id}`
                       : `/supplier/order-access/${b.id}`
                   }

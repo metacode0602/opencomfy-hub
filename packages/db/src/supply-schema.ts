@@ -1,7 +1,9 @@
 /**
  * 供应商与算力资源域表结构（Drizzle ORM / PostgreSQL）
  *
- * 设计依据：apps/web/content/design/supplier-database.md（v1.2）
+ * 设计依据：apps/web/content/design/supplier-database.md（v1.2）、
+ *   supplier-onboarding-plan-changelog-tracking-design.md（v2.2）、
+ *   supplier-device-import-schema.md（v1.1）
  * 领域模型：Supplier → DataCenter → Device / GPU Inventory；合同与刊例价/成交价；接入批次
  *
  * 约定：
@@ -24,6 +26,7 @@ import {
   timestamp,
   uniqueIndex,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 
 import { userStaff } from "./crm-schema"
@@ -452,11 +455,20 @@ export const onboardingBatch = pgTable(
     plannedLinesJson: jsonb("planned_lines_json").notNull().default([]),
     plannedDeviceCount: integer("planned_device_count").notNull().default(0),
     listUploadMode: varchar("list_upload_mode", { length: 32 }).notNull().default("none"),
-    workOrderNo: varchar("work_order_no", { length: 64 }), /** 关联工单号 */
+    /** 飞书审批工单号（商务手动录入）；业务批次必填，supplier 内唯一 */
+    workOrderNo: varchar("work_order_no", { length: 64 }),
+    /** 变更/关联触达去重台数（refreshBatchProgress 刷新） */
+    touchedDeviceCount: integer("touched_device_count").notNull().default(0),
+    /** 触达且 lifecycle=在线 台数 */
+    onlineDeviceCount: integer("online_device_count").notNull().default(0),
+    progressSyncedAt: timestamp("progress_synced_at", { withTimezone: true }),
     onlineReason: varchar("online_reason", { length: 64 }), /** 上架原因（`batch_kind=online` 时填写） */
     orderNo: varchar("order_no", { length: 128 }), /** 关联订单编号（`batch_kind=order_access` 时填写） */
     remark: text("remark"),
-    parentBatchId: text("parent_batch_id"), /** 导入批次指向业务批次；仅 `device_inventory` / `device_changelog` 使用 */
+    /** 导入批次指向业务批次；仅 device_inventory / device_changelog */
+    parentBatchId: text("parent_batch_id").references((): AnyPgColumn => onboardingBatch.id, {
+      onDelete: "set null",
+    }),
     accessMethod: varchar("access_method", { length: 32 }).notNull(), /** 接入方式 */
     importFileName: varchar("import_file_name", { length: 255 }),
     importFileUri: varchar("import_file_uri", { length: 1024 }),
@@ -493,6 +505,41 @@ export const onboardingBatch = pgTable(
       table.createdAt,
     ),
     index("onboarding_batch_work_order_no_idx").on(table.workOrderNo),
+    uniqueIndex("onboarding_batch_supplier_work_order_uk")
+      .on(table.supplierId, table.workOrderNo)
+      .where(sql`${table.workOrderNo} IS NOT NULL`),
+    index("onboarding_batch_parent_batch_id_idx").on(table.parentBatchId),
+  ],
+)
+
+/** 上架计划明细行（卡型 × 合作类型 × 数量）；与 planned_lines_json 二选一或双写 */
+export const onboardingBatchPlanLine = pgTable(
+  "onboarding_batch_plan_line",
+  {
+    id: text("id").primaryKey(),
+    onboardingBatchId: text("onboarding_batch_id")
+      .notNull()
+      .references(() => onboardingBatch.id, { onDelete: "cascade" }),
+    gpuCardTypeId: text("gpu_card_type_id")
+      .notNull()
+      .references(() => gpuCardType.id, { onDelete: "restrict" }),
+    cooperationType: varchar("cooperation_type", { length: 32 }).notNull(),
+    plannedQuantity: integer("planned_quantity").notNull(),
+    touchedQuantity: integer("touched_quantity").notNull().default(0),
+    onlineQuantity: integer("online_quantity").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("onboarding_batch_plan_line_uk").on(
+      table.onboardingBatchId,
+      table.gpuCardTypeId,
+      table.cooperationType,
+    ),
+    index("onboarding_batch_plan_line_batch_id_idx").on(table.onboardingBatchId),
   ],
 )
 
@@ -510,6 +557,7 @@ export const supplierDevice = pgTable(
     contractId: text("contract_id").references(() => supplierContract.id, {
       onDelete: "set null",
     }),
+    /** 最近一次 device_inventory 导入批次；禁止指向 online/order_access 业务批次 */
     onboardingBatchId: text("onboarding_batch_id").references(() => onboardingBatch.id, {
       onDelete: "set null",
     }),
@@ -556,6 +604,48 @@ export const supplierDevice = pgTable(
     index("supplier_device_ops_status_idx").on(table.opsStatus),
     index("supplier_device_in_maintenance_idx").on(table.inMaintenance),
     index("supplier_device_external_device_id_idx").on(table.externalDeviceId),
+    index("supplier_device_cooperation_type_idx").on(table.cooperationType),
+  ],
+)
+
+/** 设备 ↔ 业务接入批次（多对多）；进度统计与批次详情设备列表 */
+export const onboardingBatchDeviceLink = pgTable(
+  "onboarding_batch_device_link",
+  {
+    id: text("id").primaryKey(),
+    businessOnboardingBatchId: text("business_onboarding_batch_id")
+      .notNull()
+      .references(() => onboardingBatch.id, { onDelete: "cascade" }),
+    supplierDeviceId: text("supplier_device_id")
+      .notNull()
+      .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    linkKind: varchar("link_kind", { length: 32 }).notNull().default("touched"),
+    sourceChangeLogId: text("source_change_log_id"),
+    sourceChangelogBatchId: text("source_changelog_batch_id").references(() => onboardingBatch.id, {
+      onDelete: "set null",
+    }),
+    gpuCardTypeId: text("gpu_card_type_id")
+      .notNull()
+      .references(() => gpuCardType.id, { onDelete: "restrict" }),
+    cooperationType: varchar("cooperation_type", { length: 32 }).notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("onboarding_batch_device_link_uk").on(
+      table.businessOnboardingBatchId,
+      table.supplierDeviceId,
+    ),
+    index("onboarding_batch_device_link_batch_id_idx").on(table.businessOnboardingBatchId),
+    index("onboarding_batch_device_link_device_linked_idx").on(
+      table.supplierDeviceId,
+      table.linkedAt,
+    ),
+    index("onboarding_batch_device_link_batch_card_coop_idx").on(
+      table.businessOnboardingBatchId,
+      table.gpuCardTypeId,
+      table.cooperationType,
+    ),
   ],
 )
 
@@ -641,9 +731,15 @@ export const supplierDeviceChangeLog = pgTable(
     supplierDeviceId: text("supplier_device_id")
       .notNull()
       .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    /** device_changelog 导入批次 */
     onboardingBatchId: text("onboarding_batch_id")
       .notNull()
       .references(() => onboardingBatch.id, { onDelete: "restrict" }),
+    /** 由 ticket_no 解析的业务批次（online/order_access） */
+    businessOnboardingBatchId: text("business_onboarding_batch_id").references(
+      () => onboardingBatch.id,
+      { onDelete: "set null" },
+    ),
     internalIp: varchar("internal_ip", { length: 45 }),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     changeAction: varchar("change_action", { length: 64 }).notNull(),
@@ -668,6 +764,11 @@ export const supplierDeviceChangeLog = pgTable(
     ),
     index("supplier_device_change_log_batch_id_idx").on(table.onboardingBatchId),
     index("supplier_device_change_log_ticket_no_idx").on(table.ticketNo),
+    index("supplier_device_change_log_business_batch_id_idx").on(table.businessOnboardingBatchId),
+    index("supplier_device_change_log_business_device_idx").on(
+      table.businessOnboardingBatchId,
+      table.supplierDeviceId,
+    ),
   ],
 )
 
@@ -829,12 +930,22 @@ export const lifecycleStateDefinition = pgTable(
   "lifecycle_state_definition",
   {
     id: text("id").primaryKey(),
+    /** device_ops_status | device_change_action | … */
     domain: varchar("domain", { length: 32 }).notNull(),
+    /** Excel 原文：设备状态或变更动作 */
     stateCode: varchar("state_code", { length: 64 }).notNull(),
     displayName: varchar("display_name", { length: 128 }).notNull(),
     sortOrder: integer("sort_order").notNull(),
+    /**
+     * device_ops_status: { lifecycle_status, overview_bucket, tags? }
+     * device_change_action: { default_ops_status?, updates_compute_node? }
+     */
+    payload: jsonb("payload"),
   },
-  (table) => [uniqueIndex("lifecycle_state_definition_uk").on(table.domain, table.stateCode)],
+  (table) => [
+    uniqueIndex("lifecycle_state_definition_uk").on(table.domain, table.stateCode),
+    index("lifecycle_state_definition_domain_idx").on(table.domain),
+  ],
 )
 
 export const entityStateTransitionLog = pgTable(
@@ -1028,8 +1139,29 @@ export const onboardingBatchRelations = relations(onboardingBatch, ({ one, many 
     references: [accessConditionSheet.id],
   }),
   importRows: many(onboardingBatchImportRow),
+  planLines: many(onboardingBatchPlanLine),
   tasks: many(onboardingTask),
-  devices: many(supplierDevice),
+  /** supplier_device.onboarding_batch_id（仅 inventory 批次） */
+  inventoryDevices: many(supplierDevice, {
+    relationName: "inventoryOnboardingBatch",
+  }),
+  deviceLinks: many(onboardingBatchDeviceLink, {
+    relationName: "businessBatchDeviceLinks",
+  }),
+  parentBatch: one(onboardingBatch, {
+    fields: [onboardingBatch.parentBatchId],
+    references: [onboardingBatch.id],
+    relationName: "parentBatch",
+  }),
+  childImportBatches: many(onboardingBatch, {
+    relationName: "parentBatch",
+  }),
+  changelogChangeLogs: many(supplierDeviceChangeLog, {
+    relationName: "changelogImportBatch",
+  }),
+  businessChangeLogs: many(supplierDeviceChangeLog, {
+    relationName: "businessOnboardingBatch",
+  }),
   createdBy: one(userStaff, {
     fields: [onboardingBatch.createdByStaffId],
     references: [userStaff.id],
@@ -1049,23 +1181,65 @@ export const supplierDeviceRelations = relations(supplierDevice, ({ one, many })
     fields: [supplierDevice.gpuCardTypeId],
     references: [gpuCardType.id],
   }),
-  onboardingBatch: one(onboardingBatch, {
+  inventoryOnboardingBatch: one(onboardingBatch, {
     fields: [supplierDevice.onboardingBatchId],
     references: [onboardingBatch.id],
+    relationName: "inventoryOnboardingBatch",
   }),
+  businessBatchLinks: many(onboardingBatchDeviceLink),
   computeNodes: many(computeNode),
   changeLogs: many(supplierDeviceChangeLog),
   poolBindings: many(resourcePoolBinding),
 }))
+
+export const onboardingBatchPlanLineRelations = relations(onboardingBatchPlanLine, ({ one }) => ({
+  batch: one(onboardingBatch, {
+    fields: [onboardingBatchPlanLine.onboardingBatchId],
+    references: [onboardingBatch.id],
+  }),
+  gpuCardType: one(gpuCardType, {
+    fields: [onboardingBatchPlanLine.gpuCardTypeId],
+    references: [gpuCardType.id],
+  }),
+}))
+
+export const onboardingBatchDeviceLinkRelations = relations(
+  onboardingBatchDeviceLink,
+  ({ one }) => ({
+    businessBatch: one(onboardingBatch, {
+      fields: [onboardingBatchDeviceLink.businessOnboardingBatchId],
+      references: [onboardingBatch.id],
+      relationName: "businessBatchDeviceLinks",
+    }),
+    supplierDevice: one(supplierDevice, {
+      fields: [onboardingBatchDeviceLink.supplierDeviceId],
+      references: [supplierDevice.id],
+    }),
+    gpuCardType: one(gpuCardType, {
+      fields: [onboardingBatchDeviceLink.gpuCardTypeId],
+      references: [gpuCardType.id],
+    }),
+    sourceChangelogBatch: one(onboardingBatch, {
+      fields: [onboardingBatchDeviceLink.sourceChangelogBatchId],
+      references: [onboardingBatch.id],
+    }),
+  }),
+)
 
 export const supplierDeviceChangeLogRelations = relations(supplierDeviceChangeLog, ({ one }) => ({
   supplierDevice: one(supplierDevice, {
     fields: [supplierDeviceChangeLog.supplierDeviceId],
     references: [supplierDevice.id],
   }),
-  onboardingBatch: one(onboardingBatch, {
+  changelogImportBatch: one(onboardingBatch, {
     fields: [supplierDeviceChangeLog.onboardingBatchId],
     references: [onboardingBatch.id],
+    relationName: "changelogImportBatch",
+  }),
+  businessOnboardingBatch: one(onboardingBatch, {
+    fields: [supplierDeviceChangeLog.businessOnboardingBatchId],
+    references: [onboardingBatch.id],
+    relationName: "businessOnboardingBatch",
   }),
 }))
 
@@ -1098,8 +1272,11 @@ export type NewSupplierRow = typeof supplier.$inferInsert
 export type DataCenterRow = typeof dataCenter.$inferSelect
 export type SupplierContractRow = typeof supplierContract.$inferSelect
 export type OnboardingBatchRow = typeof onboardingBatch.$inferSelect
+export type OnboardingBatchPlanLineRow = typeof onboardingBatchPlanLine.$inferSelect
+export type OnboardingBatchDeviceLinkRow = typeof onboardingBatchDeviceLink.$inferSelect
 export type SupplierDeviceRow = typeof supplierDevice.$inferSelect
 export type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSelect
+export type LifecycleStateDefinitionRow = typeof lifecycleStateDefinition.$inferSelect
 export type SupplierOpsUploadBatchRow = typeof supplierOpsUploadBatch.$inferSelect
 export type SupplierUnitCostRow = typeof supplierUnitCost.$inferSelect
 export type SupplierGpuInventoryRow = typeof supplierGpuInventory.$inferSelect

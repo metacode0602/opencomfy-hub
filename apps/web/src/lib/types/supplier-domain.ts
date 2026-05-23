@@ -206,6 +206,7 @@ export type SupplierDevice = {
   idc_code: string
   gpu_count: string
   card_type: string
+  gpu_card_type_id?: string
   external_ip: string
   internal_ip: string
   platform_resource_id?: string | null
@@ -242,6 +243,7 @@ export type SupplierDeviceChangeLog = {
   id: string
   supplier_device_id: string
   onboarding_batch_id: string
+  business_onboarding_batch_id?: string | null
   internal_ip?: string | null
   occurred_at: string
   change_action: string

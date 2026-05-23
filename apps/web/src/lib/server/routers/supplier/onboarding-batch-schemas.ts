@@ -19,6 +19,7 @@ export const onboardingBatchCreateSchema = z
     orderNo: z.string().optional(),
     remark: z.string().optional(),
     uploadList: z.boolean().default(false),
+    workOrderNo: z.string().trim().min(1, '请填写飞书审批工单号'),
     planLines: z.array(onboardingBatchPlanLineSchema).min(1, '请至少添加一行上架计划'),
   })
   .superRefine((data, ctx) => {

@@ -12,19 +12,19 @@ import type {
   SupplierOpsUploadBatch,
 } from "@/lib/types/supplier-domain"
 import { maskPassword } from "@/lib/supplier/onboarding-batch-utils"
+import {
+  CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
+  OPS_STATUS_TO_LIFECYCLE_FROM_SEEDS,
+} from "@workspace/db/schema"
 
-/** Excel 设备状态 → CRM lifecycle_status（§2.1） */
+/** Excel 设备状态 → CRM lifecycle_status（与 DB 种子一致） */
 export const OPS_STATUS_TO_LIFECYCLE: Record<string, string> = {
-  预留闲置中: "待接入",
-  在集群中: "在线",
-  集群组件运行中: "在线",
-  网关直连裸金属上架中: "接入中",
-  网关代理裸金属上架中: "接入中",
-  线下裸金属交付中: "接入中",
-  其他部门使用中: "维护中",
-  不可调度节点运行中: "在线",
-  网关节点上架中: "接入中",
-  已退订: "退订",
+  ...OPS_STATUS_TO_LIFECYCLE_FROM_SEEDS,
+}
+
+/** 变更动作 → 默认 ops_status（变更内容无状态时） */
+export const CHANGE_ACTION_DEFAULT_OPS: Record<string, string> = {
+  ...CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
 }
 
 export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
@@ -109,22 +109,62 @@ export function findDeviceByImportKeys(
     asset_no?: string
   },
 ): SupplierDevice | undefined {
-  if (row.sn?.trim()) {
-    const hit = devices.find((d) => d.sn === row.sn?.trim())
+  const sn = row.sn?.trim()
+  const asset = row.asset_no?.trim()
+  const extId = row.external_device_id?.trim()
+  const ip = row.internal_ip?.trim()
+
+  if (extId) {
+    const hit = devices.find((d) => d.external_device_id?.trim() === extId)
     if (hit) return hit
   }
-  if (row.asset_no?.trim()) {
-    const hit = devices.find((d) => d.asset_no === row.asset_no?.trim())
+  if (ip) {
+    const hit = devices.find((d) => d.internal_ip?.trim() === ip)
     if (hit) return hit
   }
-  if (row.external_device_id) {
-    const hit = devices.find((d) => d.external_device_id === row.external_device_id)
+  if (sn) {
+    const hit = devices.find((d) => d.sn === sn)
     if (hit) return hit
   }
-  if (row.internal_ip) {
-    return devices.find((d) => d.internal_ip === row.internal_ip)
+  if (asset) {
+    const hit = devices.find((d) => d.asset_no === asset)
+    if (hit) return hit
   }
   return undefined
+}
+
+/** 生成全局唯一的 sn/asset（表级 UK，需带机房前缀；优先设备 ID > IP > 标识） */
+export function resolveImportDeviceIdentity(
+  row: Pick<
+    DeviceInventoryParsedRow,
+    "sn" | "asset_no" | "external_device_id" | "internal_ip"
+  >,
+  idcCode: string,
+  rowIndex: number,
+): { sn: string; assetNo: string } {
+  const ext = row.external_device_id?.trim()
+  const ip = row.internal_ip?.trim()
+  const asset = row.asset_no?.trim() || row.sn?.trim()
+  const seq = String(rowIndex + 1).padStart(4, "0")
+
+  if (ext) {
+    const sn = `${idcCode}-DEV-${ext}`.slice(0, 64)
+    const assetNo = (asset && asset !== ext ? `${idcCode}-${asset}` : sn).slice(0, 64)
+    return { sn, assetNo }
+  }
+  if (ip) {
+    const sn = `${idcCode}-IP-${ip}`.slice(0, 64)
+    const assetNo = (asset && asset !== ip ? `${idcCode}-${asset}` : sn).slice(0, 64)
+    return { sn, assetNo }
+  }
+  if (asset) {
+    const sn = asset.length <= 64 && asset.includes(idcCode) ? asset : `${idcCode}-${asset}`.slice(0, 64)
+    return { sn, assetNo: sn }
+  }
+  return {
+    sn: `SN-${idcCode}-${seq}`,
+    assetNo: `AST-${idcCode}-${seq}`,
+  }
 }
 
 export function buildDevicesFromInventoryImport(params: {
@@ -157,8 +197,7 @@ export function buildDevicesFromInventoryImport(params: {
     const inMaint = row.in_maintenance ?? false
     const lifecycle = resolveLifecycleStatus(row.ops_status, inMaint)
     const cooperationType = row.cooperation_type ?? "idle_time"
-    const sn = row.sn?.trim() || row.asset_no?.trim() || `SN-${idcCode}-${String(idx + 1).padStart(4, "0")}`
-    const asset = row.asset_no?.trim() || `AST-${idcCode}-${String(idx + 1).padStart(5, "0")}`
+    const { sn, assetNo: asset } = resolveImportDeviceIdentity(row, idcCode, idx)
     const deviceId = createId("dev")
     devices.push({
       id: deviceId,
@@ -215,6 +254,50 @@ export type ChangelogBusinessBatchLinkInput = {
   ticketRefs: Set<string>
 }
 
+export type ChangelogDeviceLinkUpsert = {
+  supplierDeviceId: string
+  gpuCardTypeId: string
+  cooperationType: string
+  sourceChangeLogId: string
+  linkKind: string
+}
+
+function resolveOpsStatusFromChangelogRow(
+  row: DeviceChangelogParsedRow,
+  device: SupplierDevice,
+): { newOps: string; newLife: string; statusChanged: boolean } {
+  const prevOps = device.ops_status ?? ""
+  const prevLife = device.lifecycle_status
+  const inMaint = device.in_maintenance ?? false
+  const content = row.change_content ?? ""
+
+  if (content.includes("设备状态") || row.change_action.includes("状态")) {
+    const match = content.match(/[为改为：:]\s*([^\s,，]+)/)
+    if (match?.[1] && KNOWN_OPS_FROM_CONTENT(match[1])) {
+      const newOps = match[1]
+      const newLife = resolveLifecycleStatus(newOps, inMaint)
+      return {
+        newOps,
+        newLife,
+        statusChanged: newOps !== prevOps || newLife !== prevLife,
+      }
+    }
+  }
+
+  const defaultOps = CHANGE_ACTION_DEFAULT_OPS[row.change_action]
+  if (defaultOps) {
+    const newOps = defaultOps
+    const newLife = resolveLifecycleStatus(newOps, inMaint)
+    return {
+      newOps,
+      newLife,
+      statusChanged: newOps !== prevOps || newLife !== prevLife,
+    }
+  }
+
+  return { newOps: prevOps, newLife: prevLife, statusChanged: false }
+}
+
 export function buildChangeLogsFromChangelogImport(params: {
   batchId: string
   rows: DeviceChangelogParsedRow[]
@@ -224,7 +307,7 @@ export function buildChangeLogsFromChangelogImport(params: {
 }): {
   logs: SupplierDeviceChangeLog[]
   updatedDevices: SupplierDevice[]
-  deviceIdsToBind: string[]
+  deviceLinks: ChangelogDeviceLinkUpsert[]
   bindWarnings: string[]
 } {
   const { batchId, rows, devices, createId, businessBatchLink } = params
@@ -232,7 +315,8 @@ export function buildChangeLogsFromChangelogImport(params: {
   const logs: SupplierDeviceChangeLog[] = []
   const updatedDevices: SupplierDevice[] = []
   const deviceUpdates = new Map<string, SupplierDevice>()
-  const deviceIdsToBind = new Set<string>()
+  const deviceLinks: ChangelogDeviceLinkUpsert[] = []
+  const linkedDeviceIds = new Set<string>()
   const bindWarnings: string[] = []
 
   const ticketRefs = businessBatchLink?.ticketRefs
@@ -243,41 +327,43 @@ export function buildChangeLogsFromChangelogImport(params: {
     const device = findDeviceByImportKeys(devices, row)
     if (!device) continue
 
-    if (businessBatchLink && ticketRefs && rowTicketMatchesBatch(row.ticket_no, ticketRefs)) {
+    const logId = createId("dcl")
+    const prevOps = device.ops_status ?? ""
+    const prevLife = device.lifecycle_status
+    const { newOps, newLife, statusChanged } = resolveOpsStatusFromChangelogRow(row, device)
+
+    const matchedTicket =
+      businessBatchLink &&
+      ticketRefs &&
+      rowTicketMatchesBatch(row.ticket_no, ticketRefs)
+
+    if (matchedTicket) {
       const deviceDc = device.data_center_id?.trim()
       if (deviceDc && deviceDc !== businessDataCenterId) {
         bindWarnings.push(
-          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 所属机房与业务批次机房不一致，未挂接批次`,
+          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 所属机房与业务批次机房不一致，未写入批次关联`,
         )
-      } else if (
-        device.onboarding_batch_id &&
-        device.onboarding_batch_id !== businessBatchId
-      ) {
+      } else if (!device.gpu_card_type_id) {
         bindWarnings.push(
-          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 已关联其他批次，未覆盖挂接`,
+          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 缺少卡型信息，未写入批次关联`,
         )
-      } else {
-        deviceIdsToBind.add(device.id)
-      }
-    }
-
-    const prevOps = device.ops_status ?? ""
-    const prevLife = device.lifecycle_status
-    let newOps = prevOps
-    let newLife = prevLife
-    const content = row.change_content ?? ""
-    if (content.includes("设备状态") || row.change_action.includes("状态")) {
-      const match = content.match(/[为改为：:]\s*([^\s,，]+)/)
-      if (match?.[1] && KNOWN_OPS_FROM_CONTENT(match[1])) {
-        newOps = match[1]
-        newLife = resolveLifecycleStatus(newOps, device.in_maintenance ?? false)
+      } else if (!linkedDeviceIds.has(device.id)) {
+        linkedDeviceIds.add(device.id)
+        deviceLinks.push({
+          supplierDeviceId: device.id,
+          gpuCardTypeId: device.gpu_card_type_id,
+          cooperationType: device.cooperation_type ?? "idle_time",
+          sourceChangeLogId: logId,
+          linkKind: newLife === "在线" ? "online" : "touched",
+        })
       }
     }
 
     logs.push({
-      id: createId("dcl"),
+      id: logId,
       supplier_device_id: device.id,
       onboarding_batch_id: batchId,
+      business_onboarding_batch_id: matchedTicket ? businessBatchId ?? null : null,
       internal_ip: row.internal_ip ?? null,
       occurred_at: row.occurred_at,
       change_action: row.change_action,
@@ -286,13 +372,13 @@ export function buildChangeLogsFromChangelogImport(params: {
       ticket_no: row.ticket_no ?? null,
       import_row_no: row.row_no,
       previous_ops_status: prevOps || null,
-      new_ops_status: newOps !== prevOps ? newOps : null,
+      new_ops_status: statusChanged && newOps !== prevOps ? newOps : null,
       previous_lifecycle_status: prevLife,
-      new_lifecycle_status: newLife !== prevLife ? newLife : null,
+      new_lifecycle_status: statusChanged && newLife !== prevLife ? newLife : null,
       created_at: now,
     })
 
-    if (newOps !== prevOps || newLife !== prevLife) {
+    if (statusChanged) {
       deviceUpdates.set(device.id, {
         ...device,
         ops_status: newOps,
@@ -305,7 +391,7 @@ export function buildChangeLogsFromChangelogImport(params: {
   return {
     logs,
     updatedDevices,
-    deviceIdsToBind: [...deviceIdsToBind],
+    deviceLinks,
     bindWarnings,
   }
 }

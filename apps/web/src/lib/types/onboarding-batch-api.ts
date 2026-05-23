@@ -1,9 +1,13 @@
-import type {
-  DeviceCooperationType,
-  OnboardingBatch,
-  OnboardingBatchPlanLine,
-  OnboardingParsedRow,
-} from '@/lib/types/supplier-domain'
+import type { DeviceCooperationType, OnboardingParsedRow } from '@/lib/types/supplier-domain'
+import type { OnboardingBatchRow } from '@workspace/db/schema'
+
+/** `planned_lines_json` 存储结构，字段与 `onboarding_batch_plan_line` 表一致 */
+export type OnboardingBatchPlannedLineJson = {
+  gpuCardTypeId: string
+  gpuCardTypeCode: string
+  cooperationType: DeviceCooperationType
+  plannedQuantity: number
+}
 
 export type OnboardingBatchCreateInput = {
   batchKind: 'online' | 'order_access'
@@ -22,6 +26,8 @@ export type OnboardingBatchCreateInput = {
     cooperationType: DeviceCooperationType
     plannedQuantity: number
   }>
+  /** 飞书审批工单号（商务手动录入，supplier 内唯一） */
+  workOrderNo: string
   operatorStaffId?: string | null
 }
 
@@ -32,15 +38,18 @@ export type OnboardingBatchCreateResult = {
   plannedDeviceCount: number
 }
 
-export type OnboardingBatchListItem = OnboardingBatch
+export type OnboardingBatchListItem = OnboardingBatchRow
 
 export type OnboardingBatchProgress = {
   planned: number
+  /** 已触达设备数（v2.2）；与 linked 同义，保留 linked 兼容旧 UI */
+  touched: number
   linked: number
   onboarding: number
   online: number
   planLines: Array<
-    OnboardingBatchPlanLine & {
+    OnboardingBatchPlannedLineJson & {
+      touched: number
       linked: number
       online: number
     }
@@ -60,24 +69,27 @@ export type OnboardingBatchCommitListResult = {
 export type OnboardingBatchDetailDevice = {
   id: string
   sn: string
-  asset_no: string
-  lifecycle_status: string
-  onboarding_substage: string
-  external_ip: string | null
-  card_type_code: string | null
+  assetNo: string | null
+  lifecycleStatus: string
+  onboardingSubstage: string | null
+  externalIp: string | null
+  internalIp: string | null
+  cooperationType: string | null
+  devicePurpose: string | null
+  cardTypeCode: string | null
 }
 
 export type OnboardingBatchDetailTask = {
   id: string
-  onboarding_batch_id: string
-  device_id: string | null
-  device_sn: string | null
-  task_type: string
-  assignee_id: string
-  assignee_name: string | null
-  task_status: string
-  started_at: string | null
-  finished_at: string | null
+  onboardingBatchId: string
+  supplierDeviceId: string | null
+  deviceSn: string | null
+  taskType: string
+  assigneeStaffId: string
+  assigneeName: string | null
+  taskStatus: string
+  startedAt: Date | null
+  finishedAt: Date | null
 }
 
 export type OnboardingBatchDetailPage = {

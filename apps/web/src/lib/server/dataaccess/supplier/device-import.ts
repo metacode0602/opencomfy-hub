@@ -17,6 +17,7 @@ import {
   generateImportBatchCode,
   maskInventoryRowsForPreview,
 } from '@/lib/supplier/device-import-utils'
+import { refreshBatchProgress } from '@/lib/server/dataaccess/supplier/batch-progress'
 import {
   resolveSingleBusinessBatchFromRows,
   ticketRefsForBatch,
@@ -34,6 +35,7 @@ import {
   faultIncident,
   gpuCardType,
   onboardingBatch,
+  onboardingBatchDeviceLink,
   supplier,
   supplierActivity,
   supplierDevice,
@@ -117,6 +119,7 @@ function mapDbDeviceToDomain(
     idc_code: row.idcCode,
     gpu_count: String(row.gpuCount),
     card_type: cardTypeName,
+    gpu_card_type_id: row.gpuCardTypeId,
     external_ip: row.externalIp ?? '',
     internal_ip: row.internalIp ?? '',
     platform_resource_id: row.platformResourceId,
@@ -156,6 +159,37 @@ async function listSupplierDevicesForImport(
     .where(and(...conditions))
 
   return rows.map(({ device, cardTypeName }) => mapDbDeviceToDomain(device, cardTypeName))
+}
+
+function formatDeviceImportDbError(error: unknown): Error {
+  const err = error as {
+    message?: string
+    cause?: { code?: string; constraint?: string; detail?: string }
+  }
+  const pg = err?.cause
+  if (pg?.code === '23505') {
+    const detail = pg.detail ?? ''
+    if (pg.constraint?.includes('sn') || detail.includes('sn')) {
+      return new Error(
+        `设备 SN 已存在，无法重复入库。${detail || '请检查导入文件是否有重复行，或该 IP/设备 ID 是否已被其它记录占用'}`,
+      )
+    }
+    if (pg.constraint?.includes('asset') || detail.includes('asset_no')) {
+      return new Error(`设备资产编号已存在，无法重复入库。${detail || ''}`)
+    }
+    return new Error(`数据唯一性冲突，无法入库。${detail || pg.constraint || ''}`)
+  }
+  if (error instanceof Error) return error
+  return new Error(String(error))
+}
+
+function upsertDeviceInImportPool(pool: SupplierDevice[], device: SupplierDevice) {
+  const idx = pool.findIndex((d) => d.id === device.id)
+  if (idx >= 0) {
+    pool[idx] = device
+    return
+  }
+  pool.push(device)
 }
 
 function parseIsoDate(value: string | null | undefined): Date | null {
@@ -324,6 +358,8 @@ export const deviceImportDataAccess = {
     let insertedCount = 0
     let updatedCount = 0
     const existingDevices = await listSupplierDevicesForImport(params.supplierId)
+    /** 本批次已写入的设备（含 insert/update），避免同文件重复行触发 sn UK */
+    const devicesInImportPool: SupplierDevice[] = [...existingDevices]
     const existingComputeNodes =
       existingDevices.length > 0
         ? await db
@@ -373,7 +409,7 @@ export const deviceImportDataAccess = {
 
         for (const device of newDevices) {
           const row = findImportRowForDevice(device, okRows)
-          const existing = findDeviceByImportKeys(existingDevices, {
+          const existing = findDeviceByImportKeys(devicesInImportPool, {
             sn: device.sn,
             asset_no: device.asset_no,
             external_device_id: device.external_device_id ?? undefined,
@@ -389,6 +425,8 @@ export const deviceImportDataAccess = {
                 onboardingBatchId: batchId,
                 dataCenterId: dc.id,
                 gpuCardTypeId,
+                assetNo: device.asset_no,
+                sn: device.sn,
                 externalDeviceId: device.external_device_id,
                 idcCode: device.idc_code,
                 idcRegion: device.idc_region || null,
@@ -449,6 +487,11 @@ export const deviceImportDataAccess = {
                 })
               }
             }
+            upsertDeviceInImportPool(devicesInImportPool, {
+              ...device,
+              id: existing.id,
+              gpu_card_type_id: gpuCardTypeId,
+            })
             continue
           }
 
@@ -486,6 +529,10 @@ export const deviceImportDataAccess = {
           })
           insertedCount++
           trackImportedCardType(cardTypesByDataCenter, dc.id, gpuCardTypeId)
+          upsertDeviceInImportPool(devicesInImportPool, {
+            ...device,
+            gpu_card_type_id: gpuCardTypeId,
+          })
 
           if (node) {
             await tx.insert(computeNode).values({
@@ -570,7 +617,7 @@ export const deviceImportDataAccess = {
       })
     } catch (e) {
       supplierError('device-import', 'commitInventory failed', e, { batchId })
-      throw e
+      throw formatDeviceImportDbError(e)
     }
 
     const committedCount = insertedCount + updatedCount
@@ -651,7 +698,7 @@ export const deviceImportDataAccess = {
         }
       : undefined
 
-    const { logs, updatedDevices, deviceIdsToBind, bindWarnings } =
+    const { logs, updatedDevices, deviceLinks, bindWarnings } =
       buildChangeLogsFromChangelogImport({
         batchId,
         rows: params.rows,
@@ -664,7 +711,7 @@ export const deviceImportDataAccess = {
     const warnings: string[] = [...bindWarnings]
     if (ticketNos.length > 0 && !businessBatch) {
       warnings.push(
-        '变更表工单号未匹配到上架/订单接入批次（请填写 WO- 工单号或批次号 ONB-/ORD-），仅写入变更审计',
+        '变更表工单号未匹配到上架/订单接入批次（请填写飞书工单号或批次号 ONB-/ORD-），仅写入变更审计',
       )
     }
     if (unknownTicketNos.length > 0 && businessBatch) {
@@ -675,13 +722,11 @@ export const deviceImportDataAccess = {
     if (notFoundCount > 0) {
       warnings.push(`${notFoundCount} 行未匹配到本机房已有设备，已跳过`)
     }
-    if (businessBatch && ticketNos.length > 0 && deviceIdsToBind.length === 0 && logs.length > 0) {
+    if (businessBatch && ticketNos.length > 0 && deviceLinks.length === 0 && logs.length > 0) {
       warnings.push(
-        `已识别业务批次 ${businessBatch.batchCode}，但无设备满足挂接条件（请检查工单号、机房或设备是否已关联其他批次）`,
+        `已识别业务批次 ${businessBatch.batchCode}，但无设备满足挂接条件（请检查工单号、机房或设备卡型）`,
       )
     }
-
-    const bindSet = new Set(deviceIdsToBind)
 
     try {
       await db.transaction(async (tx) => {
@@ -720,6 +765,7 @@ export const deviceImportDataAccess = {
             id: log.id,
             supplierDeviceId: log.supplier_device_id,
             onboardingBatchId: batchId,
+            businessOnboardingBatchId: log.business_onboarding_batch_id ?? null,
             internalIp: log.internal_ip,
             occurredAt: parseIsoDate(log.occurred_at) ?? now,
             changeAction: log.change_action,
@@ -735,36 +781,47 @@ export const deviceImportDataAccess = {
           })
         }
 
-        const touchedDeviceIds = new Set<string>([
-          ...updatedDevices.map((d) => d.id),
-          ...deviceIdsToBind,
-        ])
+        if (businessBatch) {
+          for (const link of deviceLinks) {
+            await tx
+              .insert(onboardingBatchDeviceLink)
+              .values({
+                id: newId(),
+                businessOnboardingBatchId: businessBatch.id,
+              supplierDeviceId: link.supplierDeviceId,
+              linkKind: link.linkKind,
+              sourceChangeLogId: link.sourceChangeLogId,
+              sourceChangelogBatchId: batchId,
+              gpuCardTypeId: link.gpuCardTypeId,
+              cooperationType: link.cooperationType,
+              linkedAt: now,
+              createdAt: now,
+            })
+              .onConflictDoUpdate({
+                target: [
+                  onboardingBatchDeviceLink.businessOnboardingBatchId,
+                  onboardingBatchDeviceLink.supplierDeviceId,
+                ],
+                set: {
+                  linkKind: link.linkKind,
+                  sourceChangeLogId: link.sourceChangeLogId,
+                  sourceChangelogBatchId: batchId,
+                  linkedAt: now,
+                },
+              })
+          }
+        }
 
-        for (const deviceId of touchedDeviceIds) {
-          const statusPatch = updatedDevices.find((d) => d.id === deviceId)
-          const shouldBind = bindSet.has(deviceId) && businessBatch
-
+        for (const patch of updatedDevices) {
           await tx
             .update(supplierDevice)
             .set({
-              ...(statusPatch
-                ? {
-                    opsStatus: statusPatch.ops_status ?? undefined,
-                    lifecycleStatus: statusPatch.lifecycle_status,
-                    inMaintenance: statusPatch.in_maintenance ?? false,
-                  }
-                : {}),
-              ...(shouldBind
-                ? {
-                    onboardingBatchId: businessBatch!.id,
-                    dataCenterId: dc.id,
-                    idcCode: dc.code,
-                    idcRegion: dc.location,
-                  }
-                : {}),
+              opsStatus: patch.ops_status ?? undefined,
+              lifecycleStatus: patch.lifecycle_status,
+              inMaintenance: patch.in_maintenance ?? false,
               updatedAt: now,
             })
-            .where(eq(supplierDevice.id, deviceId))
+            .where(eq(supplierDevice.id, patch.id))
         }
 
         if (logs.length > 0 || updatedDevices.length > 0) {
@@ -779,8 +836,12 @@ export const deviceImportDataAccess = {
           })
         }
 
+        if (businessBatch && deviceLinks.length > 0) {
+          await refreshBatchProgress(businessBatch.id, tx, now)
+        }
+
         const activityDescription = businessBatch
-          ? `追加 ${logs.length} 条变更审计；${deviceIdsToBind.length} 台设备已挂接业务批次 ${businessBatch.batchCode}`
+          ? `追加 ${logs.length} 条变更审计；${deviceLinks.length} 台设备已关联业务批次 ${businessBatch.batchCode}`
           : `追加 ${logs.length} 条变更审计`
 
         await tx.insert(supplierActivity).values({
@@ -799,7 +860,7 @@ export const deviceImportDataAccess = {
           metadata: businessBatch
             ? {
                 linked_business_batch_id: businessBatch.id,
-                bound_device_count: deviceIdsToBind.length,
+                bound_device_count: deviceLinks.length,
               }
             : null,
           occurredAt: now,
@@ -810,7 +871,12 @@ export const deviceImportDataAccess = {
       throw e
     }
 
-    supplierLog('device-import', 'commitChangelog done', { batchId, logs: logs.length })
+    supplierLog('device-import', 'commitChangelog done', {
+      batchId,
+      logs: logs.length,
+      deviceLinks: deviceLinks.length,
+      businessBatchId: businessBatch?.id,
+    })
 
     return {
       batchId,
@@ -819,7 +885,7 @@ export const deviceImportDataAccess = {
       skippedCount: notFoundCount,
       warnings,
       linkedBusinessBatchId: businessBatch?.id ?? null,
-      boundDeviceCount: deviceIdsToBind.length,
+      boundDeviceCount: deviceLinks.length,
     }
   },
 

@@ -9,6 +9,7 @@ export * from "./crm-schema"
 export * from "./finance-schema"
 export * from "./platform-pricing-schema"
 export * from "./supply-schema"
+export * from "./supply-lifecycle-dictionary"
 
 export const schema = {
   ...authSchema,

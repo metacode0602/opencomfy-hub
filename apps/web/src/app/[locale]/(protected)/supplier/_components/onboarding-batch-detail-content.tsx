@@ -40,9 +40,10 @@ import type { OnboardingBatchDetailTask } from '@/lib/types/onboarding-batch-api
 
 type RouteKind = Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
 
-function formatDt(iso: string | null | undefined) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
+function formatDt(value: Date | string | null | undefined) {
+  if (!value) return '—'
+  const d = value instanceof Date ? value : new Date(value)
+  return d.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -116,8 +117,9 @@ export function OnboardingBatchDetailContent({
   const tasks = detail?.tasks ?? []
 
   const parsedRows = useMemo(() => {
-    if (!batch?.parsed_rows_json?.length) return []
-    return batch.parsed_rows_json as OnboardingParsedRow[]
+    const rows = batch?.parsedRowsJson
+    if (!Array.isArray(rows) || rows.length === 0) return []
+    return rows as OnboardingParsedRow[]
   }, [batch])
 
   const parseStats = useMemo(() => {
@@ -129,7 +131,7 @@ export function OnboardingBatchDetailContent({
 
   const defaultTab = useMemo(() => {
     if (!batch) return 'progress'
-    if (batch.import_status !== 'none' && parsedRows.length > 0) return 'import'
+    if (batch.importStatus !== 'none' && parsedRows.length > 0) return 'import'
     return 'progress'
   }, [batch, parsedRows.length])
 
@@ -197,7 +199,7 @@ export function OnboardingBatchDetailContent({
     )
   }
 
-  if (batch.batch_kind !== expectedKind) {
+  if (batch.batchKind !== expectedKind) {
     const correctPath = onboardingBatchDetailPath(batch)
     return (
       <div className="space-y-4">
@@ -219,7 +221,7 @@ export function OnboardingBatchDetailContent({
     )
   }
 
-  const hasImport = batch.import_status !== 'none'
+  const hasImport = batch.importStatus !== 'none'
 
   return (
     <div className="space-y-6">
@@ -232,19 +234,19 @@ export function OnboardingBatchDetailContent({
           </Link>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-semibold">{batch.batch_code}</h1>
-              <Badge variant="outline" className={importStatusColor[batch.import_status] ?? ''}>
-                {IMPORT_STATUS_LABELS[batch.import_status] ?? batch.import_status}
+              <h1 className="text-2xl font-semibold">{batch.batchCode}</h1>
+              <Badge variant="outline" className={importStatusColor[batch.importStatus] ?? ''}>
+                {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus}
               </Badge>
-              <Badge variant="secondary">{batch.batch_status}</Badge>
+              <Badge variant="secondary">{batch.batchStatus}</Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-2">
-              {batch.supplier_short_name} · {batch.idc_code} · {batch.data_center_name}
-              {batch.work_order_no ? ` · 工单 ${batch.work_order_no}` : ''}
+              {batch.supplierShortName} · {batch.idcCode} · {batch.dataCenterName}
+              {batch.workOrderNo ? ` · 工单 ${batch.workOrderNo}` : ''}
             </p>
           </div>
         </div>
-        {batch.import_status === 'parsed' && (
+        {batch.importStatus === 'parsed' && (
           <Button
             className="gap-2"
             disabled={commitListMutation.isPending}
@@ -282,7 +284,7 @@ export function OnboardingBatchDetailContent({
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">计划完成</p>
-            <p className="text-sm font-medium mt-2">{formatDt(batch.planned_ready_at)}</p>
+            <p className="text-sm font-medium mt-2">{formatDt(batch.plannedReadyAt)}</p>
           </CardContent>
         </Card>
       </div>
@@ -332,17 +334,17 @@ export function OnboardingBatchDetailContent({
                   <TableBody>
                     {progress.planLines.map((line) => {
                       const lineRate =
-                        line.planned_quantity > 0
-                          ? Math.min(100, (line.online / line.planned_quantity) * 100)
+                        line.plannedQuantity > 0
+                          ? Math.min(100, (line.online / line.plannedQuantity) * 100)
                           : 0
-                      const lineKey = `${line.gpu_card_type_id}-${line.cooperation_type}`
+                      const lineKey = `${line.gpuCardTypeId}-${line.cooperationType}`
                       return (
                         <TableRow key={lineKey}>
-                          <TableCell className="font-medium">{line.gpu_card_type_code}</TableCell>
+                          <TableCell className="font-medium">{line.gpuCardTypeCode}</TableCell>
                           <TableCell>
-                            {DEVICE_COOPERATION_TYPE_LABELS[line.cooperation_type]}
+                            {DEVICE_COOPERATION_TYPE_LABELS[line.cooperationType]}
                           </TableCell>
-                          <TableCell className="text-right">{line.planned_quantity}</TableCell>
+                          <TableCell className="text-right">{line.plannedQuantity}</TableCell>
                           <TableCell className="text-right">{line.linked}</TableCell>
                           <TableCell className="text-right">{line.online}</TableCell>
                           <TableCell className="min-w-[120px]">
@@ -367,15 +369,15 @@ export function OnboardingBatchDetailContent({
                   清单文件
                 </CardTitle>
                 <CardDescription>
-                  {batch.import_file_name}
-                  {batch.parsed_at ? ` · 解析于 ${formatDt(batch.parsed_at)}` : ''}
-                  {batch.committed_at ? ` · 入库于 ${formatDt(batch.committed_at)}` : ''}
+                  {batch.importFileName ?? '未上传'}
+                  {batch.parsedAt ? ` · 解析于 ${formatDt(batch.parsedAt)}` : ''}
+                  {batch.committedAt ? ` · 入库于 ${formatDt(batch.committedAt)}` : ''}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-4 text-sm">
                 <div>
                   <span className="text-muted-foreground">解析行数 </span>
-                  <span className="font-medium">{batch.parsed_row_count}</span>
+                  <span className="font-medium">{batch.parsedRowCount}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">通过 </span>
@@ -395,7 +397,7 @@ export function OnboardingBatchDetailContent({
                 )}
                 <div>
                   <span className="text-muted-foreground">已入库 </span>
-                  <span className="font-medium">{batch.committed_device_count}</span>
+                  <span className="font-medium">{batch.committedDeviceCount}</span>
                 </div>
               </CardContent>
             </Card>
@@ -403,7 +405,7 @@ export function OnboardingBatchDetailContent({
             {parsedRows.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center text-muted-foreground">
-                  {batch.import_status === 'draft'
+                  {batch.importStatus === 'draft'
                     ? '清单尚未上传，请在创建流程中上传 CSV'
                     : '暂无解析数据'}
                 </CardContent>
@@ -471,44 +473,44 @@ export function OnboardingBatchDetailContent({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-muted-foreground">供应商</p>
-                  <p className="font-medium mt-1">{batch.supplier_name}</p>
-                  <p className="text-xs text-muted-foreground">{batch.supplier_code}</p>
+                  <p className="font-medium mt-1">{batch.supplierName}</p>
+                  <p className="text-xs text-muted-foreground">{batch.supplierCode}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">机房</p>
-                  <p className="font-medium mt-1">{batch.data_center_name}</p>
+                  <p className="font-medium mt-1">{batch.dataCenterName}</p>
                   <p className="text-xs text-muted-foreground">
-                    {batch.idc_code} · {batch.idc_region}
+                    {batch.idcCode} · {batch.idcRegion}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">接入方式</p>
                   <p className="font-medium mt-1">
-                    {ACCESS_METHOD_OPTIONS.find((o) => o.value === batch.access_method)?.label ??
-                      batch.access_method}
+                    {ACCESS_METHOD_OPTIONS.find((o) => o.value === batch.accessMethod)?.label ??
+                      batch.accessMethod}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">商务合同</p>
                   <p className="font-medium mt-1">
-                    {detail.contractNo ?? (batch.contract_id ? batch.contract_id : '未关联')}
+                    {detail.contractNo ?? (batch.contractId ? batch.contractId : '未关联')}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">工单号</p>
                   <p className="font-medium mt-1 font-mono text-xs">
-                    {batch.work_order_no ?? '—'}
+                    {batch.workOrderNo ?? '—'}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">计划完成时间</p>
-                  <p className="font-medium mt-1">{formatDt(batch.planned_ready_at)}</p>
+                  <p className="font-medium mt-1">{formatDt(batch.plannedReadyAt)}</p>
                 </div>
-                {batch.batch_kind === 'online' && (
+                {batch.batchKind === 'online' && (
                   <>
                     <div>
                       <p className="text-muted-foreground">上架原因</p>
-                      <p className="font-medium mt-1">{onlineReasonLabel(batch.online_reason)}</p>
+                      <p className="font-medium mt-1">{onlineReasonLabel(batch.onlineReason)}</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-muted-foreground">备注</p>
@@ -518,11 +520,11 @@ export function OnboardingBatchDetailContent({
                     </div>
                   </>
                 )}
-                {batch.batch_kind === 'order_access' && (
+                {batch.batchKind === 'order_access' && (
                   <>
                     <div>
                       <p className="text-muted-foreground">订单编号</p>
-                      <p className="font-medium mt-1 font-mono">{batch.order_no ?? '—'}</p>
+                      <p className="font-medium mt-1 font-mono">{batch.orderNo ?? '—'}</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-muted-foreground">备注</p>
@@ -534,21 +536,21 @@ export function OnboardingBatchDetailContent({
                 )}
                 <div>
                   <p className="text-muted-foreground">创建时间</p>
-                  <p className="font-medium mt-1">{formatDt(batch.created_at)}</p>
+                  <p className="font-medium mt-1">{formatDt(batch.createdAt)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">最近更新</p>
-                  <p className="font-medium mt-1">{formatDt(batch.updated_at)}</p>
+                  <p className="font-medium mt-1">{formatDt(batch.updatedAt)}</p>
                 </div>
               </div>
-              {batch.parse_error && (
+              {batch.parseError && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>解析错误：{batch.parse_error}</AlertDescription>
+                  <AlertDescription>解析错误：{batch.parseError}</AlertDescription>
                 </Alert>
               )}
               <Link
-                href={`/supplier/suppliers/${batch.supplier_id}`}
+                href={`/supplier/suppliers/${batch.supplierId}`}
                 className="text-primary text-sm inline-flex items-center gap-1"
               >
                 供应商详情
@@ -562,9 +564,9 @@ export function OnboardingBatchDetailContent({
           {devices.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
-                {batch.import_status === 'committed'
+                {batch.importStatus === 'committed'
                   ? '暂无关联设备记录'
-                  : batch.import_status === 'none'
+                  : batch.importStatus === 'none'
                     ? '本批次未上传清单，设备将在后续接入流程中关联'
                     : '确认入库后将在此展示物理机列表'}
               </CardContent>
@@ -579,7 +581,10 @@ export function OnboardingBatchDetailContent({
                     <TableHead>卡型</TableHead>
                     <TableHead>状态</TableHead>
                     <TableHead>子阶段</TableHead>
+                    <TableHead>内网 IP</TableHead>
                     <TableHead>公网 IP</TableHead>
+                    <TableHead>合作类型</TableHead>
+                    <TableHead>设备用途</TableHead>
                     <TableHead className="w-[80px]" />
                   </TableRow>
                 </TableHeader>
@@ -587,18 +592,21 @@ export function OnboardingBatchDetailContent({
                   {devices.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-mono text-xs">{d.sn}</TableCell>
-                      <TableCell className="font-mono text-xs">{d.asset_no}</TableCell>
-                      <TableCell>{d.card_type_code ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.assetNo ?? '—'}</TableCell>
+                      <TableCell>{d.cardTypeCode ?? '—'}</TableCell>
                       <TableCell>
                         <Badge
                           variant="outline"
-                          className={LIFECYCLE_STATUS_COLORS[d.lifecycle_status] ?? ''}
+                          className={LIFECYCLE_STATUS_COLORS[d.lifecycleStatus] ?? ''}
                         >
-                          {d.lifecycle_status}
+                          {d.lifecycleStatus}
                         </Badge>
                       </TableCell>
-                      <TableCell>{d.onboarding_substage}</TableCell>
-                      <TableCell className="font-mono text-xs">{d.external_ip ?? '—'}</TableCell>
+                      <TableCell>{d.onboardingSubstage ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.internalIp ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.externalIp ?? '—'}</TableCell>
+                      <TableCell>{d.cooperationType ?? '—'}</TableCell>
+                      <TableCell>{d.devicePurpose ?? '—'}</TableCell>
                       <TableCell>
                         <Button variant="ghost" size="sm" asChild>
                           <Link href={`/supplier/devices/${d.id}`}>详情</Link>
@@ -629,13 +637,13 @@ export function OnboardingBatchDetailContent({
 }
 
 function OnboardingTaskCard({ task }: { task: OnboardingBatchDetailTask }) {
-  const deviceLabel = task.device_sn ?? (task.device_id ? task.device_id : '批次级')
+  const deviceLabel = task.deviceSn ?? (task.supplierDeviceId ? task.supplierDeviceId : '批次级')
   return (
     <Card>
       <CardHeader className="py-3">
-        <CardTitle className="text-sm">{task.task_type}</CardTitle>
+        <CardTitle className="text-sm">{task.taskType}</CardTitle>
         <CardDescription>
-          {task.assignee_name ?? task.assignee_id} · {task.task_status} · {deviceLabel}
+          {task.assigneeName ?? task.assigneeStaffId} · {task.taskStatus} · {deviceLabel}
         </CardDescription>
       </CardHeader>
     </Card>

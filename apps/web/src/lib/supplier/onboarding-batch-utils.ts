@@ -1,9 +1,5 @@
-import type {
-  OnboardingBatch,
-  OnboardingBatchKind,
-  OnboardingParsedRow,
-  SupplierDevice,
-} from "@/lib/types/supplier-domain"
+import type { OnboardingBatchKind, OnboardingParsedRow, SupplierDevice } from "@/lib/types/supplier-domain"
+import type { OnboardingBatchRow } from "@workspace/db/schema"
 import type { SupplierOpsInventoryRow } from "@/lib/types/supplier-ops-batch"
 
 export function batchKindFromRoute(kind: "online-tasks" | "order-access"): OnboardingBatchKind {
@@ -15,9 +11,9 @@ export function routeKindFromBatch(batchKind: OnboardingBatchKind): "online-task
 }
 
 export function onboardingBatchDetailPath(
-  batch: Pick<OnboardingBatch, "id" | "batch_kind">,
+  batch: Pick<OnboardingBatchRow, "id" | "batchKind">,
 ): string {
-  const kind = routeKindFromBatch(batch.batch_kind)
+  const kind = routeKindFromBatch(batch.batchKind as OnboardingBatchKind)
   return `/supplier/${kind}/${batch.id}`
 }
 

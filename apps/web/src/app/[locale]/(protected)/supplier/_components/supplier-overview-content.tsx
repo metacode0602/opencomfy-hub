@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   AlertCircle,
@@ -37,19 +37,9 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { cn } from '@workspace/ui/lib/utils'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
-import {
-  buildFaultSlaSummary,
-  buildInventoryOverviewRows,
-  buildLifecycleFunnel,
-  buildOnboardingBatchSummaries,
-  buildSupplierOverviewRows,
-  computeOverviewKpis,
-  getOverviewFilterOptions,
-  type OverviewFilters,
-} from '@/lib/supplier/overview-stats'
+import type { OverviewFiltersInput } from '@/lib/types/supplier-overview-api'
+import { trpc } from '@/lib/trpc/client'
 import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
-import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 
 const statusColors: Record<string, string> = {
   online: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -133,62 +123,52 @@ function KpiCard({
 }
 
 export function SupplierOverviewContent() {
-  const holds = useSupplierDomainMockStore((s) => s.internalTestHolds)
-  const faults = useSupplierDomainMockStore((s) => s.faultIncidents)
-  const batches = useSupplierDomainMockStore((s) => s.onboardingBatches)
-  const physicalDevices = useSupplierDomainMockStore((s) => s.devices)
-  const poolBindings = useSupplierDomainMockStore((s) => s.resourcePoolBindings)
-
-  const [filters, setFilters] = useState<OverviewFilters>({
+  const [filters, setFilters] = useState<OverviewFiltersInput>({
     region: 'all',
     supplierId: 'all',
     cardType: 'all',
     poolCode: 'all',
   })
 
-  const filterOptions = useMemo(
-    () => getOverviewFilterOptions(poolBindings, physicalDevices),
-    [poolBindings, physicalDevices],
-  )
+  const { data: filterOptions } = trpc.supplier.overview.getFilterOptions.useQuery()
+  const {
+    data: stats,
+    isLoading,
+    isError,
+    error,
+  } = trpc.supplier.overview.getStats.useQuery(filters)
 
-  const inventoryRows = useMemo(
-    () =>
-      buildInventoryOverviewRows(filters, holds, faults, poolBindings, physicalDevices),
-    [filters, holds, faults, poolBindings, physicalDevices],
-  )
-
-  const kpis = useMemo(
-    () =>
-      computeOverviewKpis(
-        inventoryRows,
-        filters,
-        holds,
-        faults,
-        batches,
-        physicalDevices,
-      ),
-    [inventoryRows, filters, holds, faults, batches, physicalDevices],
-  )
-
-  const supplierRows = useMemo(
-    () => buildSupplierOverviewRows(inventoryRows, faults, batches),
-    [inventoryRows, faults, batches],
-  )
-
-  const funnel = useMemo(() => buildLifecycleFunnel(physicalDevices), [physicalDevices])
-
-  const batchSummaries = useMemo(
-    () => buildOnboardingBatchSummaries(batches, filters),
-    [batches, filters],
-  )
-
-  const faultSla = useMemo(
-    () => buildFaultSlaSummary(faults, filters),
-    [faults, filters],
-  )
+  const kpis = stats?.kpis ?? {
+    totalGpu: 0,
+    onlineGpu: 0,
+    onboardingGpu: 0,
+    maintenanceGpu: 0,
+    internalTestGpu: 0,
+    sellableGpu: 0,
+    faultOpenCount: 0,
+    activeTestHolds: 0,
+    activeBatches: 0,
+  }
+  const supplierRows = stats?.supplierRows ?? []
+  const inventoryRows = stats?.inventoryRows ?? []
+  const funnel = stats?.lifecycleFunnel ?? []
+  const opsPipeline = stats?.opsPipeline ?? []
+  const batchSummaries = stats?.batchSummaries ?? []
+  const faultSla = stats?.faultSla ?? {
+    openCount: 0,
+    p1Count: 0,
+    p2Count: 0,
+    avgResolutionHours: null,
+    recentOpen: [],
+  }
 
   const sellableRate =
     kpis.onlineGpu > 0 ? Math.round((kpis.sellableGpu / kpis.onlineGpu) * 100) : 0
+
+  const suppliers = filterOptions?.suppliers ?? []
+  const regions = filterOptions?.regions ?? []
+  const cardTypes = filterOptions?.cardTypes ?? []
+  const poolCodes = filterOptions?.poolCodes ?? []
 
   return (
     <div className="space-y-6">
@@ -209,7 +189,7 @@ export function SupplierOverviewContent() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部区域</SelectItem>
-              {filterOptions.regions.map((r) => (
+              {regions.map((r) => (
                 <SelectItem key={r} value={r}>
                   {r}
                 </SelectItem>
@@ -225,9 +205,9 @@ export function SupplierOverviewContent() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部供应商</SelectItem>
-              {filterOptions.suppliers.map((s) => (
+              {suppliers.map((s) => (
                 <SelectItem key={s.id} value={s.id}>
-                  {s.shortName}
+                  {s.shortName ?? s.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -241,7 +221,7 @@ export function SupplierOverviewContent() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部卡型</SelectItem>
-              {filterOptions.cardTypes.map((c) => (
+              {cardTypes.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -257,7 +237,7 @@ export function SupplierOverviewContent() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部资源池</SelectItem>
-              {filterOptions.poolCodes.map((p) => (
+              {poolCodes.map((p) => (
                 <SelectItem key={p} value={p}>
                   {p}
                 </SelectItem>
@@ -267,7 +247,27 @@ export function SupplierOverviewContent() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {isError ? (
+        <Card className="border-destructive/40">
+          <CardContent className="py-6 text-sm text-destructive">
+            加载资源总览失败：{error?.message ?? '未知错误'}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <Loader2 className="size-5 animate-spin" />
+          <span>正在聚合资源数据…</span>
+        </div>
+      ) : null}
+
+      <div
+        className={cn(
+          'grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6',
+          (isLoading || isError) && 'pointer-events-none opacity-50',
+        )}
+      >
         <KpiCard title="GPU 总量" value={kpis.totalGpu} unit="卡" icon={Cpu} accent="primary" />
         <KpiCard
           title="在线 GPU"
@@ -316,7 +316,7 @@ export function SupplierOverviewContent() {
         <Card className="border-border/80 lg:col-span-4">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">物理机生命周期漏斗</CardTitle>
-            <CardDescription>L2 物理设备按 lifecycle_status 分布（Mock 域）</CardDescription>
+            <CardDescription>L2 物理设备按 lifecycle_status 分布</CardDescription>
           </CardHeader>
           <CardContent className="space-y-0">
             {funnel.map((row, idx) => (
@@ -341,6 +341,19 @@ export function SupplierOverviewContent() {
                 </div>
               </div>
             ))}
+            {/* {opsPipeline.some((g) => g.gpuCount > 0) ? (
+              <div className="mt-4 space-y-2 rounded-md border border-dashed border-border/80 p-3">
+                <p className="text-xs font-medium text-muted-foreground">运维状态管道</p>
+                {opsPipeline.map((g) => (
+                  <div key={g.group} className="flex justify-between text-xs">
+                    <span>{g.group}</span>
+                    <span className="tabular-nums text-muted-foreground">
+                      {g.gpuCount} 卡 · {g.deviceCount} 台
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null} */}
             <div className="mt-4 flex gap-2">
               <Button variant="outline" size="sm" asChild>
                 <Link href="/supplier/online-tasks">
@@ -382,8 +395,14 @@ export function SupplierOverviewContent() {
                   <TableHead className="text-right">可售</TableHead>
                   <TableHead className="text-right">批次</TableHead>
                   <TableHead className="text-right">故障</TableHead>
-                  <TableHead className="text-right">待上线</TableHead>
-                  <TableHead className="text-right">待下线</TableHead>
+                  <TableHead className="text-right">维护中</TableHead>
+                  <TableHead className="text-right">待接入</TableHead>
+                  <TableHead className="text-right">下线中</TableHead>
+                  <TableHead className="text-right">内部占用</TableHead>
+                  <TableHead className="text-right">线下交付</TableHead>
+                  <TableHead className="text-right">裸金属上架</TableHead>
+                  <TableHead className="text-right">弹性服务</TableHead>
+                  <TableHead className="text-right">裸金属池</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -425,22 +444,42 @@ export function SupplierOverviewContent() {
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.onboardingGpu > 0 ? (
+                      {row.maintenanceGpu.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.pendingOnboardingGpu > 0 ? (
                         <Badge variant="outline" className="border-chart-4/40 text-chart-4">
-                          {row.onboardingGpu}
+                          {row.pendingOnboardingGpu}
                         </Badge>
                       ) : (
                         '—'
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.onboardingGpu > 0 ? (
-                        <Badge variant="outline" className="border-chart-4/40 text-chart-4">
-                          {row.onboardingGpu}
+                      {row.pendingRetireGpu > 0 ? (
+                        <Badge variant="outline" className="border-muted-foreground/40">
+                          {row.pendingRetireGpu}
                         </Badge>
                       ) : (
                         '—'
                       )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.internalTestGpu.toLocaleString()}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.offlineDeliveryGpu > 0 ? row.offlineDeliveryGpu.toLocaleString() : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.bareMetalOnboardingGpu > 0
+                        ? row.bareMetalOnboardingGpu.toLocaleString()
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.elasticServiceGpu > 0 ? row.elasticServiceGpu.toLocaleString() : '—'}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.bareMetalPoolGpu > 0 ? row.bareMetalPoolGpu.toLocaleString() : '—'}
                     </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" className="size-8" asChild>
@@ -578,9 +617,10 @@ export function SupplierOverviewContent() {
                         {batch.supplierName} · {batch.dataCenterName}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 已入库{' '}
-                        {batch.committedDeviceCount}/{batch.parsedSuccessCount} 台 · 计划就绪{' '}
-                        {formatDt(batch.plannedReadyAt)}
+                        {batch.workOrderNo ? `工单 ${batch.workOrderNo} · ` : ''}
+                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 触达{' '}
+                        {batch.touchedDeviceCount}/{batch.plannedDeviceCount} · 在线{' '}
+                        {batch.onlineDeviceCount} · 计划就绪 {formatDt(batch.plannedReadyAt)}
                       </p>
                     </div>
                     <Button variant="outline" size="sm" asChild>
@@ -635,10 +675,10 @@ export function SupplierOverviewContent() {
                           <Badge variant="outline" className={severityColors[fault.severity]}>
                             {fault.severity}
                           </Badge>
-                          <span className="truncate text-sm font-medium">{fault.title}</span>
+                          <span className="truncate text-sm font-medium">{fault.faultType}</span>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {fault.incident_status} · 开启于 {formatDt(fault.opened_at)}
+                          {fault.incidentStatus} · 开启于 {formatDt(fault.openedAt)}
                         </p>
                       </div>
                     </div>
@@ -656,7 +696,7 @@ export function SupplierOverviewContent() {
                   测试占用台账
                 </Link>
               </Button>
-              {filterOptions.poolCodes.length > 0 && (
+              {poolCodes.length > 0 && (
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/supplier/devices">
                     <Layers className="mr-1.5 size-3.5" />
@@ -674,17 +714,11 @@ export function SupplierOverviewContent() {
           <div className="flex items-center gap-2">
             <Server className="size-4" />
             <span>
-              可售量公式：<code className="text-xs">online − internal_test − fault_down</code>
+              可售量公式：<code className="text-xs">online − internal_test − fault_down − other_dept</code>
             </span>
           </div>
           <span className="hidden sm:inline">·</span>
-          <span>
-            物理机域供应商映射：
-            {filterOptions.suppliers
-              .slice(0, 2)
-              .map((s) => `${s.shortName}→${resolveDomainSupplierId(s.id)}`)
-              .join('、')}
-          </span>
+          <span>批次进度来自 device_link + 变更表，与供应商表「在线/可售」列口径不同</span>
         </CardContent>
       </Card>
     </div>

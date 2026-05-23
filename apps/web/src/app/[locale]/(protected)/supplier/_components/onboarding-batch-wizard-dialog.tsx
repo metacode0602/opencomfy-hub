@@ -164,6 +164,7 @@ export function OnboardingBatchWizardDialog({
   const [plannedReady, setPlannedReady] = useState('')
   const [onlineReason, setOnlineReason] = useState('')
   const [orderNo, setOrderNo] = useState('')
+  const [workOrderNo, setWorkOrderNo] = useState('')
   const [remark, setRemark] = useState('')
   const [planLines, setPlanLines] = useState<PlanLineDraft[]>([emptyPlanLine()])
   const [uploadList, setUploadList] = useState(false)
@@ -228,6 +229,7 @@ export function OnboardingBatchWizardDialog({
     setPlannedReady('')
     setOnlineReason('')
     setOrderNo('')
+    setWorkOrderNo('')
     setRemark('')
     setPlanLines([emptyPlanLine()])
     setUploadList(false)
@@ -258,6 +260,7 @@ export function OnboardingBatchWizardDialog({
       plannedReadyAt: plannedReady || undefined,
       onlineReason: isOnlineTasks ? onlineReason : undefined,
       orderNo: isOrderAccess ? orderNo.trim() : undefined,
+      workOrderNo: workOrderNo.trim(),
       remark: remark.trim() || undefined,
       uploadList,
       planLines: planValidation.normalized.map((line) => {
@@ -297,6 +300,10 @@ export function OnboardingBatchWizardDialog({
   }
 
   const onMetaNext = async () => {
+    if (!workOrderNo.trim()) {
+      toast.error('请填写飞书审批工单号')
+      return
+    }
     if (uploadList) {
       const result = await submitCreate()
       if (!result) return
@@ -431,6 +438,14 @@ export function OnboardingBatchWizardDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label>飞书审批工单号</Label>
+                <Input
+                  placeholder="请输入飞书审批工单号（供应商内唯一）"
+                  value={workOrderNo}
+                  onChange={(e) => setWorkOrderNo(e.target.value)}
+                />
               </div>
               <div className="space-y-2 col-span-2">
                 <Label>计划完成时间（可选）</Label>

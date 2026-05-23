@@ -8,6 +8,7 @@ import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/dat
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
 import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
 import { onboardingBatchDataAccess } from '@/lib/server/dataaccess/supplier/onboarding-batch'
+import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { supplierActivityDataAccess } from '@/lib/server/dataaccess/supplier/supplier-activity'
 import { platformDatacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-datacenter-import'
 import { platformSupplierImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-import'
@@ -43,6 +44,7 @@ import {
   platformPriceUpdateSchema,
   platformPriceUpsertSchema,
 } from '@/lib/server/routers/supplier/platform-pricing-schemas'
+import { overviewFiltersSchema } from '@/lib/server/routers/supplier/overview-schemas'
 import { supplierListSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
 import {
   unitCostListSchema,
@@ -109,7 +111,10 @@ function mapImportError(error: unknown): never {
       message.includes('上架计划') ||
       message.includes('合作类型') ||
       message.includes('机房不一致') ||
-      message.includes('工单号指向')
+      message.includes('工单号指向') ||
+      message.includes('SN 已存在') ||
+      message.includes('资产编号已存在') ||
+      message.includes('唯一性冲突')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
@@ -732,6 +737,26 @@ export const supplierRouter = createTRPCRouter({
           changedByStaffId: staffId,
         })
       } catch (e) {
+        mapImportError(e)
+      }
+    }),
+  }),
+
+  overview: createTRPCRouter({
+    getFilterOptions: protectedProcedure.query(async () => {
+      try {
+        return await supplierOverviewDataAccess.getFilterOptions()
+      } catch (e) {
+        supplierError('router.overview.getFilterOptions', 'failed', e)
+        mapImportError(e)
+      }
+    }),
+
+    getStats: protectedProcedure.input(overviewFiltersSchema).query(async ({ input }) => {
+      try {
+        return await supplierOverviewDataAccess.getStats(input)
+      } catch (e) {
+        supplierError('router.overview.getStats', 'failed', e, input)
         mapImportError(e)
       }
     }),

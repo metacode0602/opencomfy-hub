@@ -46,9 +46,10 @@ import {
 } from '@/lib/supplier/onboarding-batch-utils'
 import { OnboardingBatchWizardDialog } from './onboarding-batch-wizard-dialog'
 
-function formatDt(iso: string | null | undefined) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
+function formatDt(value: Date | string | null | undefined) {
+  if (!value) return '—'
+  const d = value instanceof Date ? value : new Date(value)
+  return d.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -58,10 +59,10 @@ function formatDt(iso: string | null | undefined) {
 }
 
 function formatPlanSummary(
-  lines: Array<{ gpu_card_type_code: string; planned_quantity: number }> | null | undefined,
+  lines: Array<{ gpuCardTypeCode: string; plannedQuantity: number }> | null | undefined,
 ) {
   if (!lines?.length) return '—'
-  return lines.map((l) => `${l.gpu_card_type_code}×${l.planned_quantity}`).join('、')
+  return lines.map((l) => `${l.gpuCardTypeCode}×${l.plannedQuantity}`).join('、')
 }
 
 const importStatusColor: Record<string, string> = {
@@ -109,9 +110,9 @@ export function OnboardingBatchesContent({
   const stats = useMemo(() => {
     return {
       total: batches.length,
-      onboarding: batches.filter((b) => b.batch_status === '接入中').length,
-      committed: batches.filter((b) => b.import_status === 'committed').length,
-      pendingParse: batches.filter((b) => b.import_status === 'parsed').length,
+      onboarding: batches.filter((b) => b.batchStatus === '接入中').length,
+      committed: batches.filter((b) => b.importStatus === 'committed').length,
+      pendingParse: batches.filter((b) => b.importStatus === 'parsed').length,
     }
   }, [batches])
 
@@ -236,40 +237,40 @@ export function OnboardingBatchesContent({
                       href={onboardingBatchDetailPath(b)}
                       className="text-primary hover:underline"
                     >
-                      {b.batch_code}
+                      {b.batchCode}
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <div>{b.supplier_short_name}</div>
+                    <div>{b.supplierShortName}</div>
                     <div className="text-xs text-muted-foreground">
-                      {b.idc_code} · {b.data_center_name}
+                      {b.idcCode} · {b.dataCenterName}
                     </div>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={formatPlanSummary(b.planned_lines)}>
-                    {b.planned_device_count ?? 0} 台 · {formatPlanSummary(b.planned_lines)}
+                  <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={formatPlanSummary(b.plannedLinesJson as Parameters<typeof formatPlanSummary>[0])}>
+                    {b.plannedDeviceCount ?? 0} 台 · {formatPlanSummary(b.plannedLinesJson as Parameters<typeof formatPlanSummary>[0])}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={importStatusColor[b.import_status] ?? ''}>
-                      {IMPORT_STATUS_LABELS[b.import_status] ?? b.import_status}
+                    <Badge variant="outline" className={importStatusColor[b.importStatus] ?? ''}>
+                      {IMPORT_STATUS_LABELS[b.importStatus] ?? b.importStatus}
                     </Badge>
                   </TableCell>
-                  <TableCell>{b.batch_status}</TableCell>
+                  <TableCell>{b.batchStatus}</TableCell>
                   <TableCell>
-                    {b.committed_device_count}
-                    {(b.planned_device_count ?? 0) > 0 ? ` / ${b.planned_device_count}` : ''}
+                    {b.committedDeviceCount}
+                    {(b.plannedDeviceCount ?? 0) > 0 ? ` / ${b.plannedDeviceCount}` : ''}
                   </TableCell>
                   {isOnlineTasks && (
                     <TableCell className="text-sm">
-                      {onlineReasonLabel(b.online_reason)}
+                      {onlineReasonLabel(b.onlineReason)}
                     </TableCell>
                   )}
                   {isOrderAccess && (
                     <TableCell className="text-sm font-mono">
-                      {b.order_no ?? '—'}
+                      {b.orderNo ?? '—'}
                     </TableCell>
                   )}
                   <TableCell className="text-sm text-muted-foreground">
-                    {formatDt(b.planned_ready_at)}
+                    {formatDt(b.plannedReadyAt)}
                   </TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -285,7 +286,7 @@ export function OnboardingBatchesContent({
                             查看详情
                           </Link>
                         </DropdownMenuItem>
-                        {b.import_status === 'parsed' && (
+                        {b.importStatus === 'parsed' && (
                           <DropdownMenuItem
                             disabled={commitListMutation.isPending}
                             onClick={() => commitListMutation.mutate({ batchId: b.id })}

@@ -4,9 +4,11 @@
 
 **文档性质**：在 **不更名既有表** 的前提下，描述本次增量变更的完整表结构、字段映射与导入批次规则。物理实现见 `packages/db/src/supply-schema.ts`。
 
-**版本**：v1.1（2026-05-21）
+**版本**：v1.2（2026-05-23）
 
-**关联主文档**：[supplier-database.md](./supplier-database.md)
+**关联主文档**：[supplier-database.md](./supplier-database.md)、[supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md)（v2.2 资源总览 / 字典）
+
+**Drizzle 实现**：`packages/db/src/supply-schema.ts`、`packages/db/src/supply-lifecycle-dictionary.ts`
 
 ---
 
@@ -29,22 +31,22 @@
 
 ### 2.1 `device_ops_status`（Excel 设备状态 — 字典域）
 
-在 `lifecycle_state_definition` 中增加 `domain = device_ops_status`，`state_code` 为 Excel 原文（或规范化 code），`display_name` 为展示文案。
+在 `lifecycle_state_definition` 中增加 `domain = device_ops_status`，`state_code` 为 Excel 原文，`payload` 含 `lifecycle_status` 与 **`overview_bucket`**（资源总览分桶，见接入设计 §5.4）。
 
-**种子数据（`state_code` 建议与 Excel 完全一致）**：
+**种子数据（11 条，`supply-lifecycle-dictionary.ts`）**：
 
-| `state_code`（Excel 原文） | 映射 `lifecycle_status` | 默认 `in_maintenance` | 说明 |
-|---------------------------|-------------------------|----------------------|------|
-| `预留闲置中` | `待接入` | `false` | 已入库未调度 |
-| `在集群中` | `在线` | `false` | 已纳管且可调度 |
-| `集群组件运行中` | `在线` | `false` | 组件就绪 |
-| `网关直连裸金属上架中` | `接入中` | `false` | 上架流水线 |
-| `网关代理裸金属上架中` | `接入中` | `false` | 上架流水线 |
-| `线下裸金属交付中` | `接入中` | `false` | 交付流水线 |
-| `其他部门使用中` | `维护中` | `false` | 占用不可售 |
-| `不可调度节点运行中` | `在线` | `false` | 在线但不可调度（可售量策略见 §6） |
-| `网关节点上架中` | `接入中` | `false` | 网关节点接入 |
-| `已退订` | `退订` | `false` | 退租/报废 |
+| `state_code`（Excel 原文） | `lifecycle_status` | `overview_bucket` | 说明 |
+|---------------------------|-------------------|-------------------|------|
+| `预留闲置中` | `待接入` | `reserved` | 已入库未调度 |
+| `在集群中` | `在线` | `in_cluster` | 可售候选 |
+| `集群组件运行中` | `在线` | `in_cluster` | 可售候选 |
+| `网关直连裸金属上架中` | `接入中` | `bare_metal_onboarding` | **裸金属** 上架 |
+| `网关代理裸金属上架中` | `接入中` | `bare_metal_onboarding` | **裸金属** 上架 |
+| `线下裸金属交付中` | `接入中` | `offline_delivery` | **线下交付** |
+| `其他部门使用中` | `维护中` | `other_dept` | 不可售 |
+| `不可调度节点运行中` | `在线` | `in_cluster` | 在线不计可售（§6） |
+| `网关节点上架中` | `接入中` | `gateway_onboarding` | 网关节点接入 |
+| `已退订` | `退订` | `retired` | 退订/待下架池 |
 
 **独立字段 `in_maintenance`（维修中）**：
 
@@ -57,6 +59,14 @@
 `待接入` | `接入中` | `在线` | `离线` | `维护中` | `退订`
 
 由 `ops_status` + `in_maintenance` 在导入 commit 时计算写入 `supplier_device.lifecycle_status`，后续设备变更批次可再次刷新。
+
+### 2.3 `device_change_action`（Excel 变更动作 — 字典域）
+
+`lifecycle_state_definition.domain = device_change_action`；`supplier_device_change_log.change_action` 存原文。
+
+**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`上架网关直连裸金属`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
+
+`payload.default_ops_status` 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
 
 ---
 
@@ -71,7 +81,7 @@
 | `id` | text | PK | 系统主键 |
 | `supplier_id` | text | FK→`supplier`, NOT NULL | |
 | `contract_id` | text | FK→`supplier_contract`, 可空 | |
-| `onboarding_batch_id` | text | FK→`onboarding_batch`, 可空 | **最近一次设备主数据导入批次** |
+| `onboarding_batch_id` | text | FK→`onboarding_batch`, 可空 | **仅** 最近一次 `device_inventory` 导入批次（禁止指向业务批次） |
 | `data_center_id` | text | FK→`data_center`, 可空 | |
 | `gpu_card_type_id` | text | FK→`gpu_card_type`, NOT NULL | 由 Excel「显卡型号」解析 |
 | `external_device_id` | varchar(128) | 可空 | Excel「设备ID」；与 `id` 可不同，UK 可选 |
@@ -210,7 +220,7 @@
 
 ---
 
-### 3.5 `supplier_device_change_log`（新增 — 设备变更审计）
+### 3.5 `supplier_device_change_log`（设备变更审计）
 
 **替代**导入场景下的 `entity_state_transition_log`；UI 时间线可投影 `supplier_activity`（`type = device_change_imported`）。
 
@@ -218,21 +228,24 @@
 |------|------|------|------|
 | `id` | text | PK | |
 | `supplier_device_id` | text | FK→`supplier_device`, NOT NULL | Excel「设备ID」解析 |
-| **`onboarding_batch_id`** | text | FK→`onboarding_batch`, NOT NULL | **变更所属导入批次**（`batch_kind=device_changelog`） |
+| `onboarding_batch_id` | text | FK→`onboarding_batch`, NOT NULL | **`device_changelog` 导入批次** |
+| **`business_onboarding_batch_id`** | text | FK→`onboarding_batch`, 可空 | 由 `ticket_no` 匹配业务计划批次 |
 | `internal_ip` | varchar(45) | 可空 | Excel「内网IP」冗余校验 |
 | `occurred_at` | timestamptz | NOT NULL | Excel「操作时间」 |
-| `change_action` | varchar(64) | NOT NULL | Excel「变更动作」 |
+| `change_action` | varchar(64) | NOT NULL | Excel「变更动作」→ 字典 `device_change_action` |
 | `change_content` | text | 可空 | Excel「变更内容」 |
 | `description` | text | 可空 | Excel「详细说明」 |
-| **`ticket_no`** | varchar(64) | 可空 | Excel「工单」 |
+| `ticket_no` | varchar(64) | 可空 | Excel「工单」（飞书工单号） |
 | `import_row_no` | integer | 可空 | 源文件行号 |
-| `previous_ops_status` | varchar(64) | 可空 | commit 时快照 |
-| `new_ops_status` | varchar(64) | 可空 | 若变更含状态则写入 |
-| `previous_lifecycle_status` | varchar(32) | 可空 | |
-| `new_lifecycle_status` | varchar(32) | 可空 | |
+| `previous_ops_status` / `new_ops_status` | varchar(64) | 可空 | commit 快照 |
+| `previous_lifecycle_status` / `new_lifecycle_status` | varchar(32) | 可空 | |
 | `created_at` | timestamptz | NOT NULL | 入库时间 |
 
-索引：`(supplier_device_id, occurred_at DESC)`、`(onboarding_batch_id)`、`(ticket_no)` WHERE NOT NULL。
+索引：`(supplier_device_id, occurred_at DESC)`、`(onboarding_batch_id)`、`(ticket_no)`、`(business_onboarding_batch_id)`、`(business_onboarding_batch_id, supplier_device_id)`。
+
+### 3.5.1 `onboarding_batch_device_link`（业务批次 ↔ 设备）
+
+见 [supplier-onboarding-plan-changelog-tracking-design.md §4.4](./supplier-onboarding-plan-changelog-tracking-design.md)；Drizzle：`onboardingBatchDeviceLink`。
 
 **不保存**：附件（Excel「附件」列忽略）。
 
@@ -465,3 +478,4 @@ erDiagram
 |------|------|------|
 | v1.0 | 2026-05-21 | 首版：设备/变更/故障导入表结构；`ops_status` 与 `lifecycle_status` 映射；`supplier_device_change_log`；故障走 `supplier_ops_upload_batch` |
 | v1.1 | 2026-05-21 | `supplier_device` 保留登录凭据；阶段一 `login_password` 明文；解析行与 import_row 同步 |
+| v1.2 | 2026-05-23 | 字典 `payload`、`device_change_action` 20 条；`change_log.business_onboarding_batch_id`；`onboarding_batch_device_link`；资源总览 `overview_bucket` |

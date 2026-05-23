@@ -8,18 +8,20 @@ import type {
   OnboardingBatchDetailPage,
   OnboardingBatchListItem,
   OnboardingBatchParseListResult,
+  OnboardingBatchPlannedLineJson,
   OnboardingBatchProgress,
 } from '@/lib/types/onboarding-batch-api'
 import type {
   DeviceCooperationType,
-  OnboardingBatchPlanLine,
   OnboardingParsedRow,
 } from '@/lib/types/supplier-domain'
+import { ONBOARDING_LIFECYCLES } from '@/lib/server/dataaccess/supplier/batch-progress'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import {
   accessConditionSheet,
   gpuCardType,
   onboardingBatch,
+  onboardingBatchDeviceLink,
   onboardingTask,
   supplier,
   supplierActivity,
@@ -34,43 +36,15 @@ function newId() {
   return crypto.randomUUID()
 }
 
-type BatchRow = typeof onboardingBatch.$inferSelect
-
-function mapBatchRow(row: BatchRow): OnboardingBatchListItem {
+function readPlannedLine(line: Record<string, unknown>): OnboardingBatchPlannedLineJson {
+  if (typeof line.gpuCardTypeId === 'string') {
+    return line as OnboardingBatchPlannedLineJson
+  }
   return {
-    id: row.id,
-    batch_kind: row.batchKind as OnboardingBatchListItem['batch_kind'],
-    supplier_id: row.supplierId,
-    supplier_code: row.supplierCode,
-    supplier_name: row.supplierName,
-    supplier_short_name: row.supplierShortName ?? '',
-    data_center_id: row.dataCenterId,
-    idc_code: row.idcCode,
-    data_center_name: row.dataCenterName,
-    idc_region: row.idcRegion ?? '',
-    contract_id: row.contractId,
-    access_condition_sheet_id: row.accessConditionSheetId,
-    batch_code: row.batchCode,
-    batch_status: row.batchStatus,
-    planned_ready_at: row.plannedReadyAt?.toISOString() ?? null,
-    online_reason: row.onlineReason,
-    order_no: row.orderNo,
-    remark: row.remark,
-    planned_lines: (row.plannedLinesJson as OnboardingBatchPlanLine[] | null) ?? [],
-    planned_device_count: row.plannedDeviceCount,
-    work_order_no: row.workOrderNo,
-    access_method: row.accessMethod,
-    import_file_name: row.importFileName ?? '未上传',
-    import_status: row.importStatus as OnboardingBatchListItem['import_status'],
-    parse_error: row.parseError,
-    parsed_row_count: row.parsedRowCount,
-    parsed_success_count: row.parsedSuccessCount,
-    parsed_rows_json: (row.parsedRowsJson as OnboardingBatchListItem['parsed_rows_json']) ?? null,
-    parsed_at: row.parsedAt?.toISOString() ?? null,
-    committed_device_count: row.committedDeviceCount,
-    committed_at: row.committedAt?.toISOString() ?? null,
-    created_at: row.createdAt.toISOString(),
-    updated_at: row.updatedAt.toISOString(),
+    gpuCardTypeId: line.gpu_card_type_id as string,
+    gpuCardTypeCode: line.gpu_card_type_code as string,
+    cooperationType: line.cooperation_type as DeviceCooperationType,
+    plannedQuantity: line.planned_quantity as number,
   }
 }
 
@@ -162,7 +136,7 @@ async function resolveGpuCardTypeId(
 function normalizePlanLines(
   planLines: OnboardingBatchCreateInput['planLines'],
   gpuCache: Map<string, string>,
-): Promise<OnboardingBatchPlanLine[]> {
+): Promise<OnboardingBatchPlannedLineJson[]> {
   return Promise.all(
     planLines.map(async (line) => {
       const key = line.gpuCardTypeId ?? line.gpuCardTypeCode
@@ -172,17 +146,17 @@ function normalizePlanLines(
         columns: { code: true },
       })
       return {
-        gpu_card_type_id: gpuCardTypeId,
-        gpu_card_type_code: card?.code ?? line.gpuCardTypeCode,
-        cooperation_type: line.cooperationType,
-        planned_quantity: line.plannedQuantity,
+        gpuCardTypeId,
+        gpuCardTypeCode: card?.code ?? line.gpuCardTypeCode,
+        cooperationType: line.cooperationType,
+        plannedQuantity: line.plannedQuantity,
       }
     }),
   )
 }
 
-function sumPlannedQuantity(lines: OnboardingBatchPlanLine[]) {
-  return lines.reduce((sum, line) => sum + line.planned_quantity, 0)
+function sumPlannedQuantity(lines: OnboardingBatchPlannedLineJson[]) {
+  return lines.reduce((sum, line) => sum + line.plannedQuantity, 0)
 }
 
 async function getBusinessBatch(batchId: string, batchKind?: 'online' | 'order_access') {
@@ -220,8 +194,22 @@ export const onboardingBatchDataAccess = {
 
     const batchId = newId()
     const batchCode = generateBatchCode(input.batchKind)
-    const workOrderNo = `WO-${batchCode}`
+    const workOrderNo = input.workOrderNo.trim()
     const now = new Date()
+
+    const [dupWo] = await db
+      .select({ id: onboardingBatch.id })
+      .from(onboardingBatch)
+      .where(
+        and(
+          eq(onboardingBatch.supplierId, input.supplierId),
+          eq(onboardingBatch.workOrderNo, workOrderNo),
+        ),
+      )
+      .limit(1)
+    if (dupWo) {
+      throw new Error(`该供应商下飞书工单号「${workOrderNo}」已存在，请更换后重试`)
+    }
     const listUploadMode = input.uploadList ? 'simplified_csv' : 'none'
     const importStatus = input.uploadList ? 'draft' : 'none'
     const batchStatus = input.uploadList ? '待开始' : '接入中'
@@ -320,7 +308,7 @@ export const onboardingBatchDataAccess = {
       .where(and(...conditions))
       .orderBy(desc(onboardingBatch.createdAt))
 
-    const items = rows.map(mapBatchRow)
+    const items = rows
     return { items, total: items.length }
   },
 
@@ -338,7 +326,7 @@ export const onboardingBatchDataAccess = {
       )
       .orderBy(desc(onboardingBatch.createdAt))
 
-    return rows.map(mapBatchRow)
+    return rows
   },
 
   async getById(batchId: string): Promise<OnboardingBatchListItem | null> {
@@ -354,7 +342,7 @@ export const onboardingBatchDataAccess = {
         return null
       }
       supplierLog('onboarding-batch', 'getById done', { batchId, batchCode: row.batchCode })
-      return mapBatchRow(row)
+      return row
     } catch (e) {
       supplierError('onboarding-batch', 'getById failed', e, { batchId })
       throw e
@@ -365,7 +353,9 @@ export const onboardingBatchDataAccess = {
     supplierLog('onboarding-batch', 'getProgress start', { batchId })
     try {
     const batch = await getBusinessBatch(batchId)
-    const plannedLines = (batch.plannedLinesJson as OnboardingBatchPlanLine[] | null) ?? []
+    const plannedLines = ((batch.plannedLinesJson as Record<string, unknown>[] | null) ?? []).map(
+      readPlannedLine,
+    )
 
     const deviceRows = await db
       .select({
@@ -373,36 +363,40 @@ export const onboardingBatchDataAccess = {
         cooperationType: supplierDevice.cooperationType,
         lifecycleStatus: supplierDevice.lifecycleStatus,
       })
-      .from(supplierDevice)
-      .where(eq(supplierDevice.onboardingBatchId, batchId))
+      .from(onboardingBatchDeviceLink)
+      .innerJoin(
+        supplierDevice,
+        eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
+      )
+      .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batchId))
 
-    let linked = 0
+    let touched = 0
     let onboarding = 0
     let online = 0
 
     const lineStats = plannedLines.map((line) => {
       const matches = deviceRows.filter(
         (d) =>
-          d.gpuCardTypeId === line.gpu_card_type_id &&
-          d.cooperationType === line.cooperation_type,
+          d.gpuCardTypeId === line.gpuCardTypeId &&
+          d.cooperationType === line.cooperationType,
       )
-      const lineLinked = matches.length
+      const lineTouched = matches.length
       const lineOnline = matches.filter((d) => d.lifecycleStatus === '在线').length
-      linked += lineLinked
+      touched += lineTouched
       online += lineOnline
-      onboarding += matches.filter((d) =>
-        ['待接入', '接入中'].includes(d.lifecycleStatus),
-      ).length
+      onboarding += matches.filter((d) => ONBOARDING_LIFECYCLES.has(d.lifecycleStatus)).length
       return {
         ...line,
-        linked: lineLinked,
+        touched: lineTouched,
+        linked: lineTouched,
         online: lineOnline,
       }
     })
 
     const result = {
       planned: batch.plannedDeviceCount,
-      linked,
+      touched,
+      linked: touched,
       onboarding,
       online,
       planLines: lineStats,
@@ -410,7 +404,7 @@ export const onboardingBatchDataAccess = {
     supplierLog('onboarding-batch', 'getProgress done', {
       batchId,
       planned: result.planned,
-      linked: result.linked,
+      touched: result.touched,
       online: result.online,
     })
     return result
@@ -432,16 +426,15 @@ export const onboardingBatchDataAccess = {
         supplierWarn('onboarding-batch', 'getDetailPage not found', { batchId })
         return null
       }
-      const batch = mapBatchRow(batchRow)
 
       const progress = await onboardingBatchDataAccess.getProgress(batchId)
 
       let contractNo: string | null = null
-      if (batch.contract_id) {
+      if (batchRow.contractId) {
         const [contract] = await db
           .select({ contractNo: supplierContract.contractNo })
           .from(supplierContract)
-          .where(eq(supplierContract.id, batch.contract_id))
+          .where(eq(supplierContract.id, batchRow.contractId))
           .limit(1)
         contractNo = contract?.contractNo ?? null
       }
@@ -454,12 +447,19 @@ export const onboardingBatchDataAccess = {
           lifecycleStatus: supplierDevice.lifecycleStatus,
           onboardingSubstage: supplierDevice.onboardingSubstage,
           externalIp: supplierDevice.externalIp,
+          internalIp: supplierDevice.internalIp,
+          cooperationType: supplierDevice.cooperationType,
+          devicePurpose: supplierDevice.devicePurpose,
           cardTypeCode: gpuCardType.code,
         })
-        .from(supplierDevice)
+        .from(onboardingBatchDeviceLink)
+        .innerJoin(
+          supplierDevice,
+          eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
+        )
         .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
-        .where(eq(supplierDevice.onboardingBatchId, batchId))
-        .orderBy(desc(supplierDevice.createdAt))
+        .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batchId))
+        .orderBy(desc(onboardingBatchDeviceLink.linkedAt))
 
       const taskRows = await db
         .select({
@@ -481,35 +481,16 @@ export const onboardingBatchDataAccess = {
         .orderBy(desc(onboardingTask.createdAt))
 
       const detail: OnboardingBatchDetailPage = {
-        batch,
+        batch: batchRow,
         contractNo,
         progress,
-        devices: deviceRows.map((row) => ({
-          id: row.id,
-          sn: row.sn,
-          asset_no: row.assetNo ?? '—',
-          lifecycle_status: row.lifecycleStatus,
-          onboarding_substage: row.onboardingSubstage ?? '—',
-          external_ip: row.externalIp,
-          card_type_code: row.cardTypeCode,
-        })),
-        tasks: taskRows.map((row) => ({
-          id: row.id,
-          onboarding_batch_id: row.onboardingBatchId,
-          device_id: row.supplierDeviceId,
-          device_sn: row.deviceSn,
-          task_type: row.taskType,
-          assignee_id: row.assigneeStaffId,
-          assignee_name: row.assigneeName,
-          task_status: row.taskStatus,
-          started_at: row.startedAt?.toISOString() ?? null,
-          finished_at: row.finishedAt?.toISOString() ?? null,
-        })),
+        devices: deviceRows,
+        tasks: taskRows,
       }
 
       supplierLog('onboarding-batch', 'getDetailPage done', {
         batchId,
-        batchCode: batch.batch_code,
+        batchCode: batchRow.batchCode,
         deviceCount: detail.devices.length,
         taskCount: detail.tasks.length,
       })
@@ -571,13 +552,15 @@ export const onboardingBatchDataAccess = {
       throw new Error('批次尚未完成清单解析，无法入库')
     }
 
-    const plannedLines = (batch.plannedLinesJson as OnboardingBatchPlanLine[] | null) ?? []
+    const plannedLines = ((batch.plannedLinesJson as Record<string, unknown>[] | null) ?? []).map(
+      readPlannedLine,
+    )
     const defaultLine = plannedLines[0]
-    if (!defaultLine?.gpu_card_type_id) {
+    if (!defaultLine?.gpuCardTypeId) {
       throw new Error('批次缺少有效的上架计划卡型')
     }
 
-    const defaultCooperation = (defaultLine.cooperation_type ?? 'idle_time') as DeviceCooperationType
+    const defaultCooperation = (defaultLine.cooperationType ?? 'idle_time') as DeviceCooperationType
     const now = new Date()
     let inserted = 0
 
@@ -593,9 +576,9 @@ export const onboardingBatchDataAccess = {
             id: deviceId,
             supplierId: batch.supplierId,
             contractId: batch.contractId,
-            onboardingBatchId: batch.id,
+            onboardingBatchId: null,
             dataCenterId: batch.dataCenterId,
-            gpuCardTypeId: defaultLine.gpu_card_type_id!,
+            gpuCardTypeId: defaultLine.gpuCardTypeId,
             externalDeviceId: null,
             assetNo: asset,
             sn,
