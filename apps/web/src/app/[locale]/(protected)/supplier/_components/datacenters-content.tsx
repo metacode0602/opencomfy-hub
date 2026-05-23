@@ -36,6 +36,8 @@ import {
 import { Progress } from '@workspace/ui/components/progress'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { ListPagination } from '@/components/shared/list-pagination'
+import { PlatformDatacenterImportTrigger } from '@/components/dashboard/platform-datacenter-import-dialog'
+import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier-datacenter-import-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenter } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
@@ -51,6 +53,7 @@ function formatLocation(dc: DataCenter): string {
 }
 
 export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: string }) {
+  const utils = trpc.useUtils()
   const {
     data: dataCenters = [],
     isLoading,
@@ -140,8 +143,33 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
     )
   }
 
+  const invalidateDatacenters = () => {
+    void utils.supplier.listAllDataCenters.invalidate(
+      supplierIdFilter ? { supplierId: supplierIdFilter } : undefined,
+    )
+    void utils.supplier.getDataCenterStats.invalidate(
+      supplierIdFilter ? { supplierId: supplierIdFilter } : undefined,
+    )
+    void utils.supplier.list.invalidate()
+  }
+
   return (
     <div className="space-y-6">
+      {!supplierIdFilter && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">机房管理</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              数据中心台账、运行状态与 GPU 资源概览
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <PlatformDatacenterImportTrigger onSuccess={invalidateDatacenters} />
+            <SupplierDatacenterImportTrigger onSuccess={invalidateDatacenters} />
+          </div>
+        </div>
+      )}
+
       {!supplierIdFilter && (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <Card className="border-border bg-card">
@@ -265,16 +293,19 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
         <Table>
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
+            <TableHead className="text-muted-foreground">机房</TableHead>
+
               {!supplierIdFilter && (
                 <TableHead className="text-muted-foreground">供应商</TableHead>
               )}
-              <TableHead className="text-muted-foreground">机房</TableHead>
               <TableHead className="text-muted-foreground">编码</TableHead>
-              <TableHead className="text-muted-foreground">位置</TableHead>
+              <TableHead className="text-muted-foreground">容器区域</TableHead>
+              <TableHead className="text-muted-foreground">容器编码</TableHead>
+              <TableHead className="text-muted-foreground">裸金属区域</TableHead>
               <TableHead className="text-muted-foreground">状态</TableHead>
               <TableHead className="text-muted-foreground">GPU 在线率</TableHead>
-              <TableHead className="text-muted-foreground">网络费 (月)</TableHead>
-              <TableHead className="text-muted-foreground">管控费 (月)</TableHead>
+              {/* <TableHead className="text-muted-foreground">网络费 (月)</TableHead> */}
+              {/* <TableHead className="text-muted-foreground">管控费 (月)</TableHead> */}
               <TableHead className="text-muted-foreground">操作</TableHead>
             </TableRow>
           </TableHeader>
@@ -298,6 +329,21 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                     : 0
                 return (
                   <TableRow key={dc.id} className="border-border">
+                    <TableCell>
+                      <Link href={`/supplier/datacenters/${dc.id}`} className="block group">
+                        <div className="font-medium text-foreground group-hover:text-primary transition-colors">
+                          {dc.name}
+                        </div>
+                      </Link>
+                      {dc.sourceDeleted && (
+                        <Badge
+                          variant="outline"
+                          className="mt-1 border-amber-500/30 bg-amber-500/10 text-amber-400"
+                        >
+                          源已删除
+                        </Badge>
+                      )}
+                    </TableCell>
                     {!supplierIdFilter && (
                       <TableCell>
                         <Link
@@ -308,17 +354,7 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                         </Link>
                       </TableCell>
                     )}
-                    <TableCell>
-                      <div className="font-medium text-foreground">{dc.name}</div>
-                      {dc.sourceDeleted && (
-                        <Badge
-                          variant="outline"
-                          className="mt-1 border-amber-500/30 bg-amber-500/10 text-amber-400"
-                        >
-                          源已删除
-                        </Badge>
-                      )}
-                    </TableCell>
+
                     <TableCell>
                       <code className="rounded bg-muted px-2 py-0.5 text-sm text-foreground">
                         {dc.code}
@@ -328,6 +364,18 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                       <div className="flex items-center gap-1 text-sm text-foreground">
                         <MapPin className="h-3 w-3 shrink-0 text-muted-foreground" />
                         <span className="max-w-[180px] truncate">{formatLocation(dc)}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1 text-sm text-foreground">
+                        <MapPin className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        <span className="max-w-[180px] truncate">{dc.containerInstanceRegion}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1 text-sm text-foreground">
+                        <MapPin className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        <span className="max-w-[180px] truncate">{dc.bareMetalRegion}</span>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -343,12 +391,12 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                         </span>
                       </div>
                     </TableCell>
-                    <TableCell className="text-foreground">
+                    {/* <TableCell className="text-foreground">
                       ¥{dc.networkFee.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-foreground">
                       ¥{dc.managementNodeFee.toLocaleString()}
-                    </TableCell>
+                    </TableCell> */}
                     <TableCell>
                       <Button variant="ghost" size="sm" asChild>
                         <Link href={`/supplier/datacenters/${dc.id}`}>

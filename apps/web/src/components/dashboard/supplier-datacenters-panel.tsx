@@ -32,7 +32,6 @@ import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import type { Supplier } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
-import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier-datacenter-import-dialog'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
 
@@ -68,7 +67,7 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
+      {/* <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-medium text-foreground">机房与设备</h2>
           <p className="text-sm text-muted-foreground">
@@ -87,7 +86,7 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
             新增机房
           </Button>
         </div>
-      </div>
+      </div> */}
 
       <section className="space-y-4">
         <div>
@@ -132,7 +131,7 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <Link
-                            href={`/supplier/datacenter/${dc.id}`}
+                            href={`/supplier/datacenters/${dc.id}`}
                             className="text-base font-semibold text-foreground hover:text-primary hover:underline"
                           >
                             {dc.name}
@@ -154,7 +153,7 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem asChild>
-                            <Link href={`/supplier/datacenter/${dc.id}`}>查看详情</Link>
+                            <Link href={`/supplier/datacenters/${dc.id}`}>查看详情</Link>
                           </DropdownMenuItem>
                           <DropdownMenuItem disabled>编辑机房</DropdownMenuItem>
                           <DropdownMenuItem disabled>管理设备</DropdownMenuItem>

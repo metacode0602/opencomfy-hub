@@ -53,11 +53,13 @@ type CreateCardPricingDialogBaseProps = {
   /** 来自数据库的机房列表（已按供应商筛选时可直接传入） */
   dataCenters?: DataCenter[]
   lockedSupplierId?: string
+  /** 锁定到指定机房（用于机房详情页） */
+  lockedDataCenter?: Pick<DataCenter, 'id' | 'name'>
   isSubmitting?: boolean
 }
 
 export type CreateCardPricingDialogProps =
-  | (CreateCardPricingDialogBaseProps & { supplier: Supplier })
+  | (CreateCardPricingDialogBaseProps & { supplier: Pick<Supplier, 'id' | 'name' | 'shortName'> })
   | (CreateCardPricingDialogBaseProps & { supplier?: undefined })
 
 function pricingModeFromSelection(
@@ -119,6 +121,7 @@ export function CreateCardPricingDialog({
   suppliers: suppliersProp,
   dataCenters: dataCentersProp,
   lockedSupplierId,
+  lockedDataCenter,
   isSubmitting = false,
 }: CreateCardPricingDialogProps) {
   const supplierOptions = suppliersProp ?? mockSuppliers
@@ -163,7 +166,7 @@ export function CreateCardPricingDialog({
   useEffect(() => {
     if (!open) {
       setSupplierId(lockedSupplier?.id ?? '')
-      setDataCenterId('')
+      setDataCenterId(lockedDataCenter?.id ?? '')
       setCardTypeId('')
       setCategory('card_time')
       setVariant('fixed')
@@ -174,7 +177,7 @@ export function CreateCardPricingDialog({
       setEffectiveTo('')
       setSubmitError(null)
     }
-  }, [open, lockedSupplier?.id])
+  }, [open, lockedSupplier?.id, lockedDataCenter?.id])
 
   useEffect(() => {
     if (lockedSupplier) {
@@ -183,8 +186,12 @@ export function CreateCardPricingDialog({
   }, [lockedSupplier])
 
   useEffect(() => {
+    if (lockedDataCenter) {
+      setDataCenterId(lockedDataCenter.id)
+      return
+    }
     setDataCenterId('')
-  }, [resolvedSupplierId])
+  }, [resolvedSupplierId, lockedDataCenter])
 
   const addTier = () => {
     setTiers((prev) => [...prev, emptyTier(prev.length + 1)])
@@ -232,7 +239,9 @@ export function CreateCardPricingDialog({
     }
 
     const supplier = lockedSupplier ?? supplierOptions.find((s) => s.id === resolvedSupplierId)
-    const dataCenter = dataCenterOptions.find((dc) => dc.id === dataCenterId)
+    const dataCenter =
+      lockedDataCenter ??
+      dataCenterOptions.find((dc) => dc.id === dataCenterId)
     const cardType = cardTypes.find((c) => c.id === cardTypeId)
     if (!supplier || !dataCenter || !cardType) {
       setSubmitError('所选供应商、机房或卡型无效')
@@ -321,15 +330,23 @@ export function CreateCardPricingDialog({
         <DialogHeader>
           <DialogTitle>新增机房卡型配置</DialogTitle>
           <DialogDescription>
-            {lockedSupplier
-              ? `为 ${lockedSupplier.shortName} 的机房卡型建立单价或分成配置，支持固定与阶梯两种计价方式`
-              : '为供应商机房卡型建立单价或分成配置，支持固定与阶梯两种计价方式'}
+            {lockedDataCenter
+              ? `为 ${lockedDataCenter.name} 的卡型建立单价或分成配置，支持固定与阶梯两种计价方式`
+              : lockedSupplier
+                ? `为 ${lockedSupplier.shortName} 的机房卡型建立单价或分成配置，支持固定与阶梯两种计价方式`
+                : '为供应商机房卡型建立单价或分成配置，支持固定与阶梯两种计价方式'}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-5 py-2">
           <div
-            className={`grid gap-4 ${lockedSupplier ? 'grid-cols-2' : 'grid-cols-3'}`}
+            className={`grid gap-4 ${
+              lockedSupplier && lockedDataCenter
+                ? 'grid-cols-1'
+                : lockedSupplier
+                  ? 'grid-cols-2'
+                  : 'grid-cols-3'
+            }`}
           >
             {!lockedSupplier && (
               <div className="grid gap-2">
@@ -354,38 +371,47 @@ export function CreateCardPricingDialog({
                 </Select>
               </div>
             )}
-            <div className="grid gap-2">
-              <Label>机房 *</Label>
-              <Select
-                value={dataCenterId}
-                onValueChange={(v) => {
-                  setDataCenterId(v)
-                  setSubmitError(null)
-                }}
-                disabled={!resolvedSupplierId || dataCentersLoading}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      !resolvedSupplierId
-                        ? '请先选供应商'
-                        : dataCentersLoading
-                          ? '加载机房…'
-                          : dataCenterOptions.length === 0
-                            ? '该供应商暂无机房'
-                            : '选择机房'
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {dataCenterOptions.map((dc) => (
-                    <SelectItem key={dc.id} value={dc.id}>
-                      {dc.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!lockedDataCenter ? (
+              <div className="grid gap-2">
+                <Label>机房 *</Label>
+                <Select
+                  value={dataCenterId}
+                  onValueChange={(v) => {
+                    setDataCenterId(v)
+                    setSubmitError(null)
+                  }}
+                  disabled={!resolvedSupplierId || dataCentersLoading}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue
+                      placeholder={
+                        !resolvedSupplierId
+                          ? '请先选供应商'
+                          : dataCentersLoading
+                            ? '加载机房…'
+                            : dataCenterOptions.length === 0
+                              ? '该供应商暂无机房'
+                              : '选择机房'
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dataCenterOptions.map((dc) => (
+                      <SelectItem key={dc.id} value={dc.id}>
+                        {dc.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <Label>机房</Label>
+                <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-foreground">
+                  {lockedDataCenter.name}
+                </div>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label>卡型 *</Label>
               <Select

@@ -34,6 +34,7 @@ import type { DataCenterDevice } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
+import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 
 const inventoryStatusColors: Record<DataCenterDevice['status'], string> = {
   online: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -111,7 +112,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   if (isError || !detail) {
     return (
       <div className="space-y-4">
-        <Link href="/supplier/datacenter">
+        <Link href="/supplier/datacenters">
           <Button variant="ghost" size="sm" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
             返回机房管理
@@ -135,7 +136,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
-        <Link href="/supplier/datacenter">
+        <Link href="/supplier/datacenters">
           <Button variant="ghost" size="icon" className="mt-1">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -324,48 +325,14 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         </Card>
       </div>
 
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-base">物理机汇总</CardTitle>
-          <CardDescription>本机房下的物理机台账统计</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-lg bg-muted/30 p-4">
-              <p className="text-sm text-muted-foreground">物理机台数</p>
-              <p className="mt-1 text-2xl font-semibold text-foreground">
-                {physicalDeviceStats.total}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/30 p-4">
-              <p className="text-sm text-muted-foreground">在线台数</p>
-              <p className="mt-1 text-2xl font-semibold text-green-500">
-                {physicalDeviceStats.online}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/30 p-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Settings2 className="h-4 w-4" />
-                维护中台数
-              </div>
-              <p className="mt-1 text-2xl font-semibold text-yellow-500">
-                {physicalDeviceStats.maintenance}
-              </p>
-            </div>
-          </div>
-          {physicalDeviceStats.total > 0 && (
-            <div className="mt-4">
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/supplier/devices">
-                  查看物理机列表
-                  <ChevronRight className="ml-1 h-3 w-3" />
-                </Link>
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
+      <SupplierUnitCostsPanel
+        supplier={{
+          id: dataCenter.supplierId,
+          name: dataCenter.supplierName,
+          shortName: dataCenter.supplierName,
+        }}
+        dataCenter={{ id: dataCenter.id, name: dataCenter.name }}
+      />
       <Card className="overflow-x-auto border-border bg-card">
         <CardHeader>
           <CardTitle className="text-base">聚合库存</CardTitle>
@@ -448,6 +415,48 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
           )}
         </CardContent>
       </Card>
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">物理机汇总</CardTitle>
+          <CardDescription>本机房下的物理机台账统计</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="rounded-lg bg-muted/30 p-4">
+              <p className="text-sm text-muted-foreground">物理机台数</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">
+                {physicalDeviceStats.total}
+              </p>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-4">
+              <p className="text-sm text-muted-foreground">在线台数</p>
+              <p className="mt-1 text-2xl font-semibold text-green-500">
+                {physicalDeviceStats.online}
+              </p>
+            </div>
+            <div className="rounded-lg bg-muted/30 p-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Settings2 className="h-4 w-4" />
+                维护中台数
+              </div>
+              <p className="mt-1 text-2xl font-semibold text-yellow-500">
+                {physicalDeviceStats.maintenance}
+              </p>
+            </div>
+          </div>
+          {physicalDeviceStats.total > 0 && (
+            <div className="mt-4">
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/supplier/devices">
+                  查看物理机列表
+                  <ChevronRight className="ml-1 h-3 w-3" />
+                </Link>
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
     </div>
   )
 }

@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Cpu, DollarSign, MoreHorizontal, Percent, Plus, Search } from 'lucide-react'
+import { Cpu, DollarSign, MoreHorizontal, Percent, Plus } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import { Badge } from '@workspace/ui/components/badge'
-import { Card, CardContent } from '@workspace/ui/components/card'
+import { Card } from '@workspace/ui/components/card'
 import {
   Table,
   TableBody,
@@ -20,13 +20,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@workspace/ui/components/select'
 import {
   Dialog,
   DialogContent,
@@ -46,6 +39,7 @@ import {
 } from '@/lib/supplier/pricing-record-status'
 import type {
   ContractPricingMode,
+  DataCenter,
   Supplier,
   SupplierPricingRecord,
 } from '@/lib/data/types'
@@ -100,12 +94,24 @@ function PricingModeBadge({ mode }: { mode: ContractPricingMode }) {
 }
 
 interface SupplierUnitCostsPanelProps {
-  supplier: Supplier
+  supplier: Pick<Supplier, 'id' | 'name' | 'shortName'>
+  /** 锁定到指定机房（用于机房详情页） */
+  dataCenter?: Pick<DataCenter, 'id' | 'name'>
 }
 
-export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps) {
+export function SupplierUnitCostsPanel({ supplier, dataCenter }: SupplierUnitCostsPanelProps) {
   const listInput = { supplierId: supplier.id }
   const utils = trpc.useUtils()
+  const lockedDataCenter = dataCenter ?? null
+
+  const invalidatePricingQueries = async () => {
+    await utils.supplier.unitCosts.listRecords.invalidate(listInput)
+    await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+    if (lockedDataCenter) {
+      await utils.supplier.getDataCenterDetail.invalidate({ dataCenterId: lockedDataCenter.id })
+      await utils.supplier.listGpuInventory.invalidate()
+    }
+  }
 
   const { data: pricingRecords = [], isLoading: recordsLoading } =
     trpc.supplier.unitCosts.listRecords.useQuery(listInput)
@@ -116,23 +122,16 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
 
   const createMutation = trpc.supplier.unitCosts.create.useMutation({
     onSuccess: async () => {
-      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
-      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      await invalidatePricingQueries()
       setCreateDialogOpen(false)
     },
   })
   const updateMutation = trpc.supplier.unitCosts.update.useMutation({
     onSuccess: async () => {
-      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
-      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
+      await invalidatePricingQueries()
       setEditDialogOpen(false)
     },
   })
-
-  const [searchTerm, setSearchTerm] = useState('')
-  const [dataCenterFilter, setDataCenterFilter] = useState('all')
-  const [modeFilter, setModeFilter] = useState('all')
-  const [cardTypeFilter, setCardTypeFilter] = useState('all')
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
@@ -143,16 +142,12 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
   const [editEffectiveTo, setEditEffectiveTo] = useState('')
   const [editReason, setEditReason] = useState('')
 
-  const filteredPricing = pricingRecords.filter((row) => {
-    const q = searchTerm.toLowerCase()
-    const matchesSearch =
-      row.dataCenterName.toLowerCase().includes(q) ||
-      row.cardTypeName.toLowerCase().includes(q)
-    const matchesDc = dataCenterFilter === 'all' || row.dataCenterId === dataCenterFilter
-    const matchesMode = modeFilter === 'all' || row.cooperationMode === modeFilter
-    const matchesCard = cardTypeFilter === 'all' || row.cardTypeId === cardTypeFilter
-    return matchesSearch && matchesDc && matchesMode && matchesCard
-  })
+  const scopedPricing = useMemo(() => {
+    if (lockedDataCenter) {
+      return pricingRecords.filter((row) => row.dataCenterId === lockedDataCenter.id)
+    }
+    return pricingRecords
+  }, [pricingRecords, lockedDataCenter])
 
   const selectedRecord = useMemo(
     () => pricingRecords.find((r) => r.id === selectedId) ?? null,
@@ -199,65 +194,17 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-medium text-foreground">卡型成本</h2>
-          <p className="text-sm text-muted-foreground">按机房与卡型维护单价或分成比例</p>
+          <p className="text-sm text-muted-foreground">
+            {lockedDataCenter
+              ? `本机房各卡型的单价或分成配置`
+              : '该供应商下各机房各卡型的单价或分成配置'}
+          </p>
         </div>
         <Button className="gap-2" onClick={() => setCreateDialogOpen(true)}>
           <Plus className="w-4 h-4" />
           新增配置
         </Button>
       </div>
-
-      <Card className="bg-card border-border">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="搜索机房、卡型..."
-                className="pl-9"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <Select value={dataCenterFilter} onValueChange={setDataCenterFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="机房" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部机房</SelectItem>
-                {dataCenterOptions.map((dc) => (
-                  <SelectItem key={dc.id} value={dc.id}>
-                    {dc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={cardTypeFilter} onValueChange={setCardTypeFilter}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="卡型" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部卡型</SelectItem>
-                {activeCardTypes.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={modeFilter} onValueChange={setModeFilter}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="计价模式" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部模式</SelectItem>
-                <SelectItem value="card_time">卡时模式</SelectItem>
-                <SelectItem value="revenue_share">分成模式</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
 
       {recordsLoading && (
         <p className="text-sm text-muted-foreground">加载卡型成本配置…</p>
@@ -267,7 +214,9 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
         <Table>
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
-              <TableHead className="text-muted-foreground">机房</TableHead>
+              {!lockedDataCenter && (
+                <TableHead className="text-muted-foreground">机房</TableHead>
+              )}
               <TableHead className="text-muted-foreground">卡型</TableHead>
               <TableHead className="text-muted-foreground">计价方式</TableHead>
               <TableHead className="text-muted-foreground">状态</TableHead>
@@ -278,16 +227,21 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredPricing.length === 0 ? (
+            {scopedPricing.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+                <TableCell
+                  colSpan={lockedDataCenter ? 7 : 8}
+                  className="text-center text-muted-foreground py-12"
+                >
                   暂无配置，点击「新增配置」添加机房卡型单价
                 </TableCell>
               </TableRow>
             ) : (
-              filteredPricing.map((row) => (
+              scopedPricing.map((row) => (
                 <TableRow key={row.id} className={`border-border ${pricingRecordRowClassName(row)}`}>
-                  <TableCell className="text-foreground">{row.dataCenterName}</TableCell>
+                  {!lockedDataCenter && (
+                    <TableCell className="text-foreground">{row.dataCenterName}</TableCell>
+                  )}
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Cpu className="w-4 h-4 text-muted-foreground" />
@@ -340,6 +294,7 @@ export function SupplierUnitCostsPanel({ supplier }: SupplierUnitCostsPanelProps
         existingRecords={pricingRecords}
         cardTypes={activeCardTypes}
         dataCenters={dataCenterOptions}
+        lockedDataCenter={lockedDataCenter ?? undefined}
         isSubmitting={createMutation.isPending}
         onCreated={(record) => {
           const pricingMode = record.pricingMode ?? 'card_time'

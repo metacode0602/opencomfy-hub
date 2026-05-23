@@ -49,11 +49,10 @@ import {
   SupplierOnboardingBatchesPanel,
 } from '@/components/dashboard/supplier-activity-timeline-panel'
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
-import { SupplierDeviceImportPanel } from '@/components/dashboard/supplier-device-import-panel'
-import { SupplierDeviceRetireDialog } from '@/components/dashboard/supplier-device-retire-dialog'
 import { EditSupplierDialog } from '@/components/dashboard/supplier-form-dialog'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 import { toast } from 'sonner'
+import { SupplierDeviceRetireDialog } from './supplier-device-retire-dialog'
 
 interface SupplierDetailContentProps {
   supplier: Supplier
@@ -69,7 +68,6 @@ const VALID_TABS = new Set([
   'batches',
   'timeline',
   'machines',
-  'ops-import',
 ])
 
 export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDetailContentProps) {
@@ -361,9 +359,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
             <TabsTrigger value="timeline" className="shrink-0">
               活动时间线
             </TabsTrigger>
-            <TabsTrigger value="ops-import" className="shrink-0">
-              运维导入
-            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -618,10 +613,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
 
         <TabsContent value="timeline" className="space-y-4">
           <SupplierActivityTimelinePanel supplierId={domainSupplierId} />
-        </TabsContent>
-
-        <TabsContent value="ops-import" className="space-y-4">
-          <SupplierDeviceImportPanel supplierId={supplier.id} />
         </TabsContent>
       </Tabs>
     </div>

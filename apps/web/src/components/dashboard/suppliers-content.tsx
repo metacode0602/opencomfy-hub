@@ -56,10 +56,8 @@ import {
 } from '@/components/dashboard/supplier-form-dialog'
 import { SupplierImportTrigger } from '@/components/dashboard/supplier-import-dialog'
 import { PlatformSupplierImportTrigger } from '@/components/dashboard/platform-supplier-import-dialog'
-import { PlatformDatacenterImportTrigger } from '@/components/dashboard/platform-datacenter-import-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
-import { SupplierDatacenterImportTrigger } from './supplier-datacenter-import-dialog'
 
 const statusNames: Record<string, string> = {
   negotiating: '洽谈中',
@@ -163,14 +161,8 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
             activeStaff={activeStaff}
             onSuccess={() => void utils.supplier.list.invalidate()}
           />
-          <PlatformDatacenterImportTrigger
-            onSuccess={() => void utils.supplier.list.invalidate()}
-          />
           <SupplierImportTrigger
             activeStaff={activeStaff}
-            onSuccess={() => void utils.supplier.list.invalidate()}
-          />
-          <SupplierDatacenterImportTrigger
             onSuccess={() => void utils.supplier.list.invalidate()}
           />
           <CreateSupplierDialog
