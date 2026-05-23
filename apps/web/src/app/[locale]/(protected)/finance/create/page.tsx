@@ -14,11 +14,11 @@ import {
 } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
-import { IconLoader2, IconUpload } from "@tabler/icons-react"
-import { useCallback, useState } from "react"
-import { toast } from "sonner"
+import { IconDownload, IconLoader2, IconUpload } from "@tabler/icons-react"
+import { useCallback, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { formatMoney } from "../_lib/display"
-import { IncomeDetailTable } from "../_components/income-detail-table"
+import { getPeriodDateRange, isValidPeriodCode } from "../_lib/period"
 import { CostGroupedTable } from "../[id]/cost/_components/cost-grouped-table"
 
 type SlotKey = "customer" | "baremetal" | "tenantBill"
@@ -28,6 +28,7 @@ type SlotState = {
   status: "empty" | "parsing" | "done" | "error"
   message: string
   rowCount: number
+  hasErrorReport: boolean
 }
 
 const SLOT_LABEL: Record<
@@ -53,9 +54,9 @@ const SLOT_LABEL: Record<
 
 function initialSlots(): Record<SlotKey, SlotState> {
   return {
-    customer: { file: null, status: "empty", message: "", rowCount: 0 },
-    baremetal: { file: null, status: "empty", message: "", rowCount: 0 },
-    tenantBill: { file: null, status: "empty", message: "", rowCount: 0 },
+    customer: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
+    baremetal: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
+    tenantBill: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
   }
 }
 
@@ -67,6 +68,70 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode(bytes[i]!)
   }
   return btoa(binary)
+}
+
+function downloadBase64File(fileName: string, fileBase64: string) {
+  const bin = atob(fileBase64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const blob = new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = fileName
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function ImportPreCheckAlerts({
+  validation,
+  computeError,
+}: {
+  validation:
+    | {
+        missingPricing: { regionCode: string; gpuModel: string }[]
+        pendingAllocationCount: number
+        crossFileOk: boolean
+        periodStatus: string
+      }
+    | undefined
+  computeError: string | null
+}) {
+  if (!validation && !computeError) return null
+
+  return (
+    <div className="space-y-3" role="alert">
+      {computeError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {computeError}
+        </div>
+      )}
+      {validation && !validation.crossFileOk && validation.periodStatus === "import_error" && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          存在 B 端未知租户或未通过跨文件校验，请修正对应 Excel 后重新上传（可在各上传区下载错误明细）。
+        </div>
+      )}
+      {validation && validation.missingPricing.length > 0 && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <p className="font-medium">以下区域×GPU 缺少机房卡型成本配置，无法计算：</p>
+          <ul className="mt-2 list-inside list-disc">
+            {validation.missingPricing.map((p) => (
+              <li key={`${p.regionCode}-${p.gpuModel}`}>
+                {p.regionCode} × {p.gpuModel}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {validation && validation.pendingAllocationCount > 0 && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+          {validation.pendingAllocationCount} 个租户需配置成本分成比例后方可计算。
+        </div>
+      )}
+    </div>
+  )
 }
 
 function BillingPeriodFormCard({
@@ -81,9 +146,14 @@ function BillingPeriodFormCard({
   onPeriodStartChange,
   onPeriodEndChange,
   onPickFile,
+  onDownloadError,
   onCompute,
   onCancelHref,
   compact,
+  preCheckAlerts,
+  readOnlyMeta,
+  title,
+  description,
 }: {
   periodCode: string
   periodStart: string
@@ -96,28 +166,42 @@ function BillingPeriodFormCard({
   onPeriodStartChange: (v: string) => void
   onPeriodEndChange: (v: string) => void
   onPickFile: (slot: SlotKey, file: File | null) => void
+  onDownloadError: (slot: SlotKey) => void
   onCompute: () => void
   onCancelHref: string
   compact?: boolean
+  preCheckAlerts?: React.ReactNode
+  readOnlyMeta?: boolean
+  title?: string
+  description?: string
 }) {
   return (
     <Card className="h-full">
       <CardHeader>
-        <CardTitle>添加账期</CardTitle>
+        <CardTitle>{title ?? "添加账期"}</CardTitle>
         <CardDescription>
-          填写账期信息并上传三类 Excel，完成后点击「计算」生成收入与成本明细。
+          {description ??
+            "填写账期信息并上传三类 Excel，全部解析成功后点击「计算」。"}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2 sm:col-span-2">
+        {preCheckAlerts}
+
+        <div className="grid gap-4 grid-cols-3">
+          <div className="space-y-2">
             <Label htmlFor="period_code">账期编码 period_code</Label>
             <Input
               id="period_code"
-              placeholder="例如 2026-06"
+              placeholder="YYYY-MM，例如 2026-06"
+              pattern="\d{4}-(0[1-9]|1[0-2])"
               value={periodCode}
+              readOnly={readOnlyMeta}
+              disabled={readOnlyMeta}
               onChange={(e) => onPeriodCodeChange(e.target.value)}
             />
+            {periodCode.trim() && !isValidPeriodCode(periodCode) && (
+              <p className="text-sm text-destructive">账期编码格式应为 YYYY-MM</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="period_start">账期开始</Label>
@@ -125,6 +209,8 @@ function BillingPeriodFormCard({
               id="period_start"
               type="date"
               value={periodStart}
+              readOnly={readOnlyMeta}
+              disabled={readOnlyMeta}
               onChange={(e) => onPeriodStartChange(e.target.value)}
             />
           </div>
@@ -134,6 +220,8 @@ function BillingPeriodFormCard({
               id="period_end"
               type="date"
               value={periodEnd}
+              readOnly={readOnlyMeta}
+              disabled={readOnlyMeta}
               onChange={(e) => onPeriodEndChange(e.target.value)}
             />
           </div>
@@ -183,6 +271,17 @@ function BillingPeriodFormCard({
                       {st.file.name}
                     </span>
                   )}
+                  {st.hasErrorReport && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onDownloadError(key)}
+                    >
+                      <IconDownload className="mr-1 size-4" />
+                      下载错误明细
+                    </Button>
+                  )}
                 </div>
                 {st.status !== "empty" && (
                   <p
@@ -201,11 +300,7 @@ function BillingPeriodFormCard({
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t pt-6">
-        <Button
-          type="button"
-          disabled={!canRunCompute}
-          onClick={onCompute}
-        >
+        <Button type="button" disabled={!canRunCompute} onClick={onCompute}>
           {computing ? (
             <>
               <IconLoader2 className="mr-2 size-4 animate-spin" />
@@ -275,28 +370,8 @@ function ComputeResultCard({
             </p>
           </div>
         </div>
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
-          <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">补充收入</p>
-            <p className="tabular-nums font-medium">
-              {formatMoney(period.supplementary ?? "0")}
-            </p>
-          </div>
-          <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">余额收入</p>
-            <p className="tabular-nums font-medium">
-              {formatMoney(period.balance_income ?? "0")}
-            </p>
-          </div>
-          <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">裸金属收入</p>
-            <p className="tabular-nums font-medium">
-              {formatMoney(period.baremetal_income ?? "0")}
-            </p>
-          </div>
-        </div>
         <p className="text-sm text-muted-foreground">
-          下方已展示本账期收入与成本明细，核对无误后可写入本地。
+          请在下方收入明细中手工填写补充消费；重新计算将清空已填补充消费。
         </p>
       </CardContent>
       <CardFooter className="border-t pt-6">
@@ -322,6 +397,8 @@ function ComputeResultCard({
 
 export default function FinanceCreateBillingPeriodPage() {
   const router = useLocaleRouter()
+  const searchParams = useSearchParams()
+  const editPeriodId = searchParams.get("periodId")
   const utils = trpc.useUtils()
 
   const [periodCode, setPeriodCode] = useState("")
@@ -331,19 +408,87 @@ export default function FinanceCreateBillingPeriodPage() {
   const [slots, setSlots] = useState<Record<SlotKey, SlotState>>(initialSlots)
   const [computing, setComputing] = useState(false)
   const [persisting, setPersisting] = useState(false)
+  const [computeError, setComputeError] = useState<string | null>(null)
+  const [supplementaryDraft, setSupplementaryDraft] = useState<Record<string, string>>({})
+  const [savingSupplementary, setSavingSupplementary] = useState(false)
 
   const createPeriod = trpc.finance.periods.create.useMutation()
   const importFile = trpc.finance.periods.importFile.useMutation()
   const computePeriod = trpc.finance.periods.compute.useMutation()
   const publishPeriod = trpc.finance.periods.publish.useMutation()
+  const saveSupplementary = trpc.finance.periods.saveSupplementary.useMutation()
+
+  const { data: existingPeriod } = trpc.finance.periods.getById.useQuery(
+    { id: editPeriodId! },
+    { enabled: Boolean(editPeriodId) },
+  )
 
   const { data: draftBundle } = trpc.finance.periods.getBundle.useQuery(
     { id: periodId! },
     { enabled: Boolean(periodId) },
   )
 
+  const { data: validation, refetch: refetchValidation } =
+    trpc.finance.periods.validate.useQuery(
+      { billingPeriodId: periodId! },
+      { enabled: Boolean(periodId) },
+    )
+
+  useEffect(() => {
+    if (!existingPeriod || periodId) return
+    setPeriodId(existingPeriod.id)
+    setPeriodCode(existingPeriod.period_code)
+    setPeriodStart(existingPeriod.period_start)
+    setPeriodEnd(existingPeriod.period_end)
+    setSlots(initialSlots())
+    setComputeError(null)
+  }, [existingPeriod, periodId])
+
+  useEffect(() => {
+    if (!validation?.slots) return
+    setSlots((prev) => {
+      const next = { ...prev }
+      const map: SlotKey[] = ["customer", "baremetal", "tenantBill"]
+      for (const key of map) {
+        const server = validation.slots[key]
+        if (!server) continue
+        if (server.hasErrorReport || server.parseStatus === "error") {
+          next[key] = {
+            ...prev[key],
+            status: "error",
+            hasErrorReport: server.hasErrorReport,
+            message:
+              server.parseErrorCount > 0
+                ? `存在 ${server.parseErrorCount} 处错误，请下载错误明细修正`
+                : prev[key].message,
+          }
+        } else if (server.parseStatus === "ok") {
+          next[key] = {
+            ...prev[key],
+            status: "done",
+            rowCount: server.rowCount,
+            hasErrorReport: false,
+            message: prev[key].message || `解析成功（${server.rowCount} 行）`,
+          }
+        }
+      }
+      return next
+    })
+  }, [validation])
+
+  useEffect(() => {
+    if (!draftBundle?.income) return
+    const next: Record<string, string> = {}
+    for (const row of draftBundle.income) {
+      next[row.id] = row.supplementary_consumption ?? "0"
+    }
+    setSupplementaryDraft(next)
+  }, [draftBundle?.income])
+
   const clearPreview = useCallback(() => {
     setPeriodId(null)
+    setSlots(initialSlots())
+    setComputeError(null)
   }, [])
 
   const allParsed =
@@ -362,22 +507,51 @@ export default function FinanceCreateBillingPeriodPage() {
     return created.id
   }, [createPeriod, periodCode, periodEnd, periodId, periodStart])
 
+  const onDownloadError = useCallback(
+    async (slot: SlotKey) => {
+      if (!periodId) return
+      try {
+        const report = await utils.finance.periods.downloadImportErrorReport.fetch({
+          billingPeriodId: periodId,
+          slot,
+        })
+        downloadBase64File(report.fileName, report.fileBase64)
+      } catch (e) {
+        setComputeError(e instanceof Error ? e.message : "下载失败")
+      }
+    },
+    [periodId, utils.finance.periods.downloadImportErrorReport],
+  )
+
   const onPickFile = useCallback(
     async (slot: SlotKey, file: File | null) => {
       if (!file) {
         setSlots((s) => ({
           ...s,
-          [slot]: { file: null, status: "empty", message: "", rowCount: 0 },
+          [slot]: {
+            file: null,
+            status: "empty",
+            message: "",
+            rowCount: 0,
+            hasErrorReport: false,
+          },
         }))
         return
       }
-      if (!periodCode.trim() || !periodStart || !periodEnd) {
-        toast.error("请先填写账期编码与起止日期")
+      if (!isValidPeriodCode(periodCode) || !periodStart || !periodEnd) {
+        setComputeError("请先填写正确格式的账期编码（YYYY-MM）与起止日期")
         return
       }
+      setComputeError(null)
       setSlots((s) => ({
         ...s,
-        [slot]: { file, status: "parsing", message: "正在上传并解析…", rowCount: 0 },
+        [slot]: {
+          file,
+          status: "parsing",
+          message: "正在上传并解析…",
+          rowCount: 0,
+          hasErrorReport: false,
+        },
       }))
       try {
         const id = await ensurePeriod()
@@ -388,17 +562,31 @@ export default function FinanceCreateBillingPeriodPage() {
           fileName: file.name,
           fileBase64,
         })
-        setSlots((s) => ({
-          ...s,
-          [slot]: {
-            file,
-            status: "done",
-            message: `解析成功（${result.rowCount} 行）`,
-            rowCount: result.rowCount,
-          },
-        }))
+        if (!result.ok) {
+          setSlots((s) => ({
+            ...s,
+            [slot]: {
+              file,
+              status: "error",
+              message: result.message,
+              rowCount: 0,
+              hasErrorReport: result.hasErrorReport,
+            },
+          }))
+        } else {
+          setSlots((s) => ({
+            ...s,
+            [slot]: {
+              file,
+              status: "done",
+              message: result.message,
+              rowCount: result.rowCount,
+              hasErrorReport: false,
+            },
+          }))
+        }
+        await refetchValidation()
         await utils.finance.periods.getBundle.invalidate({ id })
-        toast.success(`${SLOT_LABEL[slot].title} 导入成功`)
       } catch (e) {
         setSlots((s) => ({
           ...s,
@@ -407,18 +595,28 @@ export default function FinanceCreateBillingPeriodPage() {
             status: "error",
             message: e instanceof Error ? e.message : "导入失败",
             rowCount: 0,
+            hasErrorReport: false,
           },
         }))
       }
     },
-    [ensurePeriod, importFile, periodCode, periodEnd, periodStart, utils.finance.periods.getBundle],
+    [
+      ensurePeriod,
+      importFile,
+      periodCode,
+      periodEnd,
+      periodStart,
+      refetchValidation,
+      utils.finance.periods.getBundle,
+    ],
   )
 
   const canRunCompute =
-    Boolean(periodCode.trim()) &&
+    isValidPeriodCode(periodCode) &&
     Boolean(periodStart) &&
     Boolean(periodEnd) &&
     allParsed &&
+    (validation?.canCompute ?? false) &&
     !computing &&
     !persisting &&
     periodStart <= periodEnd
@@ -426,15 +624,38 @@ export default function FinanceCreateBillingPeriodPage() {
   const handleCompute = async () => {
     if (!canRunCompute) return
     setComputing(true)
+    setComputeError(null)
     try {
       const id = await ensurePeriod()
       await computePeriod.mutateAsync({ billingPeriodId: id })
       await utils.finance.periods.getBundle.invalidate({ id })
-      toast.success("计算完成，请核对汇总与下方明细")
+      await refetchValidation()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "计算失败")
+      const msg = e instanceof Error ? e.message : "计算失败"
+      setComputeError(msg)
+      if (periodId) await refetchValidation()
     } finally {
       setComputing(false)
+    }
+  }
+
+  const handleSaveSupplementary = async () => {
+    if (!periodId || !draftBundle) return
+    setSavingSupplementary(true)
+    try {
+      await saveSupplementary.mutateAsync({
+        billingPeriodId: periodId,
+        items: draftBundle.income.map((row) => ({
+          incomeRowId: row.id,
+          supplementaryConsumption: supplementaryDraft[row.id] ?? "0",
+        })),
+      })
+      await utils.finance.periods.getBundle.invalidate({ id: periodId })
+      setComputeError(null)
+    } catch (e) {
+      setComputeError(e instanceof Error ? e.message : "保存补充消费失败")
+    } finally {
+      setSavingSupplementary(false)
     }
   }
 
@@ -444,10 +665,9 @@ export default function FinanceCreateBillingPeriodPage() {
     try {
       await publishPeriod.mutateAsync({ billingPeriodId: periodId })
       await utils.finance.periods.list.invalidate()
-      toast.success("账期已发布")
       router.push("/finance")
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "发布失败")
+      setComputeError(e instanceof Error ? e.message : "发布失败")
     } finally {
       setPersisting(false)
     }
@@ -458,6 +678,12 @@ export default function FinanceCreateBillingPeriodPage() {
     draftBundle?.period?.status === "computed" ||
     draftBundle?.period?.status === "published"
 
+  const preCheckAlerts = (
+    <ImportPreCheckAlerts validation={validation} computeError={computeError} />
+  )
+
+  const isEditingExisting = Boolean(editPeriodId || periodId)
+
   const formCard = (
     <BillingPeriodFormCard
       periodCode={periodCode}
@@ -467,9 +693,22 @@ export default function FinanceCreateBillingPeriodPage() {
       computing={computing}
       persisting={persisting}
       canRunCompute={canRunCompute}
+      preCheckAlerts={preCheckAlerts}
+      readOnlyMeta={isEditingExisting}
+      title={isEditingExisting ? "重新上传账期" : undefined}
+      description={
+        isEditingExisting
+          ? "账期元数据不可修改。请重新上传三类 Excel，全部解析成功后点击「计算」。"
+          : undefined
+      }
       onPeriodCodeChange={(v) => {
         clearPreview()
         setPeriodCode(v)
+        const range = getPeriodDateRange(v)
+        if (range) {
+          setPeriodStart(range.start)
+          setPeriodEnd(range.end)
+        }
       }}
       onPeriodStartChange={(v) => {
         clearPreview()
@@ -480,6 +719,7 @@ export default function FinanceCreateBillingPeriodPage() {
         setPeriodEnd(v)
       }}
       onPickFile={(slot, file) => void onPickFile(slot, file)}
+      onDownloadError={(slot) => void onDownloadError(slot)}
       onCompute={() => void handleCompute()}
       onCancelHref="/finance"
       compact={hasResult}
@@ -511,17 +751,78 @@ export default function FinanceCreateBillingPeriodPage() {
 
             <div className="space-y-6">
               <Card>
-                <CardHeader>
-                  <CardTitle>收入明细</CardTitle>
-                  <CardDescription>
-                    platform_income_monthly · 共 {draftBundle!.income.length} 条
-                  </CardDescription>
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <CardTitle>收入明细</CardTitle>
+                    <CardDescription>
+                      手工填写补充消费 · 共 {draftBundle!.income.length} 条
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={savingSupplementary || computing}
+                    onClick={() => void handleSaveSupplementary()}
+                  >
+                    {savingSupplementary ? (
+                      <>
+                        <IconLoader2 className="mr-2 size-4 animate-spin" />
+                        保存中…
+                      </>
+                    ) : (
+                      "保存补充消费"
+                    )}
+                  </Button>
                 </CardHeader>
-                <CardContent>
-                  <IncomeDetailTable
-                    rows={draftBundle!.income}
-                    showPeriodColumn={false}
-                  />
+                <CardContent className="space-y-4">
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="px-3 py-2 text-left">租户</th>
+                          <th className="px-3 py-2 text-right">补充消费</th>
+                          <th className="px-3 py-2 text-right">余额消费</th>
+                          <th className="px-3 py-2 text-right">裸金属</th>
+                          <th className="px-3 py-2 text-right">总消费</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {draftBundle!.income.map((row) => {
+                          const sup = supplementaryDraft[row.id] ?? "0"
+                          const total =
+                            (Number(sup) || 0) +
+                            (Number(row.balance_consumption ?? 0) || 0) +
+                            (Number(row.bare_metal_consumption ?? 0) || 0)
+                          return (
+                            <tr key={row.id} className="border-b">
+                              <td className="px-3 py-2">{row.tenant_name}</td>
+                              <td className="px-3 py-2 text-right">
+                                <Input
+                                  className="ml-auto max-w-[140px] text-right tabular-nums"
+                                  value={sup}
+                                  onChange={(e) =>
+                                    setSupplementaryDraft((d) => ({
+                                      ...d,
+                                      [row.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {formatMoney(row.balance_consumption ?? "0")}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {formatMoney(row.bare_metal_consumption ?? "0")}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {formatMoney(String(total))}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -529,8 +830,7 @@ export default function FinanceCreateBillingPeriodPage() {
                 <CardHeader>
                   <CardTitle>成本毛利明细</CardTitle>
                   <CardDescription>
-                    platform_cost_monthly · 共 {draftBundle!.cost.length}{" "}
-                    条，按客户经理汇总展示
+                    platform_cost_monthly · 共 {draftBundle!.cost.length} 条
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -550,7 +850,7 @@ export default function FinanceCreateBillingPeriodPage() {
                   {persisting ? (
                     <>
                       <IconLoader2 className="mr-2 size-4 animate-spin" />
-                      写入中…
+                      发布中…
                     </>
                   ) : (
                     "发布账期并返回列表"

@@ -7,13 +7,24 @@ import {
 import { desc, eq } from 'drizzle-orm'
 import { computeBillingPeriod } from './compute'
 import { FinanceError } from './errors'
-import { importExcelFile } from './import'
+import { importExcelFile, getImportSlotStatuses } from './import'
 import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
 import type { ImportFileType } from './constants'
 import { listTenantProjectBindings } from './enrichment'
 import { billingTenantCostAllocation } from '@workspace/db/schema'
+import {
+  computeTotalConsumption,
+  toMoneyString,
+} from '@/lib/finance/income-row-utils'
+import {
+  findMissingTenantBillPricing,
+  readErrorReportBySlot,
+  validateCrossFileImports,
+} from './validate-import'
+import type { ImportSlotKey } from './constants'
+import { SLOT_TO_FILE_TYPE } from './constants'
 
 export type BillingPeriodDto = {
   id: string
@@ -137,8 +148,118 @@ export const financeBillingPeriodsDataAccess = {
   },
 
   importExcelFile,
+  getImportSlotStatuses,
   computeBillingPeriod,
   listTenantProjectBindings,
+
+  async validatePeriod(periodId: string) {
+    const period = await this.getById(periodId)
+    if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+    const slots = await getImportSlotStatuses(periodId)
+    const cross = await validateCrossFileImports(periodId)
+    const missingPricing = await findMissingTenantBillPricing({
+      periodId,
+      periodEnd: period.period_end,
+    })
+    const bindings = await listTenantProjectBindings(periodId)
+    const pendingAllocation = bindings.filter(
+      (b) =>
+        b.projects.length >= 2 &&
+        b.projects.some((p) => p.allocationPercent == null),
+    )
+    return {
+      periodStatus: period.status,
+      slots,
+      crossFileOk: cross.ok,
+      missingPricing,
+      pendingAllocationCount: pendingAllocation.length,
+      canCompute:
+        period.status === 'imported' &&
+        cross.ok &&
+        missingPricing.length === 0 &&
+        pendingAllocation.length === 0,
+    }
+  },
+
+  async downloadImportErrorReport(input: {
+    billingPeriodId: string
+    slot: ImportSlotKey
+  }) {
+    const fileType = SLOT_TO_FILE_TYPE[input.slot]
+    const report = await readErrorReportBySlot({
+      periodId: input.billingPeriodId,
+      fileType,
+    })
+    if (!report) throw new FinanceError('NOT_FOUND', '无可下载的错误明细')
+    return report
+  },
+
+  async saveSupplementary(input: {
+    billingPeriodId: string
+    items: { incomeRowId: string; supplementaryConsumption: string }[]
+    actorId?: string | null
+  }): Promise<void> {
+    const period = await db.query.billingPeriod.findFirst({
+      where: eq(billingPeriod.id, input.billingPeriodId),
+    })
+    if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+    if (period.status !== 'computed' && period.status !== 'adjusted') {
+      throw new FinanceError('PRECONDITION_FAILED', '仅已计算账期可保存补充消费')
+    }
+
+    for (const item of input.items) {
+      const row = await db.query.platformIncomeMonthly.findFirst({
+        where: eq(platformIncomeMonthly.id, item.incomeRowId),
+      })
+      if (!row || row.billingPeriodId !== input.billingPeriodId) continue
+      const sup = toMoneyString(Number(item.supplementaryConsumption) || 0)
+      const total = computeTotalConsumption({
+        supplementary_consumption: sup,
+        balance_consumption: row.balanceConsumption ?? '0',
+        bare_metal_consumption: row.bareMetalConsumption ?? '0',
+      })
+      await db
+        .update(platformIncomeMonthly)
+        .set({
+          supplementaryConsumption: sup,
+          totalConsumption: total,
+        })
+        .where(eq(platformIncomeMonthly.id, item.incomeRowId))
+    }
+
+    const incomeRows = await db
+      .select()
+      .from(platformIncomeMonthly)
+      .where(eq(platformIncomeMonthly.billingPeriodId, input.billingPeriodId))
+
+    let totalIncome = 0
+    let balanceIncome = 0
+    let baremetalIncome = 0
+    let supplementary = 0
+    for (const row of incomeRows) {
+      totalIncome += Number(row.totalConsumption ?? 0)
+      balanceIncome += Number(row.balanceConsumption ?? 0)
+      baremetalIncome += Number(row.bareMetalConsumption ?? 0)
+      supplementary += Number(row.supplementaryConsumption ?? 0)
+    }
+
+    await db
+      .update(billingPeriod)
+      .set({
+        totalIncome: toMoneyString(totalIncome),
+        balanceIncome: toMoneyString(balanceIncome),
+        baremetalIncome: toMoneyString(baremetalIncome),
+        supplementary: toMoneyString(supplementary),
+      })
+      .where(eq(billingPeriod.id, input.billingPeriodId))
+
+    await appendOperationLog({
+      billingPeriodId: input.billingPeriodId,
+      operation: 'save_supplementary',
+      actorId: input.actorId,
+      metadata: { count: input.items.length },
+    })
+  },
 
   async saveCostAllocations(input: {
     billingPeriodId: string
@@ -234,7 +355,10 @@ export const financeBillingPeriodsDataAccess = {
     })
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
     if (period.status === 'published' || period.status === 'adjusted') {
-      throw new FinanceError('CONFLICT', '已发布账期须先撤回发布后再重新生成')
+      throw new FinanceError('CONFLICT', '已发布账期须先作废后再重新上传生成')
+    }
+    if (period.status === 'void') {
+      throw new FinanceError('CONFLICT', '作废账期不可重新生成')
     }
     await purgeBillingPeriodArtifacts({
       billingPeriodId: periodId,
@@ -243,7 +367,7 @@ export const financeBillingPeriodsDataAccess = {
     })
     await db
       .update(billingPeriod)
-      .set({ status: 'draft', voidedAt: null })
+      .set({ status: 'draft', publishedAt: null, voidedAt: null })
       .where(eq(billingPeriod.id, periodId))
     await appendOperationLog({
       billingPeriodId: periodId,
@@ -251,6 +375,34 @@ export const financeBillingPeriodsDataAccess = {
       actorId,
     })
     financeLog('regenerate', 'period reset to draft', { periodId })
+    return mapPeriod(
+      (await db.query.billingPeriod.findFirst({ where: eq(billingPeriod.id, periodId) }))!,
+    )
+  },
+
+  async voidPeriod(periodId: string, actorId?: string | null): Promise<BillingPeriodDto> {
+    const period = await db.query.billingPeriod.findFirst({
+      where: eq(billingPeriod.id, periodId),
+    })
+    if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+    if (period.status !== 'published' && period.status !== 'adjusted') {
+      throw new FinanceError('PRECONDITION_FAILED', '仅已发布账期可作废')
+    }
+    await purgeBillingPeriodArtifacts({
+      billingPeriodId: periodId,
+      scope: 'full',
+      actorId,
+    })
+    await db
+      .update(billingPeriod)
+      .set({ status: 'draft', publishedAt: null, voidedAt: new Date() })
+      .where(eq(billingPeriod.id, periodId))
+    await appendOperationLog({
+      billingPeriodId: periodId,
+      operation: 'void',
+      actorId,
+    })
+    financeLog('void', 'published period voided and reset to draft', { periodId })
     return mapPeriod(
       (await db.query.billingPeriod.findFirst({ where: eq(billingPeriod.id, periodId) }))!,
     )

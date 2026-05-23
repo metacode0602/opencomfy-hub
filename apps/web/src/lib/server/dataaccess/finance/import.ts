@@ -13,20 +13,46 @@ import {
   isTotalRow,
   normalizeCustomerType,
   parseMoneyCell,
-  parseWorkbookBuffer,
+  parseWorkbookDetailed,
   pickColumn,
   sha256Hex,
-  type SheetRow,
+  type ParsedWorkbook,
 } from './excel-parser'
 import { resolveAndPersistEnrichment } from './enrichment'
+import type { ImportCellError } from './import-errors'
+import {
+  buildMarkedErrorWorkbookBuffer,
+  summarizeImportErrors,
+} from './import-errors'
+import {
+  deleteStorageFile,
+  saveImportErrorReport,
+  saveImportSourceFile,
+} from './import-storage'
 import { financeError, financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
+import {
+  persistBatchErrorReport,
+  validateCrossFileImports,
+} from './validate-import'
 
 function parseDateCell(raw: string | null): Date | null {
   if (!raw) return null
   const d = new Date(raw)
   return Number.isNaN(d.getTime()) ? null : d
+}
+
+export type ImportFileResult = {
+  ok: boolean
+  batchId: string
+  rowCount: number
+  parseStatus: 'ok' | 'error'
+  parseErrorCount: number
+  message: string
+  hasErrorReport: boolean
+  allParsed: boolean
+  periodStatus: string
 }
 
 async function getPeriodOrThrow(periodId: string) {
@@ -43,26 +69,35 @@ async function getPeriodOrThrow(periodId: string) {
   return period
 }
 
-function mapCustomerRows(rows: SheetRow[]): {
+function mapCustomerRows(sheet: ParsedWorkbook): {
   parsed: Omit<typeof billingPeriodRawCustomerConsumption.$inferInsert, 'id' | 'batchId'>[]
-  errors: string[]
+  errors: ImportCellError[]
 } {
   const parsed: Omit<
     typeof billingPeriodRawCustomerConsumption.$inferInsert,
     'id' | 'batchId'
   >[] = []
-  const errors: string[] = []
-  rows.forEach((row, idx) => {
-    const rowNo = idx + 2
+  const errors: ImportCellError[] = []
+
+  for (const { rowNo, row } of sheet.rows) {
     const tenantId = pickColumn(row, ['租户ID', 'tenant_id', 'tenantId'])
+    if (isTotalRow(tenantId)) continue
     if (!tenantId) {
-      errors.push(`第 ${rowNo} 行：缺少租户ID`)
-      return
+      errors.push({
+        rowNo,
+        columnAliases: ['租户ID', 'tenant_id', 'tenantId'],
+        message: '缺少租户ID',
+      })
+      continue
     }
     const ctype = normalizeCustomerType(pickColumn(row, ['客户类型', 'customer_type']))
     if (!ctype) {
-      errors.push(`第 ${rowNo} 行：客户类型无效`)
-      return
+      errors.push({
+        rowNo,
+        columnAliases: ['客户类型', 'customer_type'],
+        message: '客户类型无效',
+      })
+      continue
     }
     parsed.push({
       rowNo,
@@ -76,43 +111,58 @@ function mapCustomerRows(rows: SheetRow[]): {
       balanceConsumption: parseMoneyCell(pickColumn(row, ['余额消费', 'balance_consumption'])),
       rawJson: row,
     })
-  })
+  }
+  if (parsed.length === 0 && errors.length === 0) {
+    errors.push({
+      rowNo: 2,
+      columnAliases: ['租户ID', 'tenant_id', 'tenantId'],
+      message: '客户消费明细无有效数据行',
+    })
+  }
   return { parsed, errors }
 }
 
 function mapBaremetalRows(
-  rows: SheetRow[],
+  sheet: ParsedWorkbook,
   periodStart: string,
   periodEnd: string,
 ): {
   parsed: Omit<typeof billingPeriodRawBaremetalOrder.$inferInsert, 'id' | 'batchId'>[]
-  errors: string[]
+  errors: ImportCellError[]
 } {
   const start = new Date(`${periodStart}T00:00:00+08:00`)
   const end = new Date(`${periodEnd}T23:59:59+08:00`)
   const parsed: Omit<typeof billingPeriodRawBaremetalOrder.$inferInsert, 'id' | 'batchId'>[] = []
-  const errors: string[] = []
+  const errors: ImportCellError[] = []
 
-  rows.forEach((row, idx) => {
-    const rowNo = idx + 2
+  for (const { rowNo, row } of sheet.rows) {
     const tenantId = pickColumn(row, ['租户ID', 'tenant_id'])
+    if (isTotalRow(tenantId)) continue
     const orderId = pickColumn(row, ['订单ID', 'order_id'])
     const payStatus = pickColumn(row, ['支付状态', 'pay_status']) ?? ''
     const finalAmount = parseMoneyCell(pickColumn(row, ['最终总额', 'final_amount']))
     const orderedAtRaw = pickColumn(row, ['下单时间', 'ordered_at'])
     const orderedAt = parseDateCell(orderedAtRaw)
     if (!tenantId || !orderId) {
-      errors.push(`第 ${rowNo} 行：缺少租户ID或订单ID`)
-      return
+      errors.push({
+        rowNo,
+        columnAliases: tenantId ? ['订单ID', 'order_id'] : ['租户ID', 'tenant_id'],
+        message: '缺少租户ID或订单ID',
+      })
+      continue
     }
     if (!orderedAt) {
-      errors.push(`第 ${rowNo} 行：下单时间无效`)
-      return
+      errors.push({
+        rowNo,
+        columnAliases: ['下单时间', 'ordered_at'],
+        message: '下单时间无效',
+      })
+      continue
     }
     if (payStatus && !payStatus.includes('已支付') && payStatus.toLowerCase() !== 'paid') {
-      return
+      continue
     }
-    if (orderedAt < start || orderedAt > end) return
+    if (orderedAt < start || orderedAt > end) continue
     parsed.push({
       rowNo,
       orderId,
@@ -130,23 +180,22 @@ function mapBaremetalRows(
       orderedAt,
       rawJson: row,
     })
-  })
+  }
   return { parsed, errors }
 }
 
-function mapTenantBillRows(rows: SheetRow[]): {
+function mapTenantBillRows(sheet: ParsedWorkbook): {
   parsed: Omit<typeof billingPeriodRawTenantBill.$inferInsert, 'id' | 'batchId'>[]
   tenantPlatformIds: string[]
-  errors: string[]
+  errors: ImportCellError[]
 } {
   const parsed: Omit<typeof billingPeriodRawTenantBill.$inferInsert, 'id' | 'batchId'>[] = []
   const tenantPlatformIds: string[] = []
-  const errors: string[] = []
+  const errors: ImportCellError[] = []
 
-  rows.forEach((row, idx) => {
-    const rowNo = idx + 2
+  for (const { rowNo, row } of sheet.rows) {
     const tenantId = pickColumn(row, ['租户ID', 'tenant_id'])
-    if (!tenantId || isTotalRow(tenantId)) return
+    if (!tenantId || isTotalRow(tenantId)) continue
     const balanceHours = pickColumn(row, ['余额卡时', 'balance_card_hours'])
     parsed.push({
       rowNo,
@@ -162,8 +211,107 @@ function mapTenantBillRows(rows: SheetRow[]): {
       rawJson: row,
     })
     tenantPlatformIds.push(tenantId)
-  })
+  }
+  if (parsed.length === 0) {
+    errors.push({
+      rowNo: 2,
+      columnAliases: ['租户ID', 'tenant_id'],
+      message: '账单详情无有效明细行',
+    })
+  }
   return { parsed, errors, tenantPlatformIds }
+}
+
+async function syncPeriodImportStatus(periodId: string): Promise<string> {
+  const batches = await db.query.billingPeriodImportBatch.findMany({
+    where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
+  })
+  const requiredTypes = [
+    'customer_consumption',
+    'baremetal_order',
+    'tenant_bill',
+  ] as const
+  const allPresent = requiredTypes.every((t) => batches.some((b) => b.fileType === t))
+  const allOk =
+    allPresent &&
+    requiredTypes.every((t) =>
+      batches.some((b) => b.fileType === t && b.parseStatus === 'ok'),
+    )
+
+  let status = 'draft'
+  if (allOk) {
+    const cross = await validateCrossFileImports(periodId)
+    if (cross.ok) {
+      status = 'imported'
+    } else {
+      status = 'import_error'
+      for (const [fileType, errs] of Object.entries(cross.errorsByFileType)) {
+        const batch = batches.find((b) => b.fileType === fileType)
+        if (batch && errs?.length) {
+          await persistBatchErrorReport({ batchId: batch.id, errors: errs })
+        }
+      }
+    }
+  } else if (batches.some((b) => b.parseStatus === 'error')) {
+    status = 'import_error'
+  }
+
+  await db.update(billingPeriod).set({ status }).where(eq(billingPeriod.id, periodId))
+  return status
+}
+
+async function recordParseFailure(input: {
+  batchId: string
+  billingPeriodId: string
+  fileType: ImportFileType
+  fileName: string
+  storagePath: string
+  sheet: ParsedWorkbook
+  errors: ImportCellError[]
+  fileSha256: string
+  fileSizeBytes: number
+  actorId?: string | null
+}): Promise<ImportFileResult> {
+  const errorBuffer = buildMarkedErrorWorkbookBuffer({
+    sheet: input.sheet,
+    errors: input.errors,
+  })
+  const errorReportPath = await saveImportErrorReport({
+    billingPeriodId: input.billingPeriodId,
+    fileType: input.fileType,
+    batchId: input.batchId,
+    buffer: errorBuffer,
+  })
+
+  await db.insert(billingPeriodImportBatch).values({
+    id: input.batchId,
+    billingPeriodId: input.billingPeriodId,
+    fileType: input.fileType,
+    fileName: input.fileName,
+    storagePath: input.storagePath,
+    errorReportPath,
+    fileSha256: input.fileSha256,
+    fileSizeBytes: input.fileSizeBytes,
+    parseStatus: 'error',
+    parseErrorCount: input.errors.length,
+    rowCount: 0,
+    uploadedBy: input.actorId ?? null,
+  })
+
+  const periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
+  const message = summarizeImportErrors(input.errors)
+
+  return {
+    ok: false,
+    batchId: input.batchId,
+    rowCount: 0,
+    parseStatus: 'error',
+    parseErrorCount: input.errors.length,
+    message,
+    hasErrorReport: true,
+    allParsed: false,
+    periodStatus,
+  }
 }
 
 export async function importExcelFile(input: {
@@ -172,7 +320,7 @@ export async function importExcelFile(input: {
   fileName: string
   buffer: Buffer
   actorId?: string | null
-}): Promise<{ rowCount: number; batchId: string }> {
+}): Promise<ImportFileResult> {
   const period = await getPeriodOrThrow(input.billingPeriodId)
   financeLog('import', `start ${input.fileType}`, {
     periodId: input.billingPeriodId,
@@ -186,72 +334,111 @@ export async function importExcelFile(input: {
     actorId: input.actorId,
   })
 
-  const sheetRows = parseWorkbookBuffer(input.buffer, input.fileName)
+  const sheet = parseWorkbookDetailed(input.buffer, input.fileName)
   const batchId = newId()
   const fileSha256 = sha256Hex(input.buffer)
+  const storagePath = await saveImportSourceFile({
+    billingPeriodId: input.billingPeriodId,
+    fileType: input.fileType,
+    batchId,
+    fileName: input.fileName,
+    buffer: input.buffer,
+  })
+
   let tenantPlatformIdsForEnrichment: string[] = []
+  let parseErrors: ImportCellError[] = []
+  let rowCount = 0
 
   try {
-    await db.transaction(async (tx) => {
-      await tx.insert(billingPeriodImportBatch).values({
-        id: batchId,
+    if (input.fileType === 'customer_consumption') {
+      const { parsed, errors } = mapCustomerRows(sheet)
+      parseErrors = errors
+      if (errors.length === 0) {
+        rowCount = parsed.length
+        await db.transaction(async (tx) => {
+          await tx.insert(billingPeriodImportBatch).values({
+            id: batchId,
+            billingPeriodId: input.billingPeriodId,
+            fileType: input.fileType,
+            fileName: input.fileName,
+            storagePath,
+            fileSha256,
+            fileSizeBytes: input.buffer.length,
+            parseStatus: 'ok',
+            parseErrorCount: 0,
+            rowCount: parsed.length,
+            uploadedBy: input.actorId ?? null,
+          })
+          await tx.insert(billingPeriodRawCustomerConsumption).values(
+            parsed.map((r) => ({ ...r, id: newId(), batchId })),
+          )
+        })
+      }
+    } else if (input.fileType === 'baremetal_order') {
+      const { parsed, errors } = mapBaremetalRows(sheet, period.periodStart, period.periodEnd)
+      parseErrors = errors
+      if (errors.length === 0) {
+        rowCount = parsed.length
+        await db.transaction(async (tx) => {
+          await tx.insert(billingPeriodImportBatch).values({
+            id: batchId,
+            billingPeriodId: input.billingPeriodId,
+            fileType: input.fileType,
+            fileName: input.fileName,
+            storagePath,
+            fileSha256,
+            fileSizeBytes: input.buffer.length,
+            parseStatus: 'ok',
+            parseErrorCount: 0,
+            rowCount: parsed.length,
+            uploadedBy: input.actorId ?? null,
+          })
+          await tx.insert(billingPeriodRawBaremetalOrder).values(
+            parsed.map((r) => ({ ...r, id: newId(), batchId })),
+          )
+        })
+      }
+    } else if (input.fileType === 'tenant_bill') {
+      const { parsed, errors, tenantPlatformIds } = mapTenantBillRows(sheet)
+      parseErrors = errors
+      if (errors.length === 0) {
+        rowCount = parsed.length
+        await db.transaction(async (tx) => {
+          await tx.insert(billingPeriodImportBatch).values({
+            id: batchId,
+            billingPeriodId: input.billingPeriodId,
+            fileType: input.fileType,
+            fileName: input.fileName,
+            storagePath,
+            fileSha256,
+            fileSizeBytes: input.buffer.length,
+            parseStatus: 'ok',
+            parseErrorCount: 0,
+            rowCount: parsed.length,
+            uploadedBy: input.actorId ?? null,
+          })
+          await tx.insert(billingPeriodRawTenantBill).values(
+            parsed.map((r) => ({ ...r, id: newId(), batchId })),
+          )
+        })
+        tenantPlatformIdsForEnrichment = tenantPlatformIds
+      }
+    }
+
+    if (parseErrors.length > 0) {
+      return recordParseFailure({
+        batchId,
         billingPeriodId: input.billingPeriodId,
         fileType: input.fileType,
         fileName: input.fileName,
+        storagePath,
+        sheet,
+        errors: parseErrors,
         fileSha256,
-        rowCount: 0,
-        uploadedBy: input.actorId ?? null,
+        fileSizeBytes: input.buffer.length,
+        actorId: input.actorId,
       })
-
-      if (input.fileType === 'customer_consumption') {
-        const { parsed, errors } = mapCustomerRows(sheetRows)
-        if (errors.length > 0) {
-          throw new FinanceError('BAD_REQUEST', errors.slice(0, 5).join('；'))
-        }
-        if (parsed.length === 0) {
-          throw new FinanceError('BAD_REQUEST', '客户消费明细无有效数据行')
-        }
-        await tx.insert(billingPeriodRawCustomerConsumption).values(
-          parsed.map((r) => ({ ...r, id: newId(), batchId })),
-        )
-        await tx
-          .update(billingPeriodImportBatch)
-          .set({ rowCount: parsed.length })
-          .where(eq(billingPeriodImportBatch.id, batchId))
-      } else if (input.fileType === 'baremetal_order') {
-        const { parsed, errors } = mapBaremetalRows(
-          sheetRows,
-          period.periodStart,
-          period.periodEnd,
-        )
-        if (errors.length > 0) {
-          throw new FinanceError('BAD_REQUEST', errors.slice(0, 5).join('；'))
-        }
-        await tx.insert(billingPeriodRawBaremetalOrder).values(
-          parsed.map((r) => ({ ...r, id: newId(), batchId })),
-        )
-        await tx
-          .update(billingPeriodImportBatch)
-          .set({ rowCount: parsed.length })
-          .where(eq(billingPeriodImportBatch.id, batchId))
-      } else if (input.fileType === 'tenant_bill') {
-        const { parsed, errors, tenantPlatformIds } = mapTenantBillRows(sheetRows)
-        if (errors.length > 0) {
-          throw new FinanceError('BAD_REQUEST', errors.slice(0, 5).join('；'))
-        }
-        if (parsed.length === 0) {
-          throw new FinanceError('BAD_REQUEST', '账单详情无有效明细行')
-        }
-        await tx.insert(billingPeriodRawTenantBill).values(
-          parsed.map((r) => ({ ...r, id: newId(), batchId })),
-        )
-        await tx
-          .update(billingPeriodImportBatch)
-          .set({ rowCount: parsed.length })
-          .where(eq(billingPeriodImportBatch.id, batchId))
-        tenantPlatformIdsForEnrichment = tenantPlatformIds
-      }
-    })
+    }
 
     if (input.fileType === 'tenant_bill' && tenantPlatformIdsForEnrichment.length > 0) {
       await resolveAndPersistEnrichment(
@@ -260,42 +447,75 @@ export async function importExcelFile(input: {
         period.periodEnd,
       )
     }
+
+    const periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
+    const batches = await db.query.billingPeriodImportBatch.findMany({
+      where: eq(billingPeriodImportBatch.billingPeriodId, input.billingPeriodId),
+    })
+    const requiredTypes = [
+      'customer_consumption',
+      'baremetal_order',
+      'tenant_bill',
+    ] as const
+    const allParsed =
+      requiredTypes.every((t) =>
+        batches.some((b) => b.fileType === t && b.parseStatus === 'ok'),
+      ) && periodStatus === 'imported'
+
+    await appendOperationLog({
+      billingPeriodId: input.billingPeriodId,
+      operation: 'import_batch',
+      actorId: input.actorId,
+      metadata: {
+        fileType: input.fileType,
+        fileName: input.fileName,
+        rowCount,
+      },
+    })
+
+    financeLog('import', 'done', {
+      periodId: input.billingPeriodId,
+      fileType: input.fileType,
+      rowCount,
+    })
+
+    return {
+      ok: true,
+      batchId,
+      rowCount,
+      parseStatus: 'ok',
+      parseErrorCount: 0,
+      message: `解析成功（${rowCount} 行）`,
+      hasErrorReport: false,
+      allParsed,
+      periodStatus,
+    }
   } catch (e) {
+    await deleteStorageFile(storagePath)
     financeError('import', 'failed', e, { periodId: input.billingPeriodId })
     throw e
   }
+}
 
+export async function getImportSlotStatuses(periodId: string) {
   const batches = await db.query.billingPeriodImportBatch.findMany({
-    where: eq(billingPeriodImportBatch.billingPeriodId, input.billingPeriodId),
+    where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
   })
-  const requiredTypes = [
-    'customer_consumption',
-    'baremetal_order',
-    'tenant_bill',
-  ] as const
-  const imported = new Set(batches.map((b) => b.fileType))
-  const allImported = requiredTypes.every((t) => imported.has(t))
-  await db
-    .update(billingPeriod)
-    .set({ status: allImported ? 'imported' : 'draft' })
-    .where(eq(billingPeriod.id, input.billingPeriodId))
-
-  const batch = await db.query.billingPeriodImportBatch.findFirst({
-    where: eq(billingPeriodImportBatch.id, batchId),
-  })
-
-  await appendOperationLog({
-    billingPeriodId: input.billingPeriodId,
-    operation: 'import_batch',
-    actorId: input.actorId,
-    metadata: { fileType: input.fileType, fileName: input.fileName, rowCount: batch?.rowCount },
-  })
-
-  financeLog('import', 'done', {
-    periodId: input.billingPeriodId,
-    fileType: input.fileType,
-    rowCount: batch?.rowCount,
-  })
-
-  return { rowCount: batch?.rowCount ?? 0, batchId }
+  const mapSlot = (fileType: ImportFileType) => {
+    const b = batches.find((x) => x.fileType === fileType)
+    if (!b) return null
+    return {
+      batchId: b.id,
+      fileName: b.fileName,
+      parseStatus: b.parseStatus as 'ok' | 'error',
+      parseErrorCount: b.parseErrorCount,
+      rowCount: b.rowCount,
+      hasErrorReport: Boolean(b.errorReportPath),
+    }
+  }
+  return {
+    customer: mapSlot('customer_consumption'),
+    baremetal: mapSlot('baremetal_order'),
+    tenantBill: mapSlot('tenant_bill'),
+  }
 }

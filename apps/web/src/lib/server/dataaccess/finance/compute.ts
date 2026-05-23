@@ -28,6 +28,10 @@ import { getTenantDisplayNames, listTenantProjectBindings } from './enrichment'
 import { financeError, financeLog, financeWarn } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
+import {
+  findMissingTenantBillPricing,
+  validateCrossFileImports,
+} from './validate-import'
 
 const DEFAULT_UNIT_PRICE = 42
 
@@ -144,6 +148,49 @@ export async function computeBillingPeriod(input: {
   if (period.status === 'void') {
     throw new FinanceError('CONFLICT', '作废账期不可计算')
   }
+  if (period.status === 'import_error') {
+    throw new FinanceError('PRECONDITION_FAILED', '导入存在错误，请修正 Excel 后重新上传')
+  }
+  if (period.status === 'pending_pricing') {
+    throw new FinanceError(
+      'UNPROCESSABLE',
+      '账单区域×卡型缺少机房卡型成本配置，请先维护供应商单价',
+    )
+  }
+  if (period.status !== 'imported' && period.status !== 'computed') {
+    throw new FinanceError('PRECONDITION_FAILED', '请先完成三类 Excel 导入且校验通过')
+  }
+
+  const cross = await validateCrossFileImports(periodId)
+  if (!cross.ok) {
+    await db
+      .update(billingPeriod)
+      .set({ status: 'import_error' })
+      .where(eq(billingPeriod.id, periodId))
+    throw new FinanceError(
+      'PRECONDITION_FAILED',
+      '存在 B 端未知租户，请下载错误明细 Excel 修正后重新上传',
+    )
+  }
+
+  const missingPricing = await findMissingTenantBillPricing({
+    periodId,
+    periodEnd: period.periodEnd,
+  })
+  if (missingPricing.length > 0) {
+    await db
+      .update(billingPeriod)
+      .set({ status: 'pending_pricing' })
+      .where(eq(billingPeriod.id, periodId))
+    const sample = missingPricing
+      .slice(0, 3)
+      .map((p) => `${p.regionCode}×${p.gpuModel}`)
+      .join('、')
+    throw new FinanceError(
+      'UNPROCESSABLE',
+      `${missingPricing.length} 个区域×卡型缺少机房卡型成本配置（如 ${sample}）`,
+    )
+  }
 
   const bindings = await listTenantProjectBindings(periodId)
   const pendingTenants = bindings.filter(
@@ -221,13 +268,18 @@ export async function computeBillingPeriod(input: {
   for (const agg of aggRows) {
     const tenantId = tenantIdMap.get(agg.tenantPlatformId)
     if (!tenantId) {
+      if (agg.customerType === 'B') {
+        throw new FinanceError(
+          'PRECONDITION_FAILED',
+          `B 端租户 ${agg.tenantPlatformId} 未在 CRM 中维护`,
+        )
+      }
       reconciliationIssues.push(`未知租户 platform_id=${agg.tenantPlatformId}`)
       continue
     }
-    const cBalance = parseNum(agg.balanceConsumption)
     const bBalance = bBalanceByTenant.get(agg.tenantPlatformId) ?? 0
     const mBare = bareByTenant.get(agg.tenantPlatformId) ?? 0
-    const supplementary = cBalance - bBalance - mBare
+    const supplementary = 0
     const balance = bBalance
     const bare = mBare
     const supStr = toMoneyString(supplementary)
@@ -238,6 +290,11 @@ export async function computeBillingPeriod(input: {
       balance_consumption: balStr,
       bare_metal_consumption: bareStr,
     })
+
+    const cBalance = parseNum(agg.balanceConsumption)
+    reconciliationIssues.push(
+      `ref_gap tenant=${agg.tenantPlatformId}: ${(cBalance - bBalance - mBare).toFixed(4)}`,
+    )
 
     const tenantEnrich = enrichments.filter(
       (e) => e.tenantPlatformId === agg.tenantPlatformId,

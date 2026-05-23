@@ -1,8 +1,13 @@
+import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { financeBillingPeriodsDataAccess, FinanceError } from '@/lib/server/dataaccess/finance'
 import { SLOT_TO_FILE_TYPE } from '@/lib/server/dataaccess/finance/constants'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
+
+async function resolveFinanceActorId(user: { id: string; email?: string | null }) {
+  return staffDataAccess.resolveStaffIdForAuthUser(user)
+}
 
 function mapFinanceError(error: unknown): never {
   if (error instanceof FinanceError) {
@@ -22,7 +27,7 @@ function mapFinanceError(error: unknown): never {
 }
 
 const periodCreateSchema = z.object({
-  periodCode: z.string().min(1),
+  periodCode: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '账期编码格式应为 YYYY-MM'),
   periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 })
@@ -84,12 +89,13 @@ export const financeRouter = createTRPCRouter({
       try {
         const buffer = Buffer.from(input.fileBase64, 'base64')
         const fileType = SLOT_TO_FILE_TYPE[input.slot]
+        const actorId = await resolveFinanceActorId(ctx.user)
         return await financeBillingPeriodsDataAccess.importExcelFile({
           billingPeriodId: input.billingPeriodId,
           fileType,
           fileName: input.fileName,
           buffer,
-          actorId: ctx.user.id,
+          actorId,
         })
       } catch (e) {
         mapFinanceError(e)
@@ -100,9 +106,10 @@ export const financeRouter = createTRPCRouter({
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
+          const actorId = await resolveFinanceActorId(ctx.user)
           return await financeBillingPeriodsDataAccess.computeBillingPeriod({
             billingPeriodId: input.billingPeriodId,
-            actorId: ctx.user.id,
+            actorId,
           })
         } catch (e) {
           mapFinanceError(e)
@@ -118,9 +125,10 @@ export const financeRouter = createTRPCRouter({
       )
       .mutation(async ({ input, ctx }) => {
         try {
+          const actorId = await resolveFinanceActorId(ctx.user)
           await financeBillingPeriodsDataAccess.saveCostAllocations({
             ...input,
-            actorId: ctx.user.id,
+            actorId,
           })
           return { ok: true }
         } catch (e) {
@@ -144,10 +152,8 @@ export const financeRouter = createTRPCRouter({
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
-          await financeBillingPeriodsDataAccess.publish(
-            input.billingPeriodId,
-            ctx.user.id,
-          )
+          const actorId = await resolveFinanceActorId(ctx.user)
+          await financeBillingPeriodsDataAccess.publish(input.billingPeriodId, actorId)
           return { ok: true }
         } catch (e) {
           mapFinanceError(e)
@@ -158,10 +164,8 @@ export const financeRouter = createTRPCRouter({
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
-          await financeBillingPeriodsDataAccess.unpublish(
-            input.billingPeriodId,
-            ctx.user.id,
-          )
+          const actorId = await resolveFinanceActorId(ctx.user)
+          await financeBillingPeriodsDataAccess.unpublish(input.billingPeriodId, actorId)
           return { ok: true }
         } catch (e) {
           mapFinanceError(e)
@@ -172,10 +176,75 @@ export const financeRouter = createTRPCRouter({
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
+          const actorId = await resolveFinanceActorId(ctx.user)
           return await financeBillingPeriodsDataAccess.regenerate(
             input.billingPeriodId,
-            ctx.user.id,
+            actorId,
           )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    void: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.voidPeriod(
+            input.billingPeriodId,
+            actorId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    validate: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.validatePeriod(input.billingPeriodId)
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    downloadImportErrorReport: adminProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          slot: z.enum(['customer', 'baremetal', 'tenantBill']),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.downloadImportErrorReport(input)
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    saveSupplementary: adminProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          items: z.array(
+            z.object({
+              incomeRowId: z.string(),
+              supplementaryConsumption: z.string(),
+            }),
+          ),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          await financeBillingPeriodsDataAccess.saveSupplementary({
+            ...input,
+            actorId,
+          })
+          return { ok: true }
         } catch (e) {
           mapFinanceError(e)
         }

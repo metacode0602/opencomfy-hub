@@ -202,7 +202,15 @@ export const billingPeriodImportBatch = pgTable(
       .references(() => billingPeriod.id, { onDelete: "cascade" }),
     fileType: varchar("file_type", { length: 32 }).notNull(),
     fileName: varchar("file_name", { length: 512 }).notNull(),
+    /** 相对 FINANCE_IMPORT_STORAGE_ROOT 的路径 */
+    storagePath: varchar("storage_path", { length: 1024 }).notNull().default(""),
+    /** 标注错误单元格后的 xlsx 路径 */
+    errorReportPath: varchar("error_report_path", { length: 1024 }),
     fileSha256: varchar("file_sha256", { length: 64 }).notNull(),
+    fileSizeBytes: integer("file_size_bytes"),
+    /** ok | error */
+    parseStatus: varchar("parse_status", { length: 16 }).notNull().default("ok"),
+    parseErrorCount: integer("parse_error_count").notNull().default(0),
     rowCount: integer("row_count").notNull().default(0),
     uploadedBy: text("uploaded_by").references(() => userStaff.id, {
       onDelete: "set null",

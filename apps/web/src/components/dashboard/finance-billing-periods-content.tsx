@@ -1,13 +1,28 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Calendar, Plus, Receipt, Search, TrendingUp } from 'lucide-react'
-import { LocaleLink } from '@/lib/i18n/navigation'
+import { Calendar, Plus, Receipt, RotateCcw, Search, TrendingUp } from 'lucide-react'
+import { LocaleLink, useLocaleRouter } from '@/lib/i18n/navigation'
 import { trpc } from '@/lib/trpc/client'
 import { formatMoney } from '@/app/[locale]/(protected)/finance/_lib/display'
+import {
+  formatPeriodStatus,
+  isPublishedPeriodStatus,
+} from '@/app/[locale]/(protected)/finance/_lib/period'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
+import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent } from '@workspace/ui/components/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
 import {
   Table,
   TableBody,
@@ -16,14 +31,38 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
+import { toast } from 'sonner'
 
 function sumDecimal(values: (string | null)[]): number {
   return values.reduce((acc, v) => acc + (Number(v) || 0), 0)
 }
 
+type ConfirmAction =
+  | { type: 'regenerate'; periodId: string; periodCode: string }
+  | { type: 'void'; periodId: string; periodCode: string }
+  | null
+
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  draft: 'border-muted-foreground/30 text-muted-foreground',
+  imported: 'border-blue-500/40 text-blue-700 dark:text-blue-300',
+  import_error: 'border-destructive/40 text-destructive',
+  pending_allocation: 'border-amber-500/40 text-amber-700 dark:text-amber-300',
+  pending_pricing: 'border-amber-500/40 text-amber-700 dark:text-amber-300',
+  computed: 'border-violet-500/40 text-violet-700 dark:text-violet-300',
+  published: 'border-green-500/40 text-green-700 dark:text-green-300',
+  adjusted: 'border-green-500/40 text-green-700 dark:text-green-300',
+}
+
 export function FinanceBillingPeriodsContent() {
+  const router = useLocaleRouter()
+  const utils = trpc.useUtils()
   const [search, setSearch] = useState('')
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
+  const [acting, setActing] = useState(false)
+
   const { data: periods = [], isLoading } = trpc.finance.periods.list.useQuery()
+  const regeneratePeriod = trpc.finance.periods.regenerate.useMutation()
+  const voidPeriod = trpc.finance.periods.void.useMutation()
 
   const filteredPeriods = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -43,6 +82,27 @@ export function FinanceBillingPeriodsContent() {
       (p) => String((Number(p.total_income) || 0) - (Number(p.total_cost) || 0)),
     ),
   )
+
+  const handleConfirmAction = async () => {
+    if (!confirmAction) return
+    setActing(true)
+    try {
+      if (confirmAction.type === 'regenerate') {
+        await regeneratePeriod.mutateAsync({ billingPeriodId: confirmAction.periodId })
+        toast.success(`账期 ${confirmAction.periodCode} 已清空，请重新上传数据`)
+      } else {
+        await voidPeriod.mutateAsync({ billingPeriodId: confirmAction.periodId })
+        toast.success(`账期 ${confirmAction.periodCode} 已作废，请重新上传生成`)
+      }
+      await utils.finance.periods.list.invalidate()
+      router.push(`/finance/create?periodId=${confirmAction.periodId}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      setActing(false)
+      setConfirmAction(null)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -153,7 +213,14 @@ export function FinanceBillingPeriodsContent() {
                 filteredPeriods.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">{p.period_code}</TableCell>
-                    <TableCell className="text-sm">{p.status}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={STATUS_BADGE_CLASS[p.status] ?? ''}
+                      >
+                        {formatPeriodStatus(p.status)}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="tabular-nums">{p.period_start}</TableCell>
                     <TableCell className="tabular-nums">{p.period_end}</TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -170,6 +237,28 @@ export function FinanceBillingPeriodsContent() {
                         <Button variant="outline" size="sm" asChild>
                           <LocaleLink href={`/finance/${p.id}/cost`}>成本</LocaleLink>
                         </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setConfirmAction(
+                              isPublishedPeriodStatus(p.status)
+                                ? {
+                                    type: 'void',
+                                    periodId: p.id,
+                                    periodCode: p.period_code,
+                                  }
+                                : {
+                                    type: 'regenerate',
+                                    periodId: p.id,
+                                    periodCode: p.period_code,
+                                  },
+                            )
+                          }
+                        >
+                          <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                          重新上传生成
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -179,6 +268,61 @@ export function FinanceBillingPeriodsContent() {
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog
+        open={confirmAction?.type === 'regenerate'}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认重新上传生成？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将清空账期 {confirmAction?.periodCode} 的全部已导入与计算结果，之后需重新上传三类
+              Excel 并计算。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={acting}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={acting}
+              onClick={() => void handleConfirmAction()}
+            >
+              {acting ? '处理中…' : '确认清空并继续'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmAction?.type === 'void'}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认作废已发布账期？</AlertDialogTitle>
+            <AlertDialogDescription>
+              账期 {confirmAction?.periodCode} 已发布。作废后将清空全部导入与计算数据，并撤回发布状态；
+              之后需重新上传三类 Excel 并重新计算发布。此操作不可撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={acting}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={acting}
+              onClick={() => void handleConfirmAction()}
+            >
+              {acting ? '处理中…' : '确认作废'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

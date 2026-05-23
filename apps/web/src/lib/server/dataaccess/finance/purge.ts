@@ -12,6 +12,10 @@ import {
 import { and, eq } from 'drizzle-orm'
 import type { ImportFileType, PurgeScope } from './constants'
 import { FinanceError } from './errors'
+import {
+  deletePeriodImportDirectory,
+  deleteStorageFile,
+} from './import-storage'
 import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 
@@ -54,6 +58,16 @@ export async function purgeBillingPeriodArtifacts(input: {
       if (!fileType) {
         throw new FinanceError('BAD_REQUEST', 'file_type purge 须指定 fileType')
       }
+      const batches = await tx.query.billingPeriodImportBatch.findMany({
+        where: and(
+          eq(billingPeriodImportBatch.billingPeriodId, periodId),
+          eq(billingPeriodImportBatch.fileType, fileType),
+        ),
+      })
+      for (const b of batches) {
+        await deleteStorageFile(b.storagePath)
+        await deleteStorageFile(b.errorReportPath)
+      }
       await tx
         .delete(billingPeriodImportBatch)
         .where(
@@ -81,6 +95,13 @@ export async function purgeBillingPeriodArtifacts(input: {
         .where(eq(billingPeriodAggCustomerConsumption.billingPeriodId, periodId))
       await resetPeriodTotals(tx, periodId)
     } else if (scope === 'full') {
+      const batches = await tx.query.billingPeriodImportBatch.findMany({
+        where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
+      })
+      for (const b of batches) {
+        await deleteStorageFile(b.storagePath)
+        await deleteStorageFile(b.errorReportPath)
+      }
       await tx
         .delete(billingPeriodImportBatch)
         .where(eq(billingPeriodImportBatch.billingPeriodId, periodId))
@@ -97,6 +118,10 @@ export async function purgeBillingPeriodArtifacts(input: {
       await resetPeriodTotals(tx, periodId)
     }
   })
+
+  if (scope === 'full') {
+    await deletePeriodImportDirectory(periodId)
+  }
 
   await appendOperationLog({
     billingPeriodId: periodId,

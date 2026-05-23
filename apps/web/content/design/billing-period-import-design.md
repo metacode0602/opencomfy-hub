@@ -1,13 +1,16 @@
 # 账期导入与经营核算实现方案
 
-> 版本：v1.4（设计稿）  
-> 日期：2026-05-19  
+> 版本：v1.5.2（已定稿）  
+> 日期：2026-05-23  
 > 变更：v1.1 — 账单详情 Excel 不再含客户经理/项目名称；改由租户反查项目并补全 AM；支持一租户多项目成本分成配置  
 > 变更：v1.2 — §6.4 增加「卡时价阶梯分成」：按成交卡时/刊例价落档后取档内分成比例计算售出成本  
 > 变更：v1.3 — §5.3 增加 Step I0：客户消费明细按租户跨「类型」汇总后再参与收入计算  
 > 变更：v1.4 — 支持账期「重新生成」：清理本账期全部导入与计算产物后重算，不保留历史批次，避免旧数据干扰  
 > 变更：v1.4.1 — §4.6 同步数据库表结构（`packages/db/src/finance-schema.ts`）  
-> 状态：**设计稿 — 确认后再实施代码**  
+> 变更：v1.5 — §5 补充消费改为独立收入字段（不再由 C/B/裸金属推导）；§3.5/§6 增加计算前阻断校验：B 端未知租户、账单 `(区域×GPU)` 缺机房卡型成本；阻断提示采用页面内联 Alert，禁止 toast/弹窗  
+> 变更：v1.5.1 — **已确认**：补充消费 UI 手工填写；C 端未知租户警告不阻断；导入文件落盘、库内仅存路径；内联 Alert 见 §8  
+> 变更：v1.5.2 — **已确认**：重新计算 **不保留** 手工补充消费；三类 Excel **均须解析成功**；各上传槽位可下载 **错误单元格高亮** 的 Excel（§3.8）  
+> 状态：**已定稿 — 实施中**  
 > 关联：`apps/web/src/lib/types/finance.ts`、`cost-row-utils.ts`、`income-row-utils.ts`、`/finance/create` 页面
 
 ---
@@ -40,6 +43,7 @@
 3. **重新生成优先清理**：任何「重新生成」入口必须先执行 §7.4 清理范围，再解析/计算，保证无残留行参与汇总。
 4. **主数据外置**：项目名、客户经理、机房卡价、**成本分成比例** 来自 CRM/配置表；账单 Excel 仅含消费与卡时事实列（§3.3）。
 5. **金额精度**：内部计算用 `decimal(15,4)`；展示四舍五入到分；与现有 `toMoneyString`（4 位小数）对齐。
+6. **导入文件落盘**：Excel 原始字节 **不写入数据库**；解析后结构化行入 Raw 表；原文件保存至配置目录，库内仅存路径（§3.7）。
 
 ---
 
@@ -49,7 +53,8 @@
 flowchart TB
   subgraph upload [上传阶段]
     A[填写 period_code / 起止日期] --> B[上传三类 Excel]
-    B --> C[解析校验 + 写入 Raw 表]
+    B --> B1[原文件写入磁盘目录]
+    B1 --> C[解析校验 + 写入 Raw 表 + batch 记录 storage_path]
   end
   subgraph enrich [补全与分成]
     C --> D[按租户ID反查关联项目 + 项目AM]
@@ -62,8 +67,15 @@ flowchart TB
     H -->|需本账期设置| I[用户填写各项目成本比例]
     I --> F
   end
+  subgraph precheck [计算前阻断校验]
+    F --> V0{B 端租户 ID 均在 tenant 主数据?}
+    V0 -->|否| X1[页面内联 Alert + 下载错误 Excel]
+    V0 -->|是| V1{账单 区域×GPU 均有有效机房卡型成本?}
+    V1 -->|否| X2[页面内联 Alert 列出缺失组合]
+    V1 -->|是| OK[允许进入计算]
+  end
   subgraph calc [计算阶段]
-    F --> J[按分成比例拆分账单量]
+    OK --> J[按分成比例拆分账单量]
     C --> K0[客户消费按租户跨类型汇总 Step I0]
     K0 --> K[收入 pipeline]
     J --> L[成本 pipeline + 单价]
@@ -74,9 +86,10 @@ flowchart TB
   end
   subgraph review [复核阶段]
     O --> P[预览收入 + 成本表]
-    P --> Q{确认写入?}
+    P --> P1[用户手工填写补充消费]
+    P1 --> Q{确认发布?}
     Q -->|是| R[发布账期]
-    Q -->|否| S[调整 Excel / 分成 / 重新计算]
+    Q -->|否| S[调整 Excel / 分成 / 补充消费 / 重新计算]
     S --> T[重新生成: purge 本账期数据]
     T --> B
   end
@@ -87,8 +100,10 @@ flowchart TB
 | 状态 | 含义 |
 |------|------|
 | `draft` | 已创建，未上传或上传未完成 |
-| `imported` | 三类 Raw 均已导入且校验通过 |
+| `imported` | 三类 Raw 均已导入且校验通过；且无 `import_error` |
 | `pending_allocation` | 存在「一租户多项目」且本账期尚未确认成本分成比例（阻塞计算） |
+| `pending_pricing` | 账单详情中存在 `(区域, GPU型号)` 在账期日无有效机房卡型成本配置（阻塞计算） |
+| `import_error` | 导入或校验发现 **B 端未知租户 ID** 等阻断性错误；须修正 Excel 或主数据后重新导入 |
 | `computed` | 已计算，待人工复核（对应 UI「计算结果（未写入）」） |
 | `published` | 已发布，对外可见；允许调账 override，调账后标记 `adjusted` |
 | `void` | 作废；执行与「重新生成」相同的清理（§7.4），账期元数据保留，不再参与报表 |
@@ -118,7 +133,9 @@ flowchart TB
 | 项目名称 | string | 否 | Excel 内仅供参考；**输出以 DB 为准**（§5.1） |
 | 总消费 | money | 是 | 含税消费总额 |
 | 券消费 | money | 否 | 默认 0 |
-| 余额消费 | money | 是 | 余额账户消费 |
+| 余额消费 | money | 是 | 余额账户消费；**仅作对账参考**，不直接作为收入输出字段 |
+
+> **补充消费**不在本 Excel 中。用户在计算完成后于 UI「收入明细」中 **手工填写**（§5.6）。
 
 **粒度**：一行 = 某租户在某一 **类型**（产品线）下的一条消费汇总。
 
@@ -193,7 +210,8 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 | V3 | `客户消费明细` 中 `客户类型` 仅为 B / C |
 | V4 | `裸金属` 中 `最终总额` ≥ 0；`退款金额` ≤ `订单金额` |
 | V5 | `账单详情` 明细行（非总计）中 `余额卡时` ≥ 0、`余额消费` ≥ 0 |
-| V6 | 明细行租户 ID 在 `tenant.platform_tenant_id` 存在（未知租户 → 警告行表 + 可选阻断策略） |
+| V6 | **B 端**租户 ID 必须在 `tenant.platform_tenant_id` 存在；未知 → **阻断**（§3.6），生成可下载错误 Excel |
+| V6b | C 端未知租户 ID → 警告 + 对账报告（不阻断导入；该租户不进入 B 端成本） |
 | V7 | 账期内 `裸金属` 与 `账单详情` 的租户 ID 集合可与客户消费不一致（允许，但记入对账报告） |
 | V8 | 总计行（若存在）金额与明细汇总一致（可配置为警告或阻断） |
 | V9 | 单租户关联项目数 = 0 → 不阻断导入，但进入「无法补全项目」清单 |
@@ -201,6 +219,101 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 | V11 | 同一租户分成比例之和 = 100%（±0.0001 容差）；每项 &gt; 0 |
 | V12 | 同一 `租户ID` 在客户消费明细中 `客户类型` 唯一（若 B/C 混用 → 警告或阻断，见 §5.3） |
 | V13 | Step I0 后：每个 `(租户ID, 客户类型)` 仅一条 agg 记录；`row_count_by_type` ≥ 1 |
+| V14 | **计算前**：账单详情 Raw 中每个 `(region_code, gpu_model)` 须在 `period_end` 日存在有效 `supplier_unit_cost`（`idc_code` + `card_type`，含阶梯所需刊例价/档位）；缺失 → **阻断计算**，状态 `pending_pricing` |
+| V15 | **计算前**：再次校验 V6（B 端未知租户）；若仍有未知 ID → **阻断计算** |
+
+### 3.6 B 端未知租户阻断（跨文件校验）
+
+**适用范围**
+
+- `客户消费明细` 中 `客户类型 = B` 的行；
+- `客户账单详情` 中 **B 端租户** 明细行。
+
+**校验时机**
+
+1. **单文件解析通过后**，若三类 batch 均已存在且 `parse_status = ok`，执行 **跨文件校验**（含 V6 B 端租户）。
+2. **计算前再次校验**（`POST .../compute`）。
+
+**阻断规则**
+
+| 条件 | 行为 |
+|------|------|
+| B 端 `tenant_platform_id` 不在 CRM | 账期 `import_error`；在 **对应槽位** 生成高亮错误 Excel（§3.8）；**禁用「计算」** |
+
+### 3.8 解析错误 Excel（按上传槽位）
+
+**原则**
+
+- 三类 Excel **各自独立解析**；**全部** `parse_status = ok` 且跨文件校验通过后，才允许计算。
+- 任一类解析或校验失败：在该类 **上传组件内** 展示错误摘要 + **「下载错误明细 Excel」** 按钮（**不用 toast/弹窗** 作为主提示）。
+
+**错误 Excel 内容（基于用户上传原表）**
+
+| 要求 | 说明 |
+|------|------|
+| 保留原表结构 | 在用户上传 sheet 副本上标注，不改为纯错误列表 |
+| 错误单元格高亮 | 背景色 `#FFC7CE`（浅红），字体 `#9C0006` |
+| 错误说明列 | 表尾追加列 **「错误说明」**：该行所有错误合并为一格文本 |
+| 仅含错误行 | 无错误的数据行可保留（便于对照）或整表保留（实施默认：**整表保留**） |
+
+**生成与存储**
+
+1. 解析/校验失败时，从 `storage_path` 读取原文件，按 `row_no` + 列名定位单元格并打标。
+2. 输出写入磁盘：`{ROOT}/{billing_period_id}/{file_type}/{batch_id}_errors.xlsx`。
+3. 数据库 `billing_period_import_batch` 仅存 `error_report_path`；**不**存 xlsx 二进制。
+
+**接口**
+
+| 动作 | 说明 |
+|------|------|
+| `GET .../imports/{file_type}/error-report` | 返回错误标注 Excel（`Content-Disposition: attachment` 或 tRPC base64） |
+| 槽位 UI | `parse_status=error` 或该 file_type 在校验结果中有错时显示下载按钮 |
+
+**单文件解析错误示例**
+
+| 错误类型 | 高亮列 |
+|----------|--------|
+| 缺少租户ID | `租户ID` |
+| 客户类型无效 | `客户类型` |
+| 下单时间无效 | `下单时间` |
+| B 端租户未维护 | `租户ID` |
+
+### 3.7 导入文件磁盘存储
+
+**原则**：数据库 **不保存** Excel 文件二进制内容；仅保存 **存储路径** 及元数据，便于审计与重新解析。
+
+**配置**
+
+| 项 | 说明 |
+|----|------|
+| 环境变量 | `FINANCE_IMPORT_STORAGE_ROOT`（默认如 `{DATA_DIR}/finance-imports`） |
+| 目录结构 | `{ROOT}/{billing_period_id}/{file_type}/{batch_id}_{sanitized_original_name}` |
+| 权限 | 仅应用服务账户可读写；不对外 HTTP 直链 |
+
+**`billing_period_import_batch` 字段（v1.5.1）**
+
+| 字段 | 说明 |
+|------|------|
+| `storage_path` | 相对 `FINANCE_IMPORT_STORAGE_ROOT` 或绝对路径（实施时二选一，推荐相对路径） |
+| `file_name` | 用户上传原始文件名 |
+| `file_sha256` | 可选；完整性校验 |
+| `file_size_bytes` | 可选 |
+| ~~`file_content`~~ | **禁止** 存库 |
+
+**上传流程**
+
+1. `POST .../imports/{file_type}` 接收 `multipart/form-data`（**禁止** base64 整文件入 JSON）。
+2. 事务内：写磁盘 → 从磁盘路径解析 → 成功则写入 Raw + `parse_status=ok`；失败则 `parse_status=error` + 生成 `error_report_path`，**不**写 Raw。
+3. 三类均为 `ok` 后执行跨文件校验；若失败，更新相关 batch 的 `error_report_path`。
+
+**清理（与 §7.4 purge 联动）**
+
+| scope | 磁盘操作 |
+|-------|----------|
+| `file_type` | 删除该 batch 对应文件；删 batch 行 |
+| `full` | 删除 `{ROOT}/{billing_period_id}/` 整个目录 |
+
+**重新解析**：从 `storage_path` 读盘解析，无需用户重传（若 UI 保留「已选文件」展示，显示 `file_name` + 路径即可）。
 
 ---
 
@@ -210,9 +323,12 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 
 ```
 billing_period_import_batch
-  id, billing_period_id, file_type, file_name, file_sha256,
+  id, billing_period_id, file_type, file_name,
+  storage_path, error_report_path, file_sha256, file_size_bytes,
+  parse_status, parse_error_count,   -- ok | error
   row_count, uploaded_by, uploaded_at
   -- UNIQUE(billing_period_id, file_type)；无 status/superseded
+  -- v1.5.1：原 Excel 落盘，库内仅存 storage_path，不存 file_content
 
 billing_period_raw_customer_consumption
   id, batch_id, row_no, tenant_platform_id, product_type,
@@ -226,6 +342,7 @@ billing_period_agg_customer_consumption
   total_consumption, voucher_consumption, balance_consumption,
   source_raw_ids, row_count_by_type, created_at
   -- Step I0 产出；一行 = 一租户×客户类型（跨类型已加总）
+  -- 不含 supplementary；补充消费仅存 platform_income_monthly（§5.6）
 
 billing_period_raw_baremetal_order
   id, batch_id, row_no, order_id, order_no, tenant_platform_id,
@@ -258,12 +375,17 @@ tenant_project_cost     -- 预置：同一租户多项目默认分成
   allocation_percent,
   effective_from, effective_to,          -- effective_to NULL = 当前生效
   remark, created_by, created_at
+
+billing_period_import_error   -- v1.5：B 端未知租户等阻断性导入错误（可导出 Excel）
+  id, billing_period_id, source_file_type, row_no,
+  tenant_platform_id, customer_type, region_code, gpu_model,
+  error_code, error_message, created_at
 ```
 
 - `raw_json`：保留原始行对象，便于对 **当前批次** 审计。
 - `row_no`：Excel 物理行号（含表头偏移），支持「定位到源表第 N 行」。
-- **重新上传（单类）**：`DELETE` 本账期该 `file_type` 下既有 `batch` 及关联 raw 行 → 新建 `batch_id` 并写入；每账期每 `file_type` **至多一组** 有效 batch。
-- **重新生成（整账期）**：按 §7.4 删除本账期全部 batch 与 raw 行后，再重新导入或重解析。
+- **重新上传（单类）**：`DELETE` 本账期该 `file_type` 下既有 `batch` 及关联 raw 行 → **删除磁盘文件** → 新建 `batch_id` 并写入；每账期每 `file_type` **至多一组** 有效 batch。
+- **重新生成（整账期）**：按 §7.4 删除本账期全部 batch、raw 行及 **账期导入目录** 后，再重新导入或从磁盘重解析。
 
 ### 4.2 派生层（与现有类型对齐）
 
@@ -291,6 +413,7 @@ tenant_project_cost     -- 预置：同一租户多项目默认分成
 | `billing_period` 汇总金额字段改为 **可 NULL** | `purge` 后置 NULL，计算完成后写入 |
 | 删除 `billing_period_import_batch.status` | 取消 `superseded`；重新上传前 **DELETE** 旧 batch |
 | **唯一约束** `(billing_period_id, file_type)` | 每账期每类 Excel 仅一组 batch |
+| v1.5.1 新增 `billing_period_import_batch.storage_path` | 原 Excel 磁盘路径；**不**存 `file_content` |
 | 新增 `billing_period_reconciliation_report` | 对账报告；`UNIQUE(billing_period_id)`，purge 派生层时删除 |
 | 新增 `billing_period_operation_log` | 操作审计（purge/regenerate/compute 等），**不**存被删业务行 |
 
@@ -315,9 +438,9 @@ billing_period
 
 | scope | SQL 要点 |
 |-------|----------|
-| `file_type` | `DELETE FROM billing_period_import_batch WHERE billing_period_id=? AND file_type=?`（cascade raw）；并按类型删 agg / enrichment；再删派生 + 对账报告 |
+| `file_type` | `DELETE FROM billing_period_import_batch WHERE billing_period_id=? AND file_type=?`（cascade raw）；删除对应 **磁盘文件**；并按类型删 agg / enrichment；再删派生 + 对账报告 |
 | `derived` | `DELETE` income/cost（cascade 调账历史）、`DELETE` reconciliation_report；重置账期汇总列为 NULL |
-| `full` | 删本账期全部子表（含三类 batch、agg、enrichment、allocation）+ `derived` 范围 |
+| `full` | 删本账期全部子表（含三类 batch、agg、enrichment、allocation）+ `derived` 范围 + 删除 `{ROOT}/{billing_period_id}/` **整个目录** |
 
 **调账历史**：挂在 `platform_income_monthly` / `platform_cost_monthly` 上，`ON DELETE CASCADE`；`purge(derived)` 时随派生行一并物理删除，与「不保留历史」一致。
 
@@ -453,10 +576,10 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 | 项目名称 | `project_name` | DB 解析（§4.3），非 Excel |
 | 客户全称 | `customer_full_name` | `customer.legal_name` |
 | 租户ID | `tenant_id` | 平台租户 ID（展示 `platform_tenant_id`） |
-| 补充消费 | `supplementary_consumption` | 对账差额，可正可负 |
-| 余额消费 | `balance_consumption` | 账单口径余额消费 |
-| 线上裸金属消费 | `bare_metal_consumption` | 账期内裸金属 `最终总额` 合计 |
-| 总消费 | `total_consumption` | 三项之和 |
+| 补充消费 | `supplementary_consumption` | **独立收入字段**；**用户在 UI 手工填写**（§5.6）；初始计算为 `0`；**与** C 表余额、B 表余额、裸金属 **无推导关系** |
+| 余额消费 | `balance_consumption` | 账单详情 Raw 按租户汇总之 `balance_consumption` |
+| 线上裸金属消费 | `bare_metal_consumption` | 账期内裸金属 `最终总额` 按租户合计 |
+| 总消费 | `total_consumption` | `supplementary + balance + bare`（见 §5.4） |
 
 ### 5.2 分轨规则
 
@@ -479,7 +602,7 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 ```
 C_total(t, ctype)   = Σ row.total_consumption
 C_voucher(t, ctype) = Σ row.voucher_consumption
-C_balance(t, ctype) = Σ row.balance_consumption
+C_balance(t, ctype) = Σ row.balance_consumption   -- 仅作参考/对账，不驱动收入输出
 ```
 
 其中求和范围：`row.tenant_platform_id = t` 且 `normalize(row.customer_type) = ctype`。
@@ -494,13 +617,13 @@ Excel 原始行（节选）：
 | 984 | 镜像仓库 | B端 | 5,047.47 | 0 | 5,047.47 |
 | 984 | Other | B端 | 25,000.00 | 0 | 25,000.00 |
 
-预汇总后 **一条** 租户消费（写入中间表或内存 DTO，供 Step I1 使用）：
+预汇总后 **一条** 租户消费（写入中间表，供对账与 B/C 分轨）：
 
 | 租户ID | 客户类型 | C_total | C_voucher | C_balance |
 |--------|----------|---------|-----------|-----------|
-| 984 | B | 110,047.47 | 0 | **110,047.47** |
+| 984 | B | 110,047.47 | 0 | 110,047.47 |
 
-> 此后 Step I1～I5 中的 `t` 均指该 **已汇总** 的租户消费，不再区分「弹性服务部署 / 镜像仓库 / Other」。
+> Step I1～I5 中收入输出的 `balance` / `bare` 来自账单与裸金属；`supplementary` **不由 Excel 导入**，见 §5.6。
 
 **一致性与校验**
 
@@ -519,13 +642,7 @@ billing_period_agg_customer_consumption
   source_raw_ids, row_count_by_type, created_at
 ```
 
-#### Step I1 — 客户消费侧（使用 Step I0 结果）
-
-```
-C_total(t)   = agg.total_consumption      -- 已含多类型加总
-C_voucher(t) = agg.voucher_consumption
-C_balance(t) = agg.balance_consumption
-```
+#### Step I1 — 账单与裸金属汇总（无 Excel 补充消费）
 
 **Step I2 — 账单侧汇总（源：Raw 账单详情）**
 
@@ -540,27 +657,28 @@ B_total(t)   = Σ row.total_consumption
 M_bare(t) = Σ row.final_amount
 ```
 
-**Step I4 — 输出字段**
+**Step I4 — 输出字段（首次计算）**
 
 ```
-balance_consumption(t) = B_balance(t)
+supplementary_consumption(t) = 0          -- 初始为 0；用户于 §5.6 UI 填写后更新
 
-bare_metal_consumption(t) = M_bare(t)
+balance_consumption(t)       = B_balance(t)
 
-supplementary_consumption(t) = C_balance(t) - B_balance(t) - M_bare(t)
+bare_metal_consumption(t)    = M_bare(t)
 
-total_consumption(t) = supplementary_consumption(t)
-                     + balance_consumption(t)
-                     + bare_metal_consumption(t)
+total_consumption(t)         = supplementary_consumption(t)
+                             + balance_consumption(t)
+                             + bare_metal_consumption(t)
 ```
 
-等价关系：
+**重要**：`supplementary_consumption` **不得** 使用 `C_balance - B_balance - M_bare` 或任何 C/B/裸金属组合公式计算。
+
+**对账参考（非阻断，写入 reconciliation report）**
 
 ```
-total_consumption(t) = C_balance(t)
+ref_gap(t) = C_balance(t) - B_balance(t) - M_bare(t)
+-- 对账参考；与用户手工填写的 supplementary 无强制相等关系
 ```
-
-即：**总消费以「客户消费明细」的余额消费口径为锚**；账单与裸金属通过「补充消费」吸收差额。
 
 **Step I5 — 项目与客户名称**
 
@@ -571,40 +689,60 @@ total_consumption(t) = C_balance(t)
 | 公式 | 含义 |
 |------|------|
 | `total = sup + balance + bare` | 与现有 `computeTotalConsumption` 一致 |
-| `sup = C_balance - B_balance - M_bare` | **对账差额**：平台消费报表相对账单+裸金属归因的差异 |
-| `total = C_balance` | 代入可得恒等式；保证与上游「客户消费」对齐 |
+| `sup` | **用户手工输入**（§5.6）；首次计算为 `0` |
+| `balance` | 账单详情 `balance_consumption` 按租户汇总 |
+| `bare` | 裸金属 `final_amount` 按租户汇总（账期内已支付） |
+| `ref_gap = C_balance - B_balance - M_bare` | **仅对账参考**，不写入 `supplementary_consumption` |
 
 **示例演算（租户 984，B端）**
 
-| 来源 | 值 |
-|------|-----|
-| 客户消费 `C_balance` | 110,047.47（= 弹性服务部署 80,000 + 镜像仓库 5,047.47 + Other 25,000，见 §5.3 Step I0） |
-| 账单 `B_balance`（两行合计） | 49,190.86 + 38,225.85 = **87,416.71** |
-| 裸金属 `M_bare` | 0 |
-| `supplementary` | 110,047.47 − 87,416.71 − 0 = **22,630.76** |
-| `balance`（输出） | 87,416.71 |
-| `total` | 22,630.76 + 87,416.71 = **110,047.47** |
-
-> 说明：用户样例输出中海绵智能一行显示 `balance=110,428.45`、`sup=-49,241.10`、`total=61,187.35`，与上述 **C_balance 锚定** 公式不一致，可能来自另一版对账口径（例如以账单 `总消费` 为锚、或含线下补录）。**实施前须与财务确认唯一口径**；本方案默认采用 `C_balance` 锚定，并在 UI 提供「对账差异说明」列展示 `C_total - B_total` 供核对。
+| 来源 | 字段 | 值 |
+|------|------|-----|
+| 账单 | `B_balance`（两行合计） | 49,190.86 + 38,225.85 = **87,416.71** |
+| 裸金属 | `M_bare` | 0 |
+| 用户手工 | `supplementary` | **22,630.76**（UI 填写，非公式推导） |
+| **输出** | `balance` | 87,416.71 |
+| **输出** | `bare` | 0 |
+| **输出** | `total` | 22,630.76 + 87,416.71 = **110,047.47** |
 
 **租户 4583（样例）**
 
 | 项 | 值 |
 |----|-----|
-| `C_balance` | 94,301.97 |
-| `B_balance`（账单单行） | 94,301.97 |
+| `supplementary` | 0（用户未填） |
+| `B_balance` | 94,301.97 |
 | `M_bare` | 0 |
-| `supplementary` | 0 |
 | `balance` | 94,301.97 |
 | `total` | 94,301.97 |
 
 **线下大额补充（样例 巨神智能 3018）**
 
-若 `C_balance = 108,000` 且账单、裸金属均为 0：
+用户在 UI 为该租户填写 `supplementary = 108,000`，账单与裸金属均为 0：
 
 ```
 supplementary = 108,000, balance = 0, bare = 0, total = 108,000
 ```
+
+### 5.6 补充消费手工填写（UI）
+
+**已确认**：财务 Excel **无**「补充消费」列；由用户在系统中自行填写。
+
+**交互（`/finance/create` 计算完成后）**
+
+1. 「收入明细」表格增加可编辑列 **补充消费**（金额输入，默认 `0`）。
+2. 用户修改后点击 **「保存补充消费」**（与「计算」「发布」分离）。
+3. 服务端更新 `platform_income_monthly.supplementary_consumption`，并重算该行 `total_consumption` 及账期汇总字段。
+4. **发布前**：允许 `supplementary` 为任意值（含负值，若财务需要冲减）；不要求与 `ref_gap` 一致。
+5. **重新计算**（`POST .../compute`）：`balance` / `bare` 按规则重算；`supplementary` **一律重置为 0**（**已确认：不保留** 用户此前手工填写值）。
+
+**API**
+
+| 动作 | 接口 |
+|------|------|
+| 批量保存 | `PUT .../income/supplementary` body: `{ items: [{ incomeRowId, supplementaryConsumption }] }` |
+| 单行保存 | 收入明细行内 blur 触发 debounce 保存（可选） |
+
+**提示方式**：保存成功/失败若需反馈，使用行内状态或 Alert 区文案；**不用 toast** 作为主要提示（与 §8 一致）。
 
 ### 5.5 账期级汇总
 
@@ -624,11 +762,37 @@ billing_period.supplementary    = Σ supplementary_consumption
 仅纳入同时满足：
 
 1. `客户消费明细.customer_type = B`（或账单行对应租户在 B 端集合内）；
-2. 租户至少关联 **1 个** CRM 项目（§4.4）；
-3. 多项目租户已配置 **成本分成比例**（§4.5），且状态非 `pending_allocation`；
-4. 项目存在有效 **项目 AM**：`project_staff_assignment.role_type = account_manager` 且 `effective_to IS NULL`。
+2. 租户 `platform_tenant_id` 存在于 CRM `billing_tenant` 主数据（§3.6）；
+3. 租户至少关联 **1 个** CRM 项目（§4.4）；
+4. 多项目租户已配置 **成本分成比例**（§4.5），且状态非 `pending_allocation`；
+5. 项目存在有效 **项目 AM**：`project_staff_assignment.role_type = account_manager` 且 `effective_to IS NULL`；
+6. 账单 Raw 行 `(region_code, gpu_model)` 在 `period_end` 日存在有效 **机房卡型成本**（§6.1.1）。
 
-**不纳入**：C 端租户；0 项目租户；多项目但未配置分成；项目无 AM（记入「未纳入成本计算清单」，列明原因）。
+**不纳入**：C 端租户；未知 B 端租户（§3.6 阻断）；0 项目租户；多项目但未配置分成；项目无 AM（记入「未纳入成本计算清单」，列明原因）。
+
+#### 6.1.1 机房卡型成本前置校验（计算前阻断）
+
+**校验对象**：`billing_period_raw_tenant_bill` 中所有明细行的 `(region_code, gpu_model)` **去重组合**（不含总计行）。
+
+**有效配置定义**（与 §4.6 一致，`as_of = period_end`）：
+
+```
+pricing = resolve_unit_cost(idc_code = region_code, card_type = gpu_model, as_of = period_end)
+有效 ⇔ pricing 存在且满足当前 pricing_mode 所需字段：
+  - card_time / tiered_card_time：unit_price_per_hour 或 tier 可解析
+  - revenue_share / tiered_revenue_share：revenue_share 或 tier + list_price 可解析
+```
+
+**失败行为**
+
+| 项 | 说明 |
+|----|------|
+| 阻断 | **禁止** 进入 Step C0～C7；`POST .../compute` 返回 `422` |
+| 状态 | `billing_period.status = pending_pricing` |
+| UI | 页面 **内联 Alert**（`role="alert"` / Card 内 destructive 区块），列出缺失 `(区域, GPU型号)` 及建议维护路径（供应商机房卡型成本）；**禁止** toast、**禁止** Modal/Dialog 作为主要提示 |
+| 恢复 | 主数据补全后用户点击「重新校验」或再次点击「计算」 |
+
+**与运行时缺单价之区别**：v1.4 将缺单价记入对账报告（非阻断）；**v1.5 起计算前必须全部命中有效配置**，不允许计算过程中静默跳过缺单价分项。
 
 ### 6.2 聚合维度
 
@@ -871,7 +1035,7 @@ sold_duration_cost_excl_tax = (tier.revenue_share_percent / 100 × B) / TAX_DIVI
 | `H_total = 0` | 无法计算成交卡时价；**阻断该分项** 或售出成本 = 0 并记入「阶梯落档失败」报告（可配置） |
 | 比例落在所有区间外 | 默认：取 **最接近** 的档位；或按合同 `overflow_policy`：`use_highest_tier` / `use_lowest_tier` / `block` |
 | 多档区间重叠 | 导入合同时校验互斥；运行时取 `tier_order` 最小者并记 warning |
-| 缺少刊例价或阶梯档 | 阻断计算，提示维护 `supplier_card_list_price` + `tier_json` |
+| 缺少刊例价或阶梯档 | **计算前校验 V14 应已阻断**；若仍缺失则 422 |
 | `tier_basis = multiplier` 且模式为 `tiered_revenue_share` | 先将 `list_price_multiplier` 视为目标成交/刊例比例，再按 §6.4.3 选档；或要求合同显式配置 `ratio_band`（推荐） |
 
 **伪代码**
@@ -989,6 +1153,20 @@ async function computeBillingPeriod(periodId: string) {
   await purgeDerivedArtifacts(periodId)   // 计算前再次确保派生层为空，见 §7.4
   const raw = await loadCurrentRawBatches(periodId)
 
+  // --- v1.5 计算前阻断校验（顺序固定）---
+  const bTenantErrors = validateBTenantIdsInMasterData(raw)
+  if (bTenantErrors.length > 0) {
+    await persistImportErrors(periodId, bTenantErrors)
+    await setPeriodStatus(periodId, "import_error")
+    return { blocked: true, code: "UNKNOWN_B_TENANT", errors: bTenantErrors }
+  }
+
+  const missingPricing = validateTenantBillRegionGpuPricing(raw.tenantBills, period.period_end)
+  if (missingPricing.length > 0) {
+    await setPeriodStatus(periodId, "pending_pricing")
+    return { blocked: true, code: "MISSING_UNIT_COST", pairs: missingPricing }
+  }
+
   const tenants = await resolveTenants(raw)
   const enrichments = await resolveTenantProjects(periodId, raw.tenantBills)
   const allocations = await resolveCostAllocations(periodId, enrichments)
@@ -997,7 +1175,7 @@ async function computeBillingPeriod(periodId: string) {
     return { blocked: true, tenantsNeedingSplit: allocations.pending }
   }
 
-  const pricing = await loadPricingAsOf(period.period_end)
+  const pricing = await loadPricingAsOf(period.period_end)  // 校验通过后加载
   const splitRows = applyCostAllocation(raw.tenantBills, allocations)
 
   const customerAgg = aggregateCustomerConsumptionByTenant(raw.customerConsumption)
@@ -1024,13 +1202,14 @@ async function computeBillingPeriod(periodId: string) {
 | 检查项 | 说明 |
 |--------|------|
 | 租户覆盖率 | 客户消费 vs 账单 vs 裸金属 租户集合 diff |
-| 金额守恒 | `Σ C_balance` vs `Σ income.total` 按 ctype |
-| 单价缺失 | 分项成本无法 resolve 单价/刊例价/阶梯档时列出行 |
-| 阶梯落档失败 | `总卡时=0` 或 `deal_to_list_ratio` 无匹配档位 |
+| 金额参考 | `C_balance` vs `balance + bare` 按租户（**不等同于** supplementary） |
+| 补充消费参考 | 用户填写 `supplementary` vs `ref_gap = C_balance - B_balance - M_bare`（无强制一致） |
 | AM 缺失 | B 端关联项目无 `account_manager` 指派 |
-| 分成未配 | 多项目租户缺少 100% 分成配置 |
+| 分成未配 | 多项目租户缺少 100% 分成配置（计算前已阻断，报告留痕） |
 | 总计行校验 | Excel 总计 vs 明细 SUM |
 | 拆分守恒 | 各租户拆分后金额/卡时之和 = Raw 原值 |
+
+> **v1.5**：缺机房卡型成本、B 端未知租户改为 **计算前阻断**（§3.6、§6.1.1），不再仅写入对账报告。
 
 ### 7.3 重新计算（同批 Raw）
 
@@ -1054,7 +1233,7 @@ async function computeBillingPeriod(periodId: string) {
 | `derived` | `platform_income_monthly`、`platform_cost_monthly`、对账报告、override / 调账历史（本账期） | 仅重算（§7.3） |
 | `full` | 上表全部 + 三类 batch 与全部 raw + agg + enrichment + `billing_tenant_cost_allocation`（本账期） | 「重新生成」按钮、作废 `void` |
 
-**执行顺序**（`full` / `file_type`）：子表 → batch → 派生 → 重置 `billing_period` 汇总字段（`total_income`、`total_cost` 等置 NULL）。
+**执行顺序**（`full` / `file_type`）：删除 **磁盘文件** → 子表 → batch → 派生 → 重置 `billing_period` 汇总字段（`total_income`、`total_cost` 等置 NULL）。
 
 **重新生成（`POST .../regenerate`）流程**
 
@@ -1089,25 +1268,34 @@ sequenceDiagram
 | 动作 | 接口 / 页面 | 说明 |
 |------|-------------|------|
 | 创建账期 | `POST /finance/billing-periods` | 返回 `draft` |
-| 上传 Excel | `POST .../imports/{file_type}` | 先 `purge(scope=file_type)`，再 multipart 写 Raw + batch；账单表触发 §4.4 补全 |
-| 重新生成 | `POST .../regenerate` | `purge(scope=full)`，状态 → `draft`；需重新上传或重解析后计算 |
+| 上传 Excel | `POST .../imports/{file_type}` | `multipart/form-data`；原文件 **落盘** + 写 Raw + batch（`storage_path`，§3.7）；账单表触发 §4.4 补全 |
+| 重新生成 | `POST .../regenerate` | `purge(scope=full)` + 删除账期导入目录；状态 → `draft` |
 | 撤回发布 | `POST .../unpublish` | `published`/`adjusted` → `computed`，便于修改后重算（不自动 purge） |
 | 查询租户项目组合 | `GET .../tenant-project-bindings` | 返回每租户的项目×AM 列表及预置分成 |
+| 校验导入 / 预检 | `POST .../validate` | 返回 B 端未知租户、缺机房卡型成本等；供页面内联 Alert |
+| 下载导入错误 | `GET .../import-errors/export` | B 端未知租户明细 Excel（§3.6） |
 | 保存成本分成 | `PUT .../cost-allocations` | 写入 `billing_tenant_cost_allocation`；可勾选「同步为预置」 |
-| 计算 | `POST .../compute` | 校验分成完备后执行；状态 → `computed` 或 `pending_allocation` |
+| 计算 | `POST .../compute` | 先 §3.6 + §6.1.1 + 分成校验；通过后执行 pipeline；`supplementary` 初始为 0 |
+| 保存补充消费 | `PUT .../income/supplementary` | 用户手工填写后更新收入行及账期汇总（§5.6） |
 | 发布 | `POST .../publish` | 状态 → `published` |
-| 收入明细 | `/finance/[id]/income` | 分 B/C Tab；支持补充消费 / 调账 |
+| 收入明细 | `/finance/[id]/income` | 分 B/C Tab；**可编辑补充消费** + 调账 |
 | 成本明细 | `/finance/[id]/cost` | `CostGroupedTable`；券卡时调账 |
-| 钻取 Raw | `/finance/[id]/imports` | 展示 **当前** batch、行号、raw_json（无历史 batch 列表） |
+| 钻取 Raw | `/finance/[id]/imports` | 展示 **当前** batch、`storage_path`、`file_name`、行号、`raw_json` |
 | 多项目分成 | `/finance/create` 或 `/finance/[id]/allocations` | 上传账单后展示待配置租户；表格编辑比例；阻断「计算」直至 100% |
 
 **`/finance/create` 页面增补（上传账单后）**
 
 1. 解析完成 → 自动跑 §4.4，刷新「租户项目绑定」卡片。  
-2. 若存在多项目租户 → 顶部 **Banner**：「N 个租户需配置成本分成比例后方可计算成本」。  
-3. 表格支持：加载预置、均分（100/N）、手动输入、合计实时校验 100%。  
-4. 「保存分成」≠「计算」：先持久化 `billing_tenant_cost_allocation`，再允许点击计算。  
-5. 单项目租户灰显 100%，不可编辑。
+2. 三类文件齐全后 → 自动 `POST .../validate`，刷新 **阻断清单**（见下）。  
+3. **内联 Alert 区**（表单上方或计算按钮上方，持久展示直至问题解决）：
+   - **B 端未知租户**：destructive Alert + 受影响租户数 +「下载错误明细 Excel」链接；**禁用「计算」**。
+   - **缺机房卡型成本**：destructive Alert + 表格列 `(区域, GPU型号)` + 跳转供应商成本配置说明；**禁用「计算」**。
+   - **待配置成本分成**：warning Alert + 分成表格（多项目租户）；**禁用「计算」**直至保存 100%。
+   - 以上提示 **不得** 使用 `toast` 或 Modal/Dialog 替代主文案（仅允许 Alert 内嵌操作按钮）。  
+4. 若存在多项目租户 → 分成配置表格（§4.4 示例）。  
+5. 「保存分成」≠「计算」：先持久化 `billing_tenant_cost_allocation`，再允许点击计算。  
+6. 单项目租户灰显 100%，不可编辑。  
+7. 计算完成并展示收入明细后 → 用户可编辑 **补充消费** 列并「保存补充消费」（§5.6）；发布前可随时修改。
 
 **`/finance/[id]` 账期详情增补**
 
@@ -1137,11 +1325,15 @@ sequenceDiagram
 
 | 用例 | 输入 | 期望 |
 |------|------|------|
-| E1 | 租户 4583 单行消费+账单 | `sup=0`, `balance=94301.97`, `total=94301.97` |
-| E1b | 租户 984 三行不同类型消费 | Step I0 加总后 `C_balance=110047.47`；收入表仅 **1 行** / 租户 |
-| E2 | 租户 984 汇总消费+两行账单 | `total=C_balance=110047.47`, `sup=C_balance-B_balance` |
-| E3 | 账期内裸金属 268.80 | 对应租户 `bare=268.80`，`sup` 相应减少 |
+| E1 | 租户 4583 单行消费+账单 | 首次计算 `sup=0`, `balance=94301.97`, `total=94301.97` |
+| E1b | 租户 984 三行不同类型消费 | Step I0 加总；收入表 **1 行** / 租户；`sup` 初始 0 |
+| E2 | 租户 984 两行账单 + 用户填 sup | `total=sup+balance+bare` |
+| E2b | 用户填 sup 与 ref_gap 不一致 | 允许保存；对账报告可记录 ref_gap |
+| E3 | 账期内裸金属 268.80 | 对应租户 `bare=268.80`，`total` 含 bare |
 | E4 | 仅 C 端租户 | 只出现在 C 端收入表 |
+| E5 | B 端租户 ID 不在 CRM | 状态 `import_error`；可下载错误 Excel；**禁止计算** |
+| E6 | 用户保存补充消费后 | `platform_income_monthly` 与账期 `supplementary` 汇总更新 |
+| E7 | 重新计算 | `supplementary` 重置为 0（默认策略） |
 
 ### 10.2 成本
 
@@ -1159,14 +1351,17 @@ sequenceDiagram
 | C8 | 同上租户使用预置分成 | 上传后自动带出 60/40，无需手填即可计算 |
 | C9 | 多项目未配置分成 | 状态 `pending_allocation`，`POST /compute` 返回 422 |
 | C10 | Excel 含「总计」行 | 不入 Raw；可选通过 V8 校验 |
+| C11 | 账单 `(guangdong, 4090)` 无 supplier_unit_cost | 状态 `pending_pricing`；页面内联 Alert；**禁止计算** |
+| C12 | 缺单价在 v1.5 下 | 不得静默跳过；须 C11 前置阻断 |
 
 ### 10.3 溯源与重新生成
 
 | 用例 | 期望 |
 |------|------|
 | T1 | 任一分项成本可查到 **当前** `raw_tenant_bill.id` + `row_no` |
-| T2 | 重新上传某类 Excel 后，该 `file_type` 旧 batch 及 raw 行 **已物理删除**，仅存在新 batch |
-| T3 | `POST .../regenerate` 后，本账期 raw / agg / 派生 / 调账均为空，状态为 `draft` |
+| T2 | 重新上传某类 Excel 后，该 `file_type` 旧 batch、raw 行及 **磁盘文件** **已删除**，仅存在新 batch |
+| T3 | `POST .../regenerate` 后，本账期 raw / agg / 派生 / 调账均为空，**导入目录已删**，状态为 `draft` |
+| T8 | 上传 Excel | 库内 `billing_period_import_batch` 仅有 `storage_path`，无 blob 字段 |
 | T4 | 重算后 `platform_income_monthly` 行数与当次 pipeline 输出一致，无上一版残留行 |
 | T5 | 任一分项成本可追溯到 `raw_tenant_bill.id` + `project_id` + `allocation_percent` |
 | T6 | 本账期分成覆盖预置后，审计日志记录操作者与变更前后比例 |
@@ -1178,7 +1373,7 @@ sequenceDiagram
 
 | 阶段 | 内容 |
 |------|------|
-| P1 | Raw 表 + Excel 解析（含总计行过滤）+ Step I0 agg 表 + §4.4 项目/AM 补全 |
+| P1 | Raw 表 + Excel 解析（落盘 §3.7）+ Step I0 agg 表 + §4.4 项目/AM 补全 |
 | P1b | 预置分成表 + 账期分成 UI + `pending_allocation` 状态 |
 | P2 | 收入 pipeline（B/C 分轨）+ 对账报告 |
 | P3 | 成本 pipeline（拆分后聚合）+ 单价主数据 + AM 汇总行 |
@@ -1189,12 +1384,21 @@ sequenceDiagram
 
 ## 12. 待财务确认项
 
-1. **收入对账锚点**：本方案采用 `C_balance`（客户消费余额）为 `total` 锚点；样例海绵智能数据若为准绳，需调整 Step I4 公式。
-2. **分成成本是否含税**：本方案对 `balance_consumption` 先按分成比例再除 `1.06`；若合同为含税分成需去掉除税步骤。
-3. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**（`余额消费/总卡时` 再除以刊例价），**不按累计卡时划档**（见 §6.4.2；与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。  
-4. **租户 984 多区域两行账单**：收入按租户汇总；成本先按租户×项目分成拆分，再按 AM×区域×卡型分项。  
-5. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。  
-6. **重新生成后是否保留本账期成本分成**：默认 `full` purge 会清空 `billing_tenant_cost_allocation`，需重新配置；若财务希望保留，可改为 `full` 不删分成表（实施时二选一）。
+以下 v1.5.1 已确认，自本列表移除：
+
+- ~~补充消费来源~~ → **UI 手工填写**，Excel 无此列（§5.6）
+- ~~C 端未知租户是否阻断~~ → **否**，保持警告（V6b）
+- ~~内联 Alert 布局~~ → **是**，表单上方 / 计算按钮上方（§8）
+
+**仍待确认**
+
+1. **分成成本是否含税**：本方案对 `balance_consumption` 先按分成比例再除 `1.06`；若合同为含税分成需去掉除税步骤。
+2. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**（`余额消费/总卡时` 再除以刊例价），**不按累计卡时划档**（见 §6.4.2；与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。  
+3. **租户 984 多区域两行账单**：收入按租户汇总；成本先按租户×项目分成拆分，再按 AM×区域×卡型分项。  
+4. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。  
+5. **重新生成后是否保留本账期成本分成**：默认 `full` purge 会清空 `billing_tenant_cost_allocation`，需重新配置；若财务希望保留，可改为 `full` 不删分成表（实施时二选一）。
+6. **重新计算是否保留手工补充消费**：**已确认 — 不保留**（重置为 0，§5.6）。
+7. **导入文件存储根目录**：`FINANCE_IMPORT_STORAGE_ROOT` 生产环境路径与备份策略。
 
 ---
 
@@ -1223,7 +1427,7 @@ sequenceDiagram
 
 ### A.2 输出片段
 
-**收入（B端）**：智算中心 4583 → `balance≈94301.97`（或样例 97611.54 待确认口径）；海绵智能 984 → 见 §5.4 演算。
+**收入（B端）**：智算中心 4583 → 首次计算 `sup=0`, `balance≈94301.97`；海绵智能 984 → 用户 UI 填写 `sup` 后见 §5.4 演算。
 
 **成本（B端 × AM）**：`wangpeng` 汇总 + `henan-xc-p1` / `guangdong` 等子行，列与 §6.3 公式一致。
 
@@ -1232,6 +1436,8 @@ sequenceDiagram
 | 设计概念 | 现有代码 |
 |----------|----------|
 | `total = sup + balance + bare` | `income-row-utils.computeTotalConsumption` |
+| `sup` 独立字段（非 C−B−M） | v1.5 起 **不得** 使用差额公式；**UI 手工填写** §5.6 |
+| 导入文件落盘 | v1.5.1 `storage_path`；禁止 base64/DB blob |
 | `confirmed = balance / 1.06` | 样例与 `COST_TAX_DIVISOR` 一致 |
 | `gifted = unit × voucher_hours / 1.06` | `computeGiftedDurationCostExclTax` |
 | `gross = confirmed - sold - gifted` | `computeGrossProfit` |
@@ -1241,4 +1447,4 @@ sequenceDiagram
 
 ---
 
-*文档结束。确认 §12 待确认项后即可进入 P1 开发。*
+*文档结束。v1.5.1 设计已确认；可进入代码实施（`compute.ts`、`import.ts`、`/finance/create`）。*
