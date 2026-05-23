@@ -1,7 +1,14 @@
 import { db } from '@/lib/db'
+import {
+  isDualPool,
+  poolKindForFilterPoolCode,
+  resolveDevicePoolMemberships,
+  type ResourcePoolBindingLike,
+} from '@/lib/supplier/device-pool-membership'
 import type {
   OverviewFilterOptionsResult,
   OverviewFiltersInput,
+  OverviewKpiMetric,
   OverviewStatsResult,
 } from '@/lib/types/supplier-overview-api'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
@@ -20,15 +27,15 @@ import { and, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm
 
 const CLOSED_FAULT_STATUSES = ['已关闭', 'closed']
 const TERMINAL_BATCH_STATUSES = ['已完成', '已取消']
-const ONBOARDING_LIFECYCLES = ['待接入', '接入中'] as const
-const LIFECYCLE_ORDER = ['待接入', '接入中', '在线', '维护中', '离线', '下线中'] as const
+const LIFECYCLE_ORDER = ['待接入', '接入中', '在线', '维护中', '下线中'] as const
 
-const BARE_METAL_ONBOARDING_OPS = ['网关直连裸金属上架中', '网关代理裸金属上架中'] as const
+const BARE_METAL_DIRECT_OPS = ['网关直连裸金属上架中'] as const
+const BARE_METAL_PROXY_OPS = ['网关代理裸金属上架中'] as const
 const OFFLINE_DELIVERY_OPS = ['线下裸金属交付中'] as const
 const GATEWAY_ONBOARDING_OPS = ['网关节点上架中'] as const
-const NOT_SELLABLE_OPS = ['不可调度节点运行中'] as const
+const NON_SCHEDULABLE_OPS = ['不可调度节点运行中'] as const
+const RESERVED_IDLE_OPS = ['预留闲置中'] as const
 const OTHER_DEPT_OPS = ['其他部门使用中'] as const
-const RETIRED_OPS = ['已退订'] as const
 
 function normalizeCardKey(name: string | null | undefined): string {
   return (name ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
@@ -64,16 +71,58 @@ function isHoldActive(holdFrom: Date, holdUntil: Date | null, at = Date.now()): 
   return true
 }
 
-function isElasticPool(poolCode: string | null, workloadProfile: string): boolean {
-  const code = (poolCode ?? '').toLowerCase()
-  const profile = workloadProfile.toLowerCase()
-  return code === 'platform' || profile === 'elastic_service'
+type DeviceRow = {
+  id: string
+  supplierId: string
+  dataCenterId: string | null
+  gpuCount: number
+  lifecycleStatus: string
+  opsStatus: string
+  inMaintenance: boolean
+  idcRegion: string | null
+  cardTypeName: string
 }
 
-function isBareMetalPool(poolCode: string | null, workloadProfile: string): boolean {
-  const code = (poolCode ?? '').toLowerCase()
-  const profile = workloadProfile.toLowerCase()
-  return profile === 'bare_metal' || code.includes('bare')
+function kpiFromDevices(
+  devices: DeviceRow[],
+  pred: (d: DeviceRow) => boolean,
+): OverviewKpiMetric {
+  const matched = devices.filter(pred)
+  return {
+    deviceCount: matched.length,
+    gpuCount: matched.reduce((sum, d) => sum + d.gpuCount, 0),
+  }
+}
+
+function normalizeLifecycleStage(status: string): (typeof LIFECYCLE_ORDER)[number] {
+  if ((LIFECYCLE_ORDER as readonly string[]).includes(status)) {
+    return status as (typeof LIFECYCLE_ORDER)[number]
+  }
+  return '待接入'
+}
+
+function bindingsForDevice(
+  deviceId: string,
+  poolBindingRows: Array<{ deviceId: string; poolCode: string | null; workloadProfile: string }>,
+): ResourcePoolBindingLike[] {
+  return poolBindingRows
+    .filter((b) => b.deviceId === deviceId)
+    .map((b) => ({ poolCode: b.poolCode, workloadProfile: b.workloadProfile }))
+}
+
+function deviceMatchesPoolFilter(
+  device: DeviceRow,
+  poolCode: string,
+  poolBindingRows: Array<{ deviceId: string; poolCode: string | null; workloadProfile: string }>,
+): boolean {
+  const bindings = bindingsForDevice(device.id, poolBindingRows)
+  if (bindings.some((b) => b.poolCode === poolCode)) return true
+
+  const kind = poolKindForFilterPoolCode(poolCode, poolBindingRows)
+  if (!kind) return false
+
+  const memberships = resolveDevicePoolMemberships(device.opsStatus, bindings)
+  return memberships.has(kind)
 }
 
 type InventoryRow = {
@@ -249,24 +298,17 @@ export const supplierOverviewDataAccess = {
         })
         .from(resourcePoolBinding)
 
-      const devicesByPool = new Map<string, Set<string>>()
-      for (const b of poolBindingRows) {
-        if (!b.poolCode) continue
-        const set = devicesByPool.get(b.poolCode) ?? new Set<string>()
-        set.add(b.deviceId)
-        devicesByPool.set(b.poolCode, set)
-      }
+      const poolFilterCode = filters.poolCode !== 'all' ? filters.poolCode : undefined
 
-      const poolFilterDeviceIds =
-        filters.poolCode !== 'all' ? devicesByPool.get(filters.poolCode) : undefined
-
-      const filteredDevices = deviceRows.filter((d) => {
+      const filteredDevices: DeviceRow[] = deviceRows.filter((d) => {
         const region = d.idcRegion ?? '其他'
         const cardKey = normalizeCardKey(d.cardTypeName)
         if (!matchesFilters(filters, { supplierId: d.supplierId, region, cardTypeKey: cardKey })) {
           return false
         }
-        if (poolFilterDeviceIds && !poolFilterDeviceIds.has(d.id)) return false
+        if (poolFilterCode && !deviceMatchesPoolFilter(d, poolFilterCode, poolBindingRows)) {
+          return false
+        }
         return true
       })
 
@@ -373,22 +415,22 @@ export const supplierOverviewDataAccess = {
             ? row.quantity
             : Math.max(0, row.quantity - row.onlineQuantity)
 
-        let bareMetalQuantity = 0
-        let elasticServiceQuantity = 0
+        let bareMetalPoolGpu = 0
+        let elasticServiceGpu = 0
+        let dualPoolGpu = 0
         const poolCodes = new Set<string>()
 
         for (const d of filteredDevices) {
           if (d.supplierId !== row.supplierId || d.dataCenterId !== row.dataCenterId) continue
           if (normalizeCardKey(d.cardTypeName) !== row.cardTypeKey) continue
-          for (const bind of poolBindingRows) {
-            if (bind.deviceId !== d.id) continue
+          const bindings = bindingsForDevice(d.id, poolBindingRows)
+          for (const bind of bindings) {
             if (bind.poolCode) poolCodes.add(bind.poolCode)
-            if (isElasticPool(bind.poolCode, bind.workloadProfile)) {
-              elasticServiceQuantity += d.gpuCount
-            } else if (isBareMetalPool(bind.poolCode, bind.workloadProfile)) {
-              bareMetalQuantity += d.gpuCount
-            }
           }
+          const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+          if (memberships.has('bare_metal')) bareMetalPoolGpu += d.gpuCount
+          if (memberships.has('elastic_service')) elasticServiceGpu += d.gpuCount
+          if (isDualPool(memberships)) dualPoolGpu += d.gpuCount
         }
 
         const sellableQuantity = Math.max(
@@ -410,8 +452,9 @@ export const supplierOverviewDataAccess = {
           internalTestGpu: totalInternalTest,
           sellableQuantity,
           offlineQuantity: Math.max(0, row.quantity - row.onlineQuantity),
-          bareMetalQuantity,
-          elasticServiceQuantity,
+          bareMetalPoolGpu,
+          elasticServiceGpu,
+          dualPoolGpu,
           status: row.status,
           poolCodes: Array.from(poolCodes),
         }
@@ -428,10 +471,11 @@ export const supplierOverviewDataAccess = {
         internalTestGpu: number
         bareMetalPoolGpu: number
         elasticServiceGpu: number
-        pendingOnboardingGpu: number
-        pendingRetireGpu: number
+        dualPoolGpu: number
+        pendingAccessGpu: number
+        onboardingGpu: number
+        retiringGpu: number
         offlineDeliveryGpu: number
-        bareMetalOnboardingGpu: number
       }
 
       const supplierAgg = new Map<string, SupplierAggRow>()
@@ -450,10 +494,11 @@ export const supplierOverviewDataAccess = {
           internalTestGpu: 0,
           bareMetalPoolGpu: 0,
           elasticServiceGpu: 0,
-          pendingOnboardingGpu: 0,
-          pendingRetireGpu: 0,
+          dualPoolGpu: 0,
+          pendingAccessGpu: 0,
+          onboardingGpu: 0,
+          retiringGpu: 0,
           offlineDeliveryGpu: 0,
-          bareMetalOnboardingGpu: 0,
         }
         supplierAgg.set(supplierId, row)
         return row
@@ -477,50 +522,24 @@ export const supplierOverviewDataAccess = {
         if (d.idcRegion) row.regions.add(d.idcRegion)
 
         const gpu = d.gpuCount
-        const isOnboardingLifecycle = ONBOARDING_LIFECYCLES.includes(
-          d.lifecycleStatus as (typeof ONBOARDING_LIFECYCLES)[number],
-        )
-        if (
-          isOnboardingLifecycle ||
-          d.opsStatus === '预留闲置中' ||
-          BARE_METAL_ONBOARDING_OPS.includes(
-            d.opsStatus as (typeof BARE_METAL_ONBOARDING_OPS)[number],
-          )
-        ) {
-          row.pendingOnboardingGpu += gpu
-        }
-        if (d.lifecycleStatus === '下线中' || RETIRED_OPS.includes(d.opsStatus as '已退订')) {
-          row.pendingRetireGpu += gpu
-        }
+
+        if (d.lifecycleStatus === '待接入') row.pendingAccessGpu += gpu
+        if (d.lifecycleStatus === '接入中') row.onboardingGpu += gpu
+        if (d.lifecycleStatus === '下线中') row.retiringGpu += gpu
         if (
           OFFLINE_DELIVERY_OPS.includes(d.opsStatus as (typeof OFFLINE_DELIVERY_OPS)[number])
         ) {
           row.offlineDeliveryGpu += gpu
         }
-        if (
-          BARE_METAL_ONBOARDING_OPS.includes(
-            d.opsStatus as (typeof BARE_METAL_ONBOARDING_OPS)[number],
-          )
-        ) {
-          row.bareMetalOnboardingGpu += gpu
-        }
         if (d.lifecycleStatus === '维护中' || d.inMaintenance) {
           row.maintenanceGpu += gpu
         }
 
-        let countedElastic = false
-        let countedBareMetal = false
-        for (const bind of poolBindingRows) {
-          if (bind.deviceId !== d.id) continue
-          if (!countedElastic && isElasticPool(bind.poolCode, bind.workloadProfile)) {
-            row.elasticServiceGpu += gpu
-            countedElastic = true
-          }
-          if (!countedBareMetal && isBareMetalPool(bind.poolCode, bind.workloadProfile)) {
-            row.bareMetalPoolGpu += gpu
-            countedBareMetal = true
-          }
-        }
+        const bindings = bindingsForDevice(d.id, poolBindingRows)
+        const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+        if (memberships.has('bare_metal')) row.bareMetalPoolGpu += gpu
+        if (memberships.has('elastic_service')) row.elasticServiceGpu += gpu
+        if (isDualPool(memberships)) row.dualPoolGpu += gpu
       }
 
       const openFaultsFiltered = openFaults.filter((f) => {
@@ -552,13 +571,14 @@ export const supplierOverviewDataAccess = {
           activeBatches: batchCountBySupplier.get(row.supplierId) ?? 0,
           openFaults: faultCountBySupplier.get(row.supplierId) ?? 0,
           maintenanceGpu: row.maintenanceGpu,
-          pendingOnboardingGpu: row.pendingOnboardingGpu,
-          pendingRetireGpu: row.pendingRetireGpu,
+          pendingAccessGpu: row.pendingAccessGpu,
+          onboardingGpu: row.onboardingGpu,
+          retiringGpu: row.retiringGpu,
           internalTestGpu: row.internalTestGpu,
           offlineDeliveryGpu: row.offlineDeliveryGpu,
-          bareMetalOnboardingGpu: row.bareMetalOnboardingGpu,
-          elasticServiceGpu: row.elasticServiceGpu,
           bareMetalPoolGpu: row.bareMetalPoolGpu,
+          elasticServiceGpu: row.elasticServiceGpu,
+          dualPoolGpu: row.dualPoolGpu,
         }))
         .sort((a, b) => b.sellableGpu - a.sellableGpu)
 
@@ -567,8 +587,7 @@ export const supplierOverviewDataAccess = {
         lifecycleBuckets[stage] = { gpu: 0, devices: 0 }
       }
       for (const d of filteredDevices) {
-        const key =
-          d.lifecycleStatus in lifecycleBuckets ? d.lifecycleStatus : '离线'
+        const key = normalizeLifecycleStage(d.lifecycleStatus)
         const bucket = lifecycleBuckets[key]!
         bucket.gpu += d.gpuCount
         bucket.devices += 1
@@ -578,33 +597,36 @@ export const supplierOverviewDataAccess = {
         stage,
         gpuCount: lifecycleBuckets[stage]?.gpu ?? 0,
         deviceCount: lifecycleBuckets[stage]?.devices ?? 0,
-        warn: stage === '接入中' && (lifecycleBuckets[stage]?.devices ?? 0) > 0,
+        warn:
+          (stage === '待接入' || stage === '接入中') &&
+          (lifecycleBuckets[stage]?.devices ?? 0) > 0,
       }))
 
       const opsGroups: Record<string, { gpu: number; devices: number }> = {
-        裸金属上架中: { gpu: 0, devices: 0 },
+        '裸金属池 · 直连上架中': { gpu: 0, devices: 0 },
+        '裸金属池 · 代理上架中': { gpu: 0, devices: 0 },
         线下交付: { gpu: 0, devices: 0 },
         网关上架: { gpu: 0, devices: 0 },
         其他: { gpu: 0, devices: 0 },
       }
 
       for (const d of filteredDevices) {
-        if (RETIRED_OPS.includes(d.opsStatus as '已退订')) continue
+        if (d.lifecycleStatus === '下线中') continue
         let group = '其他'
         if (
-          BARE_METAL_ONBOARDING_OPS.includes(
-            d.opsStatus as (typeof BARE_METAL_ONBOARDING_OPS)[number],
-          )
+          BARE_METAL_DIRECT_OPS.includes(d.opsStatus as (typeof BARE_METAL_DIRECT_OPS)[number])
         ) {
-          group = '裸金属上架中'
+          group = '裸金属池 · 直连上架中'
+        } else if (
+          BARE_METAL_PROXY_OPS.includes(d.opsStatus as (typeof BARE_METAL_PROXY_OPS)[number])
+        ) {
+          group = '裸金属池 · 代理上架中'
         } else if (
           OFFLINE_DELIVERY_OPS.includes(d.opsStatus as (typeof OFFLINE_DELIVERY_OPS)[number])
         ) {
           group = '线下交付'
         } else if (
-          GATEWAY_ONBOARDING_OPS.includes(
-            d.opsStatus as (typeof GATEWAY_ONBOARDING_OPS)[number],
-          )
+          GATEWAY_ONBOARDING_OPS.includes(d.opsStatus as (typeof GATEWAY_ONBOARDING_OPS)[number])
         ) {
           group = '网关上架'
         }
@@ -619,29 +641,9 @@ export const supplierOverviewDataAccess = {
         deviceCount: v.devices,
       }))
 
-      const onboardingGpuFromDevices = filteredDevices
-        .filter(
-          (d) =>
-            ONBOARDING_LIFECYCLES.includes(
-              d.lifecycleStatus as (typeof ONBOARDING_LIFECYCLES)[number],
-            ) ||
-            BARE_METAL_ONBOARDING_OPS.includes(
-              d.opsStatus as (typeof BARE_METAL_ONBOARDING_OPS)[number],
-            ) ||
-            OFFLINE_DELIVERY_OPS.includes(
-              d.opsStatus as (typeof OFFLINE_DELIVERY_OPS)[number],
-            ) ||
-            GATEWAY_ONBOARDING_OPS.includes(
-              d.opsStatus as (typeof GATEWAY_ONBOARDING_OPS)[number],
-            ),
-        )
-        .reduce((s, d) => s + d.gpuCount, 0)
-
       const totalGpu = inventoryDtoRows.reduce((s, r) => s + r.quantity, 0)
-      const onlineGpu = inventoryDtoRows.reduce((s, r) => s + r.onlineQuantity, 0)
-      const maintenanceGpu = inventoryDtoRows.reduce((s, r) => s + r.maintenanceQuantity, 0)
+      const sellableGpuRaw = inventoryDtoRows.reduce((s, r) => s + r.sellableQuantity, 0)
       const internalTestGpu = inventoryDtoRows.reduce((s, r) => s + r.internalTestGpu, 0)
-      const sellableGpu = inventoryDtoRows.reduce((s, r) => s + r.sellableQuantity, 0)
 
       let otherDeptGpu = 0
       for (const d of filteredDevices) {
@@ -650,16 +652,51 @@ export const supplierOverviewDataAccess = {
         }
       }
 
+      const sellableGpu = Math.max(0, sellableGpuRaw - otherDeptGpu)
+      const sellableRate =
+        kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线').gpuCount > 0
+          ? Math.round(
+              (sellableGpu /
+                kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线').gpuCount) *
+                100,
+            )
+          : 0
+
       const kpis = {
-        totalGpu,
-        onlineGpu,
-        onboardingGpu: onboardingGpuFromDevices,
-        maintenanceGpu,
+        total: {
+          deviceCount: filteredDevices.length,
+          gpuCount: totalGpu,
+        },
+        online: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线'),
+        pendingAccess: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
+        onboarding: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '接入中'),
+        maintenance: kpiFromDevices(
+          filteredDevices,
+          (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
+        ),
+        sellable: {
+          deviceCount: filteredDevices.filter(
+            (d) =>
+              d.lifecycleStatus === '在线' &&
+              !d.inMaintenance &&
+              !NON_SCHEDULABLE_OPS.includes(d.opsStatus as (typeof NON_SCHEDULABLE_OPS)[number]) &&
+              !OTHER_DEPT_OPS.includes(d.opsStatus as (typeof OTHER_DEPT_OPS)[number]),
+          ).length,
+          gpuCount: sellableGpu,
+        },
+        retiring: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '下线中'),
+        nonSchedulable: kpiFromDevices(filteredDevices, (d) =>
+          NON_SCHEDULABLE_OPS.includes(d.opsStatus as (typeof NON_SCHEDULABLE_OPS)[number]),
+        ),
+        inMaintenance: kpiFromDevices(filteredDevices, (d) => d.inMaintenance),
+        reservedIdle: kpiFromDevices(filteredDevices, (d) =>
+          RESERVED_IDLE_OPS.includes(d.opsStatus as (typeof RESERVED_IDLE_OPS)[number]),
+        ),
         internalTestGpu,
-        sellableGpu: Math.max(0, sellableGpu - otherDeptGpu),
         faultOpenCount: openFaultsFiltered.length,
         activeTestHolds: holds.filter((h) => isHoldActive(h.holdFrom, h.holdUntil)).length,
         activeBatches: activeBatches.length,
+        sellableRate,
       }
 
       const closedFaults = await db
@@ -734,7 +771,7 @@ export const supplierOverviewDataAccess = {
       supplierLog('overview', 'getStats done', {
         inventoryRows: inventoryDtoRows.length,
         supplierRows: supplierRows.length,
-        totalGpu: kpis.totalGpu,
+        totalGpu: kpis.total.gpuCount,
       })
 
       return result

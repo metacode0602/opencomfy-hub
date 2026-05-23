@@ -154,8 +154,9 @@ erDiagram
 |------|------|----------|
 | **计划 `planned`** | `planned_device_count` 或计划行 `planned_quantity` 之和 | `onboarding_batch` / `onboarding_batch_plan_line` |
 | **已触达 `touched`** | 本批次下 **至少有一条** 变更记录或关联表的 **去重设备数** | `onboarding_batch_device_link` 或 `change_log WHERE business_onboarding_batch_id = B` |
-| **接入中 `onboarding`** | `touched` 中 `lifecycle_status IN ('待接入','接入中')` 的设备数 | `supplier_device` 当前状态 |
-| **已上线 `online`** | `touched` 中 `lifecycle_status = '在线'` 的设备数 | `supplier_device` 当前状态 |
+| **接入中 `onboarding`** | `touched` 中 `lifecycle_status = '接入中'` 的设备数 | `supplier_device` |
+| **已上线 `online`** | `touched` 中 `lifecycle_status = '在线'` 的设备数 | `supplier_device` |
+| **待接入 `pending`** | `touched` 中 `lifecycle_status = '待接入'` 的设备数 | `supplier_device` |
 | **按计划行进度** | 每计划行：按 `(gpu_card_type_id, cooperation_type)` 过滤上述计数 | 计划行 + 设备 `gpu_card_type_id` + `cooperation_type` |
 
 **完成判定（可配置）**：
@@ -180,26 +181,29 @@ erDiagram
 | 层 | 表/字段 | 说明 |
 |----|---------|------|
 | 字典 | `lifecycle_state_definition`，`domain = device_ops_status` | `state_code` = Excel 原文（与下表一致）；`display_name` 同原文；`sort_order` 供总览排序 |
-| 扩展元数据 | 同上，建议 `payload` jsonb | 见下表 `overview_bucket`、`lifecycle_status`、`tags` |
+| 扩展元数据 | 同上，建议 `payload` jsonb | 见下表 `overview_bucket`、`lifecycle_status`、`tags`、`pool_memberships` |
 | 业务 | `supplier_device.ops_status` | NOT NULL，存 **原文**；导入/变更 commit 时写入 |
-| 派生 | `supplier_device.lifecycle_status` | 由 `ops_status` + `in_maintenance` 计算（§3.4.3） |
+| 派生 | `supplier_device.lifecycle_status` | **进程驱动**（§3.4.3）：批次关联、变更动作、`ops_status` 刷新、`in_maintenance`、下架批次；**不再**由 ops 字典单列直接映射 |
 
 **种子数据（11 种，与用户提供的设备状态一致）**：
 
-| `state_code`（原文） | `lifecycle_status` | `overview_bucket` | `tags` | 总览语义 |
-|----------------------|-------------------|-------------------|--------|----------|
-| `预留闲置中` | `待接入` | `reserved` | — | 已入库未调度 |
-| `在集群中` | `在线` | `in_cluster` | `sellable_candidate` | 可售候选 |
-| `集群组件运行中` | `在线` | `in_cluster` | `sellable_candidate` | 可售候选 |
-| `网关直连裸金属上架中` | `接入中` | `bare_metal_onboarding` | `bare_metal` | **裸金属** 上架流水线 |
-| `网关代理裸金属上架中` | `接入中` | `bare_metal_onboarding` | `bare_metal` | **裸金属** 上架流水线 |
-| `线下裸金属交付中` | `接入中` | `offline_delivery` | `bare_metal` | **线下交付** |
-| `其他部门使用中` | `维护中` | `other_dept` | `not_sellable` | 占用不可售 |
-| `不可调度节点运行中` | `在线` | `in_cluster` | `online_not_sellable` | 计在线，**不计可售**（与 import-schema §6 一致） |
-| `网关节点上架中` | `接入中` | `gateway_onboarding` | — | 网关节点接入 |
-| `已退订` | `退订` | `retired` | — | **待下架/已退订** 池 |
+> v2.4：`payload.lifecycle_status` **仅作参考**；设备 `lifecycle_status` 以 §3.4.3 进程规则为准。`ops_status` 仍保留 `overview_bucket` / `pool_memberships` 供总览分桶与资源池解析。
 
-> `overview_bucket` 为应用层枚举（varchar），可存于 `payload.overview_bucket`，供 `supplier.overview` 聚合 SQL `CASE` 使用，**不要求**单独加列。
+| `state_code`（原文） | 参考 lifecycle | `overview_bucket` | `pool_memberships` | 总览语义 |
+|----------------------|---------------|-------------------|-------------------|----------|
+| `预留闲置中` | *见 §3.4.3* | `reserved` | — | **KPI「预留闲置」**；设备接收后通常为 `接入中` + 本 ops |
+| `在集群中` | `在线` | `in_cluster` | *由 binding 决定* | 可售候选 |
+| `集群组件运行中` | `在线` | `in_cluster` | *由 binding 决定* | 可售候选 |
+| `网关直连裸金属上架中` | `在线` | `bare_metal_onboarding` | `["bare_metal"]` | 裸金属池；lifecycle 属 **在线** |
+| `网关代理裸金属上架中` | `在线` | `bare_metal_onboarding` | `["bare_metal","elastic_service"]` | 裸金属池 + 弹性用量池 |
+| `线下裸金属交付中` | `在线` | `offline_delivery` | `["bare_metal"]` | 线下交付 |
+| `其他部门使用中` | `在线`（默认） | `other_dept` | — | 占用不可售；`other_dept_gpu` 扣减 |
+| `不可调度节点运行中` | `在线` | `in_cluster` | *由 binding 决定* | **KPI「不可调度」**；计在线但不计可售 |
+| `网关节点上架中` | `在线` | `gateway_onboarding` | — | 网关节点接入 |
+| `已退订` | `下线中`（或已结案） | `retired` | — | 退订完成态；`ops` 原文保留 |
+
+> `overview_bucket` 为应用层枚举（varchar），可存于 `payload.overview_bucket`，供 `supplier.overview` 聚合使用，**不要求**单独加列。  
+> `pool_memberships` 存于 `payload.pool_memberships`（`bare_metal` \| `elastic_service` 数组）；在线稳态设备无此项时，归属完全由 `resource_pool_binding` 解析（§3.4.5）。
 
 #### 3.4.2 变更动作 `change_action`（设备变更表）
 
@@ -237,42 +241,165 @@ erDiagram
 
 解析：`parseDeviceChangelog` 对不在字典中的动作 → `parse_status=warning`（与未知 `ops_status` 一致），**仍允许 commit** 并落库原文。
 
-#### 3.4.3 `ops_status` ↔ `lifecycle_status` 映射（统一函数）
+#### 3.4.3 CRM `lifecycle_status`（v2.4 进程驱动）
 
-与代码 `resolveLifecycleStatus` / `OPS_STATUS_TO_LIFECYCLE` 保持一致；`in_maintenance = true` 时 **覆盖** 为 `维护中`。
+**正式枚举（5 态 + 可扩展）**：`待接入` | `接入中` | `在线` | `维护中` | `下线中`
+
+> v2.4 **废止** v2.2 的 `离线` / `退订` 作为 CRM 主生命周期（`ops_status=已退订` 仍保留原文；lifecycle 归 `下线中` 或批次结案后归档，见 §3.4.4）。
+
+**各阶段设备范围**：
+
+| `lifecycle_status` | 设备范围（满足任一即归入，按优先级解析 §3.4.3.1） | 典型触发 |
+|--------------------|--------------------------------------------------|----------|
+| **待接入** | 已关联进行中的 **`online` / `order_access`** 业务批次（`onboarding_batch_device_link` 或计划触达），且 **尚未** `设备接收` | 创建上架/订单接入批次并 link；主数据 `parent_batch_id` 关联计划 |
+| **接入中** | 已发生 **`设备接收`** 变更（通常 `ops_status=预留闲置中`，等待上架动作） | `commitChangelog` → `change_action=设备接收` |
+| **在线** | `in_maintenance=false` 且 `ops_status ∈ ONLINE_OPS`（见下表） | 变更刷新 ops；`加入集群` / 上架类 / `状态更新` |
+| **维护中** | `in_maintenance = true`（**优先于** ops 与批次态） | 变更表「维修中=是」；`故障维修` 等 |
+| **下线中** | 已关联进行中的 **`device_retire`** 下架批次 | 创建下架批次并将设备纳入该批次 |
+
+**`ONLINE_OPS`（计入 lifecycle=在线 的运维态）**：
+
+| `ops_status` |
+|-------------|
+| `在集群中` |
+| `集群组件运行中` |
+| `不可调度节点运行中` |
+| `网关直连裸金属上架中` |
+| `网关代理裸金属上架中` |
+| `线下裸金属交付中` |
+| `网关节点上架中` |
+| `其他部门使用中`（lifecycle 仍为在线，可售单独扣减） |
+
+**业务语义对照（与用户口径）**：
+
+| 用户说法 | CRM 阶段 | 说明 |
+|---------|---------|------|
+| 创建上架批次 | `待接入` | 设备在计划/ link 中，未接收 |
+| 设备接收 | `接入中` | 已入库验收，尚未进入集群/上架 ops |
+| 在集群 / 上架流水线 / 不可调度 | `在线` | 4 种上架/交付 ops **与** 集群 ops 同属在线 |
+| 标记维修中 | `维护中` | 仅看 `in_maintenance` |
+| 创建下架批次 | `下线中` | 与 `device_retire` 批次绑定 |
+
+##### 3.4.3.1 解析优先级（`resolveLifecycleStatus` v2.4）
 
 ```typescript
-// 单一来源：DB 字典 device_ops_status 加载为 Map，或常量 OPS_STATUS_TO_LIFECYCLE 与种子同步
-function resolveLifecycleStatus(opsStatus: string, inMaintenance: boolean): LifecycleStatus {
-  if (inMaintenance) return '维护中'
-  return OPS_STATUS_TO_LIFECYCLE[opsStatus] ?? '待接入'
+const ONLINE_OPS = new Set([
+  '在集群中', '集群组件运行中', '不可调度节点运行中',
+  '网关直连裸金属上架中', '网关代理裸金属上架中',
+  '线下裸金属交付中', '网关节点上架中', '其他部门使用中',
+])
+
+function resolveLifecycleStatus(ctx: {
+  opsStatus: string
+  inMaintenance: boolean
+  hasActiveOnboardingBatch: boolean   // online | order_access，未设备接收
+  hasReceived: boolean                // 发生过设备接收（或 ops 已离开纯预留）
+  hasActiveRetireBatch: boolean
+}): LifecycleStatus {
+  if (ctx.inMaintenance) return '维护中'
+  if (ctx.hasActiveRetireBatch) return '下线中'
+  if (ONLINE_OPS.has(ctx.opsStatus)) return '在线'
+  if (ctx.hasReceived || ctx.opsStatus === '预留闲置中') return '接入中'
+  if (ctx.hasActiveOnboardingBatch) return '待接入'
+  return '待接入' // 默认：未关联批次的新入库设备
 }
 ```
+
+实现位置：`device-import-utils.ts`；`commitChangelog` / `commitInventory` / 批次 link / 下架批次创建时传入 `ctx` 并写回 `supplier_device.lifecycle_status`。
+
+##### 3.4.3.2 与 `ops_status` 的关系
+
+- **`ops_status`**：运维 Excel 原文，11 种字典；驱动 **在线判定**、资源池（§3.4.5）、KPI 子项（不可调度/预留闲置）。
+- **`lifecycle_status`**：CRM 进程态，由 **批次 + 变更动作 + ops + 维修标记** 共同决定；漏斗与批次进度 **仅看 lifecycle**。
+- **`预留闲置中`**：ops 维度表示「物理已接收、调度闲置」→ KPI **预留闲置**；lifecycle 通常为 **`接入中`**（已设备接收），**不是** `待接入`。
 
 #### 3.4.4 变更动作 → 设备状态（`commitChangelog` 增强）
 
 当前实现仅从 `change_content` 含「设备状态」或 `change_action` 含「状态」时解析（过窄）。v2.2 增加 **动作级默认映射**（变更内容无状态时生效；有状态则仍以内容为准）：
 
-| `change_action` | 默认 `ops_status` | 备注 |
-|-----------------|-------------------|------|
-| `设备接收` | `预留闲置中` | |
-| `加入集群` | `在集群中` | |
-| `配置变更` / `带宽组调整` / `带宽限制调整` | *不变* | 仅记 change_log |
-| `故障维修` | *不变* | 可配合 `in_maintenance=true`（若变更内容含维修中） |
-| `维护结束` | *不变* | |
-| `状态更新` | 从 `change_content` 解析 | |
-| `上架接入平台网关` | `网关节点上架中` | |
-| `上架单机模式裸金属` | `网关直连裸金属上架中` | 与直连上架同桶 |
-| `上架网关代理裸金属` | `网关代理裸金属上架中` | |
-| `上架网关直连裸金属` | `网关直连裸金属上架中` | |
-| `下架裸金属` | `预留闲置中` | 下架后回闲置；若内容有状态则以内容为准 |
-| `线下裸金属交付` | `线下裸金属交付中` | **线下交付** |
-| `集群角色增加` / `集群角色删除` | *不变* | 更新 `compute_node` |
-| `设备退订` | `已退订` | |
-| `非常规下线` | `已退订` | `lifecycle_status=退订`；总览计入「待下架」 |
-| `交给其他部门使用` | `其他部门使用中` | |
+| `change_action` | 默认 `ops_status` | 默认 `lifecycle_status` | 默认 `pool_bindings` | 备注 |
+|-----------------|-------------------|-------------------------|------------------------|------|
+| `设备接收` | `预留闲置中` | **`接入中`** | 清除裸金属/弹性 binding | |
+| `加入集群` | `在集群中` | **`在线`** | *不变* | |
+| `配置变更` / `带宽组调整` / `带宽限制调整` | *不变* | *按 §3.4.3.1 重算* | *不变* | 仅记 change_log |
+| `故障维修` | *不变* | **`维护中`**（若 `in_maintenance=true`） | *不变* | |
+| `维护结束` | *不变* | *按 §3.4.3.1 重算* | *不变* | 通常恢复 `在线` |
+| `状态更新` | 从 `change_content` 解析 | *按解析后 ops 重算* | 按 ops（§3.4.5） | |
+| `上架接入平台网关` | `网关节点上架中` | **`在线`** | 仅 elastic | |
+| `上架单机模式裸金属` | `网关直连裸金属上架中` | **`在线`** | 仅 `bare_metal` | |
+| `上架网关代理裸金属` | `网关代理裸金属上架中` | **`在线`** | 双 binding | 长期双池 |
+| `上架网关直连裸金属` | `网关直连裸金属上架中` | **`在线`** | 仅 `bare_metal` | |
+| `下架裸金属` | `预留闲置中` | **`接入中`** | 清除 bare_metal | |
+| `线下裸金属交付` | `线下裸金属交付中` | **`在线`** | 仅 `bare_metal` | |
+| `集群角色增加` / `集群角色删除` | *不变* | *不变* | *不变* | 更新 `compute_node` |
+| `设备退订` | `已退订` | **`下线中`** | 清除全部 binding | |
+| `非常规下线` | `已退订` | **`下线中`** | 清除全部 binding | |
+| `交给其他部门使用` | `其他部门使用中` | **`在线`** | *不变* | 不可售扣减 |
 
-实现位置：`device-import-utils.ts` → `applyChangelogRows`；字典表 `device_change_action.payload.default_ops_status` 可配置化（Phase 2）。
+实现位置：`device-import-utils.ts` → `applyChangelogRows`；字典表 `device_change_action.payload.default_ops_status` / `default_pool_bindings` 可配置化（Phase 2）。
+
+#### 3.4.5 资源池归属解析（`resolveDevicePoolMemberships`）
+
+资源总览「裸金属池占用 / 弹性用量池占用 / 双池占用」三列的 **唯一聚合口径**。实现建议：`apps/web/src/lib/supplier/device-pool-membership.ts`（服务端与 Mock 共用）。
+
+**边界（已确认）**：
+
+| # | 规则 |
+|---|------|
+| B1 | 上架完成后 `ops_status → 在集群中` 时，池归属 **完全由 `resource_pool_binding` 承接**（commit 时已写入） |
+| B2 | `线下裸金属交付中` **仅** 计裸金属池，**不计** 弹性用量池 |
+| B3 | 网关代理裸金属（`上架网关代理裸金属` / `网关代理裸金属上架中`）**长期双池**：上架中与在线稳态均同时归属裸金属池与弹性用量池 |
+| B4 | 裸金属池列 + 弹性池列 − 双池列 **不等于** 「独占 GPU 总数」；UI footer 必须说明重叠计数 |
+| B5 | 历史脏数据将清理，**不做** backfill 迁移 |
+
+**解析函数（伪代码）**：
+
+```typescript
+type PoolKind = 'bare_metal' | 'elastic_service'
+
+function resolveDevicePoolMemberships(
+  opsStatus: string,
+  bindings: ResourcePoolBinding[],
+  opsStatusDict: Map<string, { pool_memberships?: PoolKind[] }>,
+): Set<PoolKind> {
+  const pools = new Set<PoolKind>()
+
+  // ① ops_status 派生（上架/过渡态；字典 payload.pool_memberships）
+  const fromOps = opsStatusDict.get(opsStatus)?.pool_memberships ?? []
+  for (const p of fromOps) pools.add(p)
+
+  // ② resource_pool_binding 派生（稳态/显式绑定）
+  for (const bind of bindings) {
+    if (isBareMetalPool(bind.poolCode, bind.workloadProfile)) pools.add('bare_metal')
+    if (isElasticPool(bind.poolCode, bind.workloadProfile)) pools.add('elastic_service')
+  }
+
+  return pools
+}
+
+function isDualPool(memberships: Set<PoolKind>): boolean {
+  return memberships.has('bare_metal') && memberships.has('elastic_service')
+}
+```
+
+**聚合规则（供应商表 / 库存表共用）**：
+
+| 输出字段 | 条件 |
+|----------|------|
+| `bareMetalPoolGpu` | `memberships.has('bare_metal')` → `+= gpu_count` |
+| `elasticServiceGpu` | `memberships.has('elastic_service')` → `+= gpu_count` |
+| `dualPoolGpu` | `isDualPool(memberships)` → `+= gpu_count` |
+
+> **禁止** 裸金属池与弹性池之间的互斥去重（移除现 `countedBareMetal && countedElastic` 逻辑）。同一设备 GPU 可同时计入两列。
+
+**变更动作与 ops 的池语义对照**：
+
+| 变更动作 / `ops_status` | 裸金属池 | 弹性用量池 |
+|-------------------------|---------|-----------|
+| `上架单机模式裸金属` / `上架网关直连裸金属` → `网关直连裸金属上架中` | ✓ | ✗ |
+| `上架网关代理裸金属` → `网关代理裸金属上架中` | ✓ | ✓ |
+| `线下裸金属交付` → `线下裸金属交付中` | ✓ | ✗ |
+| `在集群中` + 代理裸金属 binding | ✓ | ✓（长期双池） |
 
 ---
 
@@ -289,7 +416,7 @@ function resolveLifecycleStatus(opsStatus: string, inMaintenance: boolean): Life
 | `state_code` | varchar(64) | Excel 原文 |
 | `display_name` | varchar(128) | 展示文案 |
 | `sort_order` | integer | 总览排序 |
-| **`payload`** | jsonb | `device_ops_status`: `{ lifecycle_status, overview_bucket, tags? }`；`device_change_action`: `{ default_ops_status?, updates_compute_node? }` |
+| **`payload`** | jsonb | `device_ops_status`: `{ lifecycle_status, overview_bucket, pool_memberships?, tags? }`；`device_change_action`: `{ default_ops_status?, default_pool_bindings?, updates_compute_node? }` |
 
 索引：`(domain, state_code)` UK；`(domain)`。
 
@@ -532,16 +659,47 @@ flowchart TB
   POOL[resource_pool_binding] --> OV
 ```
 
-#### 5.4.1 顶部 KPI 卡片（6 项）
+#### 5.4.1 顶部 KPI 卡片
 
-| KPI | 单位 | 聚合口径（GPU 卡数 = Σ `gpu_count`） |
-|-----|------|--------------------------------------|
-| GPU 总量 | 卡 | `SUM(inventory.quantity)` + 可选：未入库仅 `lifecycle∈{待接入,接入中}` 的设备（与现 Mock 一致） |
-| 在线 GPU | 卡 | `SUM(inventory.online_quantity)` 或 L2：`ops_status` 映射后 `lifecycle=在线` 且非 `不可调度…` 且非 `in_maintenance` |
-| 接入中 | 卡 | L2：`lifecycle_status IN ('待接入','接入中')` **或** `overview_bucket IN (bare_metal_onboarding, gateway_onboarding, offline_delivery)` |
-| 维护 / 故障 | 卡 | L2：`lifecycle=维护中` 或 `in_maintenance`；hint = 未关闭 `fault_incident` **条数** |
-| 内部测试占用 | 卡 | `internal_test_hold` + `supplier_gpu_inventory.is_internal_test` |
-| 可售 GPU | 卡 | §5.4.2 公式；hint = 可售率 |
+**通用结构（v2.4）**：每个 KPI **必须** 同时返回 **设备台数**（`deviceCount`）与 **GPU 卡数**（`gpuCount`）。
+
+```typescript
+type OverviewKpiMetric = {
+  deviceCount: number  // COUNT(DISTINCT supplier_device.id)
+  gpuCount: number       // SUM(supplier_device.gpu_count)
+}
+```
+
+**主 KPI（6 项）**：
+
+| KPI | 字段 | 聚合口径 |
+|-----|------|----------|
+| GPU 总量 | `total` | L1：`SUM(inventory.quantity)` 设备数/卡数；或 L2 全量设备 |
+| 在线 | `online` | `lifecycle_status = '在线'` |
+| 待接入 | `pendingAccess` | `lifecycle_status = '待接入'` |
+| 接入中 | `onboarding` | `lifecycle_status = '接入中'` |
+| 维护中 | `maintenance` | `lifecycle_status = '维护中'`（=`in_maintenance=true` 为主） |
+| 可售 | `sellable` | §5.4.2 公式（卡数）；设备数为可售 GPU>0 的去重设备数 |
+
+**运维子 KPI（3 项，展示于主 KPI 下方或卡片 hint）**：
+
+| 子 KPI | 字段 | 聚合口径 | 与 lifecycle 关系 |
+|--------|------|----------|------------------|
+| 不可调度 | `nonSchedulable` | `ops_status = '不可调度节点运行中'` | 通常 lifecycle=**在线**，不计可售 |
+| 维修中 | `inMaintenance` | `in_maintenance = true` | lifecycle=**维护中**（应与上行一致） |
+| 预留闲置 | `reservedIdle` | `ops_status = '预留闲置中'` | 通常 lifecycle=**接入中** |
+
+**UI 展示格式**（每张卡片）：
+
+```
+{title}
+{gpuCount} 卡 · {deviceCount} 台
+{hint?}
+```
+
+示例：`不可调度` → `128 卡 · 16 台`；`预留闲置` → `64 卡 · 8 台`。
+
+**下线中（可选第 7 张或漏斗旁数字）**：`lifecycle_status = '下线中'` → `{ deviceCount, gpuCount }`。
 
 #### 5.4.2 可售量公式（与 import-schema §6 对齐）
 
@@ -554,38 +712,64 @@ sellable_gpu =
 
 其中：
   online_gpu：lifecycle=在线 且 in_maintenance=false 且 ops_status≠不可调度节点运行中
-  other_dept_gpu：ops_status=其他部门使用中 的 GPU（即使 lifecycle 映射为维护中，也单独扣减展示）
+  other_dept_gpu：ops_status=其他部门使用中 的 GPU（lifecycle 仍为在线，单独扣减可售）
+  non_schedulable_gpu：ops_status=不可调度节点运行中（计入 online 子 KPI，不计 sellable）
+  reserved_idle_gpu：ops_status=预留闲置中（KPI 子项，lifecycle 通常为接入中）
+```
+
+**`getStats.kpis` 结构（v2.4）**：
+
+```typescript
+type OverviewKpis = {
+  total: OverviewKpiMetric
+  online: OverviewKpiMetric
+  pendingAccess: OverviewKpiMetric      // 待接入
+  onboarding: OverviewKpiMetric        // 接入中
+  maintenance: OverviewKpiMetric
+  sellable: OverviewKpiMetric
+  retiring?: OverviewKpiMetric         // 下线中，可选
+  // 运维子 KPI
+  nonSchedulable: OverviewKpiMetric
+  inMaintenance: OverviewKpiMetric
+  reservedIdle: OverviewKpiMetric
+  // 辅助 hint（非 KPI 主体）
+  faultOpenCount: number
+  activeBatches: number
+  sellableRate: number                 // sellable.gpu / online.gpu
+}
 ```
 
 #### 5.4.3 物理机生命周期漏斗（左栏）
 
-按 CRM **`lifecycle_status`** 分桶（6 段），与接入计划进度 **解耦**：
+按 CRM **`lifecycle_status`** 分桶（**5 段**，v2.4），与接入计划进度 **解耦**：
 
-| 阶段 | 包含 `lifecycle_status` |
-|------|-------------------------|
-| 待接入 | `待接入` |
-| 接入中 | `接入中` |
-| 在线 | `在线` |
-| 维护中 | `维护中` |
-| 离线 | `离线` |
-| 下线中 | `下线中` |
+| 阶段 | 包含 `lifecycle_status` | 设备范围摘要 |
+|------|-------------------------|-------------|
+| 待接入 | `待接入` | 已创建 `online`/`order_access` 批次关联，未 `设备接收` |
+| 接入中 | `接入中` | 已 `设备接收`，通常 `ops=预留闲置中` |
+| 在线 | `在线` | 集群 ops + 4 种上架/交付 ops + 其他部门使用中 |
+| 维护中 | `维护中` | `in_maintenance = true` |
+| 下线中 | `下线中` | 已创建 `device_retire` 下架批次 |
 
-每段展示：`gpuCount`（Σ `gpu_count`）、`deviceCount`（台数）。`接入中` 数量 > 0 时 `warn=true`。
+每段展示：**`gpuCount`（卡）** + **`deviceCount`（台）**。`待接入` 或 `接入中` 数量 > 0 时 `warn=true`。
+
+> v2.4 漏斗 **移除** `离线` 段；未知 lifecycle 值 fallback → `待接入`（实现时打日志）。
 
 #### 5.4.4 运维状态管道（建议 v2.2 新增折叠区，可选）
 
-在漏斗下方增加 **按 `ops_status` 原文** 的细分条（数据来自字典 `device_ops_status`），用于运维对照多维表格：
+在漏斗下方增加 **按 `ops_status` 原文** 的细分条（数据来自字典 `device_ops_status`），用于运维对照多维表格。**裸金属上架** 拆分为直连 / 代理两行，与 §5.4.5 池列口径对齐：
 
-| 展示分组 | 包含 `ops_status` |
-|----------|-------------------|
-| 裸金属上架中 | `网关直连裸金属上架中`、`网关代理裸金属上架中` |
-| 线下交付 | `线下裸金属交付中` |
-| 网关上架 | `网关节点上架中` |
-| 其他 | 其余非退订状态 |
+| 展示分组 | 包含 `ops_status` | 池归属 |
+|----------|-------------------|--------|
+| 裸金属池 · 直连上架中 | `网关直连裸金属上架中` | 仅裸金属池 |
+| 裸金属池 · 代理上架中 | `网关代理裸金属上架中` | 裸金属池 + 弹性用量池（标注「双池」） |
+| 线下交付 | `线下裸金属交付中` | 仅裸金属池 |
+| 网关上架 | `网关节点上架中` | 弹性用量池（若已 binding） |
+| 其他 | 其余非退订状态 | 按 §3.4.5 |
 
-#### 5.4.5 供应商维度汇总表（右栏）
+#### 5.4.5 供应商维度汇总表（右栏）— 展示方案 A
 
-**表头与数据列对齐**（修正现 UI 表头/单元格顺序不一致问题）：
+**表头与数据列对齐**（v2.3：移除「裸金属上架」独立列，统一为资源池占用视角）：
 
 | 列 | 字段 | 聚合口径 |
 |----|------|----------|
@@ -596,26 +780,51 @@ sellable_gpu =
 | 可售 | `sellableGpu` | §5.4.2 按供应商汇总 |
 | 活跃批次 | `activeBatches` | `COUNT(onboarding_batch)`，`batch_kind∈(online,order_access)` 且 `batch_status` 进行中 |
 | 未关闭故障 | `openFaults` | `COUNT(fault_incident)` 未关闭 |
-| 维护中 | `maintenanceGpu` | Σ `gpu_count` WHERE `lifecycle=维护中` OR `in_maintenance` |
-| 待接入 | `pendingOnboardingGpu` | Σ `gpu_count` WHERE `lifecycle IN (待接入,接入中)` **或** `ops_status=预留闲置中` |
-| 待下架 | `pendingRetireGpu` | Σ `gpu_count` WHERE `lifecycle=下线中` OR `ops_status=已退订` |
+| 维护中 | `maintenanceGpu` / `maintenanceDevices` | `lifecycle = 维护中` |
+| 待接入 | `pendingAccessGpu` / `pendingAccessDevices` | `lifecycle = 待接入` |
+| 接入中 | `onboardingGpu` / `onboardingDevices` | `lifecycle = 接入中` |
+| 下线中 | `retiringGpu` / `retiringDevices` | `lifecycle = 下线中` |
 | 内部占用 | `internalTestGpu` | hold + 库存测试标记 |
 | 线下交付 | `offlineDeliveryGpu` | Σ `gpu_count` WHERE `ops_status=线下裸金属交付中` |
-| 裸金属上架中 | `bareMetalOnboardingGpu` | Σ `gpu_count` WHERE `ops_status IN (网关直连裸金属上架中, 网关代理裸金属上架中)` |
-| 弹性服务 | `elasticServiceGpu` | Σ `gpu_count` 的设备存在 `resource_pool_binding.pool_code='platform'`（或 `workload_profile=elastic_service`） |
-| 裸金属池 | `bareMetalPoolGpu` | 绑定 `pool_code` 为裸金属池的设备 GPU（与弹性互斥去重规则见 §5.4.6） |
+| 裸金属池占用 | `bareMetalPoolGpu` | §3.4.5：`memberships.has('bare_metal')` |
+| 弹性用量池占用 | `elasticServiceGpu` | §3.4.5：`memberships.has('elastic_service')` |
+| 双池占用 | `dualPoolGpu` | §3.4.5：同时归属裸金属池与弹性用量池（主要为代理裸金属） |
 
-> **说明**：裸金属/弹性两列来自 **资源池绑定**，与 `ops_status` 裸金属上架流水线 **并存**（一台设备可「上架中」且已划入某 pool）；总览展示为两个不同视角，不在 v2.2 强行合并为一列。
+**移除字段**：`bareMetalOnboardingGpu`（deprecated，v2.3 起不再返回；原口径并入 `bareMetalPoolGpu`）。
 
-#### 5.4.6 机房 × 卡型库存表（下方全宽）
+**UI 展示规则（方案 A）**：
+
+| 规则 | 说明 |
+|------|------|
+| 列标题 | 「裸金属池占用」「弹性用量池占用」；列头 Tooltip 说明重叠计数 |
+| 零值 | 显示 `—`（与现表一致） |
+| 双池设备 | 裸金属列与弹性列 **同时显示同一 GPU 数**；可选在裸金属单元格旁 Badge `双池` |
+| 表底 footnote | 见 §5.4.6 |
+
+> **说明**：裸金属池 / 弹性用量池两列 **允许重叠计数**（网关代理裸金属长期双池）。`bareMetalPoolGpu + elasticServiceGpu − dualPoolGpu` 为去重后的「至少占一池」GPU 数，**不等于** 平台 GPU 总量或在线量。
+
+#### 5.4.6 表底口径说明（footer）
+
+`supplier-overview-content` 底部说明区 **必须** 包含：
+
+```
+裸金属池占用：直连/单机/网关直连裸金属上架中、线下裸金属交付中，及已绑定裸金属池的在线设备。
+弹性用量池占用：platform/elastic 绑定，及网关代理裸金属（上架中与在线均为长期双池）。
+双池占用：同时计入上述两列的 GPU（主要为网关代理裸金属）；两列之和减去双池不等于独占 GPU 总数。
+```
+
+#### 5.4.7 机房 × 卡型库存表（下方全宽）
 
 | 列 | 数据源 |
 |----|--------|
 | 总量 / 在线 / 维护 / 测试占用 / 可售 | `supplier_gpu_inventory` + §5.4.2 |
-| 裸金属 / 弹性服务 | 该机房×卡型下设备 JOIN `resource_pool_binding` 汇总 |
+| 裸金属池占用 | 该机房×卡型下设备，§3.4.5 `bareMetalPoolGpu` 口径 |
+| 弹性用量池占用 | 该机房×卡型下设备，§3.4.5 `elasticServiceGpu` 口径（可与裸金属重叠） |
 | 状态 Badge | `supplier_gpu_inventory.status`（`online/offline/maintenance`） |
 
-#### 5.4.7 接入批次侧栏 / 列表
+可选：库存表增加 `dualPoolGpu` 列，或列头 Tooltip 指向 §5.4.6。
+
+#### 5.4.8 接入批次侧栏 / 列表
 
 | 字段 | 数据源 |
 |------|--------|
@@ -624,17 +833,27 @@ sellable_gpu =
 | 进度 | `getProgress` → `touched` / `online`（**非**供应商表「在线」列） |
 | 缺口 | `planned − online`（批次维度） |
 
-#### 5.4.8 tRPC `supplier.overview`（新增）
+#### 5.4.9 tRPC `supplier.overview`（新增）
 
 | 过程 | 输出 |
 |------|------|
 | `getStats` | `{ kpis, lifecycleFunnel, opsPipeline?, supplierRows, inventoryRows, batchSummaries, faultSla }` |
 | `getFilterOptions` | 区域、供应商、卡型、资源池（来自 DB） |
 
+**`supplierRows` / `inventoryRows` 池相关字段（v2.3）**：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `bareMetalPoolGpu` | number | §3.4.5 |
+| `elasticServiceGpu` | number | §3.4.5 |
+| `dualPoolGpu` | number | §3.4.5 |
+| ~~`bareMetalOnboardingGpu`~~ | — | **deprecated**，v2.3 移除 |
+
 **`getStats` 实现要点**：
 
+- 设备池归属统一调用 `resolveDevicePoolMemberships`（§3.4.5），**禁止** 裸金属/弹性互斥去重。
 - 单次查询按 `supplier_id` 聚合 `supplier_device`（带 `ops_status` 分桶 CASE）。
-- JOIN `supplier_gpu_inventory` 得 L1 表。
+- JOIN `supplier_gpu_inventory` 得 L1 表；JOIN `resource_pool_binding` 得 binding。
 - 批次段调用 `onboardingBatch.list` 或内联 SQL。
 - 替换 `useSupplierDomainMockStore` 中 overview 相关片段。
 
@@ -642,8 +861,16 @@ sellable_gpu =
 
 | 总览指标 | 是否用 `onboarding_batch_device_link` |
 |----------|--------------------------------------|
-| 供应商表「在线/可售/裸金属/线下交付」等 | **否**，用 `supplier_device` 当前态 |
+| 供应商表「在线/可售/裸金属池/弹性池/双池/线下交付」等 | **否**，用 `supplier_device` + `resource_pool_binding` + §3.4.5 |
 | 活跃批次数、批次列表、计划缺口 | **是**，用批次 + `getProgress` |
+
+#### 5.4.10 资源池筛选器（`poolCode` filter）
+
+`getFilterOptions.poolCodes` 来自 `resource_pool_binding.pool_code` 去重。筛选时：
+
+- 选裸金属池：包含 `memberships.has('bare_metal')` 的设备（含直连上架中、代理双池）。
+- 选 elastic / platform：包含 `memberships.has('elastic_service')` 的设备（含代理双池）。
+- 代理裸金属设备在 **两个** 池筛选下均应出现。
 
 ### 5.5 路径 E：读模型 — 接入看板（Global）
 
@@ -752,7 +979,7 @@ type OnboardingBatchProgress = {
 | **R-DC1** | 导入匹配设备限定 `(supplier_id, data_center_id)` |
 | **R-INV1** | inventory/changelog commit 后刷新 `supplier_gpu_inventory` |
 | **R-ST1** | `ops_status` / `change_action` 以 Excel **原文** 落库；须存在于对应字典域 |
-| **R-ST2** | `lifecycle_status` 由 `resolveLifecycleStatus(ops_status, in_maintenance)` 统一计算 |
+| **R-ST2** | `lifecycle_status` 由 §3.4.3 进程规则（批次 + 变更 + ops + 维修 + 下架批次）统一计算；**禁止** 仅从 ops 字典单列映射 |
 | **R-ST3** | `commitChangelog` 优先解析 `change_content` 中的设备状态；否则按 §3.4.4 动作默认映射更新 `ops_status` |
 | **R-ST4** | 未知 `ops_status` / `change_action`：解析 warning，允许 commit，总览计入「其他/未知」桶 |
 | **R-OV1** | 资源总览「在线/可售/裸金属/线下交付」等来自 **`supplier_device` 当前态**，不用业务批次 `device_link` |
@@ -780,7 +1007,7 @@ type OnboardingBatchProgress = {
 | `commitChangelog` | 写 `business_onboarding_batch_id`；维护 `device_link`；调用 `refreshBatchProgress`；**移除** `deviceIdsToBind` → `supplier_device.onboarding_batch_id` |
 | `getContext` | 返回进行中业务批次（含 `work_order_no` 供运维对照） |
 
-### 8.3 `supplier.overview`（新增，§5.4.8）
+### 8.3 `supplier.overview`（新增，§5.4.9）
 
 | 过程 | 说明 |
 |------|------|
@@ -805,9 +1032,9 @@ type OnboardingBatchProgress = {
 | 上架/订单接入向导 | 上架计划：**卡型 + 合作类型 + 数量**（`(卡型, 合作类型)` 批次内唯一）；**飞书工单号** 输入框（必填）；去掉自动生成 `WO-{batchCode}` |
 | `onboarding-batches-content` / 批次详情 | 列：计划 / **已触达** / **已上线**；展示 `work_order_no`；变更时间线按 `business_onboarding_batch_id` |
 | `supplier-device-import-panel` | 提示：变更表「工单」列填飞书工单号；主数据导入可选关联计划（`parentBatchId`） |
-| `supplier-overview-content` | 接 `supplier.overview.getStats`；修正供应商表列顺序（§5.4.5）；新增列：`pendingOnboardingGpu`、`pendingRetireGpu`、`offlineDeliveryGpu`、`bareMetalOnboardingGpu`；可选「运维状态管道」折叠区 |
-| `overview-stats.ts` | 废弃 Mock 聚合；改为消费 tRPC 或抽离共享 `overview-aggregation.ts`（服务端） |
-| `device-import-utils` / `parse-device-import-csv` | 补齐 §3.4.1/3.4.2 字典校验；实现 §3.4.4 动作→状态映射 |
+| `supplier-overview-content` | KPI §5.4.1：`OverviewKpiMetric`（卡+台）；主 KPI + 不可调度/维修中/预留闲置子 KPI；漏斗 5 段 §5.4.3；供应商表 §5.4.5 |
+| `overview-stats.ts` | 废弃 Mock 聚合；改为消费 tRPC 或抽离共享 `device-pool-membership.ts` + `overview-aggregation.ts`（服务端） |
+| `device-import-utils` / `parse-device-import-csv` | 补齐 §3.4.1/3.4.2 字典校验；实现 §3.4.4 动作→状态 + **pool_bindings** 同步 |
 | `dashboard/global/*` | KPI / 生命周期 / 运维管道 / 待办 接 `dashboard.globalOps` |
 
 ---
@@ -819,7 +1046,8 @@ type OnboardingBatchProgress = {
 | **一** | Migration：接入表字段 + **`lifecycle_state_definition` 种子**（`device_ops_status` 11 条、`device_change_action` 20 条） | Schema + 字典就绪 |
 | **二** | `commitChangelog`（§3.4.4 动作映射）+ `device_link` + `refreshBatchProgress` | 变更驱动计划进度 |
 | **三** | `onboardingBatch.create`（工单手动 + 计划行） | 商务计划闭环 |
-| **四** | **`supplier.overview.getStats`** + overview 页接 DB（§5.4） | 资源总览可用 |
+| **四** | **`supplier.overview.getStats`** + overview 页接 DB（§5.4）；**v2.3** 池归属统一（§3.4.5）+ 方案 A UI | 资源总览可用 |
+| **四-b** | `commitChangelog` 同步 `resource_pool_binding`（§3.4.4 `default_pool_bindings`） | 台账与总览一致 |
 | **五** | `dashboard.globalOps` + Global 看板 | 接入看板可用 |
 | **六** | 可选：`onboarding_batch_plan_line`；字典 `payload` 配置化；飞书 API | 增强 |
 
@@ -848,7 +1076,8 @@ type OnboardingBatchProgress = {
 | 设备多次批次统计重复 | 按 **批次维度** 去重，非全平台去重 |
 | 内部使用/下架后在线数下降 | 批次完成以「曾达计划数量」或人工结案为准；文档明确 |
 | 变更动作无默认映射 | 仅写 change_log，不更新 `ops_status`；运营用「状态更新」+ 变更内容补状态 |
-| 裸金属列与 ops 裸金属上架重复理解 | UI 标注：上架中为流水线状态，裸金属池列为资源池绑定视角 |
+| 代理裸金属双池被误读为重复统计 | §5.4.6 footnote + `dualPoolGpu` 列 + 列头 Tooltip（§5.4.5） |
+| binding 与 ops 不一致 | `commitChangelog` 按 §3.4.4 同步 upsert binding；读模型以 §3.4.5 合并解析 |
 
 ---
 
@@ -860,3 +1089,91 @@ type OnboardingBatchProgress = {
 | v2.1 | 2026-05-23 | 明确 `planned_lines_json` **保留** `cooperation_type`；计划行唯一键与进度按 `(卡型, 合作类型)` 聚合 |
 | v2.2 | 2026-05-23 | §3.4 设备状态/变更动作全量字典与落库；§3.4.4 动作→状态映射；§5.4 资源总览读模型与供应商表列口径；`supplier.overview` API |
 | v2.2.1 | 2026-05-23 | Drizzle 落库：`supply-schema.ts` + `supply-lifecycle-dictionary.ts`；§4 标注已实现表结构 |
+| v2.3 | 2026-05-23 | §3.4.5 资源池归属统一口径；§5.4.5 展示方案 A（删 `bareMetalOnboardingGpu`，增 `dualPoolGpu`，允许双池重叠）；§3.4.4 commit 同步 binding；§14 Spec 清单 |
+| v2.4 | 2026-05-23 | §3.4.3 生命周期改为进程驱动（5 态）；§5.4.1 KPI 双维度（设备数+卡数）及不可调度/维修中/预留闲置子 KPI；漏斗 5 段 |
+
+---
+
+## 14. 实施 Spec 清单
+
+> 状态列：`[ ]` 待办 · `[~]` 进行中 · `[x]` 完成
+
+### 14.1 资源池展示（v2.3，P0）
+
+- [ ] `supply-lifecycle-dictionary.ts`：`device_ops_status` 增加 `payload.pool_memberships`
+  - [ ] `网关直连裸金属上架中` → `["bare_metal"]`
+  - [ ] `网关代理裸金属上架中` → `["bare_metal","elastic_service"]`
+  - [ ] `线下裸金属交付中` → `["bare_metal"]`
+- [ ] `device_change_action` 增加 `payload.default_pool_bindings`（与 §3.4.4 表一致）
+- [ ] 同步 [supplier-device-import-schema.md §2.1](./supplier-device-import-schema.md)
+
+### 14.2 共享解析层（P0）
+
+- [ ] 新增 `apps/web/src/lib/supplier/device-pool-membership.ts`
+  - [ ] `resolveDevicePoolMemberships(opsStatus, bindings, dict?)`
+  - [ ] `isBareMetalPool` / `isElasticPool` / `isDualPool`
+  - [ ] 单元测试：直连仅裸金属、代理双池、线下仅裸金属、在集群+binding 稳态
+
+### 14.3 聚合 API（P0）
+
+- [ ] `overview.ts`：供应商行 / 库存行改用 §3.4.5；**移除** `bareMetalOnboardingGpu` 累加；**移除** 裸金属/弹性互斥去重
+- [ ] `supplier-overview-api.ts`：删 `bareMetalOnboardingGpu`；增 `dualPoolGpu`（supplierRows + inventoryRows 可选）
+- [ ] `opsPipeline`：裸金属拆分为「直连上架中 / 代理上架中（双池）」
+- [ ] `poolCode` 筛选按 §5.4.10 行为
+
+### 14.4 UI（P0）
+
+- [ ] `supplier-overview-content.tsx` 供应商表：删「裸金属上架」列；改三列标题 + Tooltip
+- [ ] 渲染 `dualPoolGpu`；零值 `—`；代理行可选 Badge `双池`
+- [ ] 表底 footnote（§5.4.6 原文）
+- [ ] 机房×卡型表：列名与口径对齐 §5.4.7
+
+### 14.5 写入层（P1）
+
+- [ ] `device-import-utils.ts` → `applyChangelogRows`：commit 时 upsert/delete `resource_pool_binding`（§3.4.4）
+- [ ] `上架网关代理裸金属`：写入 bare_metal + elastic_service **两条** binding
+- [ ] `上架单机/直连裸金属`：仅 bare_metal，清除 elastic
+- [ ] `下架裸金属`：清除 bare_metal，**保留** elastic
+- [ ] `加入集群`：不改动 binding（B1 稳态承接）
+
+### 14.6 验收用例
+
+| # | 场景 | 裸金属池 | 弹性池 | 双池 |
+|---|------|---------|--------|------|
+| T1 | 设备 `网关直连裸金属上架中`，无 binding | ✓ | ✗ | 0 |
+| T2 | 设备 `网关代理裸金属上架中`，无 binding | ✓ | ✓ | ✓ |
+| T3 | 设备 `线下裸金属交付中` | ✓ | ✗ | 0 |
+| T4 | 代理裸金属 commit → `在集群中`，双 binding 保留 | ✓ | ✓ | ✓ |
+| T5 | 供应商行：直连 256 + 代理 64 | 320 | 180（116 纯弹性 + 64 代理） | 64 |
+| T6 | `bareMetal + elastic − dual` ≠ 总量 | footer 可见说明 | — | — |
+
+### 14.7 不在范围
+
+- 历史数据 backfill（环境将清理重建）
+- 方案 B/C 折叠矩阵（仅方案 A）
+
+### 14.8 生命周期与 KPI（v2.4，P0）
+
+- [ ] `resolveLifecycleStatus` 重写为 §3.4.3.1（批次 ctx + ONLINE_OPS）
+- [ ] `supply-lifecycle-dictionary.ts`：ops 种子 `lifecycle_status` 改为参考列；4 种上架 ops → 参考 `在线`
+- [ ] 批次创建 / link → 设备 `lifecycle=待接入`；`设备接收` → `接入中`
+- [ ] 下架批次创建 → 设备 `lifecycle=下线中`；统一 `device-retire` 写入值（废止 `已下线`）
+- [ ] `OverviewKpiMetric` 类型；`getStats.kpis` 结构 §5.4.2
+- [ ] 聚合：`nonSchedulable` / `inMaintenance` / `reservedIdle` 各含 deviceCount + gpuCount
+- [ ] 主 KPI 6 项 + 子 KPI 3 项 UI：`{gpuCount} 卡 · {deviceCount} 台`
+- [ ] 漏斗 5 段；每段 deviceCount + gpuCount
+- [ ] 供应商表：`pendingAccess*` / `onboarding*` / `retiring*` 分列（卡+台可选）
+- [ ] `batch-progress.ts`：`onboarding` 仅计 `接入中`；新增 `pending` 计 `待接入`
+- [ ] 同步 [supplier-device-import-schema.md §2](./supplier-device-import-schema.md)
+
+### 14.9 生命周期验收用例
+
+| # | 场景 | lifecycle | ops |
+|---|------|-----------|-----|
+| L1 | 创建 online 批次并 link，未接收 | 待接入 | — |
+| L2 | `设备接收` | 接入中 | 预留闲置中 |
+| L3 | `上架网关直连裸金属` | **在线** | 网关直连裸金属上架中 |
+| L4 | `在集群中` + `in_maintenance=true` | **维护中** | 在集群中 |
+| L5 | 创建 device_retire 批次 | **下线中** | 已退订或原 ops |
+| L6 | KPI 不可调度 | 在线 | 不可调度节点运行中 |
+| L7 | KPI 预留闲置 | 接入中 | 预留闲置中 |

@@ -7,16 +7,27 @@ export type OverviewFiltersInput = {
   poolCode: string
 }
 
+export type OverviewKpiMetric = {
+  deviceCount: number
+  gpuCount: number
+}
+
 export type OverviewKpisDto = {
-  totalGpu: number
-  onlineGpu: number
-  onboardingGpu: number
-  maintenanceGpu: number
+  total: OverviewKpiMetric
+  online: OverviewKpiMetric
+  pendingAccess: OverviewKpiMetric
+  onboarding: OverviewKpiMetric
+  maintenance: OverviewKpiMetric
+  sellable: OverviewKpiMetric
+  retiring?: OverviewKpiMetric
+  nonSchedulable: OverviewKpiMetric
+  inMaintenance: OverviewKpiMetric
+  reservedIdle: OverviewKpiMetric
   internalTestGpu: number
-  sellableGpu: number
   faultOpenCount: number
   activeTestHolds: number
   activeBatches: number
+  sellableRate: number
 }
 
 export type LifecycleFunnelStageDto = {
@@ -42,13 +53,14 @@ export type SupplierOverviewRowDto = {
   activeBatches: number
   openFaults: number
   maintenanceGpu: number
-  pendingOnboardingGpu: number
-  pendingRetireGpu: number
+  pendingAccessGpu: number
+  onboardingGpu: number
+  retiringGpu: number
   internalTestGpu: number
   offlineDeliveryGpu: number
-  bareMetalOnboardingGpu: number
-  elasticServiceGpu: number
   bareMetalPoolGpu: number
+  elasticServiceGpu: number
+  dualPoolGpu: number
 }
 
 export type InventoryOverviewRowDto = {
@@ -65,8 +77,9 @@ export type InventoryOverviewRowDto = {
   internalTestGpu: number
   sellableQuantity: number
   offlineQuantity: number
-  bareMetalQuantity: number
-  elasticServiceQuantity: number
+  bareMetalPoolGpu: number
+  elasticServiceGpu: number
+  dualPoolGpu: number
   status: string
   poolCodes: string[]
 }

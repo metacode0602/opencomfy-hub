@@ -15,6 +15,8 @@ import {
   Banknote,
   TrendingUp,
   ChevronRight,
+  Settings2,
+  FlaskConical,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -39,7 +41,6 @@ import {
   statusNames,
 } from '@/components/dashboard/supplier-detail-constants'
 import { SupplierDatacentersPanel } from '@/components/dashboard/supplier-datacenters-panel'
-import { SupplierDevicesPanel } from '@/components/dashboard/supplier-devices-panel'
 import { SupplierContractsPanel } from '@/components/dashboard/supplier-contracts-panel'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { SupplierBillsPanel } from '@/components/dashboard/supplier-bills-panel'
@@ -119,6 +120,8 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
 
   const totalOnlineDevices = devices.reduce((sum, d) => sum + d.onlineQuantity, 0)
   const totalDevices = devices.reduce((sum, d) => sum + d.quantity, 0)
+  const maintenanceResourceGroups = devices.filter((d) => d.status === 'maintenance').length
+  const internalTestResourceGroups = devices.filter((d) => d.isInternalTest).length
   const onlineDataCenters = dataCenters.filter((dc) => dc.status === 'online').length
   const totalNetworkFee = dataCenters.reduce((sum, dc) => sum + dc.networkFee, 0)
   const totalManagementFee = dataCenters.reduce((sum, dc) => sum + dc.managementNodeFee, 0)
@@ -147,38 +150,40 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
   )
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between">
-        <div className="flex items-start gap-4">
-          <Link href="/supplier/suppliers">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+          <Link href="/supplier/suppliers" className="shrink-0">
             <Button variant="ghost" size="icon" className="mt-1">
               <ArrowLeft className="w-4 h-4" />
             </Button>
           </Link>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold text-foreground">{supplier.name}</h1>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="text-xl font-semibold text-foreground sm:text-2xl">{supplier.name}</h1>
               <Badge variant="outline" className={statusColors[supplier.status]}>
                 {statusNames[supplier.status]}
               </Badge>
             </div>
-            <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <MapPin className="w-4 h-4" />
-                {supplier.address}
+            <div className="mt-2 flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+              <span className="flex min-w-0 items-start gap-1 sm:items-center">
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 sm:mt-0" />
+                <span className="break-words">{supplier.address}</span>
               </span>
-              <span className="flex items-center gap-1">
-                <Calendar className="w-4 h-4" />
+              <span className="flex shrink-0 items-center gap-1">
+                <Calendar className="h-4 w-4 shrink-0" />
                 合作始于 {supplier.createdAt}
               </span>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setEditDialogOpen(true)}>
+        <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+          <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => setEditDialogOpen(true)}>
             编辑信息
           </Button>
-          <Button onClick={() => setRetireDialogOpen(true)}>设备下架</Button>
+          <Button className="flex-1 sm:flex-none" onClick={() => setRetireDialogOpen(true)}>
+            设备下架
+          </Button>
         </div>
       </div>
 
@@ -223,7 +228,7 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
         }}
       />
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <Card className="bg-card border-border">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -301,54 +306,99 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
             </div>
           </CardContent>
         </Card>
+        <Card className="bg-card border-border">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">维护中资源组</p>
+                <p className="text-2xl font-semibold text-foreground mt-1">
+                  {maintenanceResourceGroups}
+                </p>
+              </div>
+              <Settings2 className="w-8 h-8 text-yellow-500/50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-card border-border">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">内部测试中</p>
+                <p className="text-2xl font-semibold text-foreground mt-1">
+                  {internalTestResourceGroups}
+                </p>
+              </div>
+              <FlaskConical className="w-8 h-8 text-purple-500/50" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">概览</TabsTrigger>
-          <TabsTrigger value="datacenters">机房管理</TabsTrigger>
-          <TabsTrigger value="devices">设备资源</TabsTrigger>
-          <TabsTrigger value="contracts">合同管理</TabsTrigger>
-          <TabsTrigger value="unit-costs">卡型成本</TabsTrigger>
-          <TabsTrigger value="bills">账单结算</TabsTrigger>
-          <TabsTrigger value="batches">接入批次</TabsTrigger>
-          <TabsTrigger value="timeline">活动时间线</TabsTrigger>
-          <TabsTrigger value="machines">物理机</TabsTrigger>
-          <TabsTrigger value="ops-import">运维导入</TabsTrigger>
-        </TabsList>
+        <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+          <TabsList className="h-auto w-max min-w-full flex-nowrap sm:w-fit">
+            <TabsTrigger value="overview" className="shrink-0">
+              概览
+            </TabsTrigger>
+            <TabsTrigger value="datacenters" className="shrink-0">
+              机房管理
+            </TabsTrigger>
+            <TabsTrigger value="devices" className="shrink-0">
+              设备资源
+            </TabsTrigger>
+            <TabsTrigger value="contracts" className="shrink-0">
+              合同管理
+            </TabsTrigger>
+            <TabsTrigger value="unit-costs" className="shrink-0">
+              卡型成本
+            </TabsTrigger>
+            <TabsTrigger value="bills" className="shrink-0">
+              账单结算
+            </TabsTrigger>
+            <TabsTrigger value="batches" className="shrink-0">
+              接入批次
+            </TabsTrigger>
+            <TabsTrigger value="timeline" className="shrink-0">
+              活动时间线
+            </TabsTrigger>
+            <TabsTrigger value="ops-import" className="shrink-0">
+              运维导入
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
-        <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-3 gap-6">
+        <TabsContent value="overview" className="space-y-4 sm:space-y-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-6 xl:grid-cols-3">
             <Card className="bg-card border-border">
               <CardHeader>
                 <CardTitle className="text-base">联系信息</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <div className="w-8 h-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                     <User className="w-4 h-4 text-primary" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm text-muted-foreground">联系人</p>
-                    <p className="text-foreground">{supplier.contactPerson}</p>
+                    <p className="break-words text-foreground">{supplier.contactPerson}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-green-500/10 flex items-center justify-center">
+                  <div className="w-8 h-8 shrink-0 rounded-full bg-green-500/10 flex items-center justify-center">
                     <Phone className="w-4 h-4 text-green-500" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm text-muted-foreground">联系电话</p>
-                    <p className="text-foreground">{supplier.contactPhone}</p>
+                    <p className="break-all text-foreground">{supplier.contactPhone}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <div className="w-8 h-8 shrink-0 rounded-full bg-blue-500/10 flex items-center justify-center">
                     <Mail className="w-4 h-4 text-blue-500" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-sm text-muted-foreground">邮箱</p>
-                    <p className="text-foreground">{supplier.contactEmail}</p>
+                    <p className="break-all text-foreground">{supplier.contactEmail}</p>
                   </div>
                 </div>
                 <div className="pt-4 border-t border-border">
@@ -366,9 +416,14 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
             </Card>
 
             <Card className="bg-card border-border">
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="text-base">机房分布</CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setActiveTab('datacenters')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-fit self-start sm:self-auto"
+                  onClick={() => setActiveTab('datacenters')}
+                >
                   查看全部
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
@@ -377,16 +432,16 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
                 {dataCenters.map((dc) => (
                   <div
                     key={dc.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/30"
+                    className="flex flex-col gap-2 rounded-lg bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
                   >
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-medium text-foreground">{dc.name}</p>
                       <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {dc.location}
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate">{dc.location}</span>
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="shrink-0 sm:text-right">
                       <Badge variant="outline" className={dcStatusColors[dc.status]}>
                         {statusNames[dc.status]}
                       </Badge>
@@ -399,10 +454,15 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
               </CardContent>
             </Card>
 
-            <Card className="bg-card border-border">
-              <CardHeader className="flex flex-row items-center justify-between">
+            <Card className="bg-card border-border md:col-span-2 xl:col-span-1">
+              <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle className="text-base">设备类型</CardTitle>
-                <Button variant="ghost" size="sm" onClick={() => setActiveTab('devices')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-fit self-start sm:self-auto"
+                  onClick={() => setActiveTab('devices')}
+                >
                   查看全部
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
@@ -431,63 +491,104 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
           </div>
 
           <Card className="bg-card border-border">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle className="text-base">近期账单</CardTitle>
                 <CardDescription>最近的结算记录</CardDescription>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setActiveTab('bills')}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit self-start sm:self-auto"
+                onClick={() => setActiveTab('bills')}
+              >
                 查看全部
                 <ChevronRight className="w-4 h-4 ml-1" />
               </Button>
             </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border hover:bg-transparent">
-                    <TableHead className="text-muted-foreground">账单月份</TableHead>
-                    <TableHead className="text-muted-foreground">结算模式</TableHead>
-                    <TableHead className="text-muted-foreground">使用卡时</TableHead>
-                    <TableHead className="text-muted-foreground">配套费用</TableHead>
-                    <TableHead className="text-muted-foreground">结算金额</TableHead>
-                    <TableHead className="text-muted-foreground">状态</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bills.slice(0, 3).map((bill) => (
-                    <TableRow key={bill.id} className="border-border">
-                      <TableCell className="font-medium text-foreground">{bill.month}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
-                            bill.cooperationMode === 'card_time'
-                              ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                              : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                          }
-                        >
-                          {cooperationModeLabels[bill.cooperationMode]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-foreground">
+            <CardContent className="divide-y p-0 md:hidden">
+                {bills.slice(0, 3).map((bill) => (
+                  <div key={bill.id} className="space-y-2 px-4 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-foreground">{bill.month}</p>
+                      <Badge variant="outline" className={billStatusColors[bill.status]}>
+                        {statusNames[bill.status]}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Badge
+                        variant="outline"
+                        className={
+                          bill.cooperationMode === 'card_time'
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                            : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                        }
+                      >
+                        {cooperationModeLabels[bill.cooperationMode]}
+                      </Badge>
+                      <span className="text-muted-foreground">
                         {bill.totalUsageHours.toLocaleString()} 小时
-                      </TableCell>
-                      <TableCell className="text-foreground">
-                        ¥{(bill.networkFee + bill.managementFee).toLocaleString()}
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        配套 ¥{(bill.networkFee + bill.managementFee).toLocaleString()}
+                      </span>
+                      <span className="font-medium text-foreground">
                         ¥{bill.finalAmount.toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={billStatusColors[bill.status]}>
-                          {statusNames[bill.status]}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      </span>
+                    </div>
+                  </div>
+                ))}
             </CardContent>
+
+            <div className="hidden overflow-x-auto md:block">
+                <Table className="min-w-[720px]">
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">账单月份</TableHead>
+                      <TableHead className="text-muted-foreground">结算模式</TableHead>
+                      <TableHead className="text-muted-foreground">使用卡时</TableHead>
+                      <TableHead className="text-muted-foreground">配套费用</TableHead>
+                      <TableHead className="text-muted-foreground">结算金额</TableHead>
+                      <TableHead className="text-muted-foreground">状态</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {bills.slice(0, 3).map((bill) => (
+                      <TableRow key={bill.id} className="border-border">
+                        <TableCell className="font-medium text-foreground">{bill.month}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              bill.cooperationMode === 'card_time'
+                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                : 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                            }
+                          >
+                            {cooperationModeLabels[bill.cooperationMode]}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-foreground">
+                          {bill.totalUsageHours.toLocaleString()} 小时
+                        </TableCell>
+                        <TableCell className="text-foreground">
+                          ¥{(bill.networkFee + bill.managementFee).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="font-medium text-foreground">
+                          ¥{bill.finalAmount.toLocaleString()}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={billStatusColors[bill.status]}>
+                            {statusNames[bill.status]}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+            </div>
           </Card>
         </TabsContent>
 
@@ -500,10 +601,7 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
         </TabsContent>
 
         <TabsContent value="devices" className="space-y-4">
-          <SupplierDevicesPanel
-            supplier={supplier}
-            onOpenOpsImport={() => setActiveTab('ops-import')}
-          />
+          <PhysicalDevicesContent supplierIdFilter={supplier.id} />
         </TabsContent>
 
         <TabsContent value="contracts" className="space-y-4">
@@ -520,10 +618,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
 
         <TabsContent value="timeline" className="space-y-4">
           <SupplierActivityTimelinePanel supplierId={domainSupplierId} />
-        </TabsContent>
-
-        <TabsContent value="machines" className="space-y-4">
-          <PhysicalDevicesContent supplierIdFilter={supplier.id} />
         </TabsContent>
 
         <TabsContent value="ops-import" className="space-y-4">

@@ -37,7 +37,11 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { cn } from '@workspace/ui/lib/utils'
-import type { OverviewFiltersInput } from '@/lib/types/supplier-overview-api'
+import type {
+  OverviewFiltersInput,
+  OverviewKpiMetric,
+  OverviewKpisDto,
+} from '@/lib/types/supplier-overview-api'
 import { trpc } from '@/lib/trpc/client'
 import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
 
@@ -64,18 +68,38 @@ function formatDt(iso: string | null | undefined) {
   })
 }
 
+const emptyMetric: OverviewKpiMetric = { deviceCount: 0, gpuCount: 0 }
+
+function normalizeOverviewKpis(kpis: Partial<OverviewKpisDto> | undefined): OverviewKpisDto {
+  return {
+    total: kpis?.total ?? emptyMetric,
+    online: kpis?.online ?? emptyMetric,
+    pendingAccess: kpis?.pendingAccess ?? emptyMetric,
+    onboarding: kpis?.onboarding ?? emptyMetric,
+    maintenance: kpis?.maintenance ?? emptyMetric,
+    sellable: kpis?.sellable ?? emptyMetric,
+    retiring: kpis?.retiring,
+    nonSchedulable: kpis?.nonSchedulable ?? emptyMetric,
+    inMaintenance: kpis?.inMaintenance ?? emptyMetric,
+    reservedIdle: kpis?.reservedIdle ?? emptyMetric,
+    internalTestGpu: kpis?.internalTestGpu ?? 0,
+    faultOpenCount: kpis?.faultOpenCount ?? 0,
+    activeTestHolds: kpis?.activeTestHolds ?? 0,
+    activeBatches: kpis?.activeBatches ?? 0,
+    sellableRate: kpis?.sellableRate ?? 0,
+  }
+}
+
 function KpiCard({
   title,
-  value,
-  unit,
+  metric,
   icon: Icon,
   hint,
   warn,
   accent,
 }: {
   title: string
-  value: number
-  unit: string
+  metric: OverviewKpiMetric
   icon: React.ComponentType<{ className?: string }>
   hint?: string
   warn?: boolean
@@ -103,16 +127,14 @@ function KpiCard({
           </div>
           <div className="min-w-0 flex-1 text-right">
             <p className="text-xs text-muted-foreground">{title}</p>
-            <div className="mt-1 flex items-baseline justify-end gap-1">
-              <span
-                className={cn(
-                  'text-2xl font-semibold tabular-nums',
-                  warn && 'text-chart-4',
-                )}
-              >
-                {value.toLocaleString()}
+            <div className="mt-1 text-lg font-semibold tabular-nums">
+              <span className={cn(warn && 'text-chart-4')}>
+                {metric.gpuCount.toLocaleString()} 卡
               </span>
-              <span className="text-xs text-muted-foreground">{unit}</span>
+              <span className="mx-1 text-sm font-normal text-muted-foreground">·</span>
+              <span className="text-sm font-medium text-muted-foreground">
+                {metric.deviceCount.toLocaleString()} 台
+              </span>
             </div>
             {hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null}
           </div>
@@ -138,21 +160,10 @@ export function SupplierOverviewContent() {
     error,
   } = trpc.supplier.overview.getStats.useQuery(filters)
 
-  const kpis = stats?.kpis ?? {
-    totalGpu: 0,
-    onlineGpu: 0,
-    onboardingGpu: 0,
-    maintenanceGpu: 0,
-    internalTestGpu: 0,
-    sellableGpu: 0,
-    faultOpenCount: 0,
-    activeTestHolds: 0,
-    activeBatches: 0,
-  }
+  const kpis = normalizeOverviewKpis(stats?.kpis)
   const supplierRows = stats?.supplierRows ?? []
   const inventoryRows = stats?.inventoryRows ?? []
   const funnel = stats?.lifecycleFunnel ?? []
-  const opsPipeline = stats?.opsPipeline ?? []
   const batchSummaries = stats?.batchSummaries ?? []
   const faultSla = stats?.faultSla ?? {
     openCount: 0,
@@ -162,8 +173,7 @@ export function SupplierOverviewContent() {
     recentOpen: [],
   }
 
-  const sellableRate =
-    kpis.onlineGpu > 0 ? Math.round((kpis.sellableGpu / kpis.onlineGpu) * 100) : 0
+  const sellableRate = kpis.sellableRate
 
   const suppliers = filterOptions?.suppliers ?? []
   const regions = filterOptions?.regions ?? []
@@ -176,7 +186,7 @@ export function SupplierOverviewContent() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">资源总览</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            供应商算力资源大盘 · 总量 / 在线 / 接入 / 维护 / 测试 / 可售
+            供应商算力资源大盘 · 总量 / 在线 / 待接入 / 接入中 / 维护 / 可售
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -268,48 +278,18 @@ export function SupplierOverviewContent() {
           (isLoading || isError) && 'pointer-events-none opacity-50',
         )}
       >
-        <KpiCard title="GPU 总量" value={kpis.totalGpu} unit="卡" icon={Cpu} accent="primary" />
+        <KpiCard title="GPU 总量" metric={kpis.total} icon={Cpu} accent="primary" />
+        <KpiCard title="在线" metric={kpis.online} icon={CheckCircle2} accent="green" />
         <KpiCard
-          title="在线 GPU"
-          value={kpis.onlineGpu}
-          unit="卡"
-          icon={CheckCircle2}
-          accent="green"
-        />
-        <KpiCard
-          title="接入中"
-          value={kpis.onboardingGpu}
-          unit="卡"
-          icon={Loader2}
-          accent="yellow"
-          warn={kpis.onboardingGpu > 0}
-          hint={kpis.activeBatches > 0 ? `${kpis.activeBatches} 个活跃批次` : undefined}
-        />
-        <KpiCard
-          title="维护 / 故障"
-          value={kpis.maintenanceGpu}
-          unit="卡"
-          icon={Wrench}
-          accent="yellow"
-          warn={kpis.faultOpenCount > 0}
-          hint={kpis.faultOpenCount > 0 ? `${kpis.faultOpenCount} 个未关闭故障` : undefined}
-        />
-        <KpiCard
-          title="内部内部占用"
-          value={kpis.internalTestGpu}
-          unit="卡"
-          icon={FlaskConical}
-          accent="purple"
-          hint={kpis.activeTestHolds > 0 ? `${kpis.activeTestHolds} 条活跃占用` : undefined}
-        />
-        <KpiCard
-          title="可售 GPU"
-          value={kpis.sellableGpu}
-          unit="卡"
+          title="可售"
+          metric={kpis.sellable}
           icon={TrendingUp}
           accent="green"
           hint={`可售率 ${sellableRate}%`}
         />
+        <KpiCard title="不可调度" metric={kpis.nonSchedulable} icon={Server} accent="purple" />
+        <KpiCard title="维修中" metric={kpis.inMaintenance} icon={Wrench} accent="yellow" />
+        <KpiCard title="预留闲置" metric={kpis.reservedIdle} icon={FlaskConical} accent="primary" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-12">
@@ -341,19 +321,6 @@ export function SupplierOverviewContent() {
                 </div>
               </div>
             ))}
-            {/* {opsPipeline.some((g) => g.gpuCount > 0) ? (
-              <div className="mt-4 space-y-2 rounded-md border border-dashed border-border/80 p-3">
-                <p className="text-xs font-medium text-muted-foreground">运维状态管道</p>
-                {opsPipeline.map((g) => (
-                  <div key={g.group} className="flex justify-between text-xs">
-                    <span>{g.group}</span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {g.gpuCount} 卡 · {g.deviceCount} 台
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : null} */}
             <div className="mt-4 flex gap-2">
               <Button variant="outline" size="sm" asChild>
                 <Link href="/supplier/online-tasks">
@@ -397,12 +364,13 @@ export function SupplierOverviewContent() {
                   <TableHead className="text-right">故障</TableHead>
                   <TableHead className="text-right">维护中</TableHead>
                   <TableHead className="text-right">待接入</TableHead>
+                  <TableHead className="text-right">接入中</TableHead>
                   <TableHead className="text-right">下线中</TableHead>
                   <TableHead className="text-right">内部占用</TableHead>
                   <TableHead className="text-right">线下交付</TableHead>
-                  <TableHead className="text-right">裸金属上架</TableHead>
-                  <TableHead className="text-right">弹性服务</TableHead>
                   <TableHead className="text-right">裸金属池</TableHead>
+                  <TableHead className="text-right">弹性池</TableHead>
+                  <TableHead className="text-right">双池</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -447,18 +415,27 @@ export function SupplierOverviewContent() {
                       {row.maintenanceGpu.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.pendingOnboardingGpu > 0 ? (
+                      {row.pendingAccessGpu > 0 ? (
                         <Badge variant="outline" className="border-chart-4/40 text-chart-4">
-                          {row.pendingOnboardingGpu}
+                          {row.pendingAccessGpu}
                         </Badge>
                       ) : (
                         '—'
                       )}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.pendingRetireGpu > 0 ? (
+                      {row.onboardingGpu > 0 ? (
+                        <Badge variant="outline" className="border-chart-4/40 text-chart-4">
+                          {row.onboardingGpu}
+                        </Badge>
+                      ) : (
+                        '—'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.retiringGpu > 0 ? (
                         <Badge variant="outline" className="border-muted-foreground/40">
-                          {row.pendingRetireGpu}
+                          {row.retiringGpu}
                         </Badge>
                       ) : (
                         '—'
@@ -471,15 +448,13 @@ export function SupplierOverviewContent() {
                       {row.offlineDeliveryGpu > 0 ? row.offlineDeliveryGpu.toLocaleString() : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.bareMetalOnboardingGpu > 0
-                        ? row.bareMetalOnboardingGpu.toLocaleString()
-                        : '—'}
+                      {row.bareMetalPoolGpu > 0 ? row.bareMetalPoolGpu.toLocaleString() : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {row.elasticServiceGpu > 0 ? row.elasticServiceGpu.toLocaleString() : '—'}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.bareMetalPoolGpu > 0 ? row.bareMetalPoolGpu.toLocaleString() : '—'}
+                      {row.dualPoolGpu > 0 ? row.dualPoolGpu.toLocaleString() : '—'}
                     </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" className="size-8" asChild>
@@ -524,8 +499,9 @@ export function SupplierOverviewContent() {
                 <TableHead className="text-right">维护</TableHead>
                 <TableHead className="text-right">内部占用</TableHead>
                 <TableHead className="text-right">可售</TableHead>
-                <TableHead className="text-right">裸金属</TableHead>
-                <TableHead className="text-right">弹性服务</TableHead>
+                <TableHead className="text-right">裸金属池</TableHead>
+                <TableHead className="text-right">弹性池</TableHead>
+                <TableHead className="text-right">双池</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
@@ -547,10 +523,13 @@ export function SupplierOverviewContent() {
                     {row.sellableQuantity}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {row.bareMetalQuantity}
+                    {row.bareMetalPoolGpu > 0 ? row.bareMetalPoolGpu : '—'}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {row.elasticServiceQuantity}
+                    {row.elasticServiceGpu > 0 ? row.elasticServiceGpu : '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.dualPoolGpu > 0 ? row.dualPoolGpu : '—'}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={statusColors[row.status]}>
@@ -564,7 +543,7 @@ export function SupplierOverviewContent() {
                   <TableCell>
                     <Button variant="ghost" size="icon" className="size-8" asChild>
                       <Link
-                        href={`/supplier/devices/${row.id}?supplier=${row.supplierId}&status=${row.status}`}
+                        href={`/supplier/inventory/${row.id}?supplier=${row.supplierId}&status=${row.status}`}
                       >
                         <ChevronRight className="size-4" />
                       </Link>
@@ -574,7 +553,7 @@ export function SupplierOverviewContent() {
               ))}
               {inventoryRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
                     当前筛选条件下无库存数据
                   </TableCell>
                 </TableRow>
@@ -718,7 +697,12 @@ export function SupplierOverviewContent() {
             </span>
           </div>
           <span className="hidden sm:inline">·</span>
-          <span>批次进度来自 device_link + 变更表，与供应商表「在线/可售」列口径不同</span>
+          <span>
+            裸金属池占用：直连/单机上架中、线下交付及已绑定裸金属池设备；弹性用量池：platform/elastic
+            及网关代理裸金属；双池主要为代理裸金属，两列之和减去双池不等于独占 GPU 总数
+          </span>
+          <span className="hidden sm:inline">·</span>
+          <span>KPI 与漏斗均展示 GPU 卡数与设备台数；lifecycle 按待接入 / 接入中 / 在线 / 维护中 / 下线中 五段统计</span>
         </CardContent>
       </Card>
     </div>

@@ -4,7 +4,7 @@
 
 **文档性质**：在 **不更名既有表** 的前提下，描述本次增量变更的完整表结构、字段映射与导入批次规则。物理实现见 `packages/db/src/supply-schema.ts`。
 
-**版本**：v1.2（2026-05-23）
+**版本**：v1.4（2026-05-23）
 
 **关联主文档**：[supplier-database.md](./supplier-database.md)、[supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md)（v2.2 资源总览 / 字典）
 
@@ -31,34 +31,41 @@
 
 ### 2.1 `device_ops_status`（Excel 设备状态 — 字典域）
 
-在 `lifecycle_state_definition` 中增加 `domain = device_ops_status`，`state_code` 为 Excel 原文，`payload` 含 `lifecycle_status` 与 **`overview_bucket`**（资源总览分桶，见接入设计 §5.4）。
+在 `lifecycle_state_definition` 中增加 `domain = device_ops_status`，`state_code` 为 Excel 原文，`payload` 含 **`overview_bucket`**、**`pool_memberships`**；`lifecycle_status` **仅作参考**（v2.4 设备 lifecycle 以 [§3.4.3](./supplier-onboarding-plan-changelog-tracking-design.md) 进程规则为准）。
 
 **种子数据（11 条，`supply-lifecycle-dictionary.ts`）**：
 
-| `state_code`（Excel 原文） | `lifecycle_status` | `overview_bucket` | 说明 |
-|---------------------------|-------------------|-------------------|------|
-| `预留闲置中` | `待接入` | `reserved` | 已入库未调度 |
-| `在集群中` | `在线` | `in_cluster` | 可售候选 |
-| `集群组件运行中` | `在线` | `in_cluster` | 可售候选 |
-| `网关直连裸金属上架中` | `接入中` | `bare_metal_onboarding` | **裸金属** 上架 |
-| `网关代理裸金属上架中` | `接入中` | `bare_metal_onboarding` | **裸金属** 上架 |
-| `线下裸金属交付中` | `接入中` | `offline_delivery` | **线下交付** |
-| `其他部门使用中` | `维护中` | `other_dept` | 不可售 |
-| `不可调度节点运行中` | `在线` | `in_cluster` | 在线不计可售（§6） |
-| `网关节点上架中` | `接入中` | `gateway_onboarding` | 网关节点接入 |
-| `已退订` | `退订` | `retired` | 退订/待下架池 |
+| `state_code`（Excel 原文） | 参考 lifecycle | `overview_bucket` | `pool_memberships` | 说明 |
+|---------------------------|---------------|-------------------|-------------------|------|
+| `预留闲置中` | *接入中* | `reserved` | — | KPI「预留闲置」 |
+| `在集群中` | `在线` | `in_cluster` | *binding* | 可售候选 |
+| `集群组件运行中` | `在线` | `in_cluster` | *binding* | 可售候选 |
+| `网关直连裸金属上架中` | **`在线`** | `bare_metal_onboarding` | `["bare_metal"]` | 上架流水线 |
+| `网关代理裸金属上架中` | **`在线`** | `bare_metal_onboarding` | `["bare_metal","elastic_service"]` | 双池 |
+| `线下裸金属交付中` | **`在线`** | `offline_delivery` | `["bare_metal"]` | 线下交付 |
+| `其他部门使用中` | `在线` | `other_dept` | — | 不可售扣减 |
+| `不可调度节点运行中` | `在线` | `in_cluster` | *binding* | KPI「不可调度」 |
+| `网关节点上架中` | **`在线`** | `gateway_onboarding` | — | 网关接入 |
+| `已退订` | `下线中` | `retired` | — | 退订 ops |
 
 **独立字段 `in_maintenance`（维修中）**：
 
 - 来源：Excel 列「维修中」（布尔：是/否、1/0、true/false）。
-- 与 `ops_status` **正交**：例如 `ops_status = 在集群中` 且 `in_maintenance = true` 时，`lifecycle_status` 仍为映射值，但大盘/可售量按维护中扣减（见 §6）。
-- 导入时若 `in_maintenance = true`，应用层可将 `lifecycle_status` **覆盖** 为 `维护中`（覆盖优先级高于 §2.1 表）。
+- 与 `ops_status` **正交**：例如 `ops_status = 在集群中` 且 `in_maintenance = true` 时，`lifecycle_status` **覆盖** 为 `维护中`（§3.4.3.1 优先级最高）。
 
-### 2.2 `lifecycle_status`（CRM 统一状态 — 不变）
+### 2.2 `lifecycle_status`（CRM 统一状态 — v2.4）
 
-`待接入` | `接入中` | `在线` | `离线` | `维护中` | `退订`
+**5 态**：`待接入` | `接入中` | `在线` | `维护中` | `下线中`
 
-由 `ops_status` + `in_maintenance` 在导入 commit 时计算写入 `supplier_device.lifecycle_status`，后续设备变更批次可再次刷新。
+| 阶段 | 定义 |
+|------|------|
+| 待接入 | 已创建 `online`/`order_access` 批次关联，未 `设备接收` |
+| 接入中 | 已 `设备接收`（通常 `ops=预留闲置中`） |
+| 在线 | `ONLINE_OPS`（集群 + 4 种上架/交付 + 其他部门使用中）且非维修 |
+| 维护中 | `in_maintenance = true` |
+| 下线中 | 已创建 `device_retire` 下架批次 |
+
+由 [§3.4.3](./supplier-onboarding-plan-changelog-tracking-design.md) 进程规则写入；详见主设计文档。
 
 ### 2.3 `device_change_action`（Excel 变更动作 — 字典域）
 
@@ -66,7 +73,7 @@
 
 **种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`上架网关直连裸金属`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
 
-`payload.default_ops_status` 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
+`payload.default_ops_status` / **`default_pool_bindings`** 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status` 并同步 `resource_pool_binding`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
 
 ---
 
@@ -479,3 +486,5 @@ erDiagram
 | v1.0 | 2026-05-21 | 首版：设备/变更/故障导入表结构；`ops_status` 与 `lifecycle_status` 映射；`supplier_device_change_log`；故障走 `supplier_ops_upload_batch` |
 | v1.1 | 2026-05-21 | `supplier_device` 保留登录凭据；阶段一 `login_password` 明文；解析行与 import_row 同步 |
 | v1.2 | 2026-05-23 | 字典 `payload`、`device_change_action` 20 条；`change_log.business_onboarding_batch_id`；`onboarding_batch_device_link`；资源总览 `overview_bucket` |
+| v1.3 | 2026-05-23 | `pool_memberships`；`default_pool_bindings` |
+| v1.4 | 2026-05-23 | v2.4 生命周期 5 态进程驱动；ops 字典 lifecycle 改为参考列 |
