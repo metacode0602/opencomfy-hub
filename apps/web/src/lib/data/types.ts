@@ -460,6 +460,30 @@ export interface DataCenter {
   updatedAt?: string
 }
 
+export interface DataCenterStats {
+  total: number
+  online: number
+  offline: number
+  maintenance: number
+  totalGpu: number
+  onlineGpu: number
+}
+
+export interface DataCenterDetail {
+  dataCenter: DataCenter
+  gpuInventory: DataCenterDevice[]
+  physicalDeviceStats: {
+    total: number
+    online: number
+    maintenance: number
+  }
+  inventoryStats: {
+    cardTypeCount: number
+    totalGpu: number
+    onlineGpu: number
+  }
+}
+
 export type GPUCardTypeManufacturer = 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'Other'
 
 export type GPUCardTypeStatus = 'active' | 'disabled'

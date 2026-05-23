@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@workspace/ui/components/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@workspace/ui/components/card'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,10 +47,15 @@ function getErrorMessage(error: unknown): string {
 
 export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelProps) {
   const utils = trpc.useUtils()
-  const { data: dataCenters = [], isLoading: isLoadingDataCenters } =
-    trpc.supplier.listDataCenters.useQuery({
-      supplierId: supplier.id,
-    })
+  const {
+    data: dataCenters = [],
+    isLoading: isLoadingDataCenters,
+    isError: isDataCentersError,
+    error: dataCentersError,
+    refetch: refetchDataCenters,
+  } = trpc.supplier.listDataCenters.useQuery({
+    supplierId: supplier.id,
+  })
   const {
     data: devices = [],
     isLoading: isLoadingDevices,
@@ -95,6 +100,16 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
             <Loader2 className="w-4 h-4 animate-spin" />
             加载机房列表…
           </div>
+        ) : isDataCentersError ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription className="flex flex-wrap items-center gap-3">
+              <span>{getErrorMessage(dataCentersError)}</span>
+              <Button variant="outline" size="sm" onClick={() => void refetchDataCenters()}>
+                重试
+              </Button>
+            </AlertDescription>
+          </Alert>
         ) : dataCenters.length === 0 ? (
           <Card className="bg-card border-border">
             <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -114,9 +129,14 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                 <Card key={dc.id} className="bg-card border-border">
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <CardTitle className="text-base">{dc.name}</CardTitle>
+                          <Link
+                            href={`/supplier/datacenter/${dc.id}`}
+                            className="text-base font-semibold text-foreground hover:text-primary hover:underline"
+                          >
+                            {dc.name}
+                          </Link>
                           <Badge variant="outline" className={dcStatusColors[dc.status]}>
                             {statusNames[dc.status]}
                           </Badge>
@@ -133,9 +153,12 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem>编辑机房</DropdownMenuItem>
-                          <DropdownMenuItem>管理设备</DropdownMenuItem>
-                          <DropdownMenuItem>调整费用</DropdownMenuItem>
+                          <DropdownMenuItem asChild>
+                            <Link href={`/supplier/datacenter/${dc.id}`}>查看详情</Link>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem disabled>编辑机房</DropdownMenuItem>
+                          <DropdownMenuItem disabled>管理设备</DropdownMenuItem>
+                          <DropdownMenuItem disabled>调整费用</DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>

@@ -177,6 +177,46 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
+  listAllDataCenters: protectedProcedure
+    .input(z.object({ supplierId: z.string().optional() }))
+    .query(async ({ input }) => {
+      try {
+        if (input.supplierId) {
+          await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        }
+        return await suppliersDataAccess.listAllDataCenters({ supplierId: input.supplierId })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  getDataCenterStats: protectedProcedure
+    .input(z.object({ supplierId: z.string().optional() }))
+    .query(async ({ input }) => {
+      try {
+        if (input.supplierId) {
+          await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        }
+        return await suppliersDataAccess.getDataCenterStats({ supplierId: input.supplierId })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  getDataCenterDetail: protectedProcedure
+    .input(z.object({ dataCenterId: z.string().min(1) }))
+    .query(async ({ input }) => {
+      try {
+        const detail = await suppliersDataAccess.getDataCenterDetail(input.dataCenterId)
+        if (!detail) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '机房不存在' })
+        }
+        return detail
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
   listGpuInventory: protectedProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {

@@ -34,6 +34,7 @@ import {
   History,
   LayoutDashboard,
   ListOrdered,
+  Server,
   Settings,
   Sparkles,
   Users,
@@ -67,6 +68,11 @@ const data = {
       title: "商务合同",
       url: "/supplier/contracts",
       icon: <FileText className="size-4" />,
+    },
+    {
+      title: "机房管理",
+      url: "/supplier/datacenters",
+      icon: <Server className="size-4" />,
     },
     {
       title: "设备管理",

@@ -2,7 +2,9 @@ import { db } from '@/lib/db'
 import type {
   CooperationMode,
   DataCenter,
+  DataCenterDetail,
   DataCenterDevice,
+  DataCenterStats,
   GPUCardType,
   GpuInventoryDetail,
   Supplier,
@@ -190,6 +192,110 @@ export const suppliersDataAccess = {
     return dcRows.map((row) =>
       mapDataCenterRow(row, nameMap.get(row.supplierId) ?? '', countMap.get(row.id)),
     )
+  },
+
+  async listAllDataCenters(params?: { supplierId?: string }): Promise<DataCenter[]> {
+    if (params?.supplierId) {
+      return this.listDataCentersBySupplier(params.supplierId)
+    }
+
+    const supplierRows = await db
+      .select({ id: supplier.id, name: supplier.name })
+      .from(supplier)
+    if (supplierRows.length === 0) return []
+
+    return this.listDataCentersBySupplierIds(supplierRows.map((r) => r.id))
+  },
+
+  async getDataCenterStats(params?: { supplierId?: string }): Promise<DataCenterStats> {
+    const dcConditions = params?.supplierId
+      ? eq(dataCenter.supplierId, params.supplierId)
+      : undefined
+
+    const dcRows = await db
+      .select({ status: dataCenter.status })
+      .from(dataCenter)
+      .where(dcConditions)
+
+    const invConditions = params?.supplierId
+      ? eq(supplierGpuInventory.supplierId, params.supplierId)
+      : undefined
+
+    const [gpuRow] = await db
+      .select({
+        total: sum(supplierGpuInventory.quantity),
+        online: sum(supplierGpuInventory.onlineQuantity),
+      })
+      .from(supplierGpuInventory)
+      .where(invConditions)
+
+    return {
+      total: dcRows.length,
+      online: dcRows.filter((r) => r.status === 'online').length,
+      offline: dcRows.filter((r) => r.status === 'offline').length,
+      maintenance: dcRows.filter((r) => r.status === 'maintenance').length,
+      totalGpu: Number(gpuRow?.total ?? 0),
+      onlineGpu: Number(gpuRow?.online ?? 0),
+    }
+  },
+
+  async getDataCenterDetail(dataCenterId: string): Promise<DataCenterDetail | null> {
+    const [hit] = await db
+      .select({
+        dataCenter: dataCenter,
+        supplierName: supplier.name,
+      })
+      .from(dataCenter)
+      .innerJoin(supplier, eq(dataCenter.supplierId, supplier.id))
+      .where(eq(dataCenter.id, dataCenterId))
+      .limit(1)
+
+    if (!hit) return null
+
+    const [invCount] = await db
+      .select({
+        total: sum(supplierGpuInventory.quantity),
+        online: sum(supplierGpuInventory.onlineQuantity),
+      })
+      .from(supplierGpuInventory)
+      .where(eq(supplierGpuInventory.dataCenterId, dataCenterId))
+
+    const mappedDataCenter = mapDataCenterRow(hit.dataCenter, hit.supplierName, {
+      total: Number(invCount?.total ?? 0),
+      online: Number(invCount?.online ?? 0),
+    })
+
+    const gpuInventory = (await this.listGpuInventory({ supplierId: hit.dataCenter.supplierId }))
+      .filter((row) => row.dataCenterId === dataCenterId)
+
+    const deviceRows = await db
+      .select({
+        lifecycleStatus: supplierDevice.lifecycleStatus,
+        inMaintenance: supplierDevice.inMaintenance,
+      })
+      .from(supplierDevice)
+      .where(eq(supplierDevice.dataCenterId, dataCenterId))
+
+    const physicalDeviceStats = {
+      total: deviceRows.length,
+      online: deviceRows.filter((d) => d.lifecycleStatus === '在线').length,
+      maintenance: deviceRows.filter(
+        (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
+      ).length,
+    }
+
+    const inventoryStats = {
+      cardTypeCount: gpuInventory.length,
+      totalGpu: gpuInventory.reduce((sum, row) => sum + row.quantity, 0),
+      onlineGpu: gpuInventory.reduce((sum, row) => sum + row.onlineQuantity, 0),
+    }
+
+    return {
+      dataCenter: mappedDataCenter,
+      gpuInventory,
+      physicalDeviceStats,
+      inventoryStats,
+    }
   },
 
   async listGpuInventory(params?: { supplierId?: string }): Promise<DataCenterDevice[]> {
