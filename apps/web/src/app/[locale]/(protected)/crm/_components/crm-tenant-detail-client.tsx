@@ -162,7 +162,7 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+    <div className="bg-background p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" asChild>
           <LocaleLink href="/crm/tenants">← 返回列表</LocaleLink>

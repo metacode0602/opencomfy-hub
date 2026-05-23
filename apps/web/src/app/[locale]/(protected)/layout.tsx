@@ -23,6 +23,7 @@ export default async function RootLayout({
 
   return (
     <SidebarProvider
+      className="h-svh overflow-hidden"
       style={
         {
           "--sidebar-width": "calc(var(--spacing) * 56)",
@@ -31,9 +32,12 @@ export default async function RootLayout({
       }
     >
       <AppSidebar variant="inset" user={sidebarUser} />
-      <SidebarInset>
+      <SidebarInset className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <SiteHeader />
-        <div className="flex flex-1 flex-col">
+        <div
+          data-ui-scroll-container
+          className="flex min-h-0 flex-1 flex-col"
+        >
           {children}
         </div>
       </SidebarInset>

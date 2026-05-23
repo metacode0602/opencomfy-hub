@@ -12,7 +12,6 @@ import { Providers } from './providers'
 import '@workspace/ui/globals.css'
 import '@/app/style.css'
 import { Viewport, type Metadata } from 'next'
-import { SmoothScroll } from '@/components/smooth-scroll'
 import { websiteConfig } from '@/lib/config/website'
 
 interface LocaleLayoutProps {
@@ -70,9 +69,7 @@ export default async function LocaleLayout({ children, params }: LocaleLayoutPro
       >
         <NextIntlClientProvider>
           <Providers>
-            <SmoothScroll>
             {children}
-            </SmoothScroll>
             <Toaster richColors position='top-right' offset={64} />
             <TailwindIndicator />
             <Analytics />

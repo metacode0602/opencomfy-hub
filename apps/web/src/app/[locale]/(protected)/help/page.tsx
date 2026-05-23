@@ -49,7 +49,7 @@ export default function HelpPage() {
   )
 
   return (
-    <div className="h-full overflow-y-auto p-6">
+    <div className="p-6">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Header */}
         <div className="text-center">

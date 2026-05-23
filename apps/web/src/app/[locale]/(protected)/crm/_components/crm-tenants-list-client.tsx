@@ -66,7 +66,7 @@ export function CrmTenantsListClient() {
   })
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+    <div className="bg-background p-4 md:p-6">
       <Card>
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>

@@ -27,7 +27,7 @@ export default function FinancePeriodIncomePage() {
 
   if (!id) {
     return (
-      <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+      <div className="bg-background p-4 md:p-6">
         <p className="text-muted-foreground">无效账期 ID</p>
       </div>
     )
@@ -35,7 +35,7 @@ export default function FinancePeriodIncomePage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+      <div className="bg-background p-4 md:p-6">
         <p className="text-muted-foreground">加载中…</p>
       </div>
     )
@@ -43,7 +43,7 @@ export default function FinancePeriodIncomePage() {
 
   if (!period) {
     return (
-      <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+      <div className="bg-background p-4 md:p-6">
         <p className="text-muted-foreground">未找到该账期。</p>
         <Button variant="link" asChild className="mt-2 px-0">
           <LocaleLink href="/finance">返回账期列表</LocaleLink>
@@ -53,7 +53,7 @@ export default function FinancePeriodIncomePage() {
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+    <div className="bg-background p-4 md:p-6">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" asChild>
           <LocaleLink href="/finance">← 账期列表</LocaleLink>

@@ -99,7 +99,7 @@ const data = {
       icon: <AlertCircleIcon className="size-4" />,
     },
     {
-      title: "测试占用",
+      title: "内部占用",
       url: "/supplier/test-holds",
       icon: <CheckCircleIcon className="size-4" />,
     }

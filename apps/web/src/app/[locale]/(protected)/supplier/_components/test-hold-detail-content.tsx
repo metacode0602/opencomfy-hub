@@ -117,12 +117,12 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
         <Link href="/supplier/test-holds">
           <Button variant="ghost" size="sm" className="gap-2">
             <ArrowLeft className="w-4 h-4" />
-            返回测试占用
+            返回内部占用
           </Button>
         </Link>
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            未找到该测试占用记录，可能 ID 无效或已被删除
+            未找到该内部占用记录，可能 ID 无效或已被删除
           </CardContent>
         </Card>
       </div>
@@ -140,7 +140,7 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
           </Link>
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-2xl font-semibold">测试占用详情</h1>
+              <h1 className="text-2xl font-semibold">内部占用详情</h1>
               <Badge
                 variant="outline"
                 className={active ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : ''}
@@ -357,13 +357,13 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>确认结束单台设备占用？</AlertDialogTitle>
             <AlertDialogDescription>
-              将从本测试占用中移除设备{' '}
+              将从本内部占用中移除设备{' '}
               <span className="font-mono">
                 {confirmAction?.type === 'end_device'
                   ? confirmAction.device.sn ?? confirmAction.device.internal_ip
                   : ''}
               </span>
-              ，该设备将不再计入本次内部测试占用（Mock）。
+              ，该设备将不再计入本次内部内部占用（Mock）。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -384,7 +384,7 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>确认结束全部占用？</AlertDialogTitle>
             <AlertDialogDescription>
-              将立即结束 {hold.user_name} 的 {hold.card_type} × {hold.unit_count} 台测试占用，
+              将立即结束 {hold.user_name} 的 {hold.card_type} × {hold.unit_count} 台内部占用，
               结束时间为当前时刻。已录入的 {devices.length} 台设备记录仍保留供查阅。
             </AlertDialogDescription>
           </AlertDialogHeader>

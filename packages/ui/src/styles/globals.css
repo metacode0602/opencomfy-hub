@@ -139,10 +139,9 @@ body {
 }
 
 
-/* Scope the desktop scroll shell to the generated root container only. */
+/* App shell scroll region: flex child that fills remaining height and scrolls internally. */
 [data-ui-scroll-container] {
-  height: 100vh;
-  height: 100dvh;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: none;

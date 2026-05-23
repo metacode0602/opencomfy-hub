@@ -209,8 +209,8 @@ export function TestHoldsContent() {
       type: 'internal_test_hold',
       title:
         parsedRows.length === 1
-          ? `内部测试占用 ${cardSummary}`
-          : `内部测试占用 ${parsedRows.length} 种卡型`,
+          ? `内部内部占用 ${cardSummary}`
+          : `内部内部占用 ${parsedRows.length} 种卡型`,
       description: `${cardSummary} · ${form.userName.trim()} · ${INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[form.department]} · ${INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[form.settlementMode]}${remark ? ` · ${remark}` : ''}`,
       author_name: '运营（mock）',
       author_role: 'ops',
@@ -220,7 +220,7 @@ export function TestHoldsContent() {
     })
 
     toast.success(
-      parsedRows.length === 1 ? '测试占用已登记' : `已登记 ${parsedRows.length} 条测试占用`,
+      parsedRows.length === 1 ? '内部占用已登记' : `已登记 ${parsedRows.length} 条内部占用`,
     )
     setCreateOpen(false)
     setForm(EMPTY_FORM)
@@ -239,7 +239,7 @@ export function TestHoldsContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">测试占用</h1>
+          <h1 className="text-2xl font-semibold text-foreground">内部占用</h1>
           <p className="text-sm text-muted-foreground mt-1">
             内部测试 GPU 占用台账，影响可售量计算（Mock）
           </p>
@@ -317,7 +317,7 @@ export function TestHoldsContent() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>登记内部测试占用</DialogTitle>
+            <DialogTitle>登记内部内部占用</DialogTitle>
             <DialogDescription>按机房登记内部测试资源占用，可一次添加多种卡型与台数</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">

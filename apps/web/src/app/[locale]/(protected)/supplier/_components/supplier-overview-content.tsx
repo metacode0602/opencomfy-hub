@@ -295,7 +295,7 @@ export function SupplierOverviewContent() {
           hint={kpis.faultOpenCount > 0 ? `${kpis.faultOpenCount} 个未关闭故障` : undefined}
         />
         <KpiCard
-          title="内部测试占用"
+          title="内部内部占用"
           value={kpis.internalTestGpu}
           unit="卡"
           icon={FlaskConical}
@@ -522,7 +522,7 @@ export function SupplierOverviewContent() {
                 <TableHead className="text-right">总量</TableHead>
                 <TableHead className="text-right">在线</TableHead>
                 <TableHead className="text-right">维护</TableHead>
-                <TableHead className="text-right">测试占用</TableHead>
+                <TableHead className="text-right">内部占用</TableHead>
                 <TableHead className="text-right">可售</TableHead>
                 <TableHead className="text-right">裸金属</TableHead>
                 <TableHead className="text-right">弹性服务</TableHead>
@@ -693,7 +693,7 @@ export function SupplierOverviewContent() {
               <Button variant="outline" size="sm" asChild>
                 <Link href="/supplier/test-holds">
                   <FlaskConical className="mr-1.5 size-3.5" />
-                  测试占用台账
+                  内部占用台账
                 </Link>
               </Button>
               {poolCodes.length > 0 && (

@@ -51,7 +51,7 @@ export function FinanceOverview() {
   )
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6 space-y-6">
+    <div className="space-y-6 bg-background p-4 md:p-6">
       <Card>
         <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1.5">

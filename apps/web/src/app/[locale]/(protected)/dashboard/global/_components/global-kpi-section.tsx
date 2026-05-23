@@ -69,7 +69,7 @@ const KPI_ITEMS = [
     warning: false,
   },
   {
-    title: "内部测试占用",
+    title: "内部内部占用",
     value: "180",
     unit: "台",
     delta: "+2.0%",

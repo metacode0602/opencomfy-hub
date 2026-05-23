@@ -81,7 +81,7 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
     : staff.display_name
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-background p-4 md:p-6">
+    <div className="bg-background p-4 md:p-6">
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
