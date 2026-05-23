@@ -9,7 +9,10 @@ export type BillingTenantListItem = {
   overdueAt?: string
   creditLimit?: number
   isDefault: boolean
+  /** CRM 导入/创建时间 */
   createdAt: string
+  /** 平台侧注册时间（OpenAPI create_time） */
+  platformRegisteredAt?: string
   customerName: string
   contactPerson?: string
   contactPhone?: string

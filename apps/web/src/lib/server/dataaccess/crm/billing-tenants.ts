@@ -66,6 +66,7 @@ function mapListRow(
     creditLimit: t.credit_limit != null ? toNumber(t.credit_limit) : undefined,
     isDefault: t.isDefault,
     createdAt: t.createdAt.toISOString(),
+    platformRegisteredAt: toIso(t.platformRegisteredAt ?? undefined),
     customerName: c.name,
     contactPerson: c.contactPerson ?? undefined,
     contactPhone: c.contactPhone ?? undefined,

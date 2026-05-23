@@ -40,6 +40,28 @@ function formatDateTime(iso?: string) {
   }
 }
 
+/** 列表展示：遮挡手机号中间 4 位，如 13812345678 → 138****5678 */
+function maskPhoneMiddle(raw?: string | null): string {
+  if (!raw?.trim()) return "—"
+  const digits = raw.replace(/\D/g, "")
+  const local =
+    digits.length === 13 && digits.startsWith("86")
+      ? digits.slice(2)
+      : digits.length >= 11
+        ? digits.slice(-11)
+        : digits
+  if (local.length === 11) {
+    const prefix =
+      digits.length === 13 && digits.startsWith("86") ? "+86 " : ""
+    return `${prefix}${local.slice(0, 3)}****${local.slice(7)}`
+  }
+  if (digits.length >= 7) {
+    const start = Math.floor((digits.length - 4) / 2)
+    return `${digits.slice(0, start)}****${digits.slice(start + 4)}`
+  }
+  return raw.trim()
+}
+
 export function CrmTenantsListClient() {
   const utils = trpc.useUtils()
   const [searchInput, setSearchInput] = React.useState("")
@@ -118,6 +140,8 @@ export function CrmTenantsListClient() {
                   <TableHead>联系人</TableHead>
                   <TableHead className="text-right">余额</TableHead>
                   <TableHead>欠费时间</TableHead>
+                  <TableHead>平台注册时间</TableHead>
+                  <TableHead>导入时间</TableHead>
                   <TableHead className="text-right">授信额度</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="w-20" />
@@ -126,13 +150,13 @@ export function CrmTenantsListClient() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={12} className="text-muted-foreground py-8 text-center text-sm">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : tenants.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={12} className="text-muted-foreground py-8 text-center text-sm">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -141,7 +165,7 @@ export function CrmTenantsListClient() {
                     <TableRow key={t.id}>
                       <TableCell className="font-mono text-sm">{t.platformTenantId ?? "—"}</TableCell>
                       <TableCell>{t.name}</TableCell>
-                      <TableCell>{t.phone ?? "—"}</TableCell>
+                      <TableCell>{maskPhoneMiddle(t.phone)}</TableCell>
                       <TableCell>
                         <LocaleLink
                           href={`/crm/customers/${t.customerId}`}
@@ -153,11 +177,15 @@ export function CrmTenantsListClient() {
                       <TableCell className="text-sm">
                         {t.contactPerson || "—"}
                         {t.contactPhone ? (
-                          <span className="text-muted-foreground block text-xs">{t.contactPhone}</span>
+                          <span className="text-muted-foreground block text-xs">
+                            {maskPhoneMiddle(t.contactPhone)}
+                          </span>
                         ) : null}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{formatMoney(t.balance)}</TableCell>
                       <TableCell className="text-sm">{formatDateTime(t.overdueAt)}</TableCell>
+                      <TableCell className="text-sm">{formatDateTime(t.platformRegisteredAt)}</TableCell>
+                      <TableCell className="text-sm">{formatDateTime(t.createdAt)}</TableCell>
                       <TableCell className="text-right tabular-nums">
                         {t.creditLimit != null ? formatMoney(t.creditLimit) : "—"}
                       </TableCell>

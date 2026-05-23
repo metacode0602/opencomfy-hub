@@ -100,6 +100,8 @@ export const billingTenant = pgTable(
     overdue_at: timestamp("overdue_at", { withTimezone: true }),
     credit_limit: tenantMoney("credit_limit"),
     balance: tenantMoney("balance").notNull().default("0"),
+    /** 平台侧租户注册时间（OpenAPI create_time） */
+    platformRegisteredAt: timestamp("platform_registered_at", { withTimezone: true }),
     ...crmTimestamps,
   },
   (table) => [

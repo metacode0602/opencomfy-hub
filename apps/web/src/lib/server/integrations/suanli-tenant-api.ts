@@ -139,6 +139,16 @@ export function platformCoinToYuan(value: number | null | undefined): number {
   return value / PLATFORM_COIN_DIVISOR
 }
 
+/** 解析平台 create_time → Date */
+export function parsePlatformRegisteredAt(
+  raw: string | null | undefined,
+): Date | null {
+  if (!raw?.trim()) return null
+  const normalized = raw.trim().replace(' +00:00', 'Z').replace(' ', 'T')
+  const d = new Date(normalized)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
 /** 解析 insufficient_balance → overdue_at */
 export function parsePlatformOverdueAt(
   raw: string | boolean | number | null | undefined,

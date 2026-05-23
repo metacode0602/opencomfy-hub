@@ -3,6 +3,7 @@ import { assertPlatformTenantIdCount } from '@/lib/crm/platform-tenant-import-ut
 import {
   fetchPlatformTenantsByIds,
   parsePlatformOverdueAt,
+  parsePlatformRegisteredAt,
   platformCoinToYuan,
   resolveTenantName,
   SuanliOpenApiError,
@@ -52,6 +53,7 @@ function mapRecordToTenantFields(record: PlatformTenantApiRecord) {
         ? moneyString(platformCoinToYuan(record.limit_coin))
         : null,
     overdue_at: parsePlatformOverdueAt(record.insufficient_balance),
+    platformRegisteredAt: parsePlatformRegisteredAt(record.create_time),
   }
 }
 
@@ -213,6 +215,7 @@ export const platformTenantImportDataAccess = {
               balance: fields.balance,
               credit_limit: fields.credit_limit,
               overdue_at: fields.overdue_at,
+              platformRegisteredAt: fields.platformRegisteredAt,
             })
             .where(eq(billingTenant.id, local.tenantId))
           updatedTenants++
@@ -283,6 +286,7 @@ export const platformTenantImportDataAccess = {
             balance: fields.balance,
             overdue_at: fields.overdue_at,
             credit_limit: fields.credit_limit,
+            platformRegisteredAt: fields.platformRegisteredAt,
           })
           createdTenants++
           importedTenants.push({

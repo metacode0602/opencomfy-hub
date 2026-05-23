@@ -162,8 +162,8 @@ export function DeviceInventoryImportDialog({
     }
   }
 
-  const okCount = rows.filter((r) => r.parse_status === 'ok').length
   const warnCount = rows.filter((r) => r.parse_status === 'warning').length
+  const committableCount = rows.filter((r) => r.parse_status !== 'error').length
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
   const canProceedFromMeta =
     Boolean(selectedDataCenterId) || (lockDataCenter && Boolean(defaultDataCenterId))
@@ -173,8 +173,8 @@ export function DeviceInventoryImportDialog({
       toast.error('请选择机房')
       return
     }
-    if (okCount === 0) {
-      toast.error('没有通过校验的行可入库')
+    if (committableCount === 0) {
+      toast.error('没有可入库的有效行')
       return
     }
 
@@ -325,7 +325,7 @@ export function DeviceInventoryImportDialog({
             <div className="flex shrink-0 flex-wrap gap-2 text-sm">
               <Badge variant="outline">{meta.title}</Badge>
               <span className="text-muted-foreground">
-                文件 {fileName} · 共 {rows.length} 行 · 通过 {okCount}
+                文件 {fileName} · 共 {rows.length} 行 · 可入库 {committableCount}
                 {warnCount > 0 ? ` · 警告 ${warnCount}` : ''}
               </span>
             </div>
@@ -336,6 +336,7 @@ export function DeviceInventoryImportDialog({
                     <TableHead>行</TableHead>
                     <TableHead>设备ID</TableHead>
                     <TableHead>IP地址</TableHead>
+                    <TableHead>K8s集群</TableHead>
                     <TableHead>设备状态</TableHead>
                     <TableHead>设备用途</TableHead>
                     <TableHead>合作类型</TableHead>
@@ -350,6 +351,9 @@ export function DeviceInventoryImportDialog({
                       <TableCell>{r.row_no}</TableCell>
                       <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
                       <TableCell>{r.internal_ip ?? '—'}</TableCell>
+                      <TableCell className="max-w-[120px] truncate text-xs" title={r.cluster_name}>
+                        {r.cluster_name ?? '—'}
+                      </TableCell>
                       <TableCell>{r.ops_status}</TableCell>
                       <TableCell className="max-w-[120px] truncate text-xs" title={r.device_purpose}>
                         {r.device_purpose ?? '—'}
@@ -374,7 +378,7 @@ export function DeviceInventoryImportDialog({
                 重新上传
               </Button>
               <Button
-                disabled={commitMutation.isPending || okCount === 0}
+                disabled={commitMutation.isPending || committableCount === 0}
                 onClick={() => void commitImport()}
               >
                 {commitMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
