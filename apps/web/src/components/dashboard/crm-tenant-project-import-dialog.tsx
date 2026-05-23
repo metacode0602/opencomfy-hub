@@ -34,6 +34,7 @@ import { IconAlertTriangle, IconCloudDownload, IconLoader2 } from "@tabler/icons
 import { toast } from "sonner"
 
 import type { BusinessLine } from "@/lib/data/types"
+import type { UserStaff } from "@/lib/types/crm"
 import {
   emptyTenantProjectImportForm,
   PLATFORM_TENANT_IMPORT_MAX_IDS,
@@ -71,6 +72,7 @@ function stageLabel(stage: TenantProjectImportFormValues["stage"]) {
 }
 
 const NONE_TAG = "__none__"
+const EMPTY_STAFF: UserStaff[] = []
 
 function formValidationError(form: TenantProjectImportFormValues): string | null {
   if (!form.businessLineId) return "请选择业务线"
@@ -93,7 +95,7 @@ export function CrmTenantProjectImportDialog({
   businessLines,
   onSuccess,
 }: Props) {
-  const { data: staff = [], isLoading: staffLoading } = trpc.crm.staff.listActive.useQuery(
+  const { data: staffData, isLoading: staffLoading } = trpc.crm.staff.listActive.useQuery(
     undefined,
     { enabled: open },
   )
@@ -101,6 +103,7 @@ export function CrmTenantProjectImportDialog({
     undefined,
     { enabled: open },
   )
+  const staff = staffData ?? EMPTY_STAFF
 
   const importTagOptions = React.useMemo(() => {
     const allowed = new Set<string>(TENANT_PROJECT_IMPORT_TAG_NAMES)
@@ -136,15 +139,17 @@ export function CrmTenantProjectImportDialog({
   }, [])
 
   React.useEffect(() => {
-    if (!open) {
-      reset()
-      return
-    }
+    if (open) return
+    reset()
+  }, [open, reset])
+
+  React.useEffect(() => {
+    if (!open) return
     if (staff.length > 0 && !staffDefaultsAppliedRef.current) {
       staffDefaultsAppliedRef.current = true
       setForm(emptyTenantProjectImportForm(staff))
     }
-  }, [open, staff, reset])
+  }, [open, staff])
 
   const patchForm = (patch: Partial<TenantProjectImportFormValues>) => {
     setForm((prev) => ({ ...prev, ...patch }))
