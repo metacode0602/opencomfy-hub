@@ -170,7 +170,7 @@ export function EditDatacenterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[640px]">
+      <DialogContent className="max-h-[90vh] min-w-[40vw] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>编辑机房信息</DialogTitle>
           <DialogDescription>
@@ -233,7 +233,7 @@ export function EditDatacenterDialog({
 
           <section className="space-y-4">
             <h4 className="text-sm font-medium text-foreground">区域配置</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="edit-dc-location">容器区域</Label>
                 <Input
@@ -275,7 +275,7 @@ export function EditDatacenterDialog({
 
           <section className="space-y-4">
             <h4 className="text-sm font-medium text-foreground">基础设施</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="edit-dc-scale">
                   规模 <span className="text-destructive">*</span>
@@ -284,7 +284,7 @@ export function EditDatacenterDialog({
                   value={values.scale || undefined}
                   onValueChange={(value) => patch({ scale: value as DatacenterScale })}
                 >
-                  <SelectTrigger id="edit-dc-scale">
+                  <SelectTrigger id="edit-dc-scale" className="w-full">
                     <SelectValue placeholder="选择规模" />
                   </SelectTrigger>
                   <SelectContent>
@@ -307,7 +307,7 @@ export function EditDatacenterDialog({
                   placeholder="非负整数"
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-2">
                 <Label htmlFor="edit-dc-cidr">内网网段</Label>
                 <Input
                   id="edit-dc-cidr"

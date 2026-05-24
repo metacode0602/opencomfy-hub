@@ -101,6 +101,15 @@ export function pickColumn(row: SheetRow, aliases: string[]): string | null {
 
 const TOTAL_ROW_MARKERS = new Set(['总计', '合计', 'total'])
 
+export const TENANT_PLATFORM_ID_ALIASES = [
+  '租户ID',
+  'tenant_id',
+  'tenantId',
+  '客户ID',
+  'customer_id',
+  'customerId',
+] as const
+
 function normalizeTotalMarker(value: string): string {
   return value.trim().replace(/\s+/g, '').toLowerCase()
 }
@@ -109,6 +118,11 @@ function normalizeTotalMarker(value: string): string {
 export function isTotalRow(tenantId: string | null): boolean {
   if (!tenantId) return false
   return TOTAL_ROW_MARKERS.has(normalizeTotalMarker(tenantId))
+}
+
+/** 行内租户/客户 ID 列为汇总标识时跳过（客户消费明细等） */
+export function isTenantTotalRow(row: SheetRow): boolean {
+  return isTotalRow(pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES]))
 }
 
 export function parseMoneyCell(raw: string | null): string {

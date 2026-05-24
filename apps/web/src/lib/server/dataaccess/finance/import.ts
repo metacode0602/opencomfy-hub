@@ -10,12 +10,14 @@ import { eq } from 'drizzle-orm'
 import type { ImportFileType } from './constants'
 import { FinanceError } from './errors'
 import {
+  isTenantTotalRow,
   isTotalRow,
   normalizeCustomerType,
   parseMoneyCell,
   parseWorkbookDetailed,
   pickColumn,
   sha256Hex,
+  TENANT_PLATFORM_ID_ALIASES,
   type ParsedWorkbook,
 } from './excel-parser'
 import {
@@ -85,12 +87,12 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
   const errors: ImportCellError[] = []
 
   for (const { rowNo, row } of sheet.rows) {
-    const tenantId = pickColumn(row, ['租户ID', 'tenant_id', 'tenantId'])
-    if (isTotalRow(tenantId)) continue
+    if (isTenantTotalRow(row)) continue
+    const tenantId = pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES])
     if (!tenantId) {
       errors.push({
         rowNo,
-        columnAliases: ['租户ID', 'tenant_id', 'tenantId'],
+        columnAliases: [...TENANT_PLATFORM_ID_ALIASES],
         message: '缺少租户ID',
       })
       continue
@@ -120,7 +122,7 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
   if (parsed.length === 0 && errors.length === 0) {
     errors.push({
       rowNo: 2,
-      columnAliases: ['租户ID', 'tenant_id', 'tenantId'],
+      columnAliases: [...TENANT_PLATFORM_ID_ALIASES],
       message: '客户消费明细无有效数据行',
     })
   }

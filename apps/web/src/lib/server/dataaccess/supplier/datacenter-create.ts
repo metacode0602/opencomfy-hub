@@ -134,7 +134,7 @@ export const datacenterCreateDataAccess = {
       supplierId: input.supplierId,
       code,
       name,
-      location: location ?? deriveLocation(importRow) || null,
+      location: (location ?? deriveLocation(importRow)) || null,
       address: input.address?.trim() || null,
       regionTags: buildRegionTags(importRow),
       status: input.status ?? 'offline',

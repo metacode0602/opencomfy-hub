@@ -79,7 +79,10 @@ function previewCode(name: string, externalOnboardingId: string, existingCodes: 
 function validateForm(
   values: CreateDatacenterFormValues,
   existingNames: Set<string>,
-  existingContainerRegions: Set<string>,
+  allDataCenters: Pick<
+    DataCenter,
+    'name' | 'location' | 'containerInstanceRegion' | 'bareMetalRegion'
+  >[],
 ): string | null {
   const name = values.name.trim()
   if (!name) return '请填写机房名称'
@@ -87,9 +90,28 @@ function validateForm(
   const normName = normalizeDatacenterName(name)
   if (existingNames.has(normName)) return '机房名称已存在，请使用唯一名称'
 
+  const location = values.location.trim()
+  if (location) {
+    const hit = allDataCenters.find((dc) => dc.location?.trim() === location)
+    if (hit) {
+      return `容器区域「${location}」已被机房「${hit.name}」使用，请填写唯一名称`
+    }
+  }
+
   const containerRegion = values.containerInstanceRegion.trim()
-  if (containerRegion && existingContainerRegions.has(containerRegion)) {
-    return `容器实例区域「${containerRegion}」已被使用，请填写唯一的 Karmada 标签值`
+  if (containerRegion) {
+    const hit = allDataCenters.find((dc) => dc.containerInstanceRegion?.trim() === containerRegion)
+    if (hit) {
+      return `容器实例区域「${containerRegion}」已被机房「${hit.name}」使用，请填写唯一的 Karmada 标签值`
+    }
+  }
+
+  const bareMetalRegion = values.bareMetalRegion.trim()
+  if (bareMetalRegion) {
+    const hit = allDataCenters.find((dc) => dc.bareMetalRegion?.trim() === bareMetalRegion)
+    if (hit) {
+      return `裸金属区域「${bareMetalRegion}」已被机房「${hit.name}」使用，请填写唯一名称`
+    }
   }
 
   if (!values.scale) return '请选择规模'
@@ -119,6 +141,7 @@ function formValuesToInput(values: CreateDatacenterFormValues, supplierId: strin
     name: values.name.trim(),
     address: values.address.trim() || undefined,
     description: values.description.trim() || undefined,
+    location: values.location.trim() || undefined,
     containerInstanceRegion: values.containerInstanceRegion.trim() || undefined,
     bareMetalRegion: values.bareMetalRegion.trim() || undefined,
     scale: values.scale as DatacenterScale,
@@ -173,15 +196,6 @@ export function CreateDatacenterDialog({
     () => new Set(existingDataCenters.map((dc) => normalizeDatacenterName(dc.name))),
     [existingDataCenters],
   )
-  const existingContainerRegions = useMemo(
-    () =>
-      new Set(
-        allDataCenters
-          .map((dc) => dc.containerInstanceRegion?.trim())
-          .filter((value): value is string => Boolean(value)),
-      ),
-    [allDataCenters],
-  )
 
   const derivedCodePreview = useMemo(
     () =>
@@ -204,7 +218,7 @@ export function CreateDatacenterDialog({
   }
 
   const handleSubmit = () => {
-    const error = validateForm(values, existingNames, existingContainerRegions)
+    const error = validateForm(values, existingNames, allDataCenters)
     if (error) {
       setSubmitError(error)
       return
@@ -215,7 +229,7 @@ export function CreateDatacenterDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[640px]">
+      <DialogContent className="max-h-[90vh] min-w-[40vw] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>新增机房</DialogTitle>
           <DialogDescription>
@@ -226,7 +240,7 @@ export function CreateDatacenterDialog({
         <div className="space-y-6 py-1">
           <section className="space-y-4">
             <h4 className="text-sm font-medium text-foreground">基本信息</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="create-dc-name">
                   机房名称 <span className="text-destructive">*</span>
@@ -278,6 +292,18 @@ export function CreateDatacenterDialog({
             <h4 className="text-sm font-medium text-foreground">区域配置</h4>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
+                <Label htmlFor="create-dc-location">容器区域</Label>
+                <Input
+                  id="create-dc-location"
+                  value={values.location}
+                  onChange={(e) => patch({ location: e.target.value })}
+                  placeholder="如 华北-北京-亦庄"
+                />
+                <p className="text-xs text-muted-foreground">
+                  可选。若填写，须全局唯一，在弹性服务部署等容器应用中展示给用户的名称。
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="create-dc-container-region">容器实例区域</Label>
                 <Input
                   id="create-dc-container-region"
@@ -297,13 +323,16 @@ export function CreateDatacenterDialog({
                   onChange={(e) => patch({ bareMetalRegion: e.target.value })}
                   placeholder="如 华北-北京-亦庄"
                 />
+                <p className="text-xs text-muted-foreground">
+                  可选。若填写，须全局唯一。
+                </p>
               </div>
             </div>
           </section>
 
           <section className="space-y-4">
             <h4 className="text-sm font-medium text-foreground">基础设施</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="create-dc-scale">
                   规模 <span className="text-destructive">*</span>
@@ -312,7 +341,7 @@ export function CreateDatacenterDialog({
                   value={values.scale || undefined}
                   onValueChange={(value) => patch({ scale: value as DatacenterScale })}
                 >
-                  <SelectTrigger id="create-dc-scale">
+                  <SelectTrigger id="create-dc-scale" className="w-full">
                     <SelectValue placeholder="选择规模" />
                   </SelectTrigger>
                   <SelectContent>
@@ -335,7 +364,7 @@ export function CreateDatacenterDialog({
                   placeholder="非负整数"
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-2">
                 <Label htmlFor="create-dc-cidr">内网网段</Label>
                 <Input
                   id="create-dc-cidr"
