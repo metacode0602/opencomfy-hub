@@ -118,6 +118,9 @@ function mapImportError(error: unknown): never {
       message.includes('成本配置') ||
       message.includes('不可变更') ||
       message.includes('清单行数') ||
+      message.includes('显卡型号') ||
+      message.includes('无法识别') ||
+      message.includes('未填写') ||
       message.includes('卡型') ||
       message.includes('上架计划') ||
       message.includes('合作类型') ||

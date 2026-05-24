@@ -1,7 +1,7 @@
 # 账期导入与经营核算实现方案
 
-> 版本：v1.5.2（已定稿）  
-> 日期：2026-05-23  
+> 版本：v1.5.3（已定稿）  
+> 日期：2026-05-24  
 > 变更：v1.1 — 账单详情 Excel 不再含客户经理/项目名称；改由租户反查项目并补全 AM；支持一租户多项目成本分成配置  
 > 变更：v1.2 — §6.4 增加「卡时价阶梯分成」：按成交卡时/刊例价落档后取档内分成比例计算售出成本  
 > 变更：v1.3 — §5.3 增加 Step I0：客户消费明细按租户跨「类型」汇总后再参与收入计算  
@@ -10,6 +10,7 @@
 > 变更：v1.5 — §5 补充消费改为独立收入字段（不再由 C/B/裸金属推导）；§3.5/§6 增加计算前阻断校验：B 端未知租户、账单 `(区域×GPU)` 缺机房卡型成本；阻断提示采用页面内联 Alert，禁止 toast/弹窗  
 > 变更：v1.5.1 — **已确认**：补充消费 UI 手工填写；C 端未知租户警告不阻断；导入文件落盘、库内仅存路径；内联 Alert 见 §8  
 > 变更：v1.5.2 — **已确认**：重新计算 **不保留** 手工补充消费；三类 Excel **均须解析成功**；各上传槽位可下载 **错误单元格高亮** 的 Excel（§3.8）  
+> 变更：v1.5.3 — §4.6 / §6.1.1：账单 `区域`（`region_code`）与机房主数据匹配字段由 `data_center.code` 改为 `data_center.container_instance_region`  
 > 状态：**已定稿 — 实施中**  
 > 关联：`apps/web/src/lib/types/finance.ts`、`cost-row-utils.ts`、`income-row-utils.ts`、`/finance/create` 页面
 
@@ -219,7 +220,7 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 | V11 | 同一租户分成比例之和 = 100%（±0.0001 容差）；每项 &gt; 0 |
 | V12 | 同一 `租户ID` 在客户消费明细中 `客户类型` 唯一（若 B/C 混用 → 警告或阻断，见 §5.3） |
 | V13 | Step I0 后：每个 `(租户ID, 客户类型)` 仅一条 agg 记录；`row_count_by_type` ≥ 1 |
-| V14 | **计算前**：账单详情 Raw 中每个 `(region_code, gpu_model)` 须在 `period_end` 日存在有效 `supplier_unit_cost`（`idc_code` + `card_type`，含阶梯所需刊例价/档位）；缺失 → **阻断计算**，状态 `pending_pricing` |
+| V14 | **计算前**：账单详情 Raw 中每个 `(region_code, gpu_model)` 须在 `period_end` 日存在有效机房卡型成本（`data_center.container_instance_region = region_code` + `card_type`，经 `supplier_pricing_record` 关联机房；含阶梯所需刊例价/档位）；缺失 → **阻断计算**，状态 `pending_pricing` |
 | V15 | **计算前**：再次校验 V6（B 端未知租户）；若仍有未知 ID → **阻断计算** |
 
 ### 3.6 B 端未知租户阻断（跨文件校验）
@@ -548,11 +549,13 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 
 ### 4.6 机房 × 卡型单价
 
+**区域匹配键**：账单 Excel `区域` 列 → `region_code`；与机房主数据 **`data_center.container_instance_region`** 比对（**非** `data_center.code` / `idc_code`）。`supplier_pricing_record` 经 `data_center_id` JOIN 机房后按上述字段匹配。
+
 解析顺序（与现有 `resolveUnitPricePerHour` 一致）：
 
-1. `supplier_unit_cost`：`idc_code` + `card_type` + 账期生效日 `effective_from <= period_end`
+1. `supplier_pricing_record`（或 `supplier_unit_cost`）：`container_instance_region` + `card_type` + 账期生效日 `effective_from <= period_end`
 2. `data_center_device`：`cardTimeCostPerHour` / `revenueShareCostPerHour`
-3. `supplier_pricing_record`：合同单价
+3. 兜底：同供应商合同单价缓存
 
 合作模式分支：
 
@@ -777,7 +780,11 @@ billing_period.supplementary    = Σ supplementary_consumption
 **有效配置定义**（与 §4.6 一致，`as_of = period_end`）：
 
 ```
-pricing = resolve_unit_cost(idc_code = region_code, card_type = gpu_model, as_of = period_end)
+pricing = resolve_unit_cost(
+  container_instance_region = region_code,  -- data_center.container_instance_region
+  card_type = gpu_model,
+  as_of = period_end
+)
 有效 ⇔ pricing 存在且满足当前 pricing_mode 所需字段：
   - card_time / tiered_card_time：unit_price_per_hour 或 tier 可解析
   - revenue_share / tiered_revenue_share：revenue_share 或 tier + list_price 可解析
@@ -852,7 +859,7 @@ confirmed_revenue_excl_tax = balance_consumption / TAX_DIVISOR
 **Step C3 — 解析单价与合作模式**
 
 ```
-pricing = resolve_unit_cost(idc_code=r, card_type=g, as_of=period_end)
+pricing = resolve_unit_cost(container_instance_region=r, card_type=g, as_of=period_end)
 mode    = pricing.pricing_mode
         -- card_time | revenue_share | tiered_revenue_share | tiered_card_time
 

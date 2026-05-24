@@ -152,7 +152,10 @@ export async function findMissingTenantBillPricing(input: {
       .innerJoin(gpuCardType, eq(supplierPricingRecord.gpuCardTypeId, gpuCardType.id))
       .where(
         and(
-          eq(sql`lower(${dataCenter.code})`, pair.regionCode.toLowerCase()),
+          eq(
+            sql`lower(${dataCenter.containerInstanceRegion})`,
+            pair.regionCode.toLowerCase(),
+          ),
           or(
             eq(sql`lower(${gpuCardType.code})`, pair.gpuModel.toLowerCase()),
             eq(sql`lower(${gpuCardType.name})`, pair.gpuModel.toLowerCase()),

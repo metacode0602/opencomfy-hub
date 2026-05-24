@@ -28,6 +28,7 @@ export const deviceInventoryRowSchema = z.object({
   parse_status: parseStatusSchema,
   parse_message: z.string().nullable().optional(),
   supplier_device_id: z.string().optional(),
+  gpu_card_type_id: z.string().optional(),
 })
 
 export const deviceChangelogRowSchema = z.object({

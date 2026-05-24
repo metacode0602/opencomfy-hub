@@ -17,6 +17,10 @@ import {
   generateImportBatchCode,
   maskInventoryRowsForPreview,
 } from '@/lib/supplier/device-import-utils'
+import {
+  DeviceImportUnrecognizedGpuCardError,
+  validateInventoryGpuCardTypes,
+} from '@/lib/supplier/gpu-card-type-import-match'
 import { refreshBatchProgress } from '@/lib/server/dataaccess/supplier/batch-progress'
 import {
   resolveSingleBusinessBatchFromRows,
@@ -75,30 +79,28 @@ async function loadDataCenter(supplierId: string, dataCenterId: string) {
   return dc
 }
 
-async function resolveGpuCardTypeId(
-  codeOrName: string | undefined,
-  cache: Map<string, string>,
-): Promise<string> {
-  const key = (codeOrName?.trim() || 'A100-80G').toLowerCase()
-  const cached = cache.get(key)
-  if (cached) return cached
+async function loadAllGpuCardTypesForImport() {
+  return db
+    .select({
+      id: gpuCardType.id,
+      code: gpuCardType.code,
+      name: gpuCardType.name,
+    })
+    .from(gpuCardType)
+}
 
-  const byName = await db.query.gpuCardType.findFirst({
-    where: eq(gpuCardType.name, codeOrName?.trim() || 'A100-80G'),
-    columns: { id: true },
-  })
-  if (byName) {
-    cache.set(key, byName.id)
-    return byName.id
+async function assertInventoryGpuCardTypesResolved(
+  rows: DeviceInventoryParsedRow[],
+) {
+  const cardTypes = await loadAllGpuCardTypesForImport()
+  if (cardTypes.length === 0) {
+    throw new Error('系统中没有 GPU 卡型，请先在卡型管理中维护 gpu_card_type')
   }
-
-  const fallback = await db.query.gpuCardType.findFirst({
-    where: eq(gpuCardType.status, 'active'),
-    columns: { id: true },
-  })
-  if (!fallback) throw new Error('系统中没有可用的 GPU 卡型，请先维护 gpu_card_type')
-  cache.set(key, fallback.id)
-  return fallback.id
+  const validation = validateInventoryGpuCardTypes(rows, cardTypes)
+  if (validation.issues.length > 0) {
+    throw new DeviceImportUnrecognizedGpuCardError(validation)
+  }
+  return validation
 }
 
 function mapDbDeviceToDomain(
@@ -333,6 +335,8 @@ export const deviceImportDataAccess = {
       throw new Error('没有可入库的有效行')
     }
 
+    const gpuValidation = await assertInventoryGpuCardTypesResolved(params.rows)
+
     const batchId = newId()
     const batchCode = generateImportBatchCode('device_inventory')
     const now = new Date()
@@ -346,12 +350,10 @@ export const deviceImportDataAccess = {
       dataCenterId: dc.id,
       idcCode: dc.code,
       idcRegion: dc.location ?? '',
-      cardTypeDefault: 'A100-80G',
       rows: params.rows,
       createId,
     })
 
-    const gpuCache = new Map<string, string>()
     const cardTypesByDataCenter = new Map<string, Set<string>>()
     const affectedDataCenterIds = new Set<string>([dc.id])
     const warnings: string[] = []
@@ -409,13 +411,17 @@ export const deviceImportDataAccess = {
 
         for (const device of newDevices) {
           const row = findImportRowForDevice(device, okRows)
+          const gpuCardTypeId =
+            row != null ? gpuValidation.rowResolutions.get(row.row_no)?.gpuCardTypeId : undefined
+          if (!gpuCardTypeId) {
+            throw new Error(`第 ${row?.row_no ?? '?'} 行显卡型号未解析，无法入库`)
+          }
           const existing = findDeviceByImportKeys(devicesInImportPool, {
             sn: device.sn,
             asset_no: device.asset_no,
             external_device_id: device.external_device_id ?? undefined,
             internal_ip: device.internal_ip,
           })
-          const gpuCardTypeId = await resolveGpuCardTypeId(row?.gpu_card_type_code, gpuCache)
           const node = nodes.find((n) => n.device_id === device.id)
 
           if (existing) {

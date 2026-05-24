@@ -4,7 +4,7 @@
 
 **文档性质**：在 **不更名既有表** 的前提下，描述本次增量变更的完整表结构、字段映射与导入批次规则。物理实现见 `packages/db/src/supply-schema.ts`。
 
-**版本**：v1.4（2026-05-23）
+**版本**：v1.5（2026-05-24）
 
 **关联主文档**：[supplier-database.md](./supplier-database.md)、[supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md)（v2.2 资源总览 / 字典）
 
@@ -196,7 +196,8 @@
 | `external_device_id` | 否 | 设备ID |
 | `internal_ip` | 否 | 内网IP |
 | `asset_no` / `sn` | 否 | 设备标识；至少其一 |
-| `gpu_card_type_code` | 否 | 显卡型号 → `gpu_card_type` |
+| `gpu_card_type_code` | 否 | Excel「显卡型号」原文；可为空（如 CPU 管控节点） |
+| `gpu_card_type_id` | 否 | preview/commit 手工选择的卡型 ID（§4.1.1） |
 | `gpu_count` | 否 | |
 | `ops_status` | 是 | 设备状态（原文） |
 | `in_maintenance` | 否 | 维修中，默认 false |
@@ -354,7 +355,7 @@
 | 设备ID | `supplier_device.external_device_id` |
 | 内网IP地址 | `supplier_device.internal_ip` |
 | 设备标识 | `supplier_device.asset_no` 或 `sn` |
-| 显卡型号 | `gpu_card_type` → `gpu_card_type_id` |
+| 显卡型号 | `gpu_card_type` → `gpu_card_type_id`（§4.1.1） |
 | 显卡数量 | `supplier_device.gpu_count` |
 | 设备状态 | `supplier_device.ops_status` + 映射 → `lifecycle_status` |
 | 维修中 | `supplier_device.in_maintenance` |
@@ -370,6 +371,44 @@
 | 备注 | `supplier_device.remark` |
 | 登录用户名 | `supplier_device.login_username` |
 | 登录密码 | `supplier_device.login_password`（阶段一明文） |
+
+#### 4.1.1 显卡型号 → `gpu_card_type_id` 解析规则（R-DI8）
+
+**适用范围**：`batch_kind = device_inventory` 的 preview 与 commit。
+
+**输入**：Excel 列「显卡型号」（解析字段 `gpu_card_type_code`），表头别名：`显卡型号` / `gpu_card_type` / `卡型`。
+
+**卡型字典**：加载 `gpu_card_type` **全表**（**不**过滤 `status`）。
+
+**匹配顺序**（均 **忽略大小写**）：
+
+1. **名称匹配**：`trim(excel值)` 与 `gpu_card_type.name` 相等（忽略大小写）。
+2. **编码匹配**：去掉 Excel 值 **最前** 的品牌前缀（如 `Nvidia` / `NVIDIA` / `Huawei` / `华为` / `AMD` / `Intel` / `Ascend` / `昇腾` / `英伟达`）后，与 `gpu_card_type.code` 比较：
+   - 先尝试规范化后 **完全相等**（去空格、连字符；`80G` 与 `80GB` 视为等价）；
+   - 再尝试 **前缀匹配**（较长编码优先，如 `4090` → `4090-24GB`，`A100 80G` → `A100-80GB`）。
+
+**失败与手工补全**：
+
+| 情况 | Preview | Commit |
+|------|---------|--------|
+| 未填写「显卡型号」 | 警告；**匹配卡型**列下拉选择（可能为 CPU 管控节点） | 须已手工选择 `gpu_card_type_id` |
+| 填写但自动匹配失败 | 警告；下拉选择卡型 | 须已手工选择 `gpu_card_type_id` |
+| 自动匹配成功 | 下拉预填，可改选 | 使用自动或用户改选结果 |
+| 可入库行仍未选定卡型 | 禁用「确认入库」；可下载 **待确认明细** Excel | **阻断**整批导入 |
+
+**Preview UI**：预览表展示「显卡型号」与「匹配卡型」列；后者为 `gpu_card_type` 全表下拉（**不**过滤 `status`），自动匹配成功时预填并标注匹配方式（名称/编码/手工）。
+
+**实现**：`apps/web/src/lib/supplier/gpu-card-type-import-match.ts`；commit 入口 `device-import.ts#commitInventory`。
+
+**示例**（种子 `gpu_card_type.code`）：
+
+| Excel 显卡型号 | 匹配方式 | 目标 code |
+|----------------|----------|-----------|
+| `409024GB` | 名称 | `4090-24GB` |
+| `Nvidia 4090` | 编码（去品牌） | `4090-24GB` |
+| `Nvidia A100 80G` | 编码 | `A100-80GB` |
+| `Nvidia H20` | 编码 | `H20-141GB` |
+| `huawei 910B3` | 编码（须库中存在对应 code） | `910B3` 等 |
 
 ### 4.2 设备变更表
 
@@ -448,6 +487,7 @@ flowchart TB
 | **R-DI5** | 故障记录导入 **必须** 经 `supplier_ops_upload_batch`（`kind=fault_records`）；`fault_incident.supplier_ops_upload_batch_id` 回填 |
 | **R-DI6** | 导入 **不写入** `entity_state_transition_log`；**不保存** 变更附件；登录凭据写入 `supplier_device`（阶段一明文，UI 脱敏展示） |
 | **R-DI7** | `supplier_device` **不保存** 合作类型 |
+| **R-DI8** | 设备主数据导入：可入库行 commit 前 **必须** 有有效 `gpu_card_type_id`（自动匹配 §4.1.1 或 preview 手工选择）；未填写/未识别型号 **不** 直接失败，须在列表下拉补选；仍未选定则阻断导入；卡型字典 **不** 过滤 `status` |
 
 ---
 
@@ -488,3 +528,4 @@ erDiagram
 | v1.2 | 2026-05-23 | 字典 `payload`、`device_change_action` 20 条；`change_log.business_onboarding_batch_id`；`onboarding_batch_device_link`；资源总览 `overview_bucket` |
 | v1.3 | 2026-05-23 | `pool_memberships`；`default_pool_bindings` |
 | v1.4 | 2026-05-23 | v2.4 生命周期 5 态进程驱动；ops 字典 lifecycle 改为参考列 |
+| v1.5 | 2026-05-24 | §4.1.1 显卡型号解析：名称→去品牌后编码；忽略大小写；preview 手工选卡型（含 CPU 无型号行）；待确认明细 Excel；移除默认 fallback 与 active 过滤 |

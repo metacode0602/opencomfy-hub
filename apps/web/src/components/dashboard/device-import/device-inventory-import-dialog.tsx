@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { FileSpreadsheet, Loader2, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Download, FileSpreadsheet, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -37,6 +37,11 @@ import {
   isDeviceImportFileName,
 } from '@/lib/supplier/device-import-utils'
 import type { DeviceInventoryParsedRow } from '@/lib/types/supplier-domain'
+import {
+  downloadUnrecognizedGpuCardTypesExcel,
+  gpuCardTypeMatchLabel,
+  validateInventoryGpuCardTypes,
+} from '@/lib/supplier/gpu-card-type-import-match'
 import { trpc } from '@/lib/trpc/client'
 import { IMPORT_META, useInvalidateAfterDeviceImport } from './device-import-dialog-shared'
 
@@ -91,6 +96,9 @@ export function DeviceInventoryImportDialog({
     { supplierId },
     { enabled: Boolean(supplierId) && open },
   )
+
+  const { data: gpuCardTypes = [], isLoading: gpuCardTypesLoading } =
+    trpc.supplier.gpuCardTypes.list.useQuery({ status: 'all' }, { enabled: open })
 
   const commitMutation = trpc.supplier.deviceImport.commitInventory.useMutation()
 
@@ -168,8 +176,65 @@ export function DeviceInventoryImportDialog({
     }
   }
 
-  const warnCount = rows.filter((r) => r.parse_status === 'warning').length
-  const committableCount = rows.filter((r) => r.parse_status !== 'error').length
+  const gpuCardTypeOptions = useMemo(
+    () =>
+      gpuCardTypes.map((card) => ({
+        id: card.id,
+        code: card.code ?? '',
+        name: card.name,
+        label: `${card.code ?? card.name} · ${card.name}`,
+      })),
+    [gpuCardTypes],
+  )
+
+  const gpuValidation = useMemo(() => {
+    if (rows.length === 0 || gpuCardTypes.length === 0) {
+      return null
+    }
+    return validateInventoryGpuCardTypes(
+      rows,
+      gpuCardTypeOptions.map((card) => ({
+        id: card.id,
+        code: card.code,
+        name: card.name,
+      })),
+    )
+  }, [rows, gpuCardTypes, gpuCardTypeOptions])
+
+  const gpuIssueByRow = useMemo(() => {
+    const map = new Map<number, string>()
+    for (const issue of gpuValidation?.issues ?? []) {
+      map.set(
+        issue.row_no,
+        issue.reason === 'missing'
+          ? '未填写显卡型号，请选择卡型'
+          : `未识别「${issue.raw_value}」，请选择卡型`,
+      )
+    }
+    return map
+  }, [gpuValidation])
+
+  const setRowGpuCardTypeId = (rowNo: number, gpuCardTypeId: string) => {
+    setRows((prev) =>
+      prev.map((row) => (row.row_no === rowNo ? { ...row, gpu_card_type_id: gpuCardTypeId } : row)),
+    )
+  }
+
+  const getRowDisplayStatus = (row: DeviceInventoryParsedRow): 'ok' | 'warning' | 'error' => {
+    if (row.parse_status === 'error') return 'error'
+    if (gpuIssueByRow.has(row.row_no)) return 'warning'
+    return row.parse_status
+  }
+
+  const warnCount = rows.filter((r) => getRowDisplayStatus(r) === 'warning').length
+  const errorCount = rows.filter((r) => getRowDisplayStatus(r) === 'error').length
+  const committableCount = rows.filter((r) => getRowDisplayStatus(r) !== 'error').length
+  const pendingGpuSelectionCount = gpuValidation?.pendingSelectionCount ?? 0
+  const canCommit =
+    committableCount > 0 &&
+    pendingGpuSelectionCount === 0 &&
+    !gpuCardTypesLoading &&
+    gpuCardTypes.length > 0
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
   const canUpload =
     Boolean(selectedDataCenterId) || (lockDataCenter && Boolean(defaultDataCenterId))
@@ -181,6 +246,10 @@ export function DeviceInventoryImportDialog({
     }
     if (committableCount === 0) {
       toast.error('没有可入库的有效行')
+      return
+    }
+    if (pendingGpuSelectionCount > 0) {
+      toast.error('仍有行未选择卡型，请在列表中补全后再入库')
       return
     }
 
@@ -327,8 +396,43 @@ export function DeviceInventoryImportDialog({
               <span className="text-muted-foreground">
                 文件 {fileName} · 共 {rows.length} 行 · 可入库 {committableCount}
                 {warnCount > 0 ? ` · 警告 ${warnCount}` : ''}
+                {errorCount > 0 ? ` · 失败 ${errorCount}` : ''}
               </span>
             </div>
+            {gpuCardTypesLoading ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                加载卡型字典...
+              </p>
+            ) : null}
+            {pendingGpuSelectionCount > 0 ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-300">
+                <div>
+                  <p className="font-medium">仍有 {pendingGpuSelectionCount} 行待选择卡型</p>
+                  <p className="mt-1 text-xs">
+                    未填写显卡型号可能为 CPU 管控节点；未识别型号请在列表中手工选择卡型后再入库
+                    {gpuValidation?.uniqueUnrecognized.length
+                      ? `。未识别：${gpuValidation.uniqueUnrecognized.join('、')}`
+                      : ''}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="border-yellow-500/40"
+                  onClick={() =>
+                    downloadUnrecognizedGpuCardTypesExcel(
+                      gpuValidation?.issues ?? [],
+                      `${fileName.replace(/\.[^.]+$/, '')}-待确认显卡型号.xlsx`,
+                    )
+                  }
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  下载待确认明细
+                </Button>
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <Table>
                 <TableHeader>
@@ -336,6 +440,8 @@ export function DeviceInventoryImportDialog({
                     <TableHead>行</TableHead>
                     <TableHead>设备ID</TableHead>
                     <TableHead>IP地址</TableHead>
+                    <TableHead>显卡型号</TableHead>
+                    <TableHead>匹配卡型</TableHead>
                     <TableHead>K8s集群</TableHead>
                     <TableHead>设备状态</TableHead>
                     <TableHead>设备用途</TableHead>
@@ -346,30 +452,82 @@ export function DeviceInventoryImportDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => (
-                    <TableRow key={r.row_no}>
-                      <TableCell>{r.row_no}</TableCell>
-                      <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
-                      <TableCell>{r.internal_ip ?? '—'}</TableCell>
-                      <TableCell className="max-w-[120px] truncate text-xs" title={r.cluster_name}>
-                        {r.cluster_name ?? '—'}
-                      </TableCell>
-                      <TableCell>{r.ops_status}</TableCell>
-                      <TableCell className="max-w-[120px] truncate text-xs" title={r.device_purpose}>
-                        {r.device_purpose ?? '—'}
-                      </TableCell>
-                      <TableCell>
-                        {r.cooperation_type ? DEVICE_COOPERATION_TYPE_LABELS[r.cooperation_type] : '—'}
-                      </TableCell>
-                      <TableCell className="max-w-[120px] truncate text-xs" title={r.device_spec}>
-                        {r.device_spec ?? '—'}
-                      </TableCell>
-                      <TableCell>{r.in_maintenance ? '是' : '否'}</TableCell>
-                      <TableCell>
-                        <ParseStatusBadge status={r.parse_status} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {rows.map((r) => {
+                    const displayStatus = getRowDisplayStatus(r)
+                    const gpuIssue = gpuIssueByRow.get(r.row_no)
+                    const resolution = gpuValidation?.rowResolutions.get(r.row_no)
+                    const needsGpuSelection =
+                      r.parse_status !== 'error' && !resolution && Boolean(gpuIssue)
+                    const selectedGpuId = resolution?.gpuCardTypeId ?? r.gpu_card_type_id
+                    return (
+                      <TableRow key={r.row_no}>
+                        <TableCell>{r.row_no}</TableCell>
+                        <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
+                        <TableCell>{r.internal_ip ?? '—'}</TableCell>
+                        <TableCell className="max-w-[120px] truncate text-xs" title={r.gpu_card_type_code}>
+                          {r.gpu_card_type_code ?? '—'}
+                        </TableCell>
+                        <TableCell className="min-w-[180px]">
+                          {r.parse_status === 'error' ? (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          ) : (
+                            <Select
+                              value={selectedGpuId || undefined}
+                              onValueChange={(value) => setRowGpuCardTypeId(r.row_no, value)}
+                            >
+                              <SelectTrigger
+                                className={
+                                  needsGpuSelection
+                                    ? 'h-8 border-yellow-500/50 text-xs'
+                                    : 'h-8 text-xs'
+                                }
+                              >
+                                <SelectValue placeholder="选择卡型" />
+                              </SelectTrigger>
+                              <SelectContent position="popper" className="z-[110] max-h-64">
+                                {gpuCardTypeOptions.map((card) => (
+                                  <SelectItem key={card.id} value={card.id}>
+                                    {card.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {resolution ? (
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {resolution.gpuCardTypeCode}（{gpuCardTypeMatchLabel(resolution.matchedBy)}）
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="max-w-[120px] truncate text-xs" title={r.cluster_name}>
+                          {r.cluster_name ?? '—'}
+                        </TableCell>
+                        <TableCell>{r.ops_status}</TableCell>
+                        <TableCell className="max-w-[120px] truncate text-xs" title={r.device_purpose}>
+                          {r.device_purpose ?? '—'}
+                        </TableCell>
+                        <TableCell>
+                          {r.cooperation_type ? DEVICE_COOPERATION_TYPE_LABELS[r.cooperation_type] : '—'}
+                        </TableCell>
+                        <TableCell className="max-w-[120px] truncate text-xs" title={r.device_spec}>
+                          {r.device_spec ?? '—'}
+                        </TableCell>
+                        <TableCell>{r.in_maintenance ? '是' : '否'}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <ParseStatusBadge status={displayStatus} />
+                            {gpuIssue ? (
+                              <p className="max-w-[140px] text-xs text-yellow-600 dark:text-yellow-400">
+                                {gpuIssue}
+                              </p>
+                            ) : r.parse_message ? (
+                              <p className="max-w-[140px] text-xs text-muted-foreground">{r.parse_message}</p>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -387,7 +545,7 @@ export function DeviceInventoryImportDialog({
                 重新上传
               </Button>
               <Button
-                disabled={commitMutation.isPending || committableCount === 0}
+                disabled={commitMutation.isPending || !canCommit}
                 onClick={() => void commitImport()}
               >
                 {commitMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

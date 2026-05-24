@@ -181,7 +181,6 @@ export function buildDevicesFromInventoryImport(params: {
   dataCenterId: string
   idcCode: string
   idcRegion: string
-  cardTypeDefault: string
   rows: DeviceInventoryParsedRow[]
   createId: (prefix: string) => string
 }): { devices: SupplierDevice[]; nodes: ComputeNode[] } {
@@ -192,7 +191,6 @@ export function buildDevicesFromInventoryImport(params: {
     dataCenterId,
     idcCode,
     idcRegion,
-    cardTypeDefault,
     rows,
     createId,
   } = params
@@ -219,7 +217,7 @@ export function buildDevicesFromInventoryImport(params: {
       idc_region: idcRegion,
       idc_code: idcCode,
       gpu_count: String(row.gpu_count ?? 8),
-      card_type: row.gpu_card_type_code ?? cardTypeDefault,
+      card_type: row.gpu_card_type_code ?? '',
       external_ip: "",
       internal_ip: row.internal_ip ?? "",
       platform_resource_id: null,

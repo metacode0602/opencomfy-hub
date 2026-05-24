@@ -311,7 +311,7 @@ UNIQUE (supplier_id, data_center_id, gpu_card_type_id, product_line, billing_uni
 
 ```
 1. platform_cost_monthly.supplier_unit_cost_id → supplier_unit_cost.deal_unit_price_per_hour
-2. 按 idc_code + card_type 匹配 supplier_pricing_record.unit_price_per_hour
+2. 按 data_center.container_instance_region + card_type 匹配 supplier_pricing_record.unit_price_per_hour
 3. supplier_gpu_inventory.card_time_cost_per_hour（展示缓存，不可作财务真值）
 4. NULL → 财务人工补录
 ```

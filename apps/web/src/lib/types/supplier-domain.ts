@@ -130,6 +130,8 @@ export type DeviceInventoryParsedRow = {
   parse_status: "ok" | "warning" | "error"
   parse_message?: string | null
   supplier_device_id?: string
+  /** preview/commit：自动匹配失败或 CPU 管控节点时由用户手工选择 */
+  gpu_card_type_id?: string
 }
 
 /** 设备变更表 Excel 解析行（batch_kind=device_changelog） */
