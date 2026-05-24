@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { PLATFORM_DATETIME_REGEX } from '@/lib/platform-pricing/datetime'
+import { validateRevenueShareRatioContractTiers } from '@/lib/supplier/revenue-share-ratio-tiers'
 
 const pricingModeSchema = z.enum([
   'card_time',
@@ -10,11 +11,77 @@ const pricingModeSchema = z.enum([
 
 const pricingTierSchema = z.object({
   tierOrder: z.number().int().positive(),
-  thresholdFromHours: z.number().min(0),
+  tierBasis: z.enum(['hours', 'ratio_band']).optional(),
+  thresholdFromHours: z.number().min(0).optional(),
   thresholdToHours: z.number().min(0).nullable().optional(),
+  dealToListRatioMin: z.number().min(0).optional(),
+  dealToListRatioMax: z.number().min(0).nullable().optional(),
   unitPricePerHour: z.number().positive().optional(),
-  revenueSharePercent: z.number().min(0).max(100).optional(),
+  revenueSharePercent: z.number().min(0).optional(),
 })
+
+type PricingPayload = {
+  pricingMode: z.infer<typeof pricingModeSchema>
+  unitPricePerHour?: number
+  revenueSharePercent?: number
+  pricingTiers?: z.infer<typeof pricingTierSchema>[]
+}
+
+function refinePricingPayload(data: PricingPayload, ctx: z.RefinementCtx) {
+  const { pricingMode, unitPricePerHour, revenueSharePercent, pricingTiers } = data
+
+  if (pricingMode === 'tiered_revenue_share') {
+    const tiers = pricingTiers ?? []
+    if (tiers.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '阶梯分成须至少配置一档',
+        path: ['pricingTiers'],
+      })
+      return
+    }
+    const ratioError = validateRevenueShareRatioContractTiers(tiers)
+    if (ratioError) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: ratioError,
+        path: ['pricingTiers'],
+      })
+    }
+    return
+  }
+
+  if (pricingMode === 'tiered_card_time') {
+    const tiers = pricingTiers ?? []
+    if (tiers.length < 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '阶梯卡时须至少配置一档',
+        path: ['pricingTiers'],
+      })
+    }
+    return
+  }
+
+  if (pricingMode === 'revenue_share') {
+    if (revenueSharePercent == null || revenueSharePercent <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '请填写有效的分成比例',
+        path: ['revenueSharePercent'],
+      })
+    }
+    return
+  }
+
+  if (unitPricePerHour == null || unitPricePerHour <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '请填写有效的卡时单价',
+      path: ['unitPricePerHour'],
+    })
+  }
+}
 
 export const unitCostListSchema = z
   .object({
@@ -22,7 +89,7 @@ export const unitCostListSchema = z
   })
   .optional()
 
-export const unitCostUpsertSchema = z.object({
+const unitCostUpsertBaseSchema = z.object({
   supplierId: z.string().min(1),
   dataCenterId: z.string().min(1),
   gpuCardTypeId: z.string().min(1),
@@ -40,13 +107,23 @@ export const unitCostUpsertSchema = z.object({
     .optional(),
 })
 
-export const unitCostUpdateSchema = unitCostUpsertSchema
-  .omit({
-    supplierId: true,
-    dataCenterId: true,
-    gpuCardTypeId: true,
-  })
-  .extend({
+export const unitCostUpsertSchema = unitCostUpsertBaseSchema.superRefine(refinePricingPayload)
+
+export const unitCostUpdateSchema = z
+  .object({
     recordId: z.string().min(1),
+    pricingMode: pricingModeSchema,
+    unitPricePerHour: z.number().positive().optional(),
+    revenueSharePercent: z.number().min(0).max(100).optional(),
+    pricingTiers: z.array(pricingTierSchema).optional(),
+    effectiveFrom: z
+      .string()
+      .regex(PLATFORM_DATETIME_REGEX, '生效时间格式须为 yyyy-MM-dd HH:mm:ss'),
+    effectiveTo: z
+      .string()
+      .regex(PLATFORM_DATETIME_REGEX, '结束时间格式须为 yyyy-MM-dd HH:mm:ss')
+      .nullable()
+      .optional(),
     reason: z.string().trim().max(2000).optional(),
   })
+  .superRefine(refinePricingPayload)

@@ -1,6 +1,7 @@
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { unitCostsDataAccess } from '@/lib/server/dataaccess/unit-costs'
+import { unitCostsError, unitCostsLog } from '@/lib/server/dataaccess/unit-costs/logger'
 import { platformPricingDataAccess } from '@/lib/server/dataaccess/platform-pricing'
 import { platformPricingError } from '@/lib/server/dataaccess/platform-pricing/logger'
 import { gpuCardTypesDataAccess } from '@/lib/server/dataaccess/supplier/gpu-card-types'
@@ -111,6 +112,11 @@ function mapImportError(error: unknown): never {
       message.includes('不可变更') ||
       message.includes('已有平台价') ||
       message.includes('请填写') ||
+      message.includes('须晚于') ||
+      message.includes('重叠') ||
+      message.includes('阶梯') ||
+      message.includes('成本配置') ||
+      message.includes('不可变更') ||
       message.includes('清单行数') ||
       message.includes('卡型') ||
       message.includes('上架计划') ||
@@ -804,7 +810,12 @@ export const supplierRouter = createTRPCRouter({
           throw new TRPCError({ code: 'NOT_FOUND', message: '成本配置不存在' })
         }
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
-        return await unitCostsDataAccess.updateRecord({
+        unitCostsLog('router.update', 'unit cost update requested', {
+          recordId: input.recordId,
+          pricingMode: input.pricingMode,
+          userId: ctx.user.id,
+        })
+        const updated = await unitCostsDataAccess.updateRecord({
           supplierId: row.supplierId,
           dataCenterId: row.dataCenterId,
           gpuCardTypeId: row.cardTypeId,
@@ -818,7 +829,11 @@ export const supplierRouter = createTRPCRouter({
           reason: input.reason,
           changedByStaffId: staffId,
         })
+        return updated
       } catch (e) {
+        unitCostsError('router.update', 'unit cost update failed', e, {
+          recordId: input.recordId,
+        })
         mapImportError(e)
       }
     }),

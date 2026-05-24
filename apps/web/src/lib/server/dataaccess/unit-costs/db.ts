@@ -6,6 +6,10 @@ import type {
 } from '@/lib/data/types'
 import { isSharePricingMode } from '@/lib/data/types'
 import {
+  normalizeRatioBandTiersForCompare,
+  validateRevenueShareRatioContractTiers,
+} from '@/lib/supplier/revenue-share-ratio-tiers'
+import {
   normalizePlatformDateTime,
   parsePlatformDateTime,
 } from '@/lib/platform-pricing/datetime'
@@ -13,6 +17,7 @@ import {
   mapSupplierPricingHistoryRow,
   mapSupplierPricingRecordRow,
 } from '@/lib/server/mappers/supply'
+import { unitCostsError, unitCostsLog } from '@/lib/server/dataaccess/unit-costs/logger'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import {
   dataCenter,
@@ -49,6 +54,15 @@ function validatePricingPayload(input: {
   const isTiered =
     input.pricingMode === 'tiered_card_time' || input.pricingMode === 'tiered_revenue_share'
 
+  if (input.pricingMode === 'tiered_revenue_share') {
+    const tiers = input.pricingTiers ?? []
+    const error = validateRevenueShareRatioContractTiers(tiers)
+    if (error) {
+      throw new Error(error)
+    }
+    return
+  }
+
   if (isTiered) {
     const tiers = input.pricingTiers ?? []
     if (tiers.length < 1) {
@@ -67,6 +81,19 @@ function validatePricingPayload(input: {
   if (input.unitPricePerHour == null || input.unitPricePerHour <= 0) {
     throw new Error('请填写有效的卡时单价')
   }
+}
+
+function pricingTiersChanged(
+  previous: SupplierPricingRecord['pricingTiers'],
+  next: SupplierPricingRecord['pricingTiers'],
+  pricingMode: ContractPricingMode,
+): boolean {
+  if (pricingMode === 'tiered_revenue_share') {
+    return (
+      normalizeRatioBandTiersForCompare(previous) !== normalizeRatioBandTiersForCompare(next)
+    )
+  }
+  return JSON.stringify(previous ?? null) !== JSON.stringify(next ?? null)
 }
 
 function assertEffectiveRange(effectiveFrom: string, effectiveTo?: string | null) {
@@ -244,7 +271,16 @@ export const unitCostsDataAccess = {
     assertEffectiveRange(effectiveFrom, effectiveTo)
 
     const recordId = newId()
-    const isShare = isSharePricingMode(input.pricingMode)
+    const isTieredShare = input.pricingMode === 'tiered_revenue_share'
+    const isShare = isSharePricingMode(input.pricingMode) && !isTieredShare
+    const isTiered = input.pricingMode === 'tiered_card_time' || isTieredShare
+
+    unitCostsLog('createRecord', 'creating pricing record', {
+      supplierId: input.supplierId,
+      dataCenterId: input.dataCenterId,
+      gpuCardTypeId: input.gpuCardTypeId,
+      pricingMode: input.pricingMode,
+    })
 
     await db.insert(supplierPricingRecord).values({
       id: recordId,
@@ -254,14 +290,14 @@ export const unitCostsDataAccess = {
       pricingMode: input.pricingMode,
       configStatus: 'active',
       unitPricePerHour:
-        !isShare && input.unitPricePerHour != null
+        !isShare && !isTiered && input.unitPricePerHour != null
           ? toMoney(input.unitPricePerHour)
           : null,
       revenueSharePercent:
         isShare && input.revenueSharePercent != null
           ? String(input.revenueSharePercent)
           : null,
-      pricingTiers: input.pricingTiers ?? null,
+      pricingTiers: isTiered ? (input.pricingTiers ?? null) : null,
       effectiveFrom,
       effectiveTo,
       updatedByStaffId: input.updatedByStaffId ?? null,
@@ -282,6 +318,10 @@ export const unitCostsDataAccess = {
       throw new Error('成本配置不存在')
     }
 
+    if (existing.pricingMode !== input.pricingMode) {
+      throw new Error('不可变更计价方式，请新建配置')
+    }
+
     validatePricingPayload({
       pricingMode: input.pricingMode,
       unitPricePerHour: input.unitPricePerHour,
@@ -295,65 +335,101 @@ export const unitCostsDataAccess = {
       : null
     assertEffectiveRange(effectiveFrom, effectiveTo)
 
-    const isShare = isSharePricingMode(input.pricingMode)
+    const isTieredShare = input.pricingMode === 'tiered_revenue_share'
+    const isShare = isSharePricingMode(input.pricingMode) && !isTieredShare
+    const isTiered = input.pricingMode === 'tiered_card_time' || isTieredShare
+
     const newUnitPrice =
-      !isShare && input.unitPricePerHour != null ? input.unitPricePerHour : undefined
+      !isShare && !isTiered && input.unitPricePerHour != null
+        ? input.unitPricePerHour
+        : undefined
     const newShare =
       isShare && input.revenueSharePercent != null ? input.revenueSharePercent : undefined
+    const newTiers = isTiered ? (input.pricingTiers ?? null) : null
 
     const prevUnit = existing.unitPricePerHour ? Number(existing.unitPricePerHour) : undefined
     const prevShare = existing.revenueSharePercent
       ? Number(existing.revenueSharePercent)
       : undefined
+    const prevTiers = (existing.pricingTiers as SupplierPricingRecord['pricingTiers']) ?? undefined
 
     const priceChanged =
       (newUnitPrice != null && newUnitPrice !== prevUnit) ||
-      (newShare != null && newShare !== prevShare)
+      (newShare != null && newShare !== prevShare) ||
+      (isTiered &&
+        pricingTiersChanged(prevTiers, newTiers ?? undefined, input.pricingMode))
+
+    const effectiveChanged =
+      toEffectiveDateTime(existing.effectiveFrom) !== effectiveFrom ||
+      (existing.effectiveTo ? toEffectiveDateTime(existing.effectiveTo) : null) !== effectiveTo
 
     const changedByStaffId = await resolveValidStaffId(input.changedByStaffId)
 
-    await db.transaction(async (tx) => {
-      if (priceChanged && changedByStaffId) {
-        await tx.insert(supplierPricingHistory).values({
-          id: newId(),
-          pricingRecordId: input.recordId,
-          supplierId: existing.supplierId,
-          dataCenterId: existing.dataCenterId,
-          gpuCardTypeId: existing.gpuCardTypeId,
-          pricingMode: input.pricingMode,
-          previousUnitPricePerHour: existing.unitPricePerHour,
-          newUnitPricePerHour:
-            newUnitPrice != null ? toMoney(newUnitPrice) : null,
-          previousRevenueSharePercent: existing.revenueSharePercent,
-          newRevenueSharePercent:
-            newShare != null ? String(newShare) : null,
-          changedAt: new Date(),
-          changedByStaffId,
-          reason: input.reason?.trim() || null,
-        })
-      }
-
-      await tx
-        .update(supplierPricingRecord)
-        .set({
-          pricingMode: input.pricingMode,
-          configStatus: 'active',
-          unitPricePerHour:
-            newUnitPrice != null ? toMoney(newUnitPrice) : null,
-          revenueSharePercent: newShare != null ? String(newShare) : null,
-          pricingTiers: input.pricingTiers ?? null,
-          effectiveFrom,
-          effectiveTo,
-          updatedByStaffId: changedByStaffId ?? existing.updatedByStaffId,
-          updatedAt: sql`now()`,
-        })
-        .where(eq(supplierPricingRecord.id, input.recordId))
+    unitCostsLog('updateRecord', 'updating pricing record', {
+      recordId: input.recordId,
+      pricingMode: input.pricingMode,
+      priceChanged,
+      effectiveChanged,
+      tierCount: newTiers?.length ?? 0,
     })
+
+    try {
+      await db.transaction(async (tx) => {
+        if ((priceChanged || effectiveChanged) && changedByStaffId) {
+          await tx.insert(supplierPricingHistory).values({
+            id: newId(),
+            pricingRecordId: input.recordId,
+            supplierId: existing.supplierId,
+            dataCenterId: existing.dataCenterId,
+            gpuCardTypeId: existing.gpuCardTypeId,
+            pricingMode: input.pricingMode,
+            previousUnitPricePerHour: existing.unitPricePerHour,
+            newUnitPricePerHour:
+              newUnitPrice != null ? toMoney(newUnitPrice) : null,
+            previousRevenueSharePercent: existing.revenueSharePercent,
+            newRevenueSharePercent:
+              newShare != null ? String(newShare) : null,
+            changedAt: new Date(),
+            changedByStaffId,
+            reason:
+              input.reason?.trim() ||
+              (isTieredShare && priceChanged ? '阶梯分成档位调整' : null),
+          })
+        }
+
+        await tx
+          .update(supplierPricingRecord)
+          .set({
+            pricingMode: input.pricingMode,
+            configStatus: 'active',
+            unitPricePerHour:
+              newUnitPrice != null ? toMoney(newUnitPrice) : null,
+            revenueSharePercent: newShare != null ? String(newShare) : null,
+            pricingTiers: newTiers,
+            effectiveFrom,
+            effectiveTo,
+            updatedByStaffId: changedByStaffId ?? existing.updatedByStaffId,
+            updatedAt: sql`now()`,
+          })
+          .where(eq(supplierPricingRecord.id, input.recordId))
+      })
+    } catch (error) {
+      unitCostsError('updateRecord', 'failed to update pricing record', error, {
+        recordId: input.recordId,
+      })
+      throw new Error('更新成本配置失败，请稍后重试')
+    }
 
     const updated = await fetchRecordById(input.recordId)
     if (!updated) {
       throw new Error('更新成本配置失败')
     }
+
+    unitCostsLog('updateRecord', 'pricing record updated', {
+      recordId: input.recordId,
+      supplierId: updated.supplierId,
+    })
+
     return updated
   },
 

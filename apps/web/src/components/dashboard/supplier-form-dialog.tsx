@@ -201,7 +201,7 @@ function SupplierFormFields({ form, onChange, activeStaff, idPrefix }: SupplierF
             onValueChange={(v) =>
               onChange({
                 cooperationMode: v as CooperationMode,
-                revenueShareRatio: v === 'card_time' ? '' : form.revenueShareRatio,
+                revenueShareRatio: v === 'revenue_share' ? form.revenueShareRatio : '',
               })
             }
           >
@@ -222,7 +222,7 @@ function SupplierFormFields({ form, onChange, activeStaff, idPrefix }: SupplierF
         <div className="grid gap-2">
           <Label>商务经理</Label>
           <Select
-            value={form.businessManagerStaffId || undefined}
+            value={form.businessManagerStaffId}
             onValueChange={(v) => onChange({ businessManagerStaffId: v })}
           >
             <SelectTrigger className="w-full">
@@ -394,10 +394,13 @@ export function EditSupplierDialog({
     if (open && supplier) {
       setForm(supplierToFormValues(supplier, activeStaff))
     }
+  }, [open, supplier, activeStaff])
+
+  useEffect(() => {
     if (!open) {
       setForm(emptySupplierForm)
     }
-  }, [open, supplier, activeStaff])
+  }, [open])
 
   const handleSubmit = async () => {
     if (!supplier) return

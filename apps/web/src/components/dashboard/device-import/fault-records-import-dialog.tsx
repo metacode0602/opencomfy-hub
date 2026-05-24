@@ -39,7 +39,7 @@ import type { FaultRecordsParsedRow } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
 import { IMPORT_META, useInvalidateAfterDeviceImport } from './device-import-dialog-shared'
 
-type WizardStep = 'meta' | 'upload' | 'preview'
+type WizardStep = 'import' | 'preview'
 
 const meta = IMPORT_META.fault_records
 
@@ -86,14 +86,14 @@ export function FaultRecordsImportDialog({
     defaultDataCenterId,
   )
 
-  const { data: dataCenters = [] } = trpc.supplier.listDataCenters.useQuery(
+  const { data: dataCenters = [], isLoading: dcLoading } = trpc.supplier.listDataCenters.useQuery(
     { supplierId },
     { enabled: Boolean(supplierId) && open },
   )
 
   const commitMutation = trpc.supplier.deviceImport.commitFaultRecords.useMutation()
 
-  const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
+  const [wizardStep, setWizardStep] = useState<WizardStep>('import')
   const [parsing, setParsing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -109,7 +109,7 @@ export function FaultRecordsImportDialog({
     '—'
 
   const resetWizard = () => {
-    setWizardStep('meta')
+    setWizardStep('import')
     setDataCenterId(defaultDataCenterId ?? '')
     setFileName('')
     setRows([])
@@ -127,6 +127,12 @@ export function FaultRecordsImportDialog({
 
   const onParseFile = async (file: File) => {
     setParseError(null)
+    if (!selectedDataCenterId) {
+      setParseError('请先选择机房')
+      toast.error('请先选择机房')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
     if (!isDeviceImportFileName(file.name)) {
       setParseError('仅支持 .xlsx / .xls / .csv / .tsv 文件')
       toast.error('仅支持 .xlsx / .xls / .csv / .tsv 文件')
@@ -164,8 +170,14 @@ export function FaultRecordsImportDialog({
   const okCount = rows.filter((r) => r.parse_status === 'ok').length
   const warnCount = rows.filter((r) => r.parse_status === 'warning').length
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
+  const canUpload =
+    Boolean(selectedDataCenterId) || (lockDataCenter && Boolean(defaultDataCenterId))
 
   const commitImport = async () => {
+    if (!selectedDataCenterId) {
+      toast.error('请选择机房')
+      return
+    }
     if (okCount === 0) {
       toast.error('没有通过校验的行可入库')
       return
@@ -174,7 +186,7 @@ export function FaultRecordsImportDialog({
     try {
       const result = await commitMutation.mutateAsync({
         supplierId,
-        dataCenterId: selectedDataCenterId || undefined,
+        dataCenterId: selectedDataCenterId,
         fileName,
         rows,
       })
@@ -219,61 +231,65 @@ export function FaultRecordsImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {wizardStep === 'meta' && (
+        {wizardStep === 'import' && (
           <div className="flex min-h-0 flex-1 flex-col gap-4">
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
               <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
                 必需列：{meta.columnsHint}
               </p>
-              {!lockDataCenter && dataCenters.length > 0 && (
+              {lockDataCenter && defaultDataCenterId ? (
                 <div className="space-y-2">
-                  <Label>默认机房编码（可选）</Label>
-                  <Select
-                    value={selectedDataCenterId || undefined}
-                    onValueChange={setDataCenterId}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={dataCenters[0]?.code ?? '选择机房'} />
-                    </SelectTrigger>
-                    <SelectContent position="popper" className="z-[100]">
-                      {dataCenters.map((dc) => (
-                        <SelectItem key={dc.id} value={dc.id}>
-                          {dc.code} · {dc.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {lockDataCenter && defaultDataCenterId && (
-                <div className="space-y-2">
-                  <Label>默认机房</Label>
+                  <Label>机房</Label>
                   <p className="text-sm text-foreground">{lockedDcLabel}</p>
                 </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label>机房</Label>
+                  {dcLoading ? (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      加载机房...
+                    </p>
+                  ) : dataCenters.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      该供应商暂无机房，请先在「机房管理」中添加
+                    </p>
+                  ) : (
+                    <Select
+                      value={selectedDataCenterId || undefined}
+                      onValueChange={setDataCenterId}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择机房" />
+                      </SelectTrigger>
+                      <SelectContent position="popper" className="z-[100]">
+                        {dataCenters.map((dc) => (
+                          <SelectItem key={dc.id} value={dc.id}>
+                            {dc.name}
+                            {dc.code ? ` · ${dc.code}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
               )}
-            </div>
-            <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                取消
-              </Button>
-              <Button onClick={() => setWizardStep('upload')}>
-                下一步：上传文件
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-
-        {wizardStep === 'upload' && (
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-4">
               <div
-                className="cursor-pointer rounded-lg border border-dashed border-border p-6 text-center hover:bg-muted/30"
-                onClick={() => fileRef.current?.click()}
+                className={
+                  canUpload
+                    ? 'cursor-pointer rounded-lg border border-dashed border-border p-6 text-center hover:bg-muted/30'
+                    : 'rounded-lg border border-dashed border-border p-6 text-center opacity-50'
+                }
+                onClick={() => {
+                  if (canUpload) fileRef.current?.click()
+                }}
               >
                 <Upload className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
                 <p className="text-sm font-medium">点击上传 Excel / CSV</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  支持 .xlsx / .xls / .csv / .tsv；首行为表头，CSV 须 UTF-8，最大 10MB
+                  {canUpload
+                    ? '支持 .xlsx / .xls / .csv / .tsv；首行为表头，CSV 须 UTF-8，最大 10MB'
+                    : '请先选择机房'}
                 </p>
               </div>
               <input
@@ -281,6 +297,7 @@ export function FaultRecordsImportDialog({
                 type="file"
                 accept={DEVICE_IMPORT_ACCEPT}
                 className="hidden"
+                disabled={!canUpload}
                 onChange={(e) => {
                   const f = e.target.files?.[0]
                   if (f) void onParseFile(f)
@@ -295,8 +312,8 @@ export function FaultRecordsImportDialog({
               {parseError && <p className="text-sm text-destructive">{parseError}</p>}
             </div>
             <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => setWizardStep('meta')}>
-                上一步
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                取消
               </Button>
             </DialogFooter>
           </div>
@@ -338,7 +355,16 @@ export function FaultRecordsImportDialog({
               </Table>
             </div>
             <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => setWizardStep('upload')}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setWizardStep('import')
+                  setFileName('')
+                  setRows([])
+                  setParseError(null)
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              >
                 重新上传
               </Button>
               <Button

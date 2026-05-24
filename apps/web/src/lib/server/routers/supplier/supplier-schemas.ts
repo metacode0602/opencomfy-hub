@@ -1,7 +1,12 @@
 import { z } from 'zod'
 
 const supplierStatusSchema = z.enum(['negotiating', 'cooperating', 'suspended', 'terminated'])
-const cooperationModeSchema = z.enum(['card_time', 'revenue_share'])
+const cooperationModeSchema = z.enum([
+  'card_time',
+  'revenue_share',
+  'tiered_card_time',
+  'tiered_revenue_share',
+])
 
 export const supplierUpdateSchema = z
   .object({

@@ -40,7 +40,7 @@ import type { DeviceInventoryParsedRow } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
 import { IMPORT_META, useInvalidateAfterDeviceImport } from './device-import-dialog-shared'
 
-type WizardStep = 'meta' | 'upload' | 'preview'
+type WizardStep = 'import' | 'preview'
 
 const meta = IMPORT_META.device_inventory
 
@@ -94,7 +94,7 @@ export function DeviceInventoryImportDialog({
 
   const commitMutation = trpc.supplier.deviceImport.commitInventory.useMutation()
 
-  const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
+  const [wizardStep, setWizardStep] = useState<WizardStep>('import')
   const [parsing, setParsing] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -110,7 +110,7 @@ export function DeviceInventoryImportDialog({
     '—'
 
   const resetWizard = () => {
-    setWizardStep('meta')
+    setWizardStep('import')
     setDataCenterId(defaultDataCenterId ?? '')
     setFileName('')
     setRows([])
@@ -128,6 +128,12 @@ export function DeviceInventoryImportDialog({
 
   const onParseFile = async (file: File) => {
     setParseError(null)
+    if (!selectedDataCenterId) {
+      setParseError('请先选择机房')
+      toast.error('请先选择机房')
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
     if (!isDeviceImportFileName(file.name)) {
       setParseError('仅支持 .xlsx / .xls / .csv / .tsv 文件')
       toast.error('仅支持 .xlsx / .xls / .csv / .tsv 文件')
@@ -165,7 +171,7 @@ export function DeviceInventoryImportDialog({
   const warnCount = rows.filter((r) => r.parse_status === 'warning').length
   const committableCount = rows.filter((r) => r.parse_status !== 'error').length
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
-  const canProceedFromMeta =
+  const canUpload =
     Boolean(selectedDataCenterId) || (lockDataCenter && Boolean(defaultDataCenterId))
 
   const commitImport = async () => {
@@ -226,7 +232,7 @@ export function DeviceInventoryImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {wizardStep === 'meta' && (
+        {wizardStep === 'import' && (
           <div className="flex min-h-0 flex-1 flex-col gap-4">
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
               <p className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
@@ -269,29 +275,22 @@ export function DeviceInventoryImportDialog({
                   )}
                 </div>
               )}
-            </div>
-            <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
-                取消
-              </Button>
-              <Button onClick={() => setWizardStep('upload')} disabled={!canProceedFromMeta}>
-                下一步：上传文件
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-
-        {wizardStep === 'upload' && (
-          <div className="flex min-h-0 flex-1 flex-col gap-4">
-            <div className="flex min-h-0 flex-1 flex-col justify-center gap-4">
               <div
-                className="cursor-pointer rounded-lg border border-dashed border-border p-6 text-center hover:bg-muted/30"
-                onClick={() => fileRef.current?.click()}
+                className={
+                  canUpload
+                    ? 'cursor-pointer rounded-lg border border-dashed border-border p-6 text-center hover:bg-muted/30'
+                    : 'rounded-lg border border-dashed border-border p-6 text-center opacity-50'
+                }
+                onClick={() => {
+                  if (canUpload) fileRef.current?.click()
+                }}
               >
                 <Upload className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
                 <p className="text-sm font-medium">点击上传 Excel / CSV</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  支持 .xlsx / .xls / .csv / .tsv；首行为表头，CSV 须 UTF-8，最大 10MB
+                  {canUpload
+                    ? '支持 .xlsx / .xls / .csv / .tsv；首行为表头，CSV 须 UTF-8，最大 10MB'
+                    : '请先选择机房'}
                 </p>
               </div>
               <input
@@ -299,6 +298,7 @@ export function DeviceInventoryImportDialog({
                 type="file"
                 accept={DEVICE_IMPORT_ACCEPT}
                 className="hidden"
+                disabled={!canUpload}
                 onChange={(e) => {
                   const f = e.target.files?.[0]
                   if (f) void onParseFile(f)
@@ -313,8 +313,8 @@ export function DeviceInventoryImportDialog({
               {parseError && <p className="text-sm text-destructive">{parseError}</p>}
             </div>
             <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => setWizardStep('meta')}>
-                上一步
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                取消
               </Button>
             </DialogFooter>
           </div>
@@ -374,7 +374,16 @@ export function DeviceInventoryImportDialog({
               </Table>
             </div>
             <DialogFooter className="shrink-0">
-              <Button variant="outline" onClick={() => setWizardStep('upload')}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setWizardStep('import')
+                  setFileName('')
+                  setRows([])
+                  setParseError(null)
+                  if (fileRef.current) fileRef.current.value = ''
+                }}
+              >
                 重新上传
               </Button>
               <Button

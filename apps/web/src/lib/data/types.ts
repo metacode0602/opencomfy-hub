@@ -337,8 +337,6 @@ export const statusColors: Record<string, string> = {
 }
 
 // 供应商相关类型
-export type CooperationMode = 'card_time' | 'revenue_share'
-
 /** 入驻主体类型（Excel 导入 / supplier.onboarding_type） */
 export type SupplierOnboardingType = 'enterprise' | 'individual'
 
@@ -349,12 +347,21 @@ export type ContractPricingMode =
   | 'tiered_card_time'
   | 'tiered_revenue_share'
 
+/** 供应商默认计价模式（与合同约定计价方式一致） */
+export type CooperationMode = ContractPricingMode
+
 export interface ContractPricingTier {
   tierOrder: number
-  /** 阶梯起始累计卡时（含） */
-  thresholdFromHours: number
-  /** 阶梯结束累计卡时（不含），空表示无上限 */
+  /** 档位划分依据：累计卡时 / 成交刊例比例 */
+  tierBasis?: 'hours' | 'ratio_band'
+  /** 阶梯卡时：起始累计卡时（含） */
+  thresholdFromHours?: number
+  /** 阶梯卡时：结束累计卡时（不含），空表示无上限 */
   thresholdToHours?: number | null
+  /** 阶梯分成：成交/刊例比例下限（小数，左开） */
+  dealToListRatioMin?: number
+  /** 阶梯分成：成交/刊例比例上限（小数，右闭），空表示无上限 */
+  dealToListRatioMax?: number | null
   /** 卡时 / 阶梯卡时：元/小时 */
   unitPricePerHour?: number
   /** 分成 / 阶梯分成：供应商分成 % */

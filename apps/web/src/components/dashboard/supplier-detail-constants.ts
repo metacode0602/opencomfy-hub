@@ -1,9 +1,6 @@
-import type { CooperationMode } from '@/lib/data/types'
+import { contractPricingModeNames, type CooperationMode } from '@/lib/data/types'
 
-export const cooperationModeLabels: Record<CooperationMode, string> = {
-  card_time: '卡时模式',
-  revenue_share: '分成模式',
-}
+export const cooperationModeLabels: Record<CooperationMode, string> = contractPricingModeNames
 
 export const statusNames: Record<string, string> = {
   negotiating: '洽谈中',
