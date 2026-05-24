@@ -6,6 +6,8 @@ import { platformPricingDataAccess } from '@/lib/server/dataaccess/platform-pric
 import { platformPricingError } from '@/lib/server/dataaccess/platform-pricing/logger'
 import { gpuCardTypesDataAccess } from '@/lib/server/dataaccess/supplier/gpu-card-types'
 import { datacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-import'
+import { datacenterCreateDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-create'
+import { datacenterUpdateDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-update'
 import { deviceImportDataAccess } from '@/lib/server/dataaccess/supplier/device-import'
 import { deviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/device-retire'
 import { onboardingBatchDataAccess } from '@/lib/server/dataaccess/supplier/onboarding-batch'
@@ -51,7 +53,12 @@ import {
   platformPriceUpsertSchema,
 } from '@/lib/server/routers/supplier/platform-pricing-schemas'
 import { overviewFiltersSchema } from '@/lib/server/routers/supplier/overview-schemas'
-import { supplierListSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
+import { supplierListSchema, supplierCreateSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
+import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter-create-schemas'
+import {
+  datacenterUpdateSchema,
+  datacenterUpdateStatusSchema,
+} from '@/lib/server/routers/supplier/datacenter-update-schemas'
 import {
   unitCostListSchema,
   unitCostUpdateSchema,
@@ -128,7 +135,9 @@ function mapImportError(error: unknown): never {
       message.includes('工单号指向') ||
       message.includes('SN 已存在') ||
       message.includes('资产编号已存在') ||
-      message.includes('唯一性冲突')
+      message.includes('唯一性冲突') ||
+      message.includes('Karmada') ||
+      message.includes('标签值')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
@@ -180,12 +189,51 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
+  create: adminProcedure.input(supplierCreateSchema).mutation(async ({ input }) => {
+    try {
+      return await suppliersDataAccess.create(input)
+    } catch (e) {
+      mapImportError(e)
+    }
+  }),
+
   listDataCenters: protectedProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
         await suppliersDataAccess.assertSupplierExists(input.supplierId)
         return await suppliersDataAccess.listDataCentersBySupplier(input.supplierId)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  createDataCenter: protectedProcedure
+    .input(datacenterCreateSchema)
+    .mutation(async ({ input }) => {
+      try {
+        await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        return await datacenterCreateDataAccess.create(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  updateDataCenter: protectedProcedure
+    .input(datacenterUpdateSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await datacenterUpdateDataAccess.update(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  updateDataCenterStatus: protectedProcedure
+    .input(datacenterUpdateStatusSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await datacenterUpdateDataAccess.updateStatus(input)
       } catch (e) {
         mapImportError(e)
       }
@@ -369,6 +417,16 @@ export const supplierRouter = createTRPCRouter({
       .query(async ({ input }) => {
         try {
           return await deviceImportDataAccess.getContext(input.supplierId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    getGpuCardTypeIdByInternalIp: protectedProcedure
+      .input(z.object({ supplierId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          return await deviceImportDataAccess.getGpuCardTypeIdByInternalIp(input.supplierId)
         } catch (e) {
           mapImportError(e)
         }

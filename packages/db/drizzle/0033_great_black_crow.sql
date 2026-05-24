@@ -1,0 +1,1 @@
+ALTER TABLE "supplier" ADD COLUMN "source" varchar(64) DEFAULT 'import' NOT NULL;

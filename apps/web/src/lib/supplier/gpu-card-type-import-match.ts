@@ -8,12 +8,14 @@ export type GpuCardTypeRef = {
 
 export type GpuCardTypeImportIssue = {
   row_no: number
+  internal_ip?: string
   raw_value: string
-  reason: 'missing' | 'unrecognized' | 'needs_selection'
+  reason: 'missing' | 'unrecognized'
 }
 
 export type InventoryGpuRowRef = {
   row_no: number
+  internal_ip?: string
   gpu_card_type_code?: string
   gpu_card_type_id?: string
   parse_status: 'ok' | 'warning' | 'error'
@@ -23,8 +25,12 @@ export type InventoryGpuRowResolution = {
   gpuCardTypeId: string
   gpuCardTypeCode: string
   gpuCardTypeName: string
-  matchedBy: 'name' | 'code' | 'manual'
+  matchedBy: 'name' | 'code' | 'manual' | 'existing_ip'
   raw: string
+}
+
+export type ValidateInventoryGpuOptions = {
+  gpuCardTypeIdByIp?: Map<string, string> | Record<string, string>
 }
 
 export type ValidateInventoryGpuResult = {
@@ -44,6 +50,37 @@ const BRAND_PREFIXES = [
   'ascend',
   '昇腾',
 ] as const
+
+export function normalizeInternalIpKey(ip: string): string {
+  return ip.trim().toLowerCase()
+}
+
+export function buildGpuCardTypeIdByIpMap(
+  entries: Array<{ internalIp?: string | null; gpuCardTypeId?: string | null }>,
+): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const entry of entries) {
+    const ip = entry.internalIp?.trim()
+    const id = entry.gpuCardTypeId?.trim()
+    if (!ip || !id) continue
+    const key = normalizeInternalIpKey(ip)
+    if (!map.has(key)) map.set(key, id)
+  }
+  return map
+}
+
+export function lookupGpuCardTypeIdByIp(
+  internalIp: string | undefined,
+  gpuCardTypeIdByIp: Map<string, string> | Record<string, string> | undefined,
+): string | undefined {
+  const ip = internalIp?.trim()
+  if (!ip || !gpuCardTypeIdByIp) return undefined
+  const key = normalizeInternalIpKey(ip)
+  if (gpuCardTypeIdByIp instanceof Map) {
+    return gpuCardTypeIdByIp.get(key)
+  }
+  return gpuCardTypeIdByIp[key]
+}
 
 export function stripLeadingGpuBrand(raw: string): string {
   let value = raw.trim()
@@ -119,9 +156,10 @@ export function matchGpuCardType(
   return null
 }
 
-function resolveManualGpuCardType(
+function resolveGpuCardTypeById(
   gpuCardTypeId: string | undefined,
   cardTypes: GpuCardTypeRef[],
+  matchedBy: InventoryGpuRowResolution['matchedBy'],
 ): InventoryGpuRowResolution | null {
   const id = gpuCardTypeId?.trim()
   if (!id) return null
@@ -131,7 +169,7 @@ function resolveManualGpuCardType(
     gpuCardTypeId: card.id,
     gpuCardTypeCode: card.code,
     gpuCardTypeName: card.name,
-    matchedBy: 'manual',
+    matchedBy,
     raw: '',
   }
 }
@@ -139,18 +177,21 @@ function resolveManualGpuCardType(
 export function validateInventoryGpuCardTypes(
   rows: InventoryGpuRowRef[],
   cardTypes: GpuCardTypeRef[],
+  options: ValidateInventoryGpuOptions = {},
 ): ValidateInventoryGpuResult {
   const rowResolutions = new Map<number, InventoryGpuRowResolution>()
   const issues: GpuCardTypeImportIssue[] = []
   const unrecognizedSet = new Set<string>()
+  const ipMap =
+    options.gpuCardTypeIdByIp instanceof Map
+      ? options.gpuCardTypeIdByIp
+      : new Map(Object.entries(options.gpuCardTypeIdByIp ?? {}))
 
   for (const row of rows) {
     if (row.parse_status === 'error') continue
 
     const raw = row.gpu_card_type_code?.trim() ?? ''
-    const autoMatched = raw ? matchGpuCardType(raw, cardTypes) : null
-    const manualMatched = resolveManualGpuCardType(row.gpu_card_type_id, cardTypes)
-
+    const manualMatched = resolveGpuCardTypeById(row.gpu_card_type_id, cardTypes, 'manual')
     if (manualMatched) {
       rowResolutions.set(row.row_no, {
         ...manualMatched,
@@ -159,6 +200,7 @@ export function validateInventoryGpuCardTypes(
       continue
     }
 
+    const autoMatched = raw ? matchGpuCardType(raw, cardTypes) : null
     if (autoMatched) {
       rowResolutions.set(row.row_no, {
         gpuCardTypeId: autoMatched.id,
@@ -170,12 +212,27 @@ export function validateInventoryGpuCardTypes(
       continue
     }
 
-    if (!raw) {
-      issues.push({ row_no: row.row_no, raw_value: '', reason: 'missing' })
+    const existingGpuCardTypeId = lookupGpuCardTypeIdByIp(row.internal_ip, ipMap)
+    const existingMatched = resolveGpuCardTypeById(existingGpuCardTypeId, cardTypes, 'existing_ip')
+    if (existingMatched) {
+      rowResolutions.set(row.row_no, {
+        ...existingMatched,
+        raw: raw || existingMatched.gpuCardTypeCode,
+      })
       continue
     }
 
-    issues.push({ row_no: row.row_no, raw_value: raw, reason: 'unrecognized' })
+    if (!raw) {
+      issues.push({ row_no: row.row_no, internal_ip: row.internal_ip, raw_value: '', reason: 'missing' })
+      continue
+    }
+
+    issues.push({
+      row_no: row.row_no,
+      internal_ip: row.internal_ip,
+      raw_value: raw,
+      reason: 'unrecognized',
+    })
     unrecognizedSet.add(raw)
   }
 
@@ -196,12 +253,12 @@ export class DeviceImportUnrecognizedGpuCardError extends Error {
       : ''
     const pendingHint =
       validation.pendingSelectionCount > 0
-        ? `共 ${validation.pendingSelectionCount} 行尚未选择卡型`
+        ? `共 ${validation.pendingSelectionCount} 行卡型校验失败`
         : ''
     super(
       labels
         ? `显卡型号无法识别：${labels}；${pendingHint}`
-        : pendingHint || '存在尚未选择卡型的行，无法入库',
+        : pendingHint || '存在卡型校验失败的行，无法入库',
     )
     this.name = 'DeviceImportUnrecognizedGpuCardError'
     this.validation = validation
@@ -210,26 +267,25 @@ export class DeviceImportUnrecognizedGpuCardError extends Error {
 
 export function buildUnrecognizedGpuCardTypesWorkbook(issues: GpuCardTypeImportIssue[]): ArrayBuffer {
   const rows: Array<Array<string | number>> = [
-    ['行号', '显卡型号', '问题'],
+    ['行号', 'IP地址', '显卡型号', '问题'],
     ...issues.map((issue) => [
       issue.row_no,
+      issue.internal_ip ?? '',
       issue.raw_value || '(空)',
       issue.reason === 'missing'
-        ? '未填写（请在预览中选择卡型，如 CPU 管控节点）'
-        : issue.reason === 'unrecognized'
-          ? '未识别（请在预览中选择卡型）'
-          : '待选择卡型',
+        ? '未填写且无法按 IP 识别已有卡型，请选择卡型'
+        : '未识别且无法按 IP 识别已有卡型，请选择卡型',
     ]),
   ]
   const sheet = XLSX.utils.aoa_to_sheet(rows)
   const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, sheet, '待确认卡型')
+  XLSX.utils.book_append_sheet(workbook, sheet, '卡型校验失败')
   return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer
 }
 
 export function downloadUnrecognizedGpuCardTypesExcel(
   issues: GpuCardTypeImportIssue[],
-  fileName = '待确认显卡型号.xlsx',
+  fileName = '卡型校验失败.xlsx',
 ): void {
   if (issues.length === 0) return
   const buffer = buildUnrecognizedGpuCardTypesWorkbook(issues)
@@ -247,5 +303,6 @@ export function downloadUnrecognizedGpuCardTypesExcel(
 export function gpuCardTypeMatchLabel(matchedBy: InventoryGpuRowResolution['matchedBy']): string {
   if (matchedBy === 'name') return '名称'
   if (matchedBy === 'code') return '编码'
+  if (matchedBy === 'existing_ip') return '已有设备'
   return '手工'
 }

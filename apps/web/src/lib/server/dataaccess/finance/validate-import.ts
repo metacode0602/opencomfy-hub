@@ -4,11 +4,8 @@ import {
   billingPeriodRawCustomerConsumption,
   billingPeriodRawTenantBill,
   billingTenant,
-  dataCenter,
-  gpuCardType,
-  supplierPricingRecord,
 } from '@workspace/db/schema'
-import { and, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { ImportFileType } from './constants'
 import type { ImportCellError } from './import-errors'
 import { buildMarkedErrorWorkbookBuffer } from './import-errors'
@@ -18,6 +15,10 @@ import {
   saveImportErrorReport,
 } from './import-storage'
 import { parseWorkbookDetailed } from './excel-parser'
+export {
+  findMissingTenantBillPricing,
+  type MissingPricingPair,
+} from './tenant-bill-pricing'
 
 export type CrossFileValidation = {
   ok: boolean
@@ -107,71 +108,6 @@ export async function validateCrossFileImports(
   }
 
   return { ok: Object.keys(errorsByFileType).length === 0, errorsByFileType }
-}
-
-export type MissingPricingPair = {
-  regionCode: string
-  gpuModel: string
-}
-
-export async function findMissingTenantBillPricing(input: {
-  periodId: string
-  periodEnd: string
-}): Promise<MissingPricingPair[]> {
-  const tenantBillBatch = await db.query.billingPeriodImportBatch.findFirst({
-    where: and(
-      eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
-      eq(billingPeriodImportBatch.fileType, 'tenant_bill'),
-      eq(billingPeriodImportBatch.parseStatus, 'ok'),
-    ),
-  })
-  if (!tenantBillBatch) return []
-
-  const rows = await db
-    .select({
-      regionCode: billingPeriodRawTenantBill.regionCode,
-      gpuModel: billingPeriodRawTenantBill.gpuModel,
-    })
-    .from(billingPeriodRawTenantBill)
-    .where(eq(billingPeriodRawTenantBill.batchId, tenantBillBatch.id))
-
-  const pairs = new Map<string, MissingPricingPair>()
-  for (const row of rows) {
-    const key = `${row.regionCode}::${row.gpuModel}`
-    if (!pairs.has(key)) {
-      pairs.set(key, { regionCode: row.regionCode, gpuModel: row.gpuModel })
-    }
-  }
-
-  const missing: MissingPricingPair[] = []
-  for (const pair of pairs.values()) {
-    const hit = await db
-      .select({ id: supplierPricingRecord.id })
-      .from(supplierPricingRecord)
-      .innerJoin(dataCenter, eq(supplierPricingRecord.dataCenterId, dataCenter.id))
-      .innerJoin(gpuCardType, eq(supplierPricingRecord.gpuCardTypeId, gpuCardType.id))
-      .where(
-        and(
-          eq(
-            sql`lower(${dataCenter.containerInstanceRegion})`,
-            pair.regionCode.toLowerCase(),
-          ),
-          or(
-            eq(sql`lower(${gpuCardType.code})`, pair.gpuModel.toLowerCase()),
-            eq(sql`lower(${gpuCardType.name})`, pair.gpuModel.toLowerCase()),
-          ),
-          eq(supplierPricingRecord.configStatus, 'active'),
-          lte(supplierPricingRecord.effectiveFrom, `${input.periodEnd} 23:59:59`),
-          or(
-            isNull(supplierPricingRecord.effectiveTo),
-            sql`${supplierPricingRecord.effectiveTo} >= ${`${input.periodEnd} 00:00:00`}`,
-          ),
-        ),
-      )
-      .limit(1)
-    if (hit.length === 0) missing.push(pair)
-  }
-  return missing
 }
 
 export async function persistBatchErrorReport(input: {

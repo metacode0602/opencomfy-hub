@@ -77,15 +77,7 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [supplierFilter, setSupplierFilter] = useState('all')
-  const [locationFilter, setLocationFilter] = useState('all')
-
-  const locationOptions = useMemo(() => {
-    const locations = new Set<string>()
-    for (const dc of dataCenters) {
-      if (dc.location) locations.add(dc.location)
-    }
-    return [...locations].sort((a, b) => a.localeCompare(b, 'zh-CN'))
-  }, [dataCenters])
+  const [containerInstanceRegionFilter, setContainerInstanceRegionFilter] = useState('')
 
   const filtered = useMemo(() => {
     return dataCenters.filter((dc) => {
@@ -96,19 +88,30 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
         dc.code.toLowerCase().includes(q) ||
         dc.supplierName.toLowerCase().includes(q) ||
         (dc.address?.toLowerCase().includes(q) ?? false) ||
-        (dc.location?.toLowerCase().includes(q) ?? false)
+        (dc.location?.toLowerCase().includes(q) ?? false) ||
+        (dc.containerInstanceRegion?.toLowerCase().includes(q) ?? false)
+      const regionQ = containerInstanceRegionFilter.trim().toLowerCase()
+      const matchContainerInstanceRegion =
+        !regionQ ||
+        (dc.containerInstanceRegion?.toLowerCase().includes(regionQ) ?? false)
       const matchStatus = statusFilter === 'all' || dc.status === statusFilter
       const matchSupplier =
         supplierIdFilter != null ||
         supplierFilter === 'all' ||
         dc.supplierId === supplierFilter
-      const matchLocation = locationFilter === 'all' || dc.location === locationFilter
-      return matchQ && matchStatus && matchSupplier && matchLocation
+      return matchQ && matchStatus && matchSupplier && matchContainerInstanceRegion
     })
-  }, [dataCenters, searchTerm, statusFilter, supplierFilter, locationFilter, supplierIdFilter])
+  }, [
+    dataCenters,
+    searchTerm,
+    statusFilter,
+    supplierFilter,
+    containerInstanceRegionFilter,
+    supplierIdFilter,
+  ])
 
   const pagination = useListPagination(filtered, {
-    resetDeps: [searchTerm, statusFilter, supplierFilter, locationFilter],
+    resetDeps: [searchTerm, statusFilter, supplierFilter, containerInstanceRegionFilter],
   })
 
   const displayStats = stats ?? {
@@ -272,19 +275,12 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                 </SelectContent>
               </Select>
             )}
-            <Select value={locationFilter} onValueChange={setLocationFilter}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue placeholder="区域" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部区域</SelectItem>
-                {locationOptions.map((location) => (
-                  <SelectItem key={location} value={location}>
-                    {location}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              placeholder="容器实例区域"
+              className="w-[180px]"
+              value={containerInstanceRegionFilter}
+              onChange={(e) => setContainerInstanceRegionFilter(e.target.value)}
+            />
           </div>
         </CardContent>
       </Card>

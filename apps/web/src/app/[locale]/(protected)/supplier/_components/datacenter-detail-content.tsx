@@ -13,6 +13,8 @@ import {
   Eye,
   Loader2,
   MapPin,
+  Pencil,
+  Power,
   Server,
   Settings2,
 } from 'lucide-react'
@@ -29,6 +31,16 @@ import {
 } from '@workspace/ui/components/table'
 import { Progress } from '@workspace/ui/components/progress'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenterDevice } from '@/lib/data/types'
@@ -37,6 +49,8 @@ import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-det
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-device-retire-dialog'
+import { EditDatacenterDialog } from '@/components/dashboard/edit-datacenter-dialog'
+import { toast } from 'sonner'
 
 const inventoryStatusColors: Record<DataCenterDevice['status'], string> = {
   online: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -71,6 +85,8 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 
 export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string }) {
   const [retireDialogOpen, setRetireDialogOpen] = useState(false)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [statusConfirmTarget, setStatusConfirmTarget] = useState<'online' | 'offline' | null>(null)
   const utils = trpc.useUtils()
   const {
     data: detail,
@@ -99,6 +115,24 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
       void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
       void utils.supplier.listDataCenters.invalidate({ supplierId })
     }
+  }
+
+  const updateStatusMutation = trpc.supplier.updateDataCenterStatus.useMutation({
+    onSuccess: (result) => {
+      toast.success(
+        `机房「${result.dataCenter.name}」已${result.dataCenter.status === 'online' ? '上线' : '下线'}`,
+      )
+      setStatusConfirmTarget(null)
+      invalidateAfterImport()
+    },
+    onError: (error) => {
+      toast.error(error.message)
+    },
+  })
+
+  const handleConfirmStatusChange = () => {
+    if (!statusConfirmTarget) return
+    updateStatusMutation.mutate({ dataCenterId, status: statusConfirmTarget })
   }
 
   const gpuInventory = detail?.gpuInventory ?? []
@@ -144,6 +178,12 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   }
 
   const { dataCenter, physicalDeviceStats, inventoryStats } = detail
+  const nextStatus: 'online' | 'offline' | null =
+    dataCenter.status === 'online'
+      ? 'offline'
+      : dataCenter.status === 'offline' || dataCenter.status === 'maintenance'
+        ? 'online'
+        : null
 
   return (
     <div className="space-y-6">
@@ -190,10 +230,65 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
           </div>
         </div>
         </div>
-        <Button className="shrink-0 self-start" onClick={() => setRetireDialogOpen(true)}>
-          设备下架 / 裁撤
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2 self-start">
+          <Button variant="outline" className="gap-2" onClick={() => setEditDialogOpen(true)}>
+            <Pencil className="h-4 w-4" />
+            编辑信息
+          </Button>
+          {nextStatus && (
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => setStatusConfirmTarget(nextStatus)}
+            >
+              <Power className="h-4 w-4" />
+              {nextStatus === 'online' ? '设为在线' : '设为离线'}
+            </Button>
+          )}
+          <Button onClick={() => setRetireDialogOpen(true)}>设备下架 / 裁撤</Button>
+        </div>
       </div>
+
+      <EditDatacenterDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        dataCenter={dataCenter}
+        onUpdated={invalidateAfterImport}
+      />
+
+      <AlertDialog
+        open={statusConfirmTarget !== null}
+        onOpenChange={(open) => !open && setStatusConfirmTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {statusConfirmTarget === 'online' ? '确认设为在线？' : '确认设为离线？'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusConfirmTarget === 'online'
+                ? `将机房「${dataCenter.name}」切换为在线状态，该机房将恢复对外可用。`
+                : `将机房「${dataCenter.name}」切换为离线状态，该机房将标记为不可用。`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={updateStatusMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={updateStatusMutation.isPending}
+              onClick={handleConfirmStatusChange}
+            >
+              {updateStatusMutation.isPending
+                ? '处理中…'
+                : statusConfirmTarget === 'online'
+                  ? '确认上线'
+                  : '确认下线'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <DatacenterDeviceRetireDialog
         open={retireDialogOpen}
@@ -399,9 +494,15 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card className="border-border bg-card">
-          <CardHeader>
-            <CardTitle className="text-base">基本信息</CardTitle>
-            <CardDescription>机房基础属性与平台映射</CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+            <div>
+              <CardTitle className="text-base">基本信息</CardTitle>
+              <CardDescription>机房基础属性与平台映射</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => setEditDialogOpen(true)}>
+              <Pencil className="h-3.5 w-3.5" />
+              编辑
+            </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <InfoRow label="供应商">

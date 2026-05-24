@@ -8,7 +8,6 @@ import {
   Loader2,
   MapPin,
   MoreHorizontal,
-  Plus,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -34,6 +33,7 @@ import { trpc } from '@/lib/trpc/client'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
+import { CreateDatacenterTrigger } from '@/components/dashboard/create-datacenter-dialog'
 
 interface SupplierDatacentersPanelProps {
   supplier: Supplier
@@ -89,11 +89,19 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
       </div> */}
 
       <section className="space-y-4">
-        <div>
-          <h3 className="text-base font-medium text-foreground">机房概览</h3>
-          <p className="text-sm text-muted-foreground">各数据中心的运行状态与配套费用</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-medium text-foreground">机房概览</h3>
+            <p className="text-sm text-muted-foreground">各数据中心的运行状态与配套费用</p>
+          </div>
+          <CreateDatacenterTrigger
+            supplier={supplier}
+            existingDataCenters={dataCenters.map((dc) => ({ name: dc.name, code: dc.code }))}
+            onCreated={() =>
+              void utils.supplier.listDataCenters.invalidate({ supplierId: supplier.id })
+            }
+          />
         </div>
-
         {isLoadingDataCenters ? (
           <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />

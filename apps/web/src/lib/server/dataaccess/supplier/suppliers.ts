@@ -26,6 +26,7 @@ import {
   mapSupplierRow,
 } from '@/lib/server/mappers/supply'
 import { toNumber } from '@/lib/server/mappers/crm'
+import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import {
   dataCenter,
   gpuCardType,
@@ -44,6 +45,21 @@ import { and, count, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
+}
+
+function deriveManualSupplierCode(id: string, shortName: string, existingCodes: Set<string>): string {
+  const slug = shortName
+    .replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '')
+    .slice(0, 12)
+    .toUpperCase()
+  const base = slug ? `SUP-${slug}` : `SUP-CRM-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`
+  let code = base
+  let n = 2
+  while (existingCodes.has(code)) {
+    code = `${base}-${n}`
+    n++
+  }
+  return code
 }
 
 export const suppliersDataAccess = {
@@ -531,6 +547,60 @@ export const suppliersDataAccess = {
       throw new Error('供应商不存在')
     }
     return row
+  },
+
+  async create(input: {
+    name: string
+    shortName: string
+    status: Supplier['status']
+    cooperationMode: CooperationMode
+    revenueShareRatio?: number
+    businessManagerStaffId: string
+    contactPerson: string
+    contactPhone: string
+    contactEmail: string
+    address: string
+    bankAccount?: string
+    bankName?: string
+  }): Promise<Supplier> {
+    const staff = await staffDataAccess.getById(input.businessManagerStaffId)
+    if (!staff || staff.status !== 'active') {
+      throw new Error('默认商务经理无效或已停用')
+    }
+
+    const id = newId()
+    const existingCodes = new Set(
+      (await db.select({ code: supplier.code }).from(supplier)).map((row) => row.code),
+    )
+    const code = deriveManualSupplierCode(id, input.shortName, existingCodes)
+
+    await db.insert(supplier).values({
+      id,
+      code,
+      externalTenantId: `crm-manual-${id}`,
+      name: input.name,
+      shortName: input.shortName,
+      status: input.status,
+      defaultCooperationMode: input.cooperationMode,
+      defaultRevenueSharePercent:
+        input.cooperationMode === 'revenue_share' && input.revenueShareRatio != null
+          ? String(input.revenueShareRatio)
+          : null,
+      businessManagerStaffId: input.businessManagerStaffId,
+      contactPerson: input.contactPerson,
+      contactPhone: input.contactPhone,
+      contactEmail: input.contactEmail,
+      address: input.address,
+      bankAccount: input.bankAccount ?? null,
+      bankName: input.bankName ?? null,
+      source: 'manual',
+    })
+
+    const created = await this.getById(id)
+    if (!created) {
+      throw new Error('创建供应商失败')
+    }
+    return created
   },
 
   async update(input: {

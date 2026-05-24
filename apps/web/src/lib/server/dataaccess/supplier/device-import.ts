@@ -18,6 +18,7 @@ import {
   maskInventoryRowsForPreview,
 } from '@/lib/supplier/device-import-utils'
 import {
+  buildGpuCardTypeIdByIpMap,
   DeviceImportUnrecognizedGpuCardError,
   validateInventoryGpuCardTypes,
 } from '@/lib/supplier/gpu-card-type-import-match'
@@ -89,14 +90,28 @@ async function loadAllGpuCardTypesForImport() {
     .from(gpuCardType)
 }
 
+async function loadGpuCardTypeIdByInternalIp(supplierId: string) {
+  const rows = await db
+    .select({
+      internalIp: supplierDevice.internalIp,
+      gpuCardTypeId: supplierDevice.gpuCardTypeId,
+    })
+    .from(supplierDevice)
+    .where(eq(supplierDevice.supplierId, supplierId))
+
+  return buildGpuCardTypeIdByIpMap(rows)
+}
+
 async function assertInventoryGpuCardTypesResolved(
+  supplierId: string,
   rows: DeviceInventoryParsedRow[],
 ) {
   const cardTypes = await loadAllGpuCardTypesForImport()
   if (cardTypes.length === 0) {
     throw new Error('系统中没有 GPU 卡型，请先在卡型管理中维护 gpu_card_type')
   }
-  const validation = validateInventoryGpuCardTypes(rows, cardTypes)
+  const gpuCardTypeIdByIp = await loadGpuCardTypeIdByInternalIp(supplierId)
+  const validation = validateInventoryGpuCardTypes(rows, cardTypes, { gpuCardTypeIdByIp })
   if (validation.issues.length > 0) {
     throw new DeviceImportUnrecognizedGpuCardError(validation)
   }
@@ -228,6 +243,12 @@ function trackImportedCardType(
 }
 
 export const deviceImportDataAccess = {
+  async getGpuCardTypeIdByInternalIp(supplierId: string): Promise<Record<string, string>> {
+    await suppliersDataAccess.assertSupplierExists(supplierId)
+    const map = await loadGpuCardTypeIdByInternalIp(supplierId)
+    return Object.fromEntries(map)
+  },
+
   async getContext(supplierId: string): Promise<DeviceImportContext> {
     await suppliersDataAccess.assertSupplierExists(supplierId)
 
@@ -335,7 +356,7 @@ export const deviceImportDataAccess = {
       throw new Error('没有可入库的有效行')
     }
 
-    const gpuValidation = await assertInventoryGpuCardTypesResolved(params.rows)
+    const gpuValidation = await assertInventoryGpuCardTypesResolved(params.supplierId, params.rows)
 
     const batchId = newId()
     const batchCode = generateImportBatchCode('device_inventory')

@@ -71,6 +71,7 @@ export const supplier = pgTable(
     contactEmail: varchar("contact_email", { length: 255 }),
     address: text("address"),
     bankName: varchar("bank_name", { length: 255 }),
+    source: varchar("source", { length: 64 }).notNull().default("import"), // import api导入 / manual 手动
     bankAccount: varchar("bank_account", { length: 64 }),
     externalOnboardingId: varchar("external_onboarding_id", { length: 64 }),
     platformTenantId: varchar("platform_tenant_id", { length: 32 }),

@@ -100,6 +100,17 @@ export function DeviceInventoryImportDialog({
   const { data: gpuCardTypes = [], isLoading: gpuCardTypesLoading } =
     trpc.supplier.gpuCardTypes.list.useQuery({ status: 'all' }, { enabled: open })
 
+  const { data: gpuCardTypeIdByIpRecord = {}, isLoading: gpuByIpLoading } =
+    trpc.supplier.deviceImport.getGpuCardTypeIdByInternalIp.useQuery(
+      { supplierId },
+      { enabled: open && Boolean(supplierId) },
+    )
+
+  const gpuCardTypeIdByIp = useMemo(
+    () => new Map(Object.entries(gpuCardTypeIdByIpRecord)),
+    [gpuCardTypeIdByIpRecord],
+  )
+
   const commitMutation = trpc.supplier.deviceImport.commitInventory.useMutation()
 
   const [wizardStep, setWizardStep] = useState<WizardStep>('import')
@@ -198,8 +209,9 @@ export function DeviceInventoryImportDialog({
         code: card.code,
         name: card.name,
       })),
+      { gpuCardTypeIdByIp },
     )
-  }, [rows, gpuCardTypes, gpuCardTypeOptions])
+  }, [rows, gpuCardTypes, gpuCardTypeOptions, gpuCardTypeIdByIp])
 
   const gpuIssueByRow = useMemo(() => {
     const map = new Map<number, string>()
@@ -207,8 +219,8 @@ export function DeviceInventoryImportDialog({
       map.set(
         issue.row_no,
         issue.reason === 'missing'
-          ? '未填写显卡型号，请选择卡型'
-          : `未识别「${issue.raw_value}」，请选择卡型`,
+          ? '未填写显卡型号，且 IP 未匹配已有设备'
+          : `未识别「${issue.raw_value}」，且 IP 未匹配已有设备`,
       )
     }
     return map
@@ -221,8 +233,7 @@ export function DeviceInventoryImportDialog({
   }
 
   const getRowDisplayStatus = (row: DeviceInventoryParsedRow): 'ok' | 'warning' | 'error' => {
-    if (row.parse_status === 'error') return 'error'
-    if (gpuIssueByRow.has(row.row_no)) return 'warning'
+    if (row.parse_status === 'error' || gpuIssueByRow.has(row.row_no)) return 'error'
     return row.parse_status
   }
 
@@ -234,6 +245,7 @@ export function DeviceInventoryImportDialog({
     committableCount > 0 &&
     pendingGpuSelectionCount === 0 &&
     !gpuCardTypesLoading &&
+    !gpuByIpLoading &&
     gpuCardTypes.length > 0
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
   const canUpload =
@@ -249,7 +261,7 @@ export function DeviceInventoryImportDialog({
       return
     }
     if (pendingGpuSelectionCount > 0) {
-      toast.error('仍有行未选择卡型，请在列表中补全后再入库')
+      toast.error('存在卡型校验失败的行，请手工选择卡型或修正 Excel 后再入库')
       return
     }
 
@@ -399,20 +411,20 @@ export function DeviceInventoryImportDialog({
                 {errorCount > 0 ? ` · 失败 ${errorCount}` : ''}
               </span>
             </div>
-            {gpuCardTypesLoading ? (
+            {gpuCardTypesLoading || gpuByIpLoading ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                加载卡型字典...
+                加载卡型字典与已有设备 IP 映射...
               </p>
             ) : null}
             {pendingGpuSelectionCount > 0 ? (
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-300">
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                 <div>
-                  <p className="font-medium">仍有 {pendingGpuSelectionCount} 行待选择卡型</p>
+                  <p className="font-medium">卡型校验失败，无法入库</p>
                   <p className="mt-1 text-xs">
-                    未填写显卡型号可能为 CPU 管控节点；未识别型号请在列表中手工选择卡型后再入库
+                    {pendingGpuSelectionCount} 行未能自动识别卡型，请在列表中手工选择
                     {gpuValidation?.uniqueUnrecognized.length
-                      ? `。未识别：${gpuValidation.uniqueUnrecognized.join('、')}`
+                      ? `。未识别型号：${gpuValidation.uniqueUnrecognized.join('、')}`
                       : ''}
                   </p>
                 </div>
@@ -420,16 +432,16 @@ export function DeviceInventoryImportDialog({
                   type="button"
                   size="sm"
                   variant="outline"
-                  className="border-yellow-500/40"
+                  className="border-destructive/40"
                   onClick={() =>
                     downloadUnrecognizedGpuCardTypesExcel(
                       gpuValidation?.issues ?? [],
-                      `${fileName.replace(/\.[^.]+$/, '')}-待确认显卡型号.xlsx`,
+                      `${fileName.replace(/\.[^.]+$/, '')}-卡型校验失败.xlsx`,
                     )
                   }
                 >
                   <Download className="mr-2 h-4 w-4" />
-                  下载待确认明细
+                  下载失败明细
                 </Button>
               </div>
             ) : null}
@@ -456,9 +468,7 @@ export function DeviceInventoryImportDialog({
                     const displayStatus = getRowDisplayStatus(r)
                     const gpuIssue = gpuIssueByRow.get(r.row_no)
                     const resolution = gpuValidation?.rowResolutions.get(r.row_no)
-                    const needsGpuSelection =
-                      r.parse_status !== 'error' && !resolution && Boolean(gpuIssue)
-                    const selectedGpuId = resolution?.gpuCardTypeId ?? r.gpu_card_type_id
+                    const needsGpuSelection = r.parse_status !== 'error' && Boolean(gpuIssue)
                     return (
                       <TableRow key={r.row_no}>
                         <TableCell>{r.row_no}</TableCell>
@@ -470,18 +480,19 @@ export function DeviceInventoryImportDialog({
                         <TableCell className="min-w-[180px]">
                           {r.parse_status === 'error' ? (
                             <span className="text-xs text-muted-foreground">—</span>
+                          ) : resolution && !needsGpuSelection ? (
+                            <div>
+                              <p className="text-xs font-medium">{resolution.gpuCardTypeCode}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {resolution.gpuCardTypeName}（{gpuCardTypeMatchLabel(resolution.matchedBy)}）
+                              </p>
+                            </div>
                           ) : (
                             <Select
-                              value={selectedGpuId || undefined}
+                              value={r.gpu_card_type_id || undefined}
                               onValueChange={(value) => setRowGpuCardTypeId(r.row_no, value)}
                             >
-                              <SelectTrigger
-                                className={
-                                  needsGpuSelection
-                                    ? 'h-8 border-yellow-500/50 text-xs'
-                                    : 'h-8 text-xs'
-                                }
-                              >
+                              <SelectTrigger className="h-8 border-destructive/50 text-xs">
                                 <SelectValue placeholder="选择卡型" />
                               </SelectTrigger>
                               <SelectContent position="popper" className="z-[110] max-h-64">
@@ -493,11 +504,6 @@ export function DeviceInventoryImportDialog({
                               </SelectContent>
                             </Select>
                           )}
-                          {resolution ? (
-                            <p className="mt-1 text-[11px] text-muted-foreground">
-                              {resolution.gpuCardTypeCode}（{gpuCardTypeMatchLabel(resolution.matchedBy)}）
-                            </p>
-                          ) : null}
                         </TableCell>
                         <TableCell className="max-w-[120px] truncate text-xs" title={r.cluster_name}>
                           {r.cluster_name ?? '—'}
@@ -517,9 +523,7 @@ export function DeviceInventoryImportDialog({
                           <div className="space-y-1">
                             <ParseStatusBadge status={displayStatus} />
                             {gpuIssue ? (
-                              <p className="max-w-[140px] text-xs text-yellow-600 dark:text-yellow-400">
-                                {gpuIssue}
-                              </p>
+                              <p className="max-w-[140px] text-xs text-destructive">{gpuIssue}</p>
                             ) : r.parse_message ? (
                               <p className="max-w-[140px] text-xs text-muted-foreground">{r.parse_message}</p>
                             ) : null}

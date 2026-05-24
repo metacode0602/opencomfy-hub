@@ -60,6 +60,70 @@ function initialSlots(): Record<SlotKey, SlotState> {
   }
 }
 
+type ImportSlotServerStatus = {
+  parseStatus: "ok" | "error"
+  parseErrorCount: number
+  rowCount: number
+  hasErrorReport: boolean
+}
+
+function buildImportSlotMessage(server: ImportSlotServerStatus): string {
+  if (server.parseStatus === "error" || server.hasErrorReport) {
+    if (server.parseErrorCount > 0) {
+      return `存在 ${server.parseErrorCount} 处错误，请下载错误明细修正`
+    }
+    return "解析或校验未通过，请下载错误明细修正"
+  }
+  return `解析成功（${server.rowCount} 行）`
+}
+
+function applyImportSlotServerStatus(
+  prev: SlotState,
+  server: ImportSlotServerStatus,
+  messageOverride?: string,
+): SlotState {
+  const message = messageOverride ?? buildImportSlotMessage(server)
+  if (server.hasErrorReport || server.parseStatus === "error") {
+    return {
+      ...prev,
+      status: "error",
+      hasErrorReport: server.hasErrorReport,
+      message,
+      rowCount: server.rowCount,
+    }
+  }
+  if (server.parseStatus === "ok") {
+    return {
+      ...prev,
+      status: "done",
+      hasErrorReport: false,
+      message,
+      rowCount: server.rowCount,
+    }
+  }
+  return prev
+}
+
+function syncSlotsFromValidation(
+  prev: Record<SlotKey, SlotState>,
+  slots: Partial<Record<SlotKey, ImportSlotServerStatus | null>>,
+  options?: { skipParsing?: boolean; messageOverrides?: Partial<Record<SlotKey, string>> },
+): Record<SlotKey, SlotState> {
+  const next = { ...prev }
+  const keys: SlotKey[] = ["customer", "baremetal", "tenantBill"]
+  for (const key of keys) {
+    const server = slots[key]
+    if (!server) continue
+    if (options?.skipParsing && prev[key].status === "parsing") continue
+    next[key] = applyImportSlotServerStatus(
+      prev[key],
+      server,
+      options?.messageOverrides?.[key],
+    )
+  }
+  return next
+}
+
 async function fileToBase64(file: File): Promise<string> {
   const buf = await file.arrayBuffer()
   const bytes = new Uint8Array(buf)
@@ -446,34 +510,9 @@ export default function FinanceCreateBillingPeriodPage() {
 
   useEffect(() => {
     if (!validation?.slots) return
-    setSlots((prev) => {
-      const next = { ...prev }
-      const map: SlotKey[] = ["customer", "baremetal", "tenantBill"]
-      for (const key of map) {
-        const server = validation.slots[key]
-        if (!server) continue
-        if (server.hasErrorReport || server.parseStatus === "error") {
-          next[key] = {
-            ...prev[key],
-            status: "error",
-            hasErrorReport: server.hasErrorReport,
-            message:
-              server.parseErrorCount > 0
-                ? `存在 ${server.parseErrorCount} 处错误，请下载错误明细修正`
-                : prev[key].message,
-          }
-        } else if (server.parseStatus === "ok") {
-          next[key] = {
-            ...prev[key],
-            status: "done",
-            rowCount: server.rowCount,
-            hasErrorReport: false,
-            message: prev[key].message || `解析成功（${server.rowCount} 行）`,
-          }
-        }
-      }
-      return next
-    })
+    setSlots((prev) =>
+      syncSlotsFromValidation(prev, validation.slots, { skipParsing: true }),
+    )
   }, [validation])
 
   useEffect(() => {
@@ -555,6 +594,7 @@ export default function FinanceCreateBillingPeriodPage() {
       }))
       try {
         const id = await ensurePeriod()
+        void utils.finance.periods.validate.invalidate({ billingPeriodId: id })
         const fileBase64 = await fileToBase64(file)
         const result = await importFile.mutateAsync({
           billingPeriodId: id,
@@ -562,30 +602,32 @@ export default function FinanceCreateBillingPeriodPage() {
           fileName: file.name,
           fileBase64,
         })
-        if (!result.ok) {
-          setSlots((s) => ({
-            ...s,
-            [slot]: {
-              file,
-              status: "error",
-              message: result.message,
-              rowCount: 0,
-              hasErrorReport: result.hasErrorReport,
-            },
-          }))
-        } else {
-          setSlots((s) => ({
-            ...s,
-            [slot]: {
-              file,
-              status: "done",
-              message: result.message,
-              rowCount: result.rowCount,
-              hasErrorReport: false,
-            },
-          }))
-        }
-        await refetchValidation()
+        const { data: freshValidation } = await refetchValidation()
+        setSlots((prev) => {
+          const withFile = { ...prev, [slot]: { ...prev[slot], file } }
+          const messageOverrides: Partial<Record<SlotKey, string>> = {}
+          if (!result.ok && result.message) {
+            messageOverrides[slot] = result.message
+          }
+          if (freshValidation?.slots) {
+            return syncSlotsFromValidation(withFile, freshValidation.slots, {
+              messageOverrides,
+            })
+          }
+          return {
+            ...withFile,
+            [slot]: applyImportSlotServerStatus(
+              withFile[slot],
+              {
+                parseStatus: result.ok ? "ok" : "error",
+                parseErrorCount: result.parseErrorCount,
+                rowCount: result.rowCount,
+                hasErrorReport: result.hasErrorReport,
+              },
+              result.message,
+            ),
+          }
+        })
         await utils.finance.periods.getBundle.invalidate({ id })
       } catch (e) {
         setSlots((s) => ({

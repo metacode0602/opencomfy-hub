@@ -380,23 +380,24 @@
 
 **卡型字典**：加载 `gpu_card_type` **全表**（**不**过滤 `status`）。
 
-**匹配顺序**（均 **忽略大小写**）：
+**匹配顺序**（均 **忽略大小写**；优先级从高到低）：
 
-1. **名称匹配**：`trim(excel值)` 与 `gpu_card_type.name` 相等（忽略大小写）。
-2. **编码匹配**：去掉 Excel 值 **最前** 的品牌前缀（如 `Nvidia` / `NVIDIA` / `Huawei` / `华为` / `AMD` / `Intel` / `Ascend` / `昇腾` / `英伟达`）后，与 `gpu_card_type.code` 比较：
-   - 先尝试规范化后 **完全相等**（去空格、连字符；`80G` 与 `80GB` 视为等价）；
-   - 再尝试 **前缀匹配**（较长编码优先，如 `4090` → `4090-24GB`，`A100 80G` → `A100-80GB`）。
+1. **Preview 手工选择**：行上 `gpu_card_type_id`（用户在下拉中指定）。
+2. **Excel 自动匹配**：
+   - **名称匹配**：`trim(excel值)` 与 `gpu_card_type.name` 相等；
+   - **编码匹配**：去掉 Excel 值最前品牌前缀后，与 `gpu_card_type.code` 比较（规范化完全相等或前缀匹配，`80G`≈`80GB`）。
+3. **已有设备 IP 匹配**：`supplier_device.internal_ip`（同供应商）已存在且已有 `gpu_card_type_id` 时，按 **内网 IP** 复用该卡型（`matchedBy = existing_ip`）；重复导入无需再次选择。
 
 **失败与手工补全**：
 
 | 情况 | Preview | Commit |
 |------|---------|--------|
-| 未填写「显卡型号」 | 警告；**匹配卡型**列下拉选择（可能为 CPU 管控节点） | 须已手工选择 `gpu_card_type_id` |
-| 填写但自动匹配失败 | 警告；下拉选择卡型 | 须已手工选择 `gpu_card_type_id` |
-| 自动匹配成功 | 下拉预填，可改选 | 使用自动或用户改选结果 |
-| 可入库行仍未选定卡型 | 禁用「确认入库」；可下载 **待确认明细** Excel | **阻断**整批导入 |
+| 上述三步均未得到卡型 | **失败**（红色）；**匹配卡型**列下拉手工选择 | **阻断**整批导入 |
+| 自动匹配或 IP 复用成功 | 只读展示 code + 匹配方式 | 直接使用 |
+| 用户手工选择后 | 失败消除，只读展示「手工」 | 使用 `gpu_card_type_id` |
+| 存在任一失败行 | 禁用「确认入库」；可下载 **失败明细** Excel | **阻断**整批导入 |
 
-**Preview UI**：预览表展示「显卡型号」与「匹配卡型」列；后者为 `gpu_card_type` 全表下拉（**不**过滤 `status`），自动匹配成功时预填并标注匹配方式（名称/编码/手工）。
+**Preview UI**：展示「显卡型号」「匹配卡型」；已成功解析（名称/编码/已有设备 IP）的行 **只读**；仅失败行显示卡型下拉（`gpu_card_type` 全表，**不**过滤 `status`）。
 
 **实现**：`apps/web/src/lib/supplier/gpu-card-type-import-match.ts`；commit 入口 `device-import.ts#commitInventory`。
 
@@ -487,7 +488,7 @@ flowchart TB
 | **R-DI5** | 故障记录导入 **必须** 经 `supplier_ops_upload_batch`（`kind=fault_records`）；`fault_incident.supplier_ops_upload_batch_id` 回填 |
 | **R-DI6** | 导入 **不写入** `entity_state_transition_log`；**不保存** 变更附件；登录凭据写入 `supplier_device`（阶段一明文，UI 脱敏展示） |
 | **R-DI7** | `supplier_device` **不保存** 合作类型 |
-| **R-DI8** | 设备主数据导入：可入库行 commit 前 **必须** 有有效 `gpu_card_type_id`（自动匹配 §4.1.1 或 preview 手工选择）；未填写/未识别型号 **不** 直接失败，须在列表下拉补选；仍未选定则阻断导入；卡型字典 **不** 过滤 `status` |
+| **R-DI8** | 设备主数据导入：卡型解析顺序为 **手工选择 → Excel 自动匹配 → 同供应商 IP 已有设备**；仍未解析则 **失败** 并阻断入库（可下载失败明细、preview 下拉补选）；已成功行只读展示；字典 **不** 过滤 `status` |
 
 ---
 
@@ -528,4 +529,4 @@ erDiagram
 | v1.2 | 2026-05-23 | 字典 `payload`、`device_change_action` 20 条；`change_log.business_onboarding_batch_id`；`onboarding_batch_device_link`；资源总览 `overview_bucket` |
 | v1.3 | 2026-05-23 | `pool_memberships`；`default_pool_bindings` |
 | v1.4 | 2026-05-23 | v2.4 生命周期 5 态进程驱动；ops 字典 lifecycle 改为参考列 |
-| v1.5 | 2026-05-24 | §4.1.1 显卡型号解析：名称→去品牌后编码；忽略大小写；preview 手工选卡型（含 CPU 无型号行）；待确认明细 Excel；移除默认 fallback 与 active 过滤 |
+| v1.5 | 2026-05-24 | §4.1.1 卡型：手工→Excel 自动→IP 已有设备；失败阻断+明细 Excel；preview 失败行下拉、成功行只读 |

@@ -167,7 +167,7 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
           />
           <CreateSupplierDialog
             activeStaff={activeStaff}
-            onCreated={() => void refetch()}
+            onCreated={() => void utils.supplier.list.invalidate()}
           />
         </div>
       </div>

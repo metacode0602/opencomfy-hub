@@ -24,6 +24,7 @@ import {
 import { contractPricingModeNames } from '@/lib/data/types'
 import type { CooperationMode, Supplier } from '@/lib/data/types'
 import type { UserStaff } from '@/lib/types/crm'
+import { trpc } from '@/lib/trpc/client'
 import { toast } from 'sonner'
 
 const statusNames: Record<string, string> = {
@@ -38,7 +39,6 @@ export type SupplierFormValues = {
   shortName: string
   status: Supplier['status']
   cooperationMode: CooperationMode
-  revenueShareRatio: string
   businessManagerStaffId: string
   contactPerson: string
   contactPhone: string
@@ -53,7 +53,6 @@ const emptySupplierForm: SupplierFormValues = {
   shortName: '',
   status: 'negotiating',
   cooperationMode: 'card_time',
-  revenueShareRatio: '',
   businessManagerStaffId: '',
   contactPerson: '',
   contactPhone: '',
@@ -70,7 +69,6 @@ function supplierToFormValues(supplier: Supplier, activeStaff: UserStaff[]): Sup
     shortName: supplier.shortName,
     status: supplier.status,
     cooperationMode: supplier.cooperationMode,
-    revenueShareRatio: supplier.revenueShareRatio?.toString() ?? '',
     businessManagerStaffId: staff?.id ?? '',
     contactPerson: supplier.contactPerson,
     contactPhone: supplier.contactPhone,
@@ -102,14 +100,23 @@ function validateSupplierForm(
     toast.error('请填写地址')
     return { ok: false }
   }
-  if (form.cooperationMode === 'revenue_share') {
-    const ratio = Number(form.revenueShareRatio)
-    if (!form.revenueShareRatio.trim() || Number.isNaN(ratio) || ratio <= 0 || ratio > 100) {
-      toast.error('分成模式请填写有效的分成比例（1-100）')
-      return { ok: false }
-    }
-  }
   return { ok: true, businessManager }
+}
+
+function formToSupplierInput(form: SupplierFormValues) {
+  return {
+    name: form.name.trim(),
+    shortName: form.shortName.trim(),
+    status: form.status,
+    cooperationMode: form.cooperationMode,
+    businessManagerStaffId: form.businessManagerStaffId,
+    contactPerson: form.contactPerson.trim(),
+    contactPhone: form.contactPhone.trim(),
+    contactEmail: form.contactEmail.trim(),
+    address: form.address.trim(),
+    bankAccount: form.bankAccount.trim() || undefined,
+    bankName: form.bankName.trim() || undefined,
+  }
 }
 
 function formToSupplierFields(
@@ -121,7 +128,6 @@ function formToSupplierFields(
   | 'shortName'
   | 'status'
   | 'cooperationMode'
-  | 'revenueShareRatio'
   | 'businessManager'
   | 'contactPerson'
   | 'contactPhone'
@@ -135,8 +141,6 @@ function formToSupplierFields(
     shortName: form.shortName.trim(),
     status: form.status,
     cooperationMode: form.cooperationMode,
-    revenueShareRatio:
-      form.cooperationMode === 'revenue_share' ? Number(form.revenueShareRatio) : undefined,
     businessManager,
     contactPerson: form.contactPerson.trim(),
     contactPhone: form.contactPhone.trim(),
@@ -198,12 +202,7 @@ function SupplierFormFields({ form, onChange, activeStaff, idPrefix }: SupplierF
           <Label>计价模式</Label>
           <Select
             value={form.cooperationMode}
-            onValueChange={(v) =>
-              onChange({
-                cooperationMode: v as CooperationMode,
-                revenueShareRatio: v === 'revenue_share' ? form.revenueShareRatio : '',
-              })
-            }
+            onValueChange={(v) => onChange({ cooperationMode: v as CooperationMode })}
           >
             <SelectTrigger className="w-full">
               <SelectValue />
@@ -303,14 +302,28 @@ function SupplierFormFields({ form, onChange, activeStaff, idPrefix }: SupplierF
 
 export type CreateSupplierDialogProps = {
   activeStaff: UserStaff[]
-  onCreated: (supplier: Supplier) => void
+  onCreated: () => void
 }
 
 export function CreateSupplierDialog({ activeStaff, onCreated }: CreateSupplierDialogProps) {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<SupplierFormValues>(emptySupplierForm)
+  const utils = trpc.useUtils()
 
   const resetForm = () => setForm(emptySupplierForm)
+
+  const createMutation = trpc.supplier.create.useMutation({
+    onSuccess: () => {
+      void utils.supplier.list.invalidate()
+      onCreated()
+      resetForm()
+      setOpen(false)
+      toast.success('供应商已创建')
+    },
+    onError: (error) => {
+      toast.error(error.message || '创建失败，请稍后重试')
+    },
+  })
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
@@ -321,20 +334,7 @@ export function CreateSupplierDialog({ activeStaff, onCreated }: CreateSupplierD
     const result = validateSupplierForm(form, activeStaff)
     if (!result.ok) return
 
-    const fields = formToSupplierFields(form, result.businessManager)
-    const newSupplier: Supplier = {
-      id: `sup${Date.now()}`,
-      ...fields,
-      createdAt: new Date().toISOString().split('T')[0]!,
-      dataCenterCount: 0,
-      totalDeviceCount: 0,
-      monthlySettlement: 0,
-    }
-
-    onCreated(newSupplier)
-    resetForm()
-    setOpen(false)
-    toast.success('供应商已创建')
+    createMutation.mutate(formToSupplierInput(form))
   }
 
   return (
@@ -366,7 +366,9 @@ export function CreateSupplierDialog({ activeStaff, onCreated }: CreateSupplierD
           >
             取消
           </Button>
-          <Button onClick={handleSubmit}>创建供应商</Button>
+          <Button onClick={handleSubmit} disabled={createMutation.isPending}>
+            {createMutation.isPending ? '创建中…' : '创建供应商'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
