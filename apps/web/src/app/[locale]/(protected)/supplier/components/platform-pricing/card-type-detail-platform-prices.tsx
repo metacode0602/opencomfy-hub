@@ -42,6 +42,7 @@ export function CardTypeDetailPlatformPrices({
   const configured = rows.filter((r) => r.recordId != null)
   const readOnly =
     selectedPeriod != null &&
+    configured.length > 0 &&
     (selectedPeriod.phase === 'expired' || selectedPeriod.phase === 'scheduled')
 
   return (

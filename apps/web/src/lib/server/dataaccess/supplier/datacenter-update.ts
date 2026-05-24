@@ -84,6 +84,36 @@ async function assertUniqueContainerInstanceRegion(
   }
 }
 
+async function assertUniqueLocation(
+  location: string,
+  excludeDataCenterId: string,
+): Promise<void> {
+  const [hit] = await db
+    .select({ id: dataCenter.id, name: dataCenter.name })
+    .from(dataCenter)
+    .where(eq(dataCenter.location, location))
+    .limit(1)
+
+  if (hit && hit.id !== excludeDataCenterId) {
+    throw new Error(`容器区域「${location}」已被机房「${hit.name}」使用，请填写唯一名称`)
+  }
+}
+
+async function assertUniqueBareMetalRegion(
+  region: string,
+  excludeDataCenterId: string,
+): Promise<void> {
+  const [hit] = await db
+    .select({ id: dataCenter.id, name: dataCenter.name })
+    .from(dataCenter)
+    .where(eq(dataCenter.bareMetalRegion, region))
+    .limit(1)
+
+  if (hit && hit.id !== excludeDataCenterId) {
+    throw new Error(`裸金属区域「${region}」已被机房「${hit.name}」使用，请填写唯一名称`)
+  }
+}
+
 async function loadDataCenterResult(dataCenterId: string): Promise<DataCenter> {
   const [row] = await db
     .select({ row: dataCenter, supplierName: supplier.name })
@@ -115,16 +145,24 @@ export const datacenterUpdateDataAccess = {
     const hit = await assertDataCenterExists(input.dataCenterId)
 
     const name = input.name.trim()
+    const location = input.location?.trim() || undefined
     const containerInstanceRegion = input.containerInstanceRegion?.trim() || undefined
     const bareMetalRegion = input.bareMetalRegion?.trim() || undefined
 
     await assertUniqueName(hit.supplierId, name, input.dataCenterId)
+    if (location) {
+      await assertUniqueLocation(location, input.dataCenterId)
+    }
     if (containerInstanceRegion) {
       await assertUniqueContainerInstanceRegion(containerInstanceRegion, input.dataCenterId)
+    }
+    if (bareMetalRegion) {
+      await assertUniqueBareMetalRegion(bareMetalRegion, input.dataCenterId)
     }
 
     const importRow = toImportRow(input)
     const now = new Date()
+    const resolvedLocation = location ?? deriveLocation(importRow)
 
     supplierLog(logTag, 'update start', {
       dataCenterId: input.dataCenterId,
@@ -136,7 +174,7 @@ export const datacenterUpdateDataAccess = {
       .update(dataCenter)
       .set({
         name,
-        location: deriveLocation(importRow) || null,
+        location: resolvedLocation || null,
         address: input.address?.trim() || null,
         regionTags: buildRegionTags(importRow),
         networkFeeMonthly: formatMoney(input.networkFee ?? 0),

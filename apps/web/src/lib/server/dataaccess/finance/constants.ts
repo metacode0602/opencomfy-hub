@@ -33,4 +33,4 @@ export const PERIOD_STATUSES = [
 
 export type PeriodStatus = (typeof PERIOD_STATUSES)[number]
 
-export const RULE_VERSION = 'v1.5.2'
+export const RULE_VERSION = 'v1.6.0'

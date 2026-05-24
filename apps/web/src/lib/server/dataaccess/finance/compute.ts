@@ -1,7 +1,11 @@
 import { db } from '@/lib/db'
 import {
+  computeGiftedDurationCostExclTaxForPricing,
+  computeSoldDurationCostExclTax,
+  resolveTierCostContext,
+} from '@/lib/finance/cost-pricing-utils'
+import {
   COST_TAX_DIVISOR,
-  computeGiftedDurationCostExclTax,
   computeGrossProfit,
   recomputeStaffSumRows,
 } from '@/lib/finance/cost-row-utils'
@@ -29,11 +33,15 @@ import { financeError, financeLog, financeWarn } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
 import {
+  buildTenantBillPricingMap,
+  findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
-  validateCrossFileImports,
-} from './validate-import'
-
-const DEFAULT_UNIT_PRICE = 42
+  pricingMapKeyForWindow,
+  type ResolvedUnitCost,
+} from './tenant-bill-pricing'
+import { listTenantBillWindows, syncTenantBillWindowsForPeriod } from './tenant-bill-windows'
+import { asOfFromOrderedAt } from './platform-list-price'
+import { validateCrossFileImports } from './validate-import'
 
 function parseNum(s: string | null | undefined): number {
   if (s == null || s === '') return 0
@@ -45,15 +53,19 @@ async function loadCurrentRaw(periodId: string) {
   const batches = await db.query.billingPeriodImportBatch.findMany({
     where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
   })
-  const byType = new Map(batches.map((b) => [b.fileType, b]))
-  const customerBatch = byType.get('customer_consumption')
-  const baremetalBatch = byType.get('baremetal_order')
-  const tenantBillBatch = byType.get('tenant_bill')
-  if (!customerBatch || !baremetalBatch || !tenantBillBatch) {
-    throw new FinanceError('PRECONDITION_FAILED', '请先上传三类 Excel 文件')
+  const customerBatch = batches.find((b) => b.fileType === 'customer_consumption')
+  const baremetalBatch = batches.find((b) => b.fileType === 'baremetal_order')
+  const tenantBillBatches = batches.filter((b) => b.fileType === 'tenant_bill')
+  if (!customerBatch || !baremetalBatch || tenantBillBatches.length === 0) {
+    throw new FinanceError('PRECONDITION_FAILED', '请先上传全部 Excel 文件')
   }
 
-  const [customerRows, baremetalRows, tenantBillRows] = await Promise.all([
+  const windows = await listTenantBillWindows(periodId)
+  if (windows.length === 0 || tenantBillBatches.length !== windows.length) {
+    throw new FinanceError('PRECONDITION_FAILED', '客户账单时间段未就绪，请重新校验账期')
+  }
+
+  const [customerRows, baremetalRows, tenantBillByWindow] = await Promise.all([
     db
       .select()
       .from(billingPeriodRawCustomerConsumption)
@@ -62,13 +74,27 @@ async function loadCurrentRaw(periodId: string) {
       .select()
       .from(billingPeriodRawBaremetalOrder)
       .where(eq(billingPeriodRawBaremetalOrder.batchId, baremetalBatch.id)),
-    db
-      .select()
-      .from(billingPeriodRawTenantBill)
-      .where(eq(billingPeriodRawTenantBill.batchId, tenantBillBatch.id)),
+    Promise.all(
+      windows.map(async (window) => {
+        const batch = tenantBillBatches.find((b) => b.windowId === window.id)
+        if (!batch) {
+          throw new FinanceError(
+            'PRECONDITION_FAILED',
+            `缺少时间段 ${window.windowStart} ~ ${window.windowEnd} 的客户账单`,
+          )
+        }
+        const rows = await db
+          .select()
+          .from(billingPeriodRawTenantBill)
+          .where(eq(billingPeriodRawTenantBill.batchId, batch.id))
+        return { window, rows }
+      }),
+    ),
   ])
 
-  return { customerRows, baremetalRows, tenantBillRows }
+  const tenantBillRows = tenantBillByWindow.flatMap((x) => x.rows)
+
+  return { customerRows, baremetalRows, tenantBillRows, tenantBillByWindow }
 }
 
 function buildAggRows(
@@ -131,6 +157,228 @@ async function resolveTenantIdMap(platformIds: string[]): Promise<Map<string, st
   return map
 }
 
+type SplitCostRow = {
+  staffId: string
+  accountManager: string
+  projectId: string
+  regionCode: string
+  gpuModel: string
+  balanceConsumption: number
+  balanceCardHours: number
+  voucherCardHours: number
+}
+
+function pricingMapKey(regionCode: string, gpuModel: string): string {
+  return `${regionCode}::${gpuModel}`
+}
+
+function staffRegionGpuKey(staffId: string, regionCode: string, gpuModel: string): string {
+  return `${staffId}::${regionCode}::${gpuModel}`
+}
+
+function recordKey(
+  staffId: string,
+  projectId: string,
+  regionCode: string,
+  gpuModel: string,
+): string {
+  return `${staffId}::${projectId}::${regionCode}::${gpuModel}`
+}
+
+type CostRecordRow = PlatformCostMonthly & { project_id?: string }
+
+function buildCostRecords(input: {
+  periodId: string
+  windowId: string
+  tenantBillRows: (typeof billingPeriodRawTenantBill.$inferSelect)[]
+  aggRows: ReturnType<typeof buildAggRows>
+  enrichments: (typeof billingPeriodTenantProjectEnrichment.$inferSelect)[]
+  allocByTenantProject: Map<string, number>
+  bindings: Awaited<ReturnType<typeof listTenantProjectBindings>>
+  pricingMap: Map<string, ResolvedUnitCost>
+  reconciliationIssues: string[]
+}): CostRecordRow[] {
+  const splitRows: SplitCostRow[] = []
+
+  for (const row of input.tenantBillRows) {
+    const aggB = input.aggRows.find(
+      (a) => a.tenantPlatformId === row.tenantPlatformId && a.customerType === 'B',
+    )
+    if (!aggB) continue
+
+    const tenantProjects = input.enrichments.filter(
+      (e) => e.tenantPlatformId === row.tenantPlatformId,
+    )
+    if (tenantProjects.length === 0) {
+      input.reconciliationIssues.push(`租户 ${row.tenantPlatformId} 无关联项目，跳过成本`)
+      continue
+    }
+
+    for (const proj of tenantProjects) {
+      const allocKey = `${row.tenantPlatformId}::${proj.projectId}`
+      let ratio = input.allocByTenantProject.get(allocKey)
+      if (ratio == null) {
+        if (tenantProjects.length === 1) ratio = 1
+        else continue
+      }
+      if (!proj.staffId) {
+        input.reconciliationIssues.push(
+          `项目 ${proj.projectName} 无客户经理，跳过成本分项`,
+        )
+        continue
+      }
+
+      splitRows.push({
+        staffId: proj.staffId,
+        accountManager: proj.accountManagerName ?? proj.staffId,
+        projectId: proj.projectId,
+        regionCode: row.regionCode,
+        gpuModel: row.gpuModel,
+        balanceConsumption: parseNum(row.balanceConsumption) * ratio,
+        balanceCardHours: parseNum(row.balanceCardHours) * ratio,
+        voucherCardHours: parseNum(row.voucherCardHours) * ratio,
+      })
+    }
+  }
+
+  const staffRegionTotals = new Map<
+    string,
+    {
+      balanceConsumption: number
+      balanceCardHours: number
+      voucherCardHours: number
+      regionCode: string
+      gpuModel: string
+      staffId: string
+    }
+  >()
+
+  for (const row of splitRows) {
+    const key = staffRegionGpuKey(row.staffId, row.regionCode, row.gpuModel)
+    const cur = staffRegionTotals.get(key) ?? {
+      balanceConsumption: 0,
+      balanceCardHours: 0,
+      voucherCardHours: 0,
+      regionCode: row.regionCode,
+      gpuModel: row.gpuModel,
+      staffId: row.staffId,
+    }
+    cur.balanceConsumption += row.balanceConsumption
+    cur.balanceCardHours += row.balanceCardHours
+    cur.voucherCardHours += row.voucherCardHours
+    staffRegionTotals.set(key, cur)
+  }
+
+  const tierContextByStaffRegion = new Map<
+    string,
+    ReturnType<typeof resolveTierCostContext>
+  >()
+
+  for (const [key, totals] of staffRegionTotals) {
+    const pricing = input.pricingMap.get(
+      pricingMapKeyForWindow(input.windowId, totals.regionCode, totals.gpuModel),
+    )
+    if (!pricing) {
+      input.reconciliationIssues.push(
+        `缺成本配置 staff=${totals.staffId} region=${totals.regionCode} gpu=${totals.gpuModel}`,
+      )
+      continue
+    }
+    tierContextByStaffRegion.set(
+      key,
+      resolveTierCostContext(pricing, {
+        balanceConsumption: totals.balanceConsumption,
+        balanceCardHours: totals.balanceCardHours,
+        voucherCardHours: totals.voucherCardHours,
+      }),
+    )
+  }
+
+  const recordMap = new Map<string, CostRecordRow>()
+
+  for (const row of splitRows) {
+    const pricing = input.pricingMap.get(
+      pricingMapKeyForWindow(input.windowId, row.regionCode, row.gpuModel),
+    )
+    if (!pricing) continue
+
+    const tierCtx = tierContextByStaffRegion.get(
+      staffRegionGpuKey(row.staffId, row.regionCode, row.gpuModel),
+    )
+    const metrics = {
+      balanceConsumption: row.balanceConsumption,
+      balanceCardHours: row.balanceCardHours,
+      voucherCardHours: row.voucherCardHours,
+    }
+    const confirmed = row.balanceConsumption / COST_TAX_DIVISOR
+    const sold = computeSoldDurationCostExclTax(pricing, metrics, tierCtx ?? undefined)
+    const gifted = computeGiftedDurationCostExclTaxForPricing(
+      pricing,
+      metrics,
+      tierCtx ?? undefined,
+    )
+    const gross = computeGrossProfit(confirmed, sold, gifted)
+
+    const rKey = recordKey(row.staffId, row.projectId, row.regionCode, row.gpuModel)
+    const existing = recordMap.get(rKey)
+    if (existing) {
+      const mergeBalance =
+        parseNum(existing.balance_consumption) + row.balanceConsumption
+      const mergeHours = parseNum(existing.balance_card_hours) + row.balanceCardHours
+      const mergeVoucher = parseNum(existing.voucher_card_hours) + row.voucherCardHours
+      const mergeConfirmed = mergeBalance / COST_TAX_DIVISOR
+      const mergeMetrics = {
+        balanceConsumption: mergeBalance,
+        balanceCardHours: mergeHours,
+        voucherCardHours: mergeVoucher,
+      }
+      const mergeSold = computeSoldDurationCostExclTax(pricing, mergeMetrics, tierCtx ?? undefined)
+      const mergeGifted = computeGiftedDurationCostExclTaxForPricing(
+        pricing,
+        mergeMetrics,
+        tierCtx ?? undefined,
+      )
+      recordMap.set(rKey, {
+        ...existing,
+        balance_consumption: toMoneyString(mergeBalance),
+        balance_card_hours: mergeHours.toFixed(4),
+        voucher_card_hours: mergeVoucher.toFixed(4),
+        confirmed_revenue_excl_tax: toMoneyString(mergeConfirmed),
+        sold_duration_cost_excl_tax: toMoneyString(mergeSold),
+        gifted_duration_cost_excl_tax: toMoneyString(mergeGifted),
+        gross_profit: toMoneyString(
+          computeGrossProfit(mergeConfirmed, mergeSold, mergeGifted),
+        ),
+      })
+      continue
+    }
+
+    recordMap.set(rKey, {
+      id: newId(),
+      billing_period_id: input.periodId,
+      type: 'record',
+      staff_id: row.staffId,
+      account_manager: row.accountManager,
+      project_id: row.projectId,
+      supplier_unit_cost_id: pricing.supplierUnitCostId,
+      idc_name: row.regionCode,
+      idc_code: row.regionCode,
+      card_type: row.gpuModel,
+      balance_consumption: toMoneyString(row.balanceConsumption),
+      balance_card_hours: row.balanceCardHours.toFixed(4),
+      voucher_card_hours: row.voucherCardHours.toFixed(4),
+      confirmed_revenue_excl_tax: toMoneyString(confirmed),
+      sold_duration_cost_excl_tax: toMoneyString(sold),
+      gifted_duration_cost_excl_tax: toMoneyString(gifted),
+      gross_profit: toMoneyString(gross),
+      created_at: new Date().toISOString(),
+      updated_at: null,
+    })
+  }
+
+  return [...recordMap.values()]
+}
+
 export async function computeBillingPeriod(input: {
   billingPeriodId: string
   actorId?: string | null
@@ -173,10 +421,10 @@ export async function computeBillingPeriod(input: {
     )
   }
 
-  const missingPricing = await findMissingTenantBillPricing({
-    periodId,
-    periodEnd: period.periodEnd,
-  })
+  const missingPricing = [
+    ...(await findMissingTenantBillPricing({ periodId })),
+    ...(await findMissingBaremetalPlatformListPrice({ periodId })),
+  ]
   if (missingPricing.length > 0) {
     await db
       .update(billingPeriod)
@@ -184,7 +432,7 @@ export async function computeBillingPeriod(input: {
       .where(eq(billingPeriod.id, periodId))
     const sample = missingPricing
       .slice(0, 3)
-      .map((p) => `${p.regionCode}×${p.gpuModel}`)
+      .map((p) => `${p.regionCode}×${p.gpuModel}(${p.failureReason})`)
       .join('、')
     throw new FinanceError(
       'UNPROCESSABLE',
@@ -219,7 +467,10 @@ export async function computeBillingPeriod(input: {
     actorId: input.actorId,
   })
 
-  const { customerRows, baremetalRows, tenantBillRows } = await loadCurrentRaw(periodId)
+  await syncTenantBillWindowsForPeriod(periodId)
+
+  const { customerRows, baremetalRows, tenantBillRows, tenantBillByWindow } =
+    await loadCurrentRaw(periodId)
   financeLog('compute', 'raw loaded', {
     periodId,
     customer: customerRows.length,
@@ -264,6 +515,17 @@ export async function computeBillingPeriod(input: {
 
   const incomeInserts: (typeof platformIncomeMonthly.$inferInsert)[] = []
   const reconciliationIssues: string[] = []
+
+  const baremetalListPriceNotes: string[] = []
+  for (const row of baremetalRows) {
+    const deviceModel = row.deviceModel?.trim() ?? ''
+    if (deviceModel) {
+      baremetalListPriceNotes.push(
+        `baremetal_order=${row.orderId} model=${deviceModel} ordered_at=${asOfFromOrderedAt(row.orderedAt)}`,
+      )
+    }
+  }
+  reconciliationIssues.push(...baremetalListPriceNotes.slice(0, 50))
 
   for (const agg of aggRows) {
     const tenantId = tenantIdMap.get(agg.tenantPlatformId)
@@ -349,96 +611,64 @@ export async function computeBillingPeriod(input: {
     }
   }
 
-  const costRecords: PlatformCostMonthly[] = []
-  const recordKeyToIdx = new Map<string, number>()
+  const pricingMap = await buildTenantBillPricingMap({ periodId })
 
-  for (const row of tenantBillRows) {
-    const aggB = aggRows.find(
-      (a) => a.tenantPlatformId === row.tenantPlatformId && a.customerType === 'B',
-    )
-    if (!aggB) continue
+  const costRecordRows: CostRecordRow[] = []
+  for (const { window, rows } of tenantBillByWindow) {
+    const windowCosts = buildCostRecords({
+      periodId,
+      windowId: window.id,
+      tenantBillRows: rows,
+      aggRows,
+      enrichments,
+      allocByTenantProject,
+      bindings,
+      pricingMap,
+      reconciliationIssues,
+    })
+    costRecordRows.push(...windowCosts)
+  }
 
-    const tenantProjects = enrichments.filter(
-      (e) => e.tenantPlatformId === row.tenantPlatformId,
+  const mergedCostMap = new Map<string, CostRecordRow>()
+  for (const row of costRecordRows) {
+    const key = recordKey(
+      row.staff_id,
+      row.project_id ?? '',
+      row.idc_code ?? '',
+      row.card_type ?? '',
     )
-    if (tenantProjects.length === 0) {
-      reconciliationIssues.push(`租户 ${row.tenantPlatformId} 无关联项目，跳过成本`)
+    const existing = mergedCostMap.get(key)
+    if (!existing) {
+      mergedCostMap.set(key, row)
       continue
     }
-
-    for (const proj of tenantProjects) {
-      const allocKey = `${row.tenantPlatformId}::${proj.projectId}`
-      let ratio = allocByTenantProject.get(allocKey)
-      if (ratio == null) {
-        if (tenantProjects.length === 1) ratio = 1
-        else continue
-      }
-      if (!proj.staffId) {
-        reconciliationIssues.push(
-          `项目 ${proj.projectName} 无客户经理，跳过成本分项`,
-        )
-        continue
-      }
-
-      const balanceConsumption =
-        (parseNum(row.balanceConsumption) * ratio)
-      const balanceCardHours = parseNum(row.balanceCardHours) * ratio
-      const voucherCardHours = parseNum(row.voucherCardHours) * ratio
-      const confirmed = balanceConsumption / COST_TAX_DIVISOR
-      const unitPrice = DEFAULT_UNIT_PRICE
-      const sold = (unitPrice * balanceCardHours) / COST_TAX_DIVISOR
-      const gifted = computeGiftedDurationCostExclTax(unitPrice, voucherCardHours)
-      const gross = computeGrossProfit(confirmed, sold, gifted)
-
-      const staffKey = `${proj.staffId}::${proj.projectId}::${row.regionCode}::${row.gpuModel}`
-      const existingIdx = recordKeyToIdx.get(staffKey)
-      if (existingIdx != null) {
-        const ex = costRecords[existingIdx]!
-        const mergeBalance = parseNum(ex.balance_consumption) + balanceConsumption
-        const mergeHours = parseNum(ex.balance_card_hours) + balanceCardHours
-        const mergeVoucher = parseNum(ex.voucher_card_hours) + voucherCardHours
-        const mergeConfirmed = mergeBalance / COST_TAX_DIVISOR
-        const mergeSold = (unitPrice * mergeHours) / COST_TAX_DIVISOR
-        const mergeGifted = computeGiftedDurationCostExclTax(unitPrice, mergeVoucher)
-        costRecords[existingIdx] = {
-          ...ex,
-          balance_consumption: toMoneyString(mergeBalance),
-          balance_card_hours: mergeHours.toFixed(4),
-          voucher_card_hours: mergeVoucher.toFixed(4),
-          confirmed_revenue_excl_tax: toMoneyString(mergeConfirmed),
-          sold_duration_cost_excl_tax: toMoneyString(mergeSold),
-          gifted_duration_cost_excl_tax: toMoneyString(mergeGifted),
-          gross_profit: toMoneyString(
-            computeGrossProfit(mergeConfirmed, mergeSold, mergeGifted),
-          ),
-        }
-        continue
-      }
-
-      const record: PlatformCostMonthly = {
-        id: newId(),
-        billing_period_id: periodId,
-        type: 'record',
-        staff_id: proj.staffId,
-        account_manager: proj.accountManagerName ?? proj.staffId,
-        supplier_unit_cost_id: null,
-        idc_name: row.regionCode,
-        idc_code: row.regionCode,
-        card_type: row.gpuModel,
-        balance_consumption: toMoneyString(balanceConsumption),
-        balance_card_hours: balanceCardHours.toFixed(4),
-        voucher_card_hours: voucherCardHours.toFixed(4),
-        confirmed_revenue_excl_tax: toMoneyString(confirmed),
-        sold_duration_cost_excl_tax: toMoneyString(sold),
-        gifted_duration_cost_excl_tax: toMoneyString(gifted),
-        gross_profit: toMoneyString(gross),
-        created_at: new Date().toISOString(),
-        updated_at: null,
-      }
-      recordKeyToIdx.set(staffKey, costRecords.length)
-      costRecords.push(record)
-    }
+    const mergeBalance =
+      parseNum(existing.balance_consumption) + parseNum(row.balance_consumption)
+    const mergeHours = parseNum(existing.balance_card_hours) + parseNum(row.balance_card_hours)
+    const mergeVoucher =
+      parseNum(existing.voucher_card_hours) + parseNum(row.voucher_card_hours)
+    const mergeConfirmed = mergeBalance / COST_TAX_DIVISOR
+    mergedCostMap.set(key, {
+      ...existing,
+      balance_consumption: toMoneyString(mergeBalance),
+      balance_card_hours: mergeHours.toFixed(4),
+      voucher_card_hours: mergeVoucher.toFixed(4),
+      confirmed_revenue_excl_tax: toMoneyString(mergeConfirmed),
+      sold_duration_cost_excl_tax: toMoneyString(
+        parseNum(existing.sold_duration_cost_excl_tax) +
+          parseNum(row.sold_duration_cost_excl_tax),
+      ),
+      gifted_duration_cost_excl_tax: toMoneyString(
+        parseNum(existing.gifted_duration_cost_excl_tax) +
+          parseNum(row.gifted_duration_cost_excl_tax),
+      ),
+      gross_profit: toMoneyString(
+        parseNum(existing.gross_profit) + parseNum(row.gross_profit),
+      ),
+    })
   }
+
+  const costRecords: CostRecordRow[] = [...mergedCostMap.values()]
 
   const staffIds = [...new Set(costRecords.map((r) => r.staff_id))]
   for (const staffId of staffIds) {
@@ -474,7 +704,7 @@ export async function computeBillingPeriod(input: {
       type: r.type,
       staffId: r.staff_id,
       accountManager: r.account_manager,
-      projectId: null,
+      projectId: (r as CostRecordRow).project_id ?? null,
       supplierUnitCostId: r.supplier_unit_cost_id,
       idcName: r.idc_name,
       idcCode: r.idc_code,

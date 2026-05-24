@@ -19,10 +19,15 @@ import {
   toMoneyString,
 } from '@/lib/finance/income-row-utils'
 import {
+  findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
   readErrorReportBySlot,
   validateCrossFileImports,
 } from './validate-import'
+import { detectPlatformListPriceWindows } from './platform-list-price'
+import {
+  syncTenantBillWindowsForPeriod,
+} from './tenant-bill-windows'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
 
@@ -93,6 +98,7 @@ export const financeBillingPeriodsDataAccess = {
       periodEnd: input.periodEnd,
       status: 'draft',
     })
+    await syncTenantBillWindowsForPeriod(id)
     financeLog('period', 'created', { id, periodCode: input.periodCode })
     const row = await db.query.billingPeriod.findFirst({ where: eq(billingPeriod.id, id) })
     return mapPeriod(row!)
@@ -155,21 +161,31 @@ export const financeBillingPeriodsDataAccess = {
   async validatePeriod(periodId: string) {
     const period = await this.getById(periodId)
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-    const slots = await getImportSlotStatuses(periodId)
-    const cross = await validateCrossFileImports(periodId)
-    const missingPricing = await findMissingTenantBillPricing({
-      periodId,
+    const windows = await syncTenantBillWindowsForPeriod(periodId)
+    const priceWindowInfo = await detectPlatformListPriceWindows({
+      periodStart: period.period_start,
       periodEnd: period.period_end,
     })
+    const slots = await getImportSlotStatuses(periodId)
+    const cross = await validateCrossFileImports(periodId)
+    const missingTenantBill = await findMissingTenantBillPricing({ periodId })
+    const missingBaremetal = await findMissingBaremetalPlatformListPrice({ periodId })
+    const missingPricing = [...missingTenantBill, ...missingBaremetal]
     const bindings = await listTenantProjectBindings(periodId)
     const pendingAllocation = bindings.filter(
       (b) =>
         b.projects.length >= 2 &&
         b.projects.some((p) => p.allocationPercent == null),
     )
+    const tenantBillReady =
+      windows.length > 0 &&
+      slots.tenantBillWindows.length === windows.length &&
+      slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
     return {
       periodStatus: period.status,
       slots,
+      windows,
+      priceWindowInfo,
       crossFileOk: cross.ok,
       missingPricing,
       pendingAllocationCount: pendingAllocation.length,
@@ -177,18 +193,25 @@ export const financeBillingPeriodsDataAccess = {
         period.status === 'imported' &&
         cross.ok &&
         missingPricing.length === 0 &&
-        pendingAllocation.length === 0,
+        pendingAllocation.length === 0 &&
+        tenantBillReady,
     }
+  },
+
+  async detectPriceWindows(input: { periodStart: string; periodEnd: string }) {
+    return detectPlatformListPriceWindows(input)
   },
 
   async downloadImportErrorReport(input: {
     billingPeriodId: string
     slot: ImportSlotKey
+    windowId?: string
   }) {
     const fileType = SLOT_TO_FILE_TYPE[input.slot]
     const report = await readErrorReportBySlot({
       periodId: input.billingPeriodId,
       fileType,
+      windowId: input.windowId,
     })
     if (!report) throw new FinanceError('NOT_FOUND', '无可下载的错误明细')
     return report
@@ -365,6 +388,7 @@ export const financeBillingPeriodsDataAccess = {
       scope: 'full',
       actorId,
     })
+    await syncTenantBillWindowsForPeriod(periodId)
     await db
       .update(billingPeriod)
       .set({ status: 'draft', publishedAt: null, voidedAt: null })
@@ -393,6 +417,7 @@ export const financeBillingPeriodsDataAccess = {
       scope: 'full',
       actorId,
     })
+    await syncTenantBillWindowsForPeriod(periodId)
     await db
       .update(billingPeriod)
       .set({ status: 'draft', publishedAt: null, voidedAt: new Date() })

@@ -7,6 +7,7 @@ export const datacenterCreateSchema = z.object({
   code: z.string().trim().optional(),
   address: z.string().trim().optional(),
   description: z.string().trim().optional(),
+  location: z.string().trim().optional(),
   containerInstanceRegion: z.string().trim().optional(),
   bareMetalRegion: z.string().trim().optional(),
   scale: z.enum(DATACENTER_SCALE_OPTIONS, { message: '请选择规模' }),

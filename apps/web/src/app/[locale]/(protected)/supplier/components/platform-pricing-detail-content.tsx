@@ -19,7 +19,13 @@ import {
   mockSupplierDatacenterSellPriceHistory,
   mockSupplierDatacenterSellPrices,
 } from '@/lib/data/platform-pricing-mock'
-import { buildDetailPageDataForPeriod } from '@/lib/platform-pricing/transforms'
+import { buildDetailPageDataForPeriod, toPeriodRows } from '@/lib/platform-pricing/transforms'
+import {
+  formatPeriodRange,
+  getPeriodPhase,
+  parsePeriodDate,
+  platformPricePeriodPhaseNames,
+} from '@/lib/platform-pricing/periods'
 import type {
   PlatformCardPriceRecord,
   SupplierDatacenterSellPrice,
@@ -32,6 +38,64 @@ import { CardTypeDetailPeriods } from './platform-pricing/card-type-detail-perio
 import { CardTypeDetailPlatformPrices } from './platform-pricing/card-type-detail-platform-prices'
 import { PricingHistoryDialog } from './platform-pricing/pricing-history-dialog'
 import { cardTypeLabel } from './platform-pricing/platform-pricing-utils'
+
+type LocalPeriodMeta = {
+  periodId: string
+  effectiveFrom: string
+  effectiveTo: string | null
+}
+
+const EMPTY_PLATFORM_RECORDS: PlatformCardPriceRecord[] = []
+
+function mergePeriodRows(
+  records: PlatformCardPriceRecord[],
+  cardTypeId: string,
+  emptyPeriods: LocalPeriodMeta[],
+): PlatformCardPricePeriodRow[] {
+  const fromRecords = toPeriodRows(records, cardTypeId)
+  const existingIds = new Set(fromRecords.map((period) => period.periodId))
+  const extras = emptyPeriods
+    .filter((period) => !existingIds.has(period.periodId))
+    .map((period) => {
+      const phase = getPeriodPhase(period.effectiveFrom, period.effectiveTo, false)
+      return {
+        periodId: period.periodId,
+        effectiveFrom: period.effectiveFrom,
+        effectiveTo: period.effectiveTo,
+        rangeLabel: formatPeriodRange(period.effectiveFrom, period.effectiveTo),
+        phase,
+        phaseLabel: platformPricePeriodPhaseNames[phase],
+        priceEntryCount: 0,
+        isCurrent: false,
+      }
+    })
+
+  const merged = [...fromRecords, ...extras]
+  const currentCandidates = merged.filter((period) => period.phase === 'current')
+  if (currentCandidates.length === 1) {
+    currentCandidates[0]!.isCurrent = true
+  }
+
+  return merged.sort(
+    (a, b) => parsePeriodDate(b.effectiveFrom) - parsePeriodDate(a.effectiveFrom),
+  )
+}
+
+async function invalidatePlatformPricingQueries(
+  utils: ReturnType<typeof trpc.useUtils>,
+  cardTypeId: string,
+  options?: { includeHistory?: boolean },
+) {
+  await Promise.all([
+    utils.supplier.platformPricing.getDetailPage.invalidate({ cardTypeId }),
+    utils.supplier.platformPricing.listRecordsForCardType.invalidate({ cardTypeId }),
+    utils.supplier.platformPricing.listPage.invalidate(),
+    utils.supplier.platformPricing.listRecords.invalidate(),
+    options?.includeHistory
+      ? utils.supplier.platformPricing.listHistory.invalidate({ cardTypeId })
+      : Promise.resolve(),
+  ])
+}
 
 type PlatformPricingDetailContentProps = {
   cardTypeId: string
@@ -48,9 +112,12 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     refetch: refetchDetail,
   } = trpc.supplier.platformPricing.getDetailPage.useQuery({ cardTypeId })
 
-  const {
-    data: platformRecords = [],
-  } = trpc.supplier.platformPricing.listRecordsForCardType.useQuery({ cardTypeId })
+  const { data: platformRecordsData } =
+    trpc.supplier.platformPricing.listRecordsForCardType.useQuery({ cardTypeId })
+  const platformRecords = platformRecordsData ?? EMPTY_PLATFORM_RECORDS
+
+  /** 无价格的时间段在落库前仅本地占位，待新增产品线价后清除 */
+  const [localEmptyPeriods, setLocalEmptyPeriods] = useState<LocalPeriodMeta[]>([])
 
   const { data: cardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
 
@@ -90,29 +157,43 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     name: string
   } | null>(null)
 
+  const mergedPeriods = useMemo(
+    () => mergePeriodRows(platformRecords, cardTypeId, localEmptyPeriods),
+    [platformRecords, cardTypeId, localEmptyPeriods],
+  )
+
+  const mergedPeriodIdsKey = useMemo(
+    () => mergedPeriods.map((period) => period.periodId).join('\0'),
+    [mergedPeriods],
+  )
+
   useEffect(() => {
     if (!detail) return
     setSelectedPeriodId((current) => {
-      if (current && detail.periods.some((p) => p.periodId === current)) {
+      if (current && mergedPeriods.some((period) => period.periodId === current)) {
         return current
       }
-      return detail.currentPeriodId ?? detail.periods[0]?.periodId ?? null
+      const next =
+        mergedPeriods.find((period) => period.isCurrent)?.periodId ??
+        detail.currentPeriodId ??
+        mergedPeriods[0]?.periodId ??
+        null
+      return next === current ? current : next
     })
-  }, [detail])
+  }, [detail, mergedPeriodIdsKey, mergedPeriods])
 
   const createMutation = trpc.supplier.platformPricing.create.useMutation({
     onSuccess: async () => {
       toast.success('平台标准价已创建')
       setPlatformDialogOpen(false)
-      await Promise.all([
-        utils.supplier.platformPricing.getDetailPage.invalidate({ cardTypeId }),
-        utils.supplier.platformPricing.listRecordsForCardType.invalidate({ cardTypeId }),
-        utils.supplier.platformPricing.listPage.invalidate(),
-        utils.supplier.platformPricing.listRecords.invalidate(),
-        platformHistoryOpen
-          ? utils.supplier.platformPricing.listHistory.invalidate({ cardTypeId })
-          : Promise.resolve(),
-      ])
+      setLocalEmptyPeriods((prev) =>
+        selectedPeriodId
+          ? prev.filter((period) => period.periodId !== selectedPeriodId)
+          : prev,
+      )
+      await invalidatePlatformPricingQueries(utils, cardTypeId, {
+        includeHistory: platformHistoryOpen,
+      })
     },
     onError: (e) => toast.error(e.message || '创建失败，请稍后重试'),
   })
@@ -121,18 +202,24 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     onSuccess: async () => {
       toast.success('平台标准价已更新')
       setPlatformDialogOpen(false)
-      await Promise.all([
-        utils.supplier.platformPricing.getDetailPage.invalidate({ cardTypeId }),
-        utils.supplier.platformPricing.listRecordsForCardType.invalidate({ cardTypeId }),
-        utils.supplier.platformPricing.listPage.invalidate(),
-        utils.supplier.platformPricing.listRecords.invalidate(),
-        utils.supplier.platformPricing.listHistory.invalidate({ cardTypeId }),
-      ])
+      await invalidatePlatformPricingQueries(utils, cardTypeId, { includeHistory: true })
     },
     onError: (e) => toast.error(e.message || '更新失败，请稍后重试'),
   })
 
-  const isSaving = createMutation.isPending || updateMutation.isPending
+  const createPeriodMutation = trpc.supplier.platformPricing.createPeriod.useMutation({
+    onError: (e) => toast.error(e.message || '创建时间段失败，请稍后重试'),
+  })
+
+  const updatePeriodMutation = trpc.supplier.platformPricing.updatePeriod.useMutation({
+    onError: (e) => toast.error(e.message || '更新时间段失败，请稍后重试'),
+  })
+
+  const isSaving =
+    createMutation.isPending ||
+    updateMutation.isPending ||
+    createPeriodMutation.isPending ||
+    updatePeriodMutation.isPending
 
   const periodSlice = useMemo(() => {
     if (!detail) {
@@ -144,7 +231,7 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     }
     if (!selectedPeriodId) {
       return {
-        periods: detail.periods,
+        periods: mergedPeriods,
         platformPrices: [],
         datacenters: detail.datacenters,
       }
@@ -164,11 +251,12 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     sellRecords,
     platformHistoryOpen,
     platformHistory.length,
+    mergedPeriods,
   ])
 
   const selectedPeriod = useMemo(
-    () => detail?.periods.find((p) => p.periodId === selectedPeriodId) ?? null,
-    [detail?.periods, selectedPeriodId],
+    () => mergedPeriods.find((p) => p.periodId === selectedPeriodId) ?? null,
+    [mergedPeriods, selectedPeriodId],
   )
 
   const dcHistoryRows = useMemo(() => {
@@ -211,11 +299,73 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         r.billingUnit === billingUnit,
     )
 
-  const handlePeriodSaved = (payload: PlatformPricePeriodSavePayload) => {
-    toast.info('时间段管理暂未接入数据库，当前为本地预览')
-    setSelectedPeriodId(payload.periodId)
-    setEditingPeriod(null)
-    setPeriodDialogOpen(false)
+  const handlePeriodSaved = async (payload: PlatformPricePeriodSavePayload) => {
+    try {
+      if (editingPeriod) {
+        const isLocalOnly = localEmptyPeriods.some(
+          (period) => period.periodId === editingPeriod.periodId,
+        )
+
+        if (isLocalOnly) {
+          const nextPeriodId = `${cardTypeId}:${payload.effectiveFrom}`
+          setLocalEmptyPeriods((prev) =>
+            prev.map((period) =>
+              period.periodId === editingPeriod.periodId
+                ? {
+                    periodId: nextPeriodId,
+                    effectiveFrom: payload.effectiveFrom,
+                    effectiveTo: payload.effectiveTo,
+                  }
+                : period,
+            ),
+          )
+          toast.success('时间段已更新')
+          setSelectedPeriodId(nextPeriodId)
+        } else {
+          const result = await updatePeriodMutation.mutateAsync({
+            gpuCardTypeId: cardTypeId,
+            periodId: payload.periodId,
+            effectiveFrom: payload.effectiveFrom,
+            effectiveTo: payload.effectiveTo,
+          })
+          toast.success('时间段已更新')
+          setSelectedPeriodId(result.periodId)
+          await invalidatePlatformPricingQueries(utils, cardTypeId, { includeHistory: true })
+        }
+      } else {
+        const result = await createPeriodMutation.mutateAsync({
+          gpuCardTypeId: cardTypeId,
+          effectiveFrom: payload.effectiveFrom,
+          effectiveTo: payload.effectiveTo,
+          copyFromPeriodId: payload.copyFromPeriodId,
+          autoClosePreviousCurrent: payload.autoClosePreviousCurrent,
+          manualPrices: payload.manualPrices,
+        })
+
+        if (result.recordCount === 0) {
+          setLocalEmptyPeriods((prev) => [
+            ...prev.filter((period) => period.periodId !== result.periodId),
+            {
+              periodId: result.periodId,
+              effectiveFrom: result.effectiveFrom,
+              effectiveTo: result.effectiveTo,
+            },
+          ])
+          toast.success('时间段已创建，请在下方补充产品线价格')
+        } else if (payload.copyFromPeriodId) {
+          toast.success('时间段已创建，已复制产品线价格')
+        } else {
+          toast.success(`时间段已创建，已配置 ${result.recordCount} 条价格`)
+        }
+        setSelectedPeriodId(result.periodId)
+        await invalidatePlatformPricingQueries(utils, cardTypeId, { includeHistory: true })
+      }
+
+      setEditingPeriod(null)
+      setPeriodDialogOpen(false)
+    } catch {
+      // 错误已在 mutation.onError 中 toast
+    }
   }
 
   const handlePlatformSaved = (
@@ -312,7 +462,7 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
       </div>
 
       <CardTypeDetailPeriods
-        periods={periodSlice.periods}
+        periods={mergedPeriods}
         selectedPeriodId={selectedPeriodId}
         onSelectPeriod={setSelectedPeriodId}
         onAddPeriod={() => {
@@ -372,8 +522,9 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         cardTypeId={cardTypeId}
         cardTypeName={detail.cardTypeName}
         existingRecords={platformRecords}
-        periods={periodSlice.periods}
+        periods={mergedPeriods}
         editing={editingPeriod}
+        isSubmitting={createPeriodMutation.isPending || updatePeriodMutation.isPending}
         onSaved={handlePeriodSaved}
       />
 
@@ -383,7 +534,7 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         existingRecords={platformRecords}
         cardTypes={cardTypes.length > 0 ? cardTypes : [card]}
         editing={editingPlatform}
-        isSubmitting={isSaving}
+        isSubmitting={createMutation.isPending || updateMutation.isPending}
         defaultCardTypeId={cardTypeId}
         periodId={selectedPeriodId ?? undefined}
         periodEffectiveFrom={selectedPeriod?.effectiveFrom}

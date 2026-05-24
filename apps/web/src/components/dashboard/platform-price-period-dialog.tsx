@@ -20,7 +20,27 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Switch } from '@workspace/ui/components/switch'
-import type { PlatformCardPriceRecord } from '@/lib/types/platform-pricing'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@workspace/ui/components/table'
+import {
+  PLATFORM_PRICE_SLOTS,
+  platformPriceSlotKey,
+} from '@/lib/platform-pricing/transforms'
+import type {
+  PlatformBillingUnit,
+  PlatformCardPriceRecord,
+  PlatformProductLine,
+} from '@/lib/types/platform-pricing'
+import {
+  platformBillingUnitNames,
+  platformProductLineNames,
+} from '@/lib/types/platform-pricing'
 import type { PlatformCardPricePeriodRow } from '@/lib/types/platform-pricing-views'
 import {
   fromDatetimeLocalValue,
@@ -29,9 +49,16 @@ import {
 } from '@/lib/platform-pricing/datetime'
 import {
   formatPeriodRange,
+  getPeriodPhase,
   getRecordsForPeriod,
   validatePeriodAgainstExisting,
 } from '@/lib/platform-pricing/periods'
+
+export type PlatformPricePeriodManualPrice = {
+  productLine: PlatformProductLine
+  billingUnit: PlatformBillingUnit
+  sellPrice: number
+}
 
 export type PlatformPricePeriodSavePayload = {
   periodId: string
@@ -41,6 +68,8 @@ export type PlatformPricePeriodSavePayload = {
   copyFromPeriodId?: string
   /** 新建且与当前时间段重叠时，自动闭合原当前段 */
   autoClosePreviousCurrent: boolean
+  /** 不复制时手动填写的产品线价格 */
+  manualPrices?: PlatformPricePeriodManualPrice[]
 }
 
 export type PlatformPricePeriodDialogProps = {
@@ -51,7 +80,16 @@ export type PlatformPricePeriodDialogProps = {
   existingRecords: PlatformCardPriceRecord[]
   periods: PlatformCardPricePeriodRow[]
   editing?: PlatformCardPricePeriodRow | null
+  isSubmitting?: boolean
   onSaved: (payload: PlatformPricePeriodSavePayload) => void
+}
+
+function billingUnitLabel(
+  productLine: PlatformProductLine,
+  billingUnit: PlatformBillingUnit,
+): string {
+  if (productLine === 'bare_metal') return platformBillingUnitNames[billingUnit]
+  return '小时'
 }
 
 export function PlatformPricePeriodDialog({
@@ -62,6 +100,7 @@ export function PlatformPricePeriodDialog({
   existingRecords,
   periods,
   editing,
+  isSubmitting = false,
   onSaved,
 }: PlatformPricePeriodDialogProps) {
   const isEdit = Boolean(editing)
@@ -71,6 +110,7 @@ export function PlatformPricePeriodDialog({
   const [openEnded, setOpenEnded] = useState(true)
   const [copyFromPeriodId, setCopyFromPeriodId] = useState<string>('none')
   const [autoClosePrevious, setAutoClosePrevious] = useState(true)
+  const [manualPriceInputs, setManualPriceInputs] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!open) return
@@ -80,6 +120,7 @@ export function PlatformPricePeriodDialog({
       setOpenEnded(editing.effectiveTo == null)
       setCopyFromPeriodId('none')
       setAutoClosePrevious(false)
+      setManualPriceInputs({})
     } else {
       setEffectiveFrom(nowPlatformDateTime())
       setEffectiveTo('')
@@ -87,10 +128,22 @@ export function PlatformPricePeriodDialog({
       const current = periods.find((p) => p.isCurrent)
       setCopyFromPeriodId(current?.periodId ?? 'none')
       setAutoClosePrevious(true)
+      setManualPriceInputs({})
     }
   }, [open, editing, periods])
 
   const effectiveToValue = openEnded ? null : effectiveTo || null
+  const showManualPrices = !isEdit && copyFromPeriodId === 'none'
+
+  const newPeriodPhase = useMemo(() => {
+    if (!effectiveFrom) return null
+    return getPeriodPhase(effectiveFrom, effectiveToValue, false)
+  }, [effectiveFrom, effectiveToValue])
+
+  const showAutoCloseOption =
+    !isEdit &&
+    periods.some((p) => p.isCurrent) &&
+    newPeriodPhase === 'current'
 
   const validationError = useMemo(() => {
     const err = validatePeriodAgainstExisting(
@@ -113,7 +166,40 @@ export function PlatformPricePeriodDialog({
     ? formatPeriodRange(effectiveFrom, effectiveToValue)
     : ''
 
-  const canSubmit = Boolean(effectiveFrom && !validationError)
+  const manualPrices = useMemo(() => {
+    const entries: PlatformPricePeriodManualPrice[] = []
+    for (const slot of PLATFORM_PRICE_SLOTS) {
+      const key = platformPriceSlotKey(slot.productLine, slot.billingUnit)
+      const raw = manualPriceInputs[key]?.trim()
+      if (!raw) continue
+      const price = parseFloat(raw)
+      if (Number.isNaN(price) || price <= 0) continue
+      entries.push({
+        productLine: slot.productLine,
+        billingUnit: slot.billingUnit,
+        sellPrice: price,
+      })
+    }
+    return entries
+  }, [manualPriceInputs])
+
+  const manualPriceError = useMemo(() => {
+    if (!showManualPrices) return null
+    for (const slot of PLATFORM_PRICE_SLOTS) {
+      const key = platformPriceSlotKey(slot.productLine, slot.billingUnit)
+      const raw = manualPriceInputs[key]?.trim()
+      if (!raw) continue
+      const price = parseFloat(raw)
+      if (Number.isNaN(price) || price <= 0) {
+        return `${platformProductLineNames[slot.productLine]}（${billingUnitLabel(slot.productLine, slot.billingUnit)}）价格无效`
+      }
+    }
+    return null
+  }, [showManualPrices, manualPriceInputs])
+
+  const canSubmit = Boolean(
+    effectiveFrom && !validationError && !manualPriceError && !isSubmitting,
+  )
 
   const handleSubmit = () => {
     if (!canSubmit) return
@@ -126,9 +212,9 @@ export function PlatformPricePeriodDialog({
       effectiveTo: effectiveToValue,
       copyFromPeriodId:
         !isEdit && copyFromPeriodId !== 'none' ? copyFromPeriodId : undefined,
-      autoClosePreviousCurrent: !isEdit && autoClosePrevious,
+      autoClosePreviousCurrent: !isEdit && showAutoCloseOption && autoClosePrevious,
+      manualPrices: showManualPrices && manualPrices.length > 0 ? manualPrices : undefined,
     })
-    onOpenChange(false)
   }
 
   const copySourceCount =
@@ -136,13 +222,23 @@ export function PlatformPricePeriodDialog({
       ? getRecordsForPeriod(existingRecords, cardTypeId, copyFromPeriodId).length
       : 0
 
+  const groupedSlots = useMemo(() => {
+    const groups = new Map<PlatformProductLine, typeof PLATFORM_PRICE_SLOTS>()
+    for (const slot of PLATFORM_PRICE_SLOTS) {
+      const list = groups.get(slot.productLine) ?? []
+      list.push(slot)
+      groups.set(slot.productLine, list)
+    }
+    return [...groups.entries()]
+  }, [])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={showManualPrices ? 'sm:max-w-2xl max-h-[90vh] overflow-y-auto' : 'sm:max-w-md'}>
         <DialogHeader>
           <DialogTitle>{isEdit ? '编辑有效时间段' : '新增有效时间段'}</DialogTitle>
           <DialogDescription>
-            {cardTypeName} · 时间段之间不可重叠；全平台仅允许一段「当前有效」
+            {cardTypeName} · 时间段之间不可重叠；支持补录历史时间段
           </DialogDescription>
         </DialogHeader>
 
@@ -186,7 +282,14 @@ export function PlatformPricePeriodDialog({
 
           {previewLabel && (
             <p className="text-sm text-muted-foreground">
-              预览：<span className="font-medium text-foreground">{previewLabel}</span>
+              预览：
+              <span className="font-medium text-foreground">{previewLabel}</span>
+              {newPeriodPhase === 'expired' && (
+                <span className="ml-2 text-xs">（历史时间段）</span>
+              )}
+              {newPeriodPhase === 'scheduled' && (
+                <span className="ml-2 text-xs">（未生效）</span>
+              )}
             </p>
           )}
 
@@ -214,7 +317,67 @@ export function PlatformPricePeriodDialog({
             </div>
           )}
 
-          {!isEdit && periods.some((p) => p.isCurrent) && (
+          {showManualPrices && (
+            <div className="grid gap-2">
+              <div>
+                <Label>产品线价格（可选）</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  可按产品线单独填写价格，未填写的可在创建后补充
+                </p>
+              </div>
+              <div className="rounded-md border max-h-[280px] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>产品线</TableHead>
+                      <TableHead>租期单位</TableHead>
+                      <TableHead className="w-[140px]">销售单价（元）</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {groupedSlots.map(([productLine, slots]) =>
+                      slots.map((slot, index) => {
+                        const key = platformPriceSlotKey(slot.productLine, slot.billingUnit)
+                        return (
+                          <TableRow key={key}>
+                            <TableCell className="text-sm">
+                              {index === 0 ? platformProductLineNames[productLine] : ''}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {billingUnitLabel(slot.productLine, slot.billingUnit)}
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                placeholder="—"
+                                className="h-8"
+                                value={manualPriceInputs[key] ?? ''}
+                                onChange={(e) =>
+                                  setManualPriceInputs((prev) => ({
+                                    ...prev,
+                                    [key]: e.target.value,
+                                  }))
+                                }
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )
+                      }),
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              {manualPrices.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  已填写 {manualPrices.length} 条产品线价格
+                </p>
+              )}
+            </div>
+          )}
+
+          {showAutoCloseOption && (
             <div className="flex items-center justify-between gap-4 rounded-md border p-3">
               <div className="space-y-0.5">
                 <p className="text-sm font-medium">自动闭合原当前时间段</p>
@@ -229,14 +392,17 @@ export function PlatformPricePeriodDialog({
           {validationError && (
             <p className="text-sm text-destructive">{validationError}</p>
           )}
+          {manualPriceError && (
+            <p className="text-sm text-destructive">{manualPriceError}</p>
+          )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
             取消
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
-            {isEdit ? '保存' : '创建'}
+            {isSubmitting ? '保存中…' : isEdit ? '保存' : '创建'}
           </Button>
         </DialogFooter>
       </DialogContent>

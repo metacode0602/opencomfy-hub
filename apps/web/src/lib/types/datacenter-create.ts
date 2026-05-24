@@ -10,6 +10,7 @@ export type CreateDatacenterInput = {
   code?: string
   address?: string
   description?: string
+  location?: string
   containerInstanceRegion?: string
   bareMetalRegion?: string
   scale?: DatacenterScale

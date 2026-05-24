@@ -4,6 +4,7 @@ import {
   billingPeriodAggCustomerConsumption,
   billingPeriodImportBatch,
   billingPeriodReconciliationReport,
+  billingPeriodTenantBillWindow,
   billingPeriodTenantProjectEnrichment,
   billingTenantCostAllocation,
   platformCostMonthly,
@@ -48,10 +49,11 @@ export async function purgeBillingPeriodArtifacts(input: {
   billingPeriodId: string
   scope: PurgeScope
   fileType?: ImportFileType
+  windowId?: string
   actorId?: string | null
 }): Promise<void> {
-  const { billingPeriodId: periodId, scope, fileType, actorId } = input
-  financeLog('purge', `start scope=${scope}`, { periodId, fileType })
+  const { billingPeriodId: periodId, scope, fileType, windowId, actorId } = input
+  financeLog('purge', `start scope=${scope}`, { periodId, fileType, windowId })
 
   await db.transaction(async (tx) => {
     if (scope === 'file_type') {
@@ -64,24 +66,25 @@ export async function purgeBillingPeriodArtifacts(input: {
           eq(billingPeriodImportBatch.fileType, fileType),
         ),
       })
-      for (const b of batches) {
+      const targetBatches =
+        fileType === 'tenant_bill' && windowId
+          ? batches.filter((b) => b.windowId === windowId)
+          : batches
+      for (const b of targetBatches) {
         await deleteStorageFile(b.storagePath)
         await deleteStorageFile(b.errorReportPath)
       }
-      await tx
-        .delete(billingPeriodImportBatch)
-        .where(
-          and(
-            eq(billingPeriodImportBatch.billingPeriodId, periodId),
-            eq(billingPeriodImportBatch.fileType, fileType),
-          ),
-        )
+      for (const b of targetBatches) {
+        await tx
+          .delete(billingPeriodImportBatch)
+          .where(eq(billingPeriodImportBatch.id, b.id))
+      }
       if (fileType === 'customer_consumption') {
         await tx
           .delete(billingPeriodAggCustomerConsumption)
           .where(eq(billingPeriodAggCustomerConsumption.billingPeriodId, periodId))
       }
-      if (fileType === 'tenant_bill') {
+      if (fileType === 'tenant_bill' && !windowId) {
         await tx
           .delete(billingPeriodTenantProjectEnrichment)
           .where(eq(billingPeriodTenantProjectEnrichment.billingPeriodId, periodId))
@@ -114,6 +117,9 @@ export async function purgeBillingPeriodArtifacts(input: {
       await tx
         .delete(billingTenantCostAllocation)
         .where(eq(billingTenantCostAllocation.billingPeriodId, periodId))
+      await tx
+        .delete(billingPeriodTenantBillWindow)
+        .where(eq(billingPeriodTenantBillWindow.billingPeriodId, periodId))
       await deleteDerivedForPeriod(tx, periodId)
       await resetPeriodTotals(tx, periodId)
     }

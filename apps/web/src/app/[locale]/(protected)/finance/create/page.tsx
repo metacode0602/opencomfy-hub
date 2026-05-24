@@ -21,7 +21,14 @@ import { formatMoney } from "../_lib/display"
 import { getPeriodDateRange, isValidPeriodCode } from "../_lib/period"
 import { CostGroupedTable } from "../[id]/cost/_components/cost-grouped-table"
 
-type SlotKey = "customer" | "baremetal" | "tenantBill"
+type FixedSlotKey = "customer" | "baremetal"
+
+type TenantBillWindowSlot = {
+  windowId: string
+  windowStart: string
+  windowEnd: string
+  state: SlotState
+}
 
 type SlotState = {
   file: File | null
@@ -31,8 +38,8 @@ type SlotState = {
   hasErrorReport: boolean
 }
 
-const SLOT_LABEL: Record<
-  SlotKey,
+const FIXED_SLOT_LABEL: Record<
+  FixedSlotKey,
   { title: string; hint: string; accept: string }
 > = {
   customer: {
@@ -42,32 +49,41 @@ const SLOT_LABEL: Record<
   },
   baremetal: {
     title: "裸金属消费订单列表",
-    hint: "Excel：订单ID、客户ID、订单金额、最终总额、下单时间等列",
-    accept: ".xlsx,.xls,.csv",
-  },
-  tenantBill: {
-    title: "客户账单详情（除 CPU 任务）",
-    hint: "Excel 或 CSV：客户ID、总消费、卡时、GPU 型号、区域等列",
+    hint: "Excel：订单ID、租户ID、机房名称、设备型号（卡型 x 卡数）、购买数量（数量 x 时长包）、最终总额、下单时间等列",
     accept: ".xlsx,.xls,.csv",
   },
 }
 
-function initialSlots(): Record<SlotKey, SlotState> {
+const TENANT_BILL_HINT =
+  "Excel 或 CSV：客户ID、总消费、卡时、GPU 型号、区域等列（该时间段内汇总）"
+
+function initialFixedSlots(): Record<FixedSlotKey, SlotState> {
   return {
     customer: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
     baremetal: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
-    tenantBill: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
+  }
+}
+
+function emptyTenantBillSlot(
+  window: { id?: string; windowStart: string; windowEnd: string; sortOrder?: number },
+  index: number,
+): TenantBillWindowSlot {
+  return {
+    windowId: window.id ?? `preview-${index}`,
+    windowStart: window.windowStart,
+    windowEnd: window.windowEnd,
+    state: { file: null, status: "empty", message: "", rowCount: 0, hasErrorReport: false },
   }
 }
 
 type ImportSlotServerStatus = {
-  parseStatus: "ok" | "error"
+  parseStatus: "ok" | "error" | "empty"
   parseErrorCount: number
   rowCount: number
   hasErrorReport: boolean
 }
 
-function buildImportSlotMessage(server: ImportSlotServerStatus): string {
+function buildImportSlotMessage(server: Pick<ImportSlotServerStatus, "parseErrorCount" | "rowCount" | "hasErrorReport"> & { parseStatus: "ok" | "error" }): string {
   if (server.parseStatus === "error" || server.hasErrorReport) {
     if (server.parseErrorCount > 0) {
       return `存在 ${server.parseErrorCount} 处错误，请下载错误明细修正`
@@ -79,7 +95,12 @@ function buildImportSlotMessage(server: ImportSlotServerStatus): string {
 
 function applyImportSlotServerStatus(
   prev: SlotState,
-  server: ImportSlotServerStatus,
+  server: {
+    parseStatus: "ok" | "error"
+    parseErrorCount: number
+    rowCount: number
+    hasErrorReport: boolean
+  },
   messageOverride?: string,
 ): SlotState {
   const message = messageOverride ?? buildImportSlotMessage(server)
@@ -104,24 +125,89 @@ function applyImportSlotServerStatus(
   return prev
 }
 
-function syncSlotsFromValidation(
-  prev: Record<SlotKey, SlotState>,
-  slots: Partial<Record<SlotKey, ImportSlotServerStatus | null>>,
-  options?: { skipParsing?: boolean; messageOverrides?: Partial<Record<SlotKey, string>> },
-): Record<SlotKey, SlotState> {
+function syncFixedSlotsFromValidation(
+  prev: Record<FixedSlotKey, SlotState>,
+  slots: {
+    customer?: ImportSlotServerStatus | null
+    baremetal?: ImportSlotServerStatus | null
+  },
+  options?: { skipParsing?: boolean; messageOverrides?: Partial<Record<FixedSlotKey, string>> },
+): Record<FixedSlotKey, SlotState> {
   const next = { ...prev }
-  const keys: SlotKey[] = ["customer", "baremetal", "tenantBill"]
+  const keys: FixedSlotKey[] = ["customer", "baremetal"]
   for (const key of keys) {
     const server = slots[key]
-    if (!server) continue
+    if (!server || server.parseStatus === "empty") continue
     if (options?.skipParsing && prev[key].status === "parsing") continue
+    if (server.parseStatus !== "ok" && server.parseStatus !== "error") continue
     next[key] = applyImportSlotServerStatus(
       prev[key],
-      server,
+      {
+        parseStatus: server.parseStatus,
+        parseErrorCount: server.parseErrorCount,
+        rowCount: server.rowCount,
+        hasErrorReport: server.hasErrorReport,
+      },
       options?.messageOverrides?.[key],
     )
   }
   return next
+}
+
+function syncTenantBillSlotsFromValidation(
+  prev: TenantBillWindowSlot[],
+  windows: Array<{
+    windowId: string
+    windowStart: string
+    windowEnd: string
+    parseStatus: "ok" | "error" | "empty"
+    parseErrorCount: number
+    rowCount: number
+    hasErrorReport: boolean
+  }>,
+  options?: { skipParsingWindowId?: string; messageOverride?: string },
+): TenantBillWindowSlot[] {
+  return windows.map((w) => {
+    const existing = prev.find((p) => p.windowId === w.windowId)
+    if (options?.skipParsingWindowId === w.windowId && existing?.state.status === "parsing") {
+      return existing
+    }
+    if (w.parseStatus === "empty") {
+      return {
+        windowId: w.windowId,
+        windowStart: w.windowStart,
+        windowEnd: w.windowEnd,
+        state: existing?.state ?? {
+          file: null,
+          status: "empty",
+          message: "",
+          rowCount: 0,
+          hasErrorReport: false,
+        },
+      }
+    }
+    return {
+      windowId: w.windowId,
+      windowStart: w.windowStart,
+      windowEnd: w.windowEnd,
+      state: applyImportSlotServerStatus(
+        existing?.state ?? {
+          file: null,
+          status: "empty",
+          message: "",
+          rowCount: 0,
+          hasErrorReport: false,
+        },
+        {
+          parseStatus: w.parseStatus,
+          parseErrorCount: w.parseErrorCount,
+          rowCount: w.rowCount,
+          hasErrorReport: w.hasErrorReport,
+        },
+        options?.messageOverride,
+      ),
+    }
+  })
 }
 
 async function fileToBase64(file: File): Promise<string> {
@@ -149,27 +235,131 @@ function downloadBase64File(fileName: string, fileBase64: string) {
   URL.revokeObjectURL(url)
 }
 
+const PRICING_FAILURE_LABEL: Record<string, string> = {
+  card_type_not_found: "卡型匹配失败",
+  region_not_found: "机房匹配失败",
+  pricing_pair_not_found: "机房×卡型成本未配置",
+  platform_list_price_not_found: "平台刊例价未配置",
+}
+
+const BILLING_UNIT_LABEL: Record<string, string> = {
+  hour: "小时",
+  day: "天",
+  week: "周",
+  month: "月",
+}
+
+function formatWindowRange(windowStart?: string, windowEnd?: string): string {
+  if (!windowStart || !windowEnd) return ""
+  return `（${windowStart} ~ ${windowEnd}）`
+}
+
+function baremetalPlatformIssueDetail(p: {
+  regionCode: string
+  gpuModel: string
+  billingUnit?: string
+  orderId?: string
+  orderedAt?: string
+}): string {
+  const unitLabel = p.billingUnit ? BILLING_UNIT_LABEL[p.billingUnit] ?? p.billingUnit : "—"
+  const pair = `${p.regionCode} × ${p.gpuModel} · ${unitLabel}租期`
+  if (p.orderId) {
+    return `订单 ${p.orderId} · ${pair} · 下单日 ${p.orderedAt ?? "—"}`
+  }
+  return pair
+}
+
+function pricingFailureDetail(p: {
+  regionCode: string
+  gpuModel: string
+  failureReason?: string
+}): string {
+  const label = PRICING_FAILURE_LABEL[p.failureReason ?? ""] ?? "成本配置缺失"
+  return `${p.regionCode} × ${p.gpuModel}（${label}）`
+}
+
+function pricingPairFailureDetail(p: {
+  regionCode: string
+  gpuModel: string
+  matchedGpuCardTypeId?: string
+  matchedDataCenterId?: string
+}): string {
+  const cardTypeId = p.matchedGpuCardTypeId ?? "—"
+  const dataCenterId = p.matchedDataCenterId ?? "—"
+  return `${p.regionCode} × ${p.gpuModel} — 卡型 ID：${cardTypeId}，机房 ID：${dataCenterId}`
+}
+
 function ImportPreCheckAlerts({
   validation,
   computeError,
+  priceWindowPreview,
 }: {
   validation:
     | {
-        missingPricing: { regionCode: string; gpuModel: string }[]
+        missingPricing: {
+          regionCode: string
+          gpuModel: string
+          failureReason?: string
+          matchedGpuCardTypeId?: string
+          matchedDataCenterId?: string
+          billingUnit?: string
+          windowStart?: string
+          windowEnd?: string
+          orderId?: string
+          orderedAt?: string
+        }[]
         pendingAllocationCount: number
         crossFileOk: boolean
         periodStatus: string
+        priceWindowInfo?: {
+          hasChanges: boolean
+          changedCardTypes: Array<{ code: string; changeDates: string[] }>
+        }
       }
     | undefined
   computeError: string | null
+  priceWindowPreview?: {
+    hasChanges: boolean
+    changedCardTypes: Array<{ code: string; changeDates: string[] }>
+  }
 }) {
-  if (!validation && !computeError) return null
+  if (!validation && !computeError && !priceWindowPreview?.hasChanges) return null
+
+  const cardTypeIssues = validation?.missingPricing.filter(
+    (p) => p.failureReason === "card_type_not_found",
+  )
+  const regionIssues = validation?.missingPricing.filter(
+    (p) => p.failureReason === "region_not_found",
+  )
+  const pairIssues = validation?.missingPricing.filter(
+    (p) => p.failureReason === "pricing_pair_not_found" || !p.failureReason,
+  )
+  const platformIssues = validation?.missingPricing.filter(
+    (p) => p.failureReason === "platform_list_price_not_found",
+  )
+
+  const changedCards =
+    validation?.priceWindowInfo?.changedCardTypes ??
+    priceWindowPreview?.changedCardTypes ??
+    []
 
   return (
     <div className="space-y-3" role="alert">
       {computeError && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {computeError}
+        </div>
+      )}
+      {changedCards.length > 0 && (
+        <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+          <p className="font-medium">账期内平台刊例价有变动，请按时间段分别上传客户账单详情：</p>
+          <ul className="mt-1 list-inside list-disc">
+            {changedCards.map((c) => (
+              <li key={c.code}>
+                {c.code}（调价日：{c.changeDates.join("、")}）
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {validation && !validation.crossFileOk && validation.periodStatus === "import_error" && (
@@ -179,14 +369,56 @@ function ImportPreCheckAlerts({
       )}
       {validation && validation.missingPricing.length > 0 && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          <p className="font-medium">以下区域×GPU 缺少机房卡型成本配置，无法计算：</p>
-          <ul className="mt-2 list-inside list-disc">
-            {validation.missingPricing.map((p) => (
-              <li key={`${p.regionCode}-${p.gpuModel}`}>
-                {p.regionCode} × {p.gpuModel}
-              </li>
-            ))}
-          </ul>
+          <p className="font-medium">以下账单区域×GPU 无法解析成本，计算已阻断：</p>
+          {cardTypeIssues && cardTypeIssues.length > 0 && (
+            <div className="mt-2">
+              <p className="font-medium">卡型匹配问题（请维护 gpu_card_type.code 或修正 Excel 设备型号）：</p>
+              <ul className="mt-1 list-inside list-disc">
+                {cardTypeIssues.map((p) => (
+                  <li key={`card-${p.regionCode}-${p.gpuModel}`}>
+                    {pricingFailureDetail(p)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {regionIssues && regionIssues.length > 0 && (
+            <div className="mt-2">
+              <p className="font-medium">机房匹配问题（请维护机房 bare_metal_region 或修正 Excel 机房名称）：</p>
+              <ul className="mt-1 list-inside list-disc">
+                {regionIssues.map((p) => (
+                  <li key={`region-${p.regionCode}-${p.gpuModel}`}>
+                    {pricingFailureDetail(p)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {pairIssues && pairIssues.length > 0 && (
+            <div className="mt-2">
+              <p className="font-medium">机房×卡型成本未配置（请在供应商「卡型成本」维护）：</p>
+              <ul className="mt-1 list-inside list-disc">
+                {pairIssues.map((p) => (
+                  <li key={`pair-${p.regionCode}-${p.gpuModel}`}>
+                    {pricingPairFailureDetail(p)}
+                    {formatWindowRange(p.windowStart, p.windowEnd)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {platformIssues && platformIssues.length > 0 && (
+            <div className="mt-2">
+              <p className="font-medium">平台刊例价未配置（请在「平台定价」维护）：</p>
+              <ul className="mt-1 list-inside list-disc">
+                {platformIssues.map((p, idx) => (
+                  <li key={`platform-${idx}-${p.gpuModel}-${p.orderId ?? ""}-${p.billingUnit ?? ""}`}>
+                    {baremetalPlatformIssueDetail(p)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
       {validation && validation.pendingAllocationCount > 0 && (
@@ -202,15 +434,18 @@ function BillingPeriodFormCard({
   periodCode,
   periodStart,
   periodEnd,
-  slots,
+  fixedSlots,
+  tenantBillSlots,
   computing,
   persisting,
   canRunCompute,
   onPeriodCodeChange,
   onPeriodStartChange,
   onPeriodEndChange,
-  onPickFile,
-  onDownloadError,
+  onPickFixedFile,
+  onPickTenantBillFile,
+  onDownloadFixedError,
+  onDownloadTenantBillError,
   onCompute,
   onCancelHref,
   compact,
@@ -222,15 +457,18 @@ function BillingPeriodFormCard({
   periodCode: string
   periodStart: string
   periodEnd: string
-  slots: Record<SlotKey, SlotState>
+  fixedSlots: Record<FixedSlotKey, SlotState>
+  tenantBillSlots: TenantBillWindowSlot[]
   computing: boolean
   persisting: boolean
   canRunCompute: boolean
   onPeriodCodeChange: (v: string) => void
   onPeriodStartChange: (v: string) => void
   onPeriodEndChange: (v: string) => void
-  onPickFile: (slot: SlotKey, file: File | null) => void
-  onDownloadError: (slot: SlotKey) => void
+  onPickFixedFile: (slot: FixedSlotKey, file: File | null) => void
+  onPickTenantBillFile: (windowId: string, file: File | null) => void
+  onDownloadFixedError: (slot: FixedSlotKey) => void
+  onDownloadTenantBillError: (windowId: string) => void
   onCompute: () => void
   onCancelHref: string
   compact?: boolean
@@ -296,9 +534,9 @@ function BillingPeriodFormCard({
         )}
 
         <div className={compact ? "space-y-3" : "space-y-4"}>
-          {(Object.keys(SLOT_LABEL) as SlotKey[]).map((key) => {
-            const meta = SLOT_LABEL[key]
-            const st = slots[key]
+          {(Object.keys(FIXED_SLOT_LABEL) as FixedSlotKey[]).map((key) => {
+            const meta = FIXED_SLOT_LABEL[key]
+            const st = fixedSlots[key]
             return (
               <div
                 key={key}
@@ -324,7 +562,7 @@ function BillingPeriodFormCard({
                         accept={meta.accept}
                         onChange={(e) => {
                           const f = e.target.files?.[0] ?? null
-                          onPickFile(key, f)
+                          onPickFixedFile(key, f)
                           e.target.value = ""
                         }}
                       />
@@ -340,7 +578,74 @@ function BillingPeriodFormCard({
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => onDownloadError(key)}
+                      onClick={() => onDownloadFixedError(key)}
+                    >
+                      <IconDownload className="mr-1 size-4" />
+                      下载错误明细
+                    </Button>
+                  )}
+                </div>
+                {st.status !== "empty" && (
+                  <p
+                    className={
+                      st.status === "error"
+                        ? "text-sm text-destructive"
+                        : "text-sm text-muted-foreground"
+                    }
+                  >
+                    {st.message}
+                  </p>
+                )}
+              </div>
+            )
+          })}
+
+          {tenantBillSlots.map((windowSlot) => {
+            const st = windowSlot.state
+            return (
+              <div
+                key={windowSlot.windowId}
+                className="rounded-lg border bg-muted/30 p-4 space-y-2"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="font-medium">
+                      客户账单详情（{windowSlot.windowStart} ~ {windowSlot.windowEnd}）
+                    </p>
+                    <p className="text-xs text-muted-foreground">{TENANT_BILL_HINT}</p>
+                  </div>
+                  {st.status === "parsing" && (
+                    <IconLoader2 className="size-5 animate-spin text-muted-foreground" />
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" asChild>
+                    <label className="cursor-pointer">
+                      <IconUpload className="mr-1 size-4" />
+                      选择文件
+                      <input
+                        type="file"
+                        className="sr-only"
+                        accept=".xlsx,.xls,.csv"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] ?? null
+                          onPickTenantBillFile(windowSlot.windowId, f)
+                          e.target.value = ""
+                        }}
+                      />
+                    </label>
+                  </Button>
+                  {st.file && (
+                    <span className="text-sm text-muted-foreground truncate max-w-[220px]">
+                      {st.file.name}
+                    </span>
+                  )}
+                  {st.hasErrorReport && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onDownloadTenantBillError(windowSlot.windowId)}
                     >
                       <IconDownload className="mr-1 size-4" />
                       下载错误明细
@@ -469,7 +774,8 @@ export default function FinanceCreateBillingPeriodPage() {
   const [periodStart, setPeriodStart] = useState("")
   const [periodEnd, setPeriodEnd] = useState("")
   const [periodId, setPeriodId] = useState<string | null>(null)
-  const [slots, setSlots] = useState<Record<SlotKey, SlotState>>(initialSlots)
+  const [fixedSlots, setFixedSlots] = useState<Record<FixedSlotKey, SlotState>>(initialFixedSlots)
+  const [tenantBillSlots, setTenantBillSlots] = useState<TenantBillWindowSlot[]>([])
   const [computing, setComputing] = useState(false)
   const [persisting, setPersisting] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
@@ -498,22 +804,68 @@ export default function FinanceCreateBillingPeriodPage() {
       { enabled: Boolean(periodId) },
     )
 
+  const datesReady =
+    Boolean(periodStart) && Boolean(periodEnd) && periodStart <= periodEnd
+
+  const { data: priceWindowPreview } = trpc.finance.periods.detectPriceWindows.useQuery(
+    { periodStart, periodEnd },
+    { enabled: datesReady },
+  )
+
   useEffect(() => {
     if (!existingPeriod || periodId) return
     setPeriodId(existingPeriod.id)
     setPeriodCode(existingPeriod.period_code)
     setPeriodStart(existingPeriod.period_start)
     setPeriodEnd(existingPeriod.period_end)
-    setSlots(initialSlots())
+    setFixedSlots(initialFixedSlots())
+    setTenantBillSlots([])
     setComputeError(null)
   }, [existingPeriod, periodId])
 
   useEffect(() => {
-    if (!validation?.slots) return
-    setSlots((prev) =>
-      syncSlotsFromValidation(prev, validation.slots, { skipParsing: true }),
-    )
+    if (validation?.slots) {
+      setFixedSlots((prev) =>
+        syncFixedSlotsFromValidation(prev, validation.slots, { skipParsing: true }),
+      )
+    }
+    if (validation?.slots?.tenantBillWindows) {
+      setTenantBillSlots((prev) =>
+        syncTenantBillSlotsFromValidation(prev, validation.slots.tenantBillWindows),
+      )
+    } else if (validation?.windows?.length) {
+      setTenantBillSlots((prev) => {
+        const next = validation.windows.map((w, index) => {
+          const existing = prev.find((p) => p.windowId === w.id)
+          return (
+            existing ?? {
+              windowId: w.id,
+              windowStart: w.windowStart,
+              windowEnd: w.windowEnd,
+              state: {
+                file: null,
+                status: "empty" as const,
+                message: "",
+                rowCount: 0,
+                hasErrorReport: false,
+              },
+            }
+          )
+        })
+        return next
+      })
+    }
   }, [validation])
+
+  useEffect(() => {
+    if (periodId || !priceWindowPreview?.windows?.length) return
+    setTenantBillSlots((prev) => {
+      if (prev.length > 0 && !prev[0]?.windowId.startsWith("preview-")) return prev
+      return priceWindowPreview.windows.map((w, index) =>
+        emptyTenantBillSlot(w, index),
+      )
+    })
+  }, [periodId, priceWindowPreview])
 
   useEffect(() => {
     if (!draftBundle?.income) return
@@ -526,14 +878,16 @@ export default function FinanceCreateBillingPeriodPage() {
 
   const clearPreview = useCallback(() => {
     setPeriodId(null)
-    setSlots(initialSlots())
+    setFixedSlots(initialFixedSlots())
+    setTenantBillSlots([])
     setComputeError(null)
   }, [])
 
   const allParsed =
-    slots.customer.status === "done" &&
-    slots.baremetal.status === "done" &&
-    slots.tenantBill.status === "done"
+    fixedSlots.customer.status === "done" &&
+    fixedSlots.baremetal.status === "done" &&
+    tenantBillSlots.length > 0 &&
+    tenantBillSlots.every((w) => w.state.status === "done")
 
   const ensurePeriod = useCallback(async (): Promise<string> => {
     if (periodId) return periodId
@@ -546,8 +900,8 @@ export default function FinanceCreateBillingPeriodPage() {
     return created.id
   }, [createPeriod, periodCode, periodEnd, periodId, periodStart])
 
-  const onDownloadError = useCallback(
-    async (slot: SlotKey) => {
+  const onDownloadFixedError = useCallback(
+    async (slot: FixedSlotKey) => {
       if (!periodId) return
       try {
         const report = await utils.finance.periods.downloadImportErrorReport.fetch({
@@ -562,10 +916,27 @@ export default function FinanceCreateBillingPeriodPage() {
     [periodId, utils.finance.periods.downloadImportErrorReport],
   )
 
-  const onPickFile = useCallback(
-    async (slot: SlotKey, file: File | null) => {
+  const onDownloadTenantBillError = useCallback(
+    async (windowId: string) => {
+      if (!periodId) return
+      try {
+        const report = await utils.finance.periods.downloadImportErrorReport.fetch({
+          billingPeriodId: periodId,
+          slot: "tenantBill",
+          windowId,
+        })
+        downloadBase64File(report.fileName, report.fileBase64)
+      } catch (e) {
+        setComputeError(e instanceof Error ? e.message : "下载失败")
+      }
+    },
+    [periodId, utils.finance.periods.downloadImportErrorReport],
+  )
+
+  const onPickFixedFile = useCallback(
+    async (slot: FixedSlotKey, file: File | null) => {
       if (!file) {
-        setSlots((s) => ({
+        setFixedSlots((s) => ({
           ...s,
           [slot]: {
             file: null,
@@ -582,7 +953,7 @@ export default function FinanceCreateBillingPeriodPage() {
         return
       }
       setComputeError(null)
-      setSlots((s) => ({
+      setFixedSlots((s) => ({
         ...s,
         [slot]: {
           file,
@@ -603,14 +974,14 @@ export default function FinanceCreateBillingPeriodPage() {
           fileBase64,
         })
         const { data: freshValidation } = await refetchValidation()
-        setSlots((prev) => {
+        setFixedSlots((prev) => {
           const withFile = { ...prev, [slot]: { ...prev[slot], file } }
-          const messageOverrides: Partial<Record<SlotKey, string>> = {}
+          const messageOverrides: Partial<Record<FixedSlotKey, string>> = {}
           if (!result.ok && result.message) {
             messageOverrides[slot] = result.message
           }
           if (freshValidation?.slots) {
-            return syncSlotsFromValidation(withFile, freshValidation.slots, {
+            return syncFixedSlotsFromValidation(withFile, freshValidation.slots, {
               messageOverrides,
             })
           }
@@ -630,7 +1001,7 @@ export default function FinanceCreateBillingPeriodPage() {
         })
         await utils.finance.periods.getBundle.invalidate({ id })
       } catch (e) {
-        setSlots((s) => ({
+        setFixedSlots((s) => ({
           ...s,
           [slot]: {
             file,
@@ -649,6 +1020,139 @@ export default function FinanceCreateBillingPeriodPage() {
       periodEnd,
       periodStart,
       refetchValidation,
+      utils.finance.periods.getBundle,
+    ],
+  )
+
+  const onPickTenantBillFile = useCallback(
+    async (windowId: string, file: File | null) => {
+      if (!file) {
+        setTenantBillSlots((prev) =>
+          prev.map((w) =>
+            w.windowId === windowId
+              ? {
+                  ...w,
+                  state: {
+                    file: null,
+                    status: "empty",
+                    message: "",
+                    rowCount: 0,
+                    hasErrorReport: false,
+                  },
+                }
+              : w,
+          ),
+        )
+        return
+      }
+      if (!isValidPeriodCode(periodCode) || !periodStart || !periodEnd) {
+        setComputeError("请先填写正确格式的账期编码（YYYY-MM）与起止日期")
+        return
+      }
+      setComputeError(null)
+      setTenantBillSlots((prev) =>
+        prev.map((w) =>
+          w.windowId === windowId
+            ? {
+                ...w,
+                state: {
+                  file,
+                  status: "parsing",
+                  message: "正在上传并解析…",
+                  rowCount: 0,
+                  hasErrorReport: false,
+                },
+              }
+            : w,
+        ),
+      )
+      try {
+        const id = await ensurePeriod()
+        const { data: freshValidationBefore } = await refetchValidation()
+        const resolvedWindowId =
+          freshValidationBefore?.windows?.find(
+            (w) =>
+              w.id === windowId ||
+              (w.windowStart ===
+                tenantBillSlots.find((s) => s.windowId === windowId)?.windowStart &&
+                w.windowEnd ===
+                  tenantBillSlots.find((s) => s.windowId === windowId)?.windowEnd),
+          )?.id ?? windowId
+
+        if (resolvedWindowId.startsWith("preview-")) {
+          throw new Error("账期时间段尚未就绪，请稍后重试")
+        }
+
+        void utils.finance.periods.validate.invalidate({ billingPeriodId: id })
+        const fileBase64 = await fileToBase64(file)
+        const result = await importFile.mutateAsync({
+          billingPeriodId: id,
+          slot: "tenantBill",
+          fileName: file.name,
+          fileBase64,
+          windowId: resolvedWindowId,
+        })
+        const { data: freshValidation } = await refetchValidation()
+        setTenantBillSlots((prev) => {
+          if (freshValidation?.slots?.tenantBillWindows) {
+            return syncTenantBillSlotsFromValidation(
+              prev.map((w) =>
+                w.windowId === windowId ? { ...w, windowId: resolvedWindowId, state: { ...w.state, file } } : w,
+              ),
+              freshValidation.slots.tenantBillWindows,
+              {
+                skipParsingWindowId: resolvedWindowId,
+                messageOverride: result.ok ? undefined : result.message,
+              },
+            )
+          }
+          return prev.map((w) =>
+            w.windowId === windowId || w.windowId === resolvedWindowId
+              ? {
+                  ...w,
+                  windowId: resolvedWindowId,
+                  state: applyImportSlotServerStatus(
+                    { ...w.state, file },
+                    {
+                      parseStatus: result.ok ? "ok" : "error",
+                      parseErrorCount: result.parseErrorCount,
+                      rowCount: result.rowCount,
+                      hasErrorReport: result.hasErrorReport,
+                    },
+                    result.message,
+                  ),
+                }
+              : w,
+          )
+        })
+        await utils.finance.periods.getBundle.invalidate({ id })
+      } catch (e) {
+        setTenantBillSlots((prev) =>
+          prev.map((w) =>
+            w.windowId === windowId
+              ? {
+                  ...w,
+                  state: {
+                    file,
+                    status: "error",
+                    message: e instanceof Error ? e.message : "导入失败",
+                    rowCount: 0,
+                    hasErrorReport: false,
+                  },
+                }
+              : w,
+          ),
+        )
+      }
+    },
+    [
+      ensurePeriod,
+      importFile,
+      periodCode,
+      periodEnd,
+      periodStart,
+      refetchValidation,
+      tenantBillSlots,
       utils.finance.periods.getBundle,
     ],
   )
@@ -721,7 +1225,11 @@ export default function FinanceCreateBillingPeriodPage() {
     draftBundle?.period?.status === "published"
 
   const preCheckAlerts = (
-    <ImportPreCheckAlerts validation={validation} computeError={computeError} />
+    <ImportPreCheckAlerts
+      validation={validation}
+      computeError={computeError}
+      priceWindowPreview={priceWindowPreview}
+    />
   )
 
   const isEditingExisting = Boolean(editPeriodId || periodId)
@@ -731,7 +1239,8 @@ export default function FinanceCreateBillingPeriodPage() {
       periodCode={periodCode}
       periodStart={periodStart}
       periodEnd={periodEnd}
-      slots={slots}
+      fixedSlots={fixedSlots}
+      tenantBillSlots={tenantBillSlots}
       computing={computing}
       persisting={persisting}
       canRunCompute={canRunCompute}
@@ -740,7 +1249,7 @@ export default function FinanceCreateBillingPeriodPage() {
       title={isEditingExisting ? "重新上传账期" : undefined}
       description={
         isEditingExisting
-          ? "账期元数据不可修改。请重新上传三类 Excel，全部解析成功后点击「计算」。"
+          ? "账期元数据不可修改。请重新上传 Excel，全部解析成功后点击「计算」。"
           : undefined
       }
       onPeriodCodeChange={(v) => {
@@ -760,8 +1269,10 @@ export default function FinanceCreateBillingPeriodPage() {
         clearPreview()
         setPeriodEnd(v)
       }}
-      onPickFile={(slot, file) => void onPickFile(slot, file)}
-      onDownloadError={(slot) => void onDownloadError(slot)}
+      onPickFixedFile={(slot, file) => void onPickFixedFile(slot, file)}
+      onPickTenantBillFile={(windowId, file) => void onPickTenantBillFile(windowId, file)}
+      onDownloadFixedError={(slot) => void onDownloadFixedError(slot)}
+      onDownloadTenantBillError={(windowId) => void onDownloadTenantBillError(windowId)}
       onCompute={() => void handleCompute()}
       onCancelHref="/finance"
       compact={hasResult}

@@ -54,6 +54,7 @@ export type PlatformPriceFormValues = {
   billingUnit: PlatformBillingUnit
   sellPrice: number
   effectiveFrom: string
+  effectiveTo?: string | null
   status: PlatformPriceStatus
   remark?: string
 }
@@ -162,6 +163,8 @@ export function PlatformPriceDialog({
       billingUnit,
       sellPrice: priceNum,
       effectiveFrom: effectiveFromVal,
+      effectiveTo:
+        periodEffectiveTo !== undefined ? periodEffectiveTo : editing?.effectiveTo ?? null,
       status,
       remark: remark.trim() || undefined,
     }

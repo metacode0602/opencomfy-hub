@@ -38,6 +38,7 @@ export type CreateDatacenterFormValues = {
   name: string
   address: string
   description: string
+  location: string
   containerInstanceRegion: string
   bareMetalRegion: string
   scale: DatacenterScale | ''
@@ -53,6 +54,7 @@ function emptyFormValues(): CreateDatacenterFormValues {
     name: '',
     address: '',
     description: '',
+    location: '',
     containerInstanceRegion: '',
     bareMetalRegion: '',
     scale: '',

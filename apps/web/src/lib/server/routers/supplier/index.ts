@@ -49,6 +49,8 @@ import {
   gpuCardTypeUpsertSchema,
 } from '@/lib/server/routers/supplier/gpu-card-types-schemas'
 import {
+  platformPricePeriodCreateSchema,
+  platformPricePeriodUpdateSchema,
   platformPriceUpdateSchema,
   platformPriceUpsertSchema,
 } from '@/lib/server/routers/supplier/platform-pricing-schemas'
@@ -136,6 +138,8 @@ function mapImportError(error: unknown): never {
       message.includes('SN 已存在') ||
       message.includes('资产编号已存在') ||
       message.includes('唯一性冲突') ||
+      message.includes('复制源') ||
+      message.includes('结束时间') ||
       message.includes('Karmada') ||
       message.includes('标签值')
     ) {
@@ -976,22 +980,73 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    create: adminProcedure.input(platformPriceUpsertSchema).mutation(async ({ input }) => {
+    create: adminProcedure.input(platformPriceUpsertSchema).mutation(async ({ ctx, input }) => {
       try {
-        return await platformPricingDataAccess.createPrice(input)
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await platformPricingDataAccess.createPrice({
+          ...input,
+          changedByStaffId: staffId,
+        })
       } catch (e) {
         platformPricingError('router.create', 'failed', e, { gpuCardTypeId: input.gpuCardTypeId })
         mapImportError(e)
       }
     }),
 
-    update: adminProcedure.input(platformPriceUpdateSchema).mutation(async ({ input }) => {
+    update: adminProcedure.input(platformPriceUpdateSchema).mutation(async ({ ctx, input }) => {
       try {
-        return await platformPricingDataAccess.updatePrice(input)
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await platformPricingDataAccess.updatePrice({
+          ...input,
+          changedByStaffId: staffId,
+        })
       } catch (e) {
         platformPricingError('router.update', 'failed', e, { recordId: input.recordId })
         mapImportError(e)
       }
     }),
+
+    createPeriod: adminProcedure
+      .input(platformPricePeriodCreateSchema)
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          return await platformPricingDataAccess.createPeriod({
+            gpuCardTypeId: input.gpuCardTypeId,
+            effectiveFrom: input.effectiveFrom,
+            effectiveTo: input.effectiveTo ?? null,
+            copyFromPeriodId: input.copyFromPeriodId,
+            autoClosePreviousCurrent: input.autoClosePreviousCurrent,
+            manualPrices: input.manualPrices,
+            changedByStaffId: staffId,
+          })
+        } catch (e) {
+          platformPricingError('router.createPeriod', 'failed', e, {
+            gpuCardTypeId: input.gpuCardTypeId,
+          })
+          mapImportError(e)
+        }
+      }),
+
+    updatePeriod: adminProcedure
+      .input(platformPricePeriodUpdateSchema)
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          return await platformPricingDataAccess.updatePeriod({
+            gpuCardTypeId: input.gpuCardTypeId,
+            periodId: input.periodId,
+            effectiveFrom: input.effectiveFrom,
+            effectiveTo: input.effectiveTo ?? null,
+            changedByStaffId: staffId,
+          })
+        } catch (e) {
+          platformPricingError('router.updatePeriod', 'failed', e, {
+            gpuCardTypeId: input.gpuCardTypeId,
+            periodId: input.periodId,
+          })
+          mapImportError(e)
+        }
+      }),
   }),
 })

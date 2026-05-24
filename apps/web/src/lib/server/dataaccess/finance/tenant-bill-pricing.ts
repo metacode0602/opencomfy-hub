@@ -1,32 +1,89 @@
 import type { ContractPricingMode, ContractPricingTier } from '@/lib/data/types'
-import { isSharePricingMode } from '@/lib/data/types'
 import { db } from '@/lib/db'
 import {
+  isPricingFieldsComplete,
+  parsePositiveMoney,
+  parsePositivePercent,
+  parsePricingTiers,
+  type ResolvedPricingFields,
+} from '@/lib/finance/cost-pricing-utils'
+import {
   billingPeriodImportBatch,
+  billingPeriodRawBaremetalOrder,
   billingPeriodRawTenantBill,
   dataCenter,
   gpuCardType,
+  supplierPricingHistory,
   supplierPricingRecord,
+  supplierUnitCost,
 } from '@workspace/db/schema'
-import { and, eq, isNull, lte, or, sql } from 'drizzle-orm'
-import { validateRevenueShareRatioContractTiers } from '@/lib/supplier/revenue-share-ratio-tiers'
+import { and, desc, eq, lte, or, sql } from 'drizzle-orm'
+import {
+  normalizeBaremetalRegion,
+  parseDeviceModel,
+  parsePurchaseQty,
+} from './baremetal-order-parse'
+import {
+  asOfFromOrderedAt,
+  DEFAULT_BAREMETAL_PRODUCT_LINE,
+  resolvePlatformListPriceAt,
+} from './platform-list-price'
+import { listTenantBillWindows, type TenantBillWindowDto } from './tenant-bill-windows'
+import type { PlatformBillingUnit } from '@/lib/types/platform-pricing'
+
+export type PricingFailureReason =
+  | 'card_type_not_found'
+  | 'region_not_found'
+  | 'pricing_pair_not_found'
+  | 'platform_list_price_not_found'
 
 export type MissingPricingPair = {
   regionCode: string
   gpuModel: string
 }
 
-type EffectivePricingCandidate = {
+export type MissingPricingIssue = MissingPricingPair & {
+  failureReason: PricingFailureReason
+  matchedGpuCardTypeCode?: string
+  matchedGpuCardTypeId?: string
+  matchedDataCenterId?: string
+  billingUnit?: PlatformBillingUnit
+  windowId?: string
+  windowStart?: string
+  windowEnd?: string
+  orderId?: string
+  orderedAt?: string
+}
+
+export type PricingSnapshotSource = 'record' | 'history' | 'supplier_unit_cost'
+
+export type ResolvedUnitCost = ResolvedPricingFields & {
+  pricingRecordId: string | null
+  supplierUnitCostId: string | null
+  source: PricingSnapshotSource
+  pricingHistoryId?: string
+  gpuCardTypeId: string
+  dataCenterId: string
+  platformCardListPriceId?: string | null
+  listPriceSource?: 'platform'
+}
+
+type GpuCardRef = { id: string; code: string }
+type DataCenterRef = { id: string; containerInstanceRegion: string }
+type BareMetalDataCenterRef = { id: string; bareMetalRegion: string }
+
+type PricingRecordRow = {
   id: string
-  containerInstanceRegion: string | null
-  gpuCardCode: string
-  gpuCardName: string
-  pricingMode: ContractPricingMode
+  supplierId: string
+  dataCenterId: string
+  gpuCardTypeId: string
+  supplierUnitCostId: string | null
+  pricingMode: string
   configStatus: string
   unitPricePerHour: string | null
   revenueSharePercent: string | null
   listPricePerHour: string | null
-  pricingTiers: ContractPricingTier[] | null
+  pricingTiers: unknown
   effectiveFrom: string
   effectiveTo: string | null
 }
@@ -36,56 +93,9 @@ export function normalizeBillingRegion(value: string): string {
   return value.trim().toLowerCase()
 }
 
-/** GPU 型号归一化：忽略大小写与空格，便于与主数据 code/name 比对 */
-export function normalizeGpuModelForMatch(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, '')
-}
-
-function compactGpuModel(value: string): string {
-  return normalizeGpuModelForMatch(value).replace(/-/g, '')
-}
-
-/**
- * 账单 GPU 与主数据卡型匹配得分。
- * 精确匹配优先；其次允许配置卡型为账单型号前缀（如配置 4090 匹配账单 4090-48G）。
- */
-export function gpuModelMatchScore(
-  billGpu: string,
-  cardCode: string,
-  cardName: string,
-): number {
-  const bill = normalizeGpuModelForMatch(billGpu)
-  if (!bill) return 0
-
-  const candidates = [
-    normalizeGpuModelForMatch(cardCode),
-    normalizeGpuModelForMatch(cardName),
-  ].filter(Boolean)
-
-  for (const candidate of candidates) {
-    if (bill === candidate) return 100
-  }
-
-  for (const candidate of candidates) {
-    if (bill.startsWith(candidate)) return 50
-  }
-
-  const billCompact = compactGpuModel(billGpu)
-  if (!billCompact) return 0
-
-  const compactCandidates = [compactGpuModel(cardCode), compactGpuModel(cardName)].filter(
-    Boolean,
-  )
-
-  for (const candidate of compactCandidates) {
-    if (billCompact === candidate) return 100
-  }
-
-  for (const candidate of compactCandidates) {
-    if (billCompact.startsWith(candidate)) return 50
-  }
-
-  return 0
+/** 卡型 code 精确匹配归一化 */
+export function normalizeGpuCodeForMatch(value: string): string {
+  return value.trim().toLowerCase()
 }
 
 export function isPricingEffectiveAtPeriodEnd(
@@ -100,65 +110,98 @@ export function isPricingEffectiveAtPeriodEnd(
   return true
 }
 
-function parsePositiveMoney(value: string | null | undefined): number | null {
-  if (value == null || value.trim() === '') return null
-  const n = Number(value)
-  if (Number.isNaN(n) || n <= 0) return null
-  return n
+function isUnitCostEffectiveAtPeriodEnd(
+  effectiveFrom: string,
+  effectiveTo: string | null | undefined,
+  periodEnd: string,
+): boolean {
+  if (effectiveFrom > periodEnd) return false
+  if (effectiveTo != null && effectiveTo !== '' && effectiveTo < periodEnd) return false
+  return true
 }
 
-function parsePositivePercent(value: string | null | undefined): number | null {
-  if (value == null || value.trim() === '') return null
-  const n = Number(value)
-  if (Number.isNaN(n) || n <= 0) return null
-  return n
-}
-
-function parsePricingTiers(value: unknown): ContractPricingTier[] {
-  if (!Array.isArray(value)) return []
-  return value as ContractPricingTier[]
-}
-
-/** 配置在账期结束日是否具备可计算所需的字段（对齐 unit-costs 校验与设计 §6.1.1） */
-export function isPricingRecordComplete(record: {
+function toResolvedFields(input: {
   configStatus: string
   pricingMode: ContractPricingMode
   unitPricePerHour: string | null
   revenueSharePercent: string | null
   listPricePerHour: string | null
   pricingTiers: ContractPricingTier[] | null
-}): boolean {
-  if (record.configStatus !== 'active') return false
-
-  const mode = record.pricingMode
-  const tiers = record.pricingTiers ?? []
-
-  if (mode === 'tiered_revenue_share') {
-    if (parsePositiveMoney(record.listPricePerHour) == null) return false
-    return validateRevenueShareRatioContractTiers(tiers) == null
+}): ResolvedPricingFields & { configStatus: string } {
+  return {
+    configStatus: input.configStatus,
+    pricingMode: input.pricingMode,
+    unitPricePerHour: parsePositiveMoney(input.unitPricePerHour),
+    revenueSharePercent: parsePositivePercent(input.revenueSharePercent),
+    listPricePerHour: parsePositiveMoney(input.listPricePerHour),
+    pricingTiers: input.pricingTiers ?? [],
   }
-
-  if (mode === 'tiered_card_time') {
-    if (parsePositiveMoney(record.listPricePerHour) == null) return false
-    return tiers.length >= 1
-  }
-
-  if (isSharePricingMode(mode)) {
-    return parsePositivePercent(record.revenueSharePercent) != null
-  }
-
-  return parsePositiveMoney(record.unitPricePerHour) != null
 }
 
-async function loadEffectivePricingCandidates(
-  periodEnd: string,
-): Promise<EffectivePricingCandidate[]> {
+function recordKey(dataCenterId: string, gpuCardTypeId: string): string {
+  return `${dataCenterId}::${gpuCardTypeId}`
+}
+
+function pairKey(regionCode: string, gpuModel: string): string {
+  return `${regionCode}::${gpuModel}`
+}
+
+async function loadGpuCardByCode(): Promise<Map<string, GpuCardRef>> {
+  const rows = await db.select({ id: gpuCardType.id, code: gpuCardType.code }).from(gpuCardType)
+  const map = new Map<string, GpuCardRef>()
+  for (const row of rows) {
+    const key = normalizeGpuCodeForMatch(row.code)
+    if (key) map.set(key, { id: row.id, code: row.code })
+  }
+  return map
+}
+
+async function loadDataCentersByRegion(): Promise<Map<string, DataCenterRef[]>> {
+  const rows = await db
+    .select({
+      id: dataCenter.id,
+      containerInstanceRegion: dataCenter.containerInstanceRegion,
+    })
+    .from(dataCenter)
+  const map = new Map<string, DataCenterRef[]>()
+  for (const row of rows) {
+    const region = row.containerInstanceRegion?.trim()
+    if (!region) continue
+    const key = normalizeBillingRegion(region)
+    const list = map.get(key) ?? []
+    list.push({ id: row.id, containerInstanceRegion: region })
+    map.set(key, list)
+  }
+  return map
+}
+
+async function loadDataCentersByBareMetalRegion(): Promise<Map<string, BareMetalDataCenterRef[]>> {
+  const rows = await db
+    .select({
+      id: dataCenter.id,
+      bareMetalRegion: dataCenter.bareMetalRegion,
+    })
+    .from(dataCenter)
+  const map = new Map<string, BareMetalDataCenterRef[]>()
+  for (const row of rows) {
+    const region = row.bareMetalRegion?.trim()
+    if (!region) continue
+    const key = normalizeBaremetalRegion(region)
+    const list = map.get(key) ?? []
+    list.push({ id: row.id, bareMetalRegion: region })
+    map.set(key, list)
+  }
+  return map
+}
+
+async function loadAllPricingRecords(): Promise<Map<string, PricingRecordRow[]>> {
   const rows = await db
     .select({
       id: supplierPricingRecord.id,
-      containerInstanceRegion: dataCenter.containerInstanceRegion,
-      gpuCardCode: gpuCardType.code,
-      gpuCardName: gpuCardType.name,
+      supplierId: supplierPricingRecord.supplierId,
+      dataCenterId: supplierPricingRecord.dataCenterId,
+      gpuCardTypeId: supplierPricingRecord.gpuCardTypeId,
+      supplierUnitCostId: supplierPricingRecord.supplierUnitCostId,
       pricingMode: supplierPricingRecord.pricingMode,
       configStatus: supplierPricingRecord.configStatus,
       unitPricePerHour: supplierPricingRecord.unitPricePerHour,
@@ -169,66 +212,387 @@ async function loadEffectivePricingCandidates(
       effectiveTo: supplierPricingRecord.effectiveTo,
     })
     .from(supplierPricingRecord)
-    .innerJoin(dataCenter, eq(supplierPricingRecord.dataCenterId, dataCenter.id))
-    .innerJoin(gpuCardType, eq(supplierPricingRecord.gpuCardTypeId, gpuCardType.id))
+
+  const map = new Map<string, PricingRecordRow[]>()
+  for (const row of rows) {
+    const key = recordKey(row.dataCenterId, row.gpuCardTypeId)
+    const list = map.get(key) ?? []
+    list.push(row)
+    map.set(key, list)
+  }
+  return map
+}
+
+async function loadHistorySnapshot(
+  pricingRecordId: string,
+  periodEnd: string,
+): Promise<{
+  id: string
+  pricingMode: ContractPricingMode
+  unitPricePerHour: string | null
+  revenueSharePercent: string | null
+  listPricePerHour: string | null
+} | null> {
+  const endOfDay = `${periodEnd} 23:59:59`
+  const rows = await db
+    .select({
+      id: supplierPricingHistory.id,
+      pricingMode: supplierPricingHistory.pricingMode,
+      newUnitPricePerHour: supplierPricingHistory.newUnitPricePerHour,
+      newRevenueSharePercent: supplierPricingHistory.newRevenueSharePercent,
+      newListPricePerHour: supplierPricingHistory.newListPricePerHour,
+    })
+    .from(supplierPricingHistory)
     .where(
       and(
-        eq(supplierPricingRecord.configStatus, 'active'),
-        lte(supplierPricingRecord.effectiveFrom, `${periodEnd} 23:59:59`),
-        or(
-          isNull(supplierPricingRecord.effectiveTo),
-          sql`${supplierPricingRecord.effectiveTo} >= ${`${periodEnd} 00:00:00`}`,
-        ),
-        sql`${dataCenter.containerInstanceRegion} IS NOT NULL`,
-        sql`trim(${dataCenter.containerInstanceRegion}) <> ''`,
+        eq(supplierPricingHistory.pricingRecordId, pricingRecordId),
+        lte(supplierPricingHistory.changedAt, sql`${endOfDay}::timestamptz`),
+      ),
+    )
+    .orderBy(desc(supplierPricingHistory.changedAt))
+    .limit(1)
+
+  const row = rows[0]
+  if (!row) return null
+  return {
+    id: row.id,
+    pricingMode: row.pricingMode as ContractPricingMode,
+    unitPricePerHour: row.newUnitPricePerHour,
+    revenueSharePercent: row.newRevenueSharePercent,
+    listPricePerHour: row.newListPricePerHour,
+  }
+}
+
+async function loadUnitCostSnapshot(
+  dataCenterId: string,
+  gpuCardTypeId: string,
+  periodEnd: string,
+): Promise<{
+  id: string
+  pricingMode: ContractPricingMode
+  unitPricePerHour: string | null
+  revenueSharePercent: string | null
+  listPricePerHour: string | null
+  pricingTiers: ContractPricingTier[]
+} | null> {
+  const rows = await db
+    .select({
+      id: supplierUnitCost.id,
+      listPricePerHour: supplierUnitCost.listPricePerHour,
+      dealUnitPricePerHour: supplierUnitCost.dealUnitPricePerHour,
+      revenueSharePercent: supplierUnitCost.revenueSharePercent,
+      tierJson: supplierUnitCost.tierJson,
+      effectiveFrom: supplierUnitCost.effectiveFrom,
+      effectiveTo: supplierUnitCost.effectiveTo,
+    })
+    .from(supplierUnitCost)
+    .where(
+      and(
+        eq(supplierUnitCost.dataCenterId, dataCenterId),
+        eq(supplierUnitCost.gpuCardTypeId, gpuCardTypeId),
       ),
     )
 
-  return rows
-    .filter((row) =>
-      isPricingEffectiveAtPeriodEnd(row.effectiveFrom, row.effectiveTo, periodEnd),
-    )
-    .map((row) => ({
-      ...row,
-      pricingMode: row.pricingMode as ContractPricingMode,
-      pricingTiers: parsePricingTiers(row.pricingTiers),
-    }))
+  const hit = rows
+    .filter((r) => isUnitCostEffectiveAtPeriodEnd(r.effectiveFrom, r.effectiveTo, periodEnd))
+    .sort((a, b) => b.effectiveFrom.localeCompare(a.effectiveFrom))[0]
+
+  if (!hit) return null
+
+  const tierJson = hit.tierJson as { tiers?: ContractPricingTier[]; pricing_mode?: string } | null
+  const tiers = parsePricingTiers(tierJson?.tiers)
+
+  return {
+    id: hit.id,
+    pricingMode: (tierJson?.pricing_mode as ContractPricingMode) ?? 'card_time',
+    unitPricePerHour: hit.dealUnitPricePerHour ?? hit.listPricePerHour,
+    revenueSharePercent: hit.revenueSharePercent,
+    listPricePerHour: hit.listPricePerHour,
+    pricingTiers: tiers,
+  }
 }
 
-function resolvePricingForPair(
-  pair: MissingPricingPair,
-  candidates: EffectivePricingCandidate[],
-): EffectivePricingCandidate | null {
-  const region = normalizeBillingRegion(pair.regionCode)
-  const gpu = pair.gpuModel.trim()
-  if (!region || !gpu) return null
+function snapshotFromRecord(
+  record: PricingRecordRow,
+  periodEnd: string,
+): (ResolvedPricingFields & { configStatus: string }) | null {
+  if (!isPricingEffectiveAtPeriodEnd(record.effectiveFrom, record.effectiveTo, periodEnd)) {
+    return null
+  }
+  const fields = toResolvedFields({
+    configStatus: record.configStatus,
+    pricingMode: record.pricingMode as ContractPricingMode,
+    unitPricePerHour: record.unitPricePerHour,
+    revenueSharePercent: record.revenueSharePercent,
+    listPricePerHour: record.listPricePerHour,
+    pricingTiers: parsePricingTiers(record.pricingTiers),
+  })
+  if (!isPricingFieldsComplete(fields, { requireListPrice: false })) return null
+  return fields
+}
 
-  let best: { candidate: EffectivePricingCandidate; score: number } | null = null
+async function attachPlatformListPrice(
+  supplier: Omit<ResolvedUnitCost, 'listPricePerHour'> & { listPricePerHour?: number | null },
+  gpuCardTypeId: string,
+  asOfDate: string,
+): Promise<ResolvedUnitCost | null> {
+  const platform = await resolvePlatformListPriceAt({
+    gpuCardTypeId,
+    asOfDate,
+  })
+  if (!platform) return null
 
-  for (const candidate of candidates) {
-    const dcRegion = candidate.containerInstanceRegion
-    if (!dcRegion || normalizeBillingRegion(dcRegion) !== region) continue
+  return {
+    ...supplier,
+    listPricePerHour: platform.listPricePerHour,
+    platformCardListPriceId: platform.platformCardListPriceId,
+    listPriceSource: 'platform',
+  }
+}
 
-    const score = gpuModelMatchScore(gpu, candidate.gpuCardCode, candidate.gpuCardName)
-    if (score === 0) continue
-    if (!isPricingRecordComplete(candidate)) continue
+async function resolvePricingSnapshotForDcCard(input: {
+  record: PricingRecordRow
+  dataCenterId: string
+  gpuCardTypeId: string
+  periodEnd: string
+}): Promise<ResolvedUnitCost | null> {
+  const { record, dataCenterId, gpuCardTypeId, periodEnd } = input
 
-    if (!best || score > best.score) {
-      best = { candidate, score }
+  const fromRecord = snapshotFromRecord(record, periodEnd)
+  if (fromRecord) {
+    const base = {
+      ...fromRecord,
+      pricingRecordId: record.id,
+      supplierUnitCostId: record.supplierUnitCostId,
+      source: 'record' as const,
+      gpuCardTypeId,
+      dataCenterId,
+    }
+    return attachPlatformListPrice(base, gpuCardTypeId, periodEnd)
+  }
+
+  const history = await loadHistorySnapshot(record.id, periodEnd)
+  if (history) {
+    const fields = toResolvedFields({
+      configStatus: 'active',
+      pricingMode: history.pricingMode,
+      unitPricePerHour: history.unitPricePerHour,
+      revenueSharePercent: history.revenueSharePercent,
+      listPricePerHour: history.listPricePerHour,
+      pricingTiers: parsePricingTiers(record.pricingTiers),
+    })
+    if (isPricingFieldsComplete(fields, { requireListPrice: false })) {
+      const base = {
+        ...fields,
+        pricingRecordId: record.id,
+        supplierUnitCostId: record.supplierUnitCostId,
+        source: 'history' as const,
+        pricingHistoryId: history.id,
+        gpuCardTypeId,
+        dataCenterId,
+      }
+      return attachPlatformListPrice(base, gpuCardTypeId, periodEnd)
     }
   }
 
-  return best?.candidate ?? null
+  const unitCost = await loadUnitCostSnapshot(dataCenterId, gpuCardTypeId, periodEnd)
+  if (unitCost) {
+    const mode = (record.pricingMode as ContractPricingMode) || unitCost.pricingMode
+    const fields = toResolvedFields({
+      configStatus: 'active',
+      pricingMode: mode,
+      unitPricePerHour: unitCost.unitPricePerHour,
+      revenueSharePercent: unitCost.revenueSharePercent,
+      listPricePerHour: unitCost.listPricePerHour,
+      pricingTiers: unitCost.pricingTiers,
+    })
+    if (isPricingFieldsComplete(fields, { requireListPrice: false })) {
+      const base = {
+        ...fields,
+        pricingRecordId: record.id,
+        supplierUnitCostId: unitCost.id,
+        source: 'supplier_unit_cost' as const,
+        gpuCardTypeId,
+        dataCenterId,
+      }
+      return attachPlatformListPrice(base, gpuCardTypeId, periodEnd)
+    }
+  }
+
+  return null
 }
 
-export async function findMissingTenantBillPricing(input: {
-  periodId: string
-  periodEnd: string
-}): Promise<MissingPricingPair[]> {
+export type PricingResolveContext = {
+  gpuByCode: Map<string, GpuCardRef>
+  dataCentersByRegion: Map<string, DataCenterRef[]>
+  dataCentersByBareMetalRegion: Map<string, BareMetalDataCenterRef[]>
+  recordsByDcCard: Map<string, PricingRecordRow[]>
+}
+
+export async function loadPricingResolveContext(): Promise<PricingResolveContext> {
+  const [gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard] =
+    await Promise.all([
+      loadGpuCardByCode(),
+      loadDataCentersByRegion(),
+      loadDataCentersByBareMetalRegion(),
+      loadAllPricingRecords(),
+    ])
+  return { gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard }
+}
+
+export function diagnosePricingPair(
+  pair: MissingPricingPair,
+  ctx: PricingResolveContext,
+): MissingPricingIssue {
+  const regionNorm = normalizeBillingRegion(pair.regionCode)
+  const gpuNorm = normalizeGpuCodeForMatch(pair.gpuModel)
+
+  if (!regionNorm || !gpuNorm) {
+    return {
+      ...pair,
+      failureReason: !gpuNorm ? 'card_type_not_found' : 'region_not_found',
+    }
+  }
+
+  const gpu = ctx.gpuByCode.get(gpuNorm)
+  if (!gpu) {
+    return { ...pair, failureReason: 'card_type_not_found' }
+  }
+
+  const dcs = ctx.dataCentersByRegion.get(regionNorm) ?? []
+  if (dcs.length === 0) {
+    return { ...pair, failureReason: 'region_not_found' }
+  }
+
+  return {
+    ...pair,
+    failureReason: 'pricing_pair_not_found',
+    matchedGpuCardTypeCode: gpu.code,
+    matchedGpuCardTypeId: gpu.id,
+    matchedDataCenterId: dcs[0]?.id,
+  }
+}
+
+export async function resolveUnitCostForPair(
+  pair: MissingPricingPair,
+  asOfDate: string,
+  ctx: PricingResolveContext,
+): Promise<ResolvedUnitCost | null> {
+  const issue = diagnosePricingPair(pair, ctx)
+  if (issue.failureReason !== 'pricing_pair_not_found') return null
+
+  const gpu = ctx.gpuByCode.get(normalizeGpuCodeForMatch(pair.gpuModel))
+  const dcs = ctx.dataCentersByRegion.get(normalizeBillingRegion(pair.regionCode)) ?? []
+  if (!gpu || dcs.length === 0) return null
+
+  for (const dc of dcs) {
+    const records = ctx.recordsByDcCard.get(recordKey(dc.id, gpu.id)) ?? []
+    for (const record of records) {
+      const resolved = await resolvePricingSnapshotForDcCard({
+        record,
+        dataCenterId: dc.id,
+        gpuCardTypeId: gpu.id,
+        periodEnd: asOfDate,
+      })
+      if (resolved) return resolved
+    }
+  }
+
+  return null
+}
+
+async function resolveSupplierOnlyForPair(
+  pair: MissingPricingPair,
+  asOfDate: string,
+  ctx: PricingResolveContext,
+): Promise<boolean> {
+  const gpu = ctx.gpuByCode.get(normalizeGpuCodeForMatch(pair.gpuModel))
+  const dcs = ctx.dataCentersByRegion.get(normalizeBillingRegion(pair.regionCode)) ?? []
+  if (!gpu || dcs.length === 0) return false
+
+  for (const dc of dcs) {
+    const records = ctx.recordsByDcCard.get(recordKey(dc.id, gpu.id)) ?? []
+    for (const record of records) {
+      const fromRecord = snapshotFromRecord(record, asOfDate)
+      if (fromRecord) return true
+
+      const history = await loadHistorySnapshot(record.id, asOfDate)
+      if (history) {
+        const fields = toResolvedFields({
+          configStatus: 'active',
+          pricingMode: history.pricingMode,
+          unitPricePerHour: history.unitPricePerHour,
+          revenueSharePercent: history.revenueSharePercent,
+          listPricePerHour: history.listPricePerHour,
+          pricingTiers: parsePricingTiers(record.pricingTiers),
+        })
+        if (isPricingFieldsComplete(fields, { requireListPrice: false })) return true
+      }
+
+      const unitCost = await loadUnitCostSnapshot(dc.id, gpu.id, asOfDate)
+      if (unitCost) {
+        const mode = (record.pricingMode as ContractPricingMode) || unitCost.pricingMode
+        const fields = toResolvedFields({
+          configStatus: 'active',
+          pricingMode: mode,
+          unitPricePerHour: unitCost.unitPricePerHour,
+          revenueSharePercent: unitCost.revenueSharePercent,
+          listPricePerHour: unitCost.listPricePerHour,
+          pricingTiers: unitCost.pricingTiers,
+        })
+        if (isPricingFieldsComplete(fields, { requireListPrice: false })) return true
+      }
+    }
+  }
+
+  return false
+}
+
+export async function diagnoseMissingPricingForPair(
+  pair: MissingPricingPair,
+  asOfDate: string,
+  ctx: PricingResolveContext,
+): Promise<MissingPricingIssue> {
+  const preliminary = diagnosePricingPair(pair, ctx)
+  if (preliminary.failureReason !== 'pricing_pair_not_found') {
+    return preliminary
+  }
+
+  const resolved = await resolveUnitCostForPair(pair, asOfDate, ctx)
+  if (resolved) return preliminary
+
+  const gpu = ctx.gpuByCode.get(normalizeGpuCodeForMatch(pair.gpuModel))
+  if (gpu) {
+    const supplierReady = await resolveSupplierOnlyForPair(pair, asOfDate, ctx)
+    if (supplierReady) {
+      const platform = await resolvePlatformListPriceAt({
+        gpuCardTypeId: gpu.id,
+        asOfDate,
+      })
+      if (!platform) {
+        return {
+          ...pair,
+          failureReason: 'platform_list_price_not_found',
+          matchedGpuCardTypeCode: gpu.code,
+          matchedGpuCardTypeId: gpu.id,
+          matchedDataCenterId: preliminary.matchedDataCenterId,
+        }
+      }
+    }
+  }
+
+  return preliminary
+}
+
+async function loadTenantBillPairsForWindow(
+  periodId: string,
+  windowId: string,
+): Promise<MissingPricingPair[]> {
   const tenantBillBatch = await db.query.billingPeriodImportBatch.findFirst({
     where: and(
-      eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
+      eq(billingPeriodImportBatch.billingPeriodId, periodId),
       eq(billingPeriodImportBatch.fileType, 'tenant_bill'),
+      eq(billingPeriodImportBatch.windowId, windowId),
       eq(billingPeriodImportBatch.parseStatus, 'ok'),
     ),
   })
@@ -244,26 +608,179 @@ export async function findMissingTenantBillPricing(input: {
 
   const pairs = new Map<string, MissingPricingPair>()
   for (const row of rows) {
-    const key = `${row.regionCode}::${row.gpuModel}`
+    const key = pairKey(row.regionCode, row.gpuModel)
     if (!pairs.has(key)) {
       pairs.set(key, { regionCode: row.regionCode, gpuModel: row.gpuModel })
     }
   }
+  return [...pairs.values()]
+}
 
-  if (pairs.size === 0) return []
+export async function findMissingTenantBillPricing(input: {
+  periodId: string
+}): Promise<MissingPricingIssue[]> {
+  const windows = await listTenantBillWindows(input.periodId)
+  if (windows.length === 0) return []
 
-  const candidates = await loadEffectivePricingCandidates(input.periodEnd)
-  const missing: MissingPricingPair[] = []
+  const ctx = await loadPricingResolveContext()
+  const missing: MissingPricingIssue[] = []
 
-  for (const pair of pairs.values()) {
-    if (!normalizeBillingRegion(pair.regionCode) || !pair.gpuModel.trim()) {
-      missing.push(pair)
-      continue
-    }
-    if (!resolvePricingForPair(pair, candidates)) {
-      missing.push(pair)
+  for (const window of windows) {
+    const pairs = await loadTenantBillPairsForWindow(input.periodId, window.id)
+    for (const pair of pairs) {
+      const resolved = await resolveUnitCostForPair(pair, window.windowEnd, ctx)
+      if (!resolved) {
+        const issue = await diagnoseMissingPricingForPair(pair, window.windowEnd, ctx)
+        missing.push({
+          ...issue,
+          windowId: window.id,
+          windowStart: window.windowStart,
+          windowEnd: window.windowEnd,
+        })
+      }
     }
   }
 
   return missing
 }
+
+export async function findMissingBaremetalPlatformListPrice(input: {
+  periodId: string
+}): Promise<MissingPricingIssue[]> {
+  const baremetalBatch = await db.query.billingPeriodImportBatch.findFirst({
+    where: and(
+      eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
+      eq(billingPeriodImportBatch.fileType, 'baremetal_order'),
+      eq(billingPeriodImportBatch.parseStatus, 'ok'),
+    ),
+  })
+  if (!baremetalBatch) return []
+
+  const orders = await db
+    .select({
+      orderId: billingPeriodRawBaremetalOrder.orderId,
+      idcName: billingPeriodRawBaremetalOrder.idcName,
+      deviceModel: billingPeriodRawBaremetalOrder.deviceModel,
+      purchaseQtyText: billingPeriodRawBaremetalOrder.purchaseQtyText,
+      orderedAt: billingPeriodRawBaremetalOrder.orderedAt,
+    })
+    .from(billingPeriodRawBaremetalOrder)
+    .where(eq(billingPeriodRawBaremetalOrder.batchId, baremetalBatch.id))
+
+  const ctx = await loadPricingResolveContext()
+  const missing: MissingPricingIssue[] = []
+  const seen = new Set<string>()
+
+  for (const order of orders) {
+    const parsedDevice = parseDeviceModel(order.deviceModel)
+    const parsedPurchase = parsePurchaseQty(order.purchaseQtyText)
+    const regionCode = normalizeBaremetalRegion(order.idcName)
+    const asOfDate = asOfFromOrderedAt(order.orderedAt)
+
+    if (!parsedDevice || !parsedPurchase || !regionCode) continue
+
+    const { cardCode } = parsedDevice
+    const { billingUnit } = parsedPurchase
+    const dedupeKey = `${regionCode}::${cardCode}::${billingUnit}::${asOfDate}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+
+    const gpuNorm = normalizeGpuCodeForMatch(cardCode)
+    const gpu = ctx.gpuByCode.get(gpuNorm)
+    if (!gpu) {
+      missing.push({
+        regionCode,
+        gpuModel: cardCode,
+        failureReason: 'card_type_not_found',
+        orderId: order.orderId,
+        orderedAt: asOfDate,
+        billingUnit,
+      })
+      continue
+    }
+
+    const dcs = ctx.dataCentersByBareMetalRegion.get(regionCode) ?? []
+    if (dcs.length === 0) {
+      missing.push({
+        regionCode,
+        gpuModel: cardCode,
+        failureReason: 'region_not_found',
+        matchedGpuCardTypeCode: gpu.code,
+        matchedGpuCardTypeId: gpu.id,
+        orderId: order.orderId,
+        orderedAt: asOfDate,
+        billingUnit,
+      })
+      continue
+    }
+
+    const platform = await resolvePlatformListPriceAt({
+      gpuCardTypeId: gpu.id,
+      asOfDate,
+      productLine: DEFAULT_BAREMETAL_PRODUCT_LINE,
+      billingUnit,
+    })
+    if (!platform) {
+      missing.push({
+        regionCode,
+        gpuModel: cardCode,
+        failureReason: 'platform_list_price_not_found',
+        matchedGpuCardTypeCode: gpu.code,
+        matchedGpuCardTypeId: gpu.id,
+        matchedDataCenterId: dcs[0]?.id,
+        orderId: order.orderId,
+        orderedAt: asOfDate,
+        billingUnit,
+      })
+    }
+  }
+
+  return missing
+}
+
+export function pricingMapKeyForWindow(
+  windowId: string,
+  regionCode: string,
+  gpuModel: string,
+): string {
+  return `${windowId}::${pairKey(regionCode, gpuModel)}`
+}
+
+export async function buildTenantBillPricingMap(input: {
+  periodId: string
+}): Promise<Map<string, ResolvedUnitCost>> {
+  const windows = await listTenantBillWindows(input.periodId)
+  const ctx = await loadPricingResolveContext()
+  const map = new Map<string, ResolvedUnitCost>()
+
+  for (const window of windows) {
+    const pairs = await loadTenantBillPairsForWindow(input.periodId, window.id)
+    for (const pair of pairs) {
+      const resolved = await resolveUnitCostForPair(pair, window.windowEnd, ctx)
+      if (resolved) {
+        map.set(
+          pricingMapKeyForWindow(window.id, pair.regionCode, pair.gpuModel),
+          resolved,
+        )
+      }
+    }
+  }
+
+  return map
+}
+
+/** @deprecated 仅保留测试兼容；财务解析改用 normalizeGpuCodeForMatch 精确匹配 */
+export function normalizeGpuModelForMatch(value: string): string {
+  return normalizeGpuCodeForMatch(value)
+}
+
+/** @deprecated 财务成本解析不再使用模糊得分 */
+export function gpuModelMatchScore(
+  _billGpu: string,
+  _cardCode: string,
+  _cardName: string,
+): number {
+  return 0
+}
+
+export { isPricingFieldsComplete as isPricingRecordComplete }

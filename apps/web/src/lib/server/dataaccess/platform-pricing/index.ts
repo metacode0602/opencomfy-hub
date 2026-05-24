@@ -9,4 +9,6 @@ export const platformPricingDataAccess = {
   listHistory: (cardTypeId: string) => platformPricingDbDataAccess.listHistory(cardTypeId),
   createPrice: platformPricingDbDataAccess.createPrice.bind(platformPricingDbDataAccess),
   updatePrice: platformPricingDbDataAccess.updatePrice.bind(platformPricingDbDataAccess),
+  createPeriod: platformPricingDbDataAccess.createPeriod.bind(platformPricingDbDataAccess),
+  updatePeriod: platformPricingDbDataAccess.updatePeriod.bind(platformPricingDbDataAccess),
 }

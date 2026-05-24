@@ -1,6 +1,6 @@
 # 账期导入与经营核算实现方案
 
-> 版本：v1.5.3（已定稿）  
+> 版本：v1.5.4（已定稿）  
 > 日期：2026-05-24  
 > 变更：v1.1 — 账单详情 Excel 不再含客户经理/项目名称；改由租户反查项目并补全 AM；支持一租户多项目成本分成配置  
 > 变更：v1.2 — §6.4 增加「卡时价阶梯分成」：按成交卡时/刊例价落档后取档内分成比例计算售出成本  
@@ -11,6 +11,7 @@
 > 变更：v1.5.1 — **已确认**：补充消费 UI 手工填写；C 端未知租户警告不阻断；导入文件落盘、库内仅存路径；内联 Alert 见 §8  
 > 变更：v1.5.2 — **已确认**：重新计算 **不保留** 手工补充消费；三类 Excel **均须解析成功**；各上传槽位可下载 **错误单元格高亮** 的 Excel（§3.8）  
 > 变更：v1.5.3 — §4.6 / §6.1.1：账单 `区域`（`region_code`）与机房主数据匹配字段由 `data_center.code` 改为 `data_center.container_instance_region`  
+> 变更：v1.5.4 — §4.6 / §6.1.1：卡型按 `gpu_card_type.code` **精确匹配**；匹配失败分级提示（卡型 / 机房 / 机房×卡型）；`supplier_pricing_record` 无账期窗口命中时回退 `supplier_pricing_history`；§6.4.3 明确 `tiered_card_time` 成交价为 `余额消费/总卡时`（总卡时 = 券卡时 + 余额卡时）  
 > 状态：**已定稿 — 实施中**  
 > 关联：`apps/web/src/lib/types/finance.ts`、`cost-row-utils.ts`、`income-row-utils.ts`、`/finance/create` 页面
 
@@ -220,7 +221,7 @@ Excel **仅包含以下列**（不含客户经理、项目名称；二者由系�
 | V11 | 同一租户分成比例之和 = 100%（±0.0001 容差）；每项 &gt; 0 |
 | V12 | 同一 `租户ID` 在客户消费明细中 `客户类型` 唯一（若 B/C 混用 → 警告或阻断，见 §5.3） |
 | V13 | Step I0 后：每个 `(租户ID, 客户类型)` 仅一条 agg 记录；`row_count_by_type` ≥ 1 |
-| V14 | **计算前**：账单详情 Raw 中每个 `(region_code, gpu_model)` 须在 `period_end` 日存在有效机房卡型成本（`data_center.container_instance_region = region_code` + `card_type`，经 `supplier_pricing_record` 关联机房；含阶梯所需刊例价/档位）；缺失 → **阻断计算**，状态 `pending_pricing` |
+| V14 | **计算前**：账单详情 Raw 中每个 `(region_code, gpu_model)` 须在 `period_end` 日存在有效机房卡型成本（§4.6.1：机房 `container_instance_region` 精确匹配 + 卡型 `gpu_card_type.code` 精确匹配 + 成本配置可解析；含阶梯所需刊例价/档位）；缺失 → **阻断计算**，状态 `pending_pricing`，并按 §6.1.1 输出 **分级失败原因** |
 | V15 | **计算前**：再次校验 V6（B 端未知租户）；若仍有未知 ID → **阻断计算** |
 
 ### 3.6 B 端未知租户阻断（跨文件校验）
@@ -551,11 +552,54 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 
 **区域匹配键**：账单 Excel `区域` 列 → `region_code`；与机房主数据 **`data_center.container_instance_region`** 比对（**非** `data_center.code` / `idc_code`）。`supplier_pricing_record` 经 `data_center_id` JOIN 机房后按上述字段匹配。
 
-解析顺序（与现有 `resolveUnitPricePerHour` 一致）：
+**卡型匹配键**：账单 Excel `GPU型号` 列 → `gpu_model`；与主数据 **`gpu_card_type.code`** **精确匹配**（见 §4.6.1）。**禁止** 使用 `gpu_card_type.name`、前缀匹配或模糊匹配作为财务成本解析依据。
 
-1. `supplier_pricing_record`（或 `supplier_unit_cost`）：`container_instance_region` + `card_type` + 账期生效日 `effective_from <= period_end`
-2. `data_center_device`：`cardTimeCostPerHour` / `revenueShareCostPerHour`
-3. 兜底：同供应商合同单价缓存
+#### 4.6.1 成本配置解析规则（`resolve_unit_cost`）
+
+**归一化**（仅用于比对，不改变 Raw 原值展示）：
+
+```
+normalize_region(v) = trim(v).toLowerCase()
+normalize_gpu_code(v) = trim(v).toLowerCase()
+```
+
+**匹配步骤**（对每个账单 `(region_code, gpu_model)` 去重组合，按序执行）：
+
+| Step | 动作 | 失败原因码 |
+|------|------|-----------|
+| M1 | 在 `gpu_card_type` 中查找 `normalize_gpu_code(code) = normalize_gpu_code(gpu_model)` | `card_type_not_found` — **卡型匹配问题** |
+| M2 | 在 `data_center` 中查找 `normalize_region(container_instance_region) = normalize_region(region_code)` 且 `container_instance_region` 非空 | `region_not_found` — **机房匹配问题** |
+| M3 | 在 `supplier_pricing_record` 中查找 `(data_center_id, gpu_card_type_id)` 与 M2、M1 结果一致，且 `as_of = period_end` 存在 **有效成本快照**（§4.6.2） | `pricing_pair_not_found` — **机房×卡型成本未配置**（主数据均已识别，但无可用成本） |
+
+> **分级提示原则**：M1 失败时 **仅** 报卡型问题，不混报机房；M2 失败时 **仅** 报机房问题；仅当 M1、M2 均成功而 M3 失败时，报「机房×卡型成本未配置」。UI / API 须携带 `failureReason` 字段（见 §6.1.1）。
+
+**解析优先级**（命中 M3 后取价，与 `platform-pricing-design.md` §5 一致）：
+
+1. `platform_cost_monthly.supplier_unit_cost_id` → `supplier_unit_cost`（已计算行调账 / 重算时 FK 优先）
+2. `supplier_pricing_record`：`container_instance_region` + `gpu_card_type.code` + 账期 `as_of = period_end`（§4.6.2）
+3. `supplier_gpu_inventory.card_time_cost_per_hour` / `revenue_share_cost_per_hour` — **展示缓存，不可作财务真值**
+4. NULL → 阻断计算（`pending_pricing`）
+
+#### 4.6.2 账期时点成本快照（含历史回退）
+
+**主路径**：读取 `supplier_pricing_record`（经 M2 机房 JOIN），要求：
+
+```
+effective_from <= period_end 23:59:59
+AND (effective_to IS NULL OR effective_to >= period_end 00:00:00)
+AND config_status = 'active'
+AND isPricingRecordComplete(pricing_mode, fields) = true   -- 见 §6.1.1
+```
+
+**历史回退**（当主路径 **无** 覆盖 `period_end` 的有效记录，或记录存在但 `config_status != active` 且账期内仅有历史价时）：
+
+1. 定位 M3 对应的 `supplier_pricing_record.id`（`(supplier_id, data_center_id, gpu_card_type_id)` 唯一键；记录可存在但当前窗口不覆盖账期）。
+2. 查询 `supplier_pricing_history`：`pricing_record_id = record.id` **且** `changed_at <= period_end 23:59:59`，按 `changed_at DESC` 取 **最近一条**。
+3. 以该条历史的 `new_*` 字段（`new_unit_price_per_hour`、`new_revenue_share_percent`、`new_list_price_per_hour` 等）及当时 `pricing_mode` 还原 **账期结束日** 成本快照；阶梯档若历史表未存 JSON，则回退读取 **同一 `supplier_unit_cost_id`** 在 `period_end` 有效的 `tier_json` / `supplier_pricing_tier`。
+4. 若 history 仍无法还原，再查 `supplier_unit_cost`：`effective_from <= period_end` 且 `(effective_to IS NULL OR effective_to >= period_end)` 的历史条款行（`(supplier_id, data_center_id, gpu_card_type_id)`）。
+5. 以上均失败 → M3 失败，`pricing_pair_not_found`；**禁止** 静默使用当前价或占位单价。
+
+**审计**：使用历史回退时，成本行或对账报告须标记 `pricing_source = history` 及 `pricing_history_id` / `supplier_unit_cost_id`。
 
 合作模式分支：
 
@@ -564,9 +608,17 @@ voucher_card_hours[r,p]  = voucher_card_hours[r] × alloc
 | **卡时** `card_time` | `unit_price_per_hour × balance_card_hours` | 见 §6.3 / §6.4 |
 | **固定分成** `revenue_share` | `balance_consumption × revenue_share_percent / 100` | 见 §6.3 / §6.4 |
 | **卡时价阶梯分成** `tiered_revenue_share` | 先算成交/刊例比例落档，再 `balance_consumption × 档内分成% / 100` | 见 §6.3 Step C4、§6.4 |
-| **卡时价阶梯卡时** `tiered_card_time` | 落档后 `list_price × list_price_multiplier × balance_card_hours` | 见 §6.4（可选，与供应商合同 `tier_basis=multiplier` 一致） |
+| **卡时价阶梯卡时** `tiered_card_time` | 落档后 `list_price × list_price_multiplier × balance_card_hours` | 见 §6.4.3（成交价为 `余额消费/总卡时`，总卡时 = 券卡时 + 余额卡时） |
 
 主数据与档位定义对齐 [`supplier-database.md`](./supplier-database.md) §3.2.1：`supplier_card_list_price`（刊例价）、`supplier_pricing_tier` / `supplier_unit_cost.tier_json`（`deal_to_list_ratio_min/max` 或 `list_price_multiplier`）。
+
+**总卡时口径**（阶梯模式落档共用）：
+
+```
+total_card_hours = voucher_card_hours + balance_card_hours
+```
+
+Excel「总卡时」列写入 Raw 后 **须校验** `|total_card_hours - (voucher_card_hours + balance_card_hours)| ≤ 0.0001`（可配置为警告或阻断）；**计算与落档一律以 `券卡时 + 余额卡时` 为准**，与 Excel 列不一致时以计算值为准并记入对账报告。
 
 ---
 
@@ -777,12 +829,12 @@ billing_period.supplementary    = Σ supplementary_consumption
 
 **校验对象**：`billing_period_raw_tenant_bill` 中所有明细行的 `(region_code, gpu_model)` **去重组合**（不含总计行）。
 
-**有效配置定义**（与 §4.6 一致，`as_of = period_end`）：
+**有效配置定义**（与 §4.6 / §4.6.2 一致，`as_of = period_end`）：
 
 ```
 pricing = resolve_unit_cost(
-  container_instance_region = region_code,  -- data_center.container_instance_region
-  card_type = gpu_model,
+  container_instance_region = region_code,  -- data_center.container_instance_region，精确匹配
+  gpu_code = gpu_model,                     -- gpu_card_type.code，精确匹配
   as_of = period_end
 )
 有效 ⇔ pricing 存在且满足当前 pricing_mode 所需字段：
@@ -790,14 +842,25 @@ pricing = resolve_unit_cost(
   - revenue_share / tiered_revenue_share：revenue_share 或 tier + list_price 可解析
 ```
 
+**匹配失败分级**（`validateTenantBillRegionGpuPricing` 返回结构）：
+
+| `failureReason` | 含义 | 判定条件 | UI 提示模板（示例） |
+|---------------|------|----------|---------------------|
+| `card_type_not_found` | **卡型匹配问题** | M1 失败：`gpu_model` 在 `gpu_card_type.code` 中无精确匹配 | `卡型匹配失败：GPU 型号「{gpu_model}」未在卡型主数据 code 中找到，请维护 gpu_card_type 或修正 Excel` |
+| `region_not_found` | **机房匹配问题** | M2 失败：`region_code` 在任一机房 `container_instance_region` 中无精确匹配 | `机房匹配失败：区域「{region_code}」未匹配到机房 container_instance_region，请在机房主数据中维护` |
+| `pricing_pair_not_found` | **机房×卡型成本未配置** | M1、M2 成功；M3 失败：无 `period_end` 有效成本，且 §4.6.2 历史回退仍无法还原 | `机房×卡型成本未配置：{region_code} × {gpu_card_type.code} 已识别，但账期结束日无有效 supplier_pricing_record / 历史成本，请在「卡型成本」维护` |
+
+> 同一 `(region_code, gpu_model)` **仅输出一条** 失败记录，按 M1 → M2 → M3 优先级取 **最先失败** 的原因，避免笼统「缺少配置」掩盖卡型或机房主数据问题。
+
 **失败行为**
 
 | 项 | 说明 |
 |----|------|
 | 阻断 | **禁止** 进入 Step C0～C7；`POST .../compute` 返回 `422` |
 | 状态 | `billing_period.status = pending_pricing` |
-| UI | 页面 **内联 Alert**（`role="alert"` / Card 内 destructive 区块），列出缺失 `(区域, GPU型号)` 及建议维护路径（供应商机房卡型成本）；**禁止** toast、**禁止** Modal/Dialog 作为主要提示 |
-| 恢复 | 主数据补全后用户点击「重新校验」或再次点击「计算」 |
+| UI | 页面 **内联 Alert**（`role="alert"` / Card 内 destructive 区块），按上表 **分组展示**（卡型 / 机房 / 机房×卡型）；每条含 `region_code`、`gpu_model`、`failureReason`、建议维护路径；**禁止** toast、**禁止** Modal/Dialog 作为主要提示 |
+| API | `validatePeriod.missingPricing[]` 扩展为 `{ regionCode, gpuModel, failureReason, matchedGpuCardTypeCode?, matchedDataCenterId? }` |
+| 恢复 | 主数据或成本补全后用户点击「重新校验」或再次点击「计算」 |
 
 **与运行时缺单价之区别**：v1.4 将缺单价记入对账报告（非阻断）；**v1.5 起计算前必须全部命中有效配置**，不允许计算过程中静默跳过缺单价分项。
 
@@ -822,6 +885,7 @@ pricing = resolve_unit_cost(
 row_p.balance_consumption = row.balance_consumption × alloc(t,p)
 row_p.balance_card_hours  = row.balance_card_hours  × alloc(t,p)
 row_p.voucher_card_hours  = row.voucher_card_hours  × alloc(t,p)
+row_p.total_card_hours    = row.voucher_card_hours + row.balance_card_hours   -- 见 §4.6 总卡时口径
 staff_id(p) = 项目 p 的 account_manager（§4.4）
 ```
 
@@ -832,7 +896,8 @@ balance_consumption[a,r,g] = Σ row_p.balance_consumption
   WHERE staff_id(row_p) = a AND region = r AND gpu = g
 
 balance_card_hours[a,r,g]  = Σ row_p.balance_card_hours
-total_card_hours[a,r,g]    = Σ row_p.total_card_hours      -- 阶梯分成落档用（§6.4）
+total_card_hours[a,r,g]    = Σ row_p.total_card_hours
+                           = Σ (row_p.voucher_card_hours + row_p.balance_card_hours)   -- 阶梯落档用（§6.4）
 voucher_card_hours[a,r,g]  = Σ row_p.voucher_card_hours
 ```
 
@@ -859,7 +924,12 @@ confirmed_revenue_excl_tax = balance_consumption / TAX_DIVISOR
 **Step C3 — 解析单价与合作模式**
 
 ```
-pricing = resolve_unit_cost(container_instance_region=r, card_type=g, as_of=period_end)
+pricing = resolve_unit_cost(
+  container_instance_region = r,
+  gpu_code = g,              -- 精确匹配 gpu_card_type.code
+  as_of = period_end
+)                            -- 含 §4.6.2 历史回退
+
 mode    = pricing.pricing_mode
         -- card_time | revenue_share | tiered_revenue_share | tiered_card_time
 
@@ -868,6 +938,7 @@ unit       = pricing.unit_price_per_hour      -- 固定卡时模式
 ratio      = pricing.revenue_share_percent    -- 固定分成模式，%
 tiers      = pricing.tier_json.tiers          -- 阶梯档列表（按 tier_order 排序）
 tier_basis = pricing.tier_json.tier_basis     -- ratio_band | multiplier
+pricing_source = pricing.source               -- record | history | supplier_unit_cost
 ```
 
 **Step C4 — 售出时长成本（不含税）**
@@ -891,6 +962,7 @@ IF total_card_hours[a,r,g] <= 0:
   -- 无法计算成交卡时价 → 记入对账报告，售出成本 = 0 或阻断（可配置）
   sold_duration_cost_excl_tax = 0
 ELSE:
+  -- 成交价 = 余额消费 / 总卡时；总卡时 = 券卡时 + 余额卡时（§4.6）
   deal_unit_price = balance_consumption / total_card_hours
   deal_to_list_ratio = deal_unit_price / list_price
   tier = match_tier(tiers, deal_to_list_ratio, tier_basis)   -- 见 §6.4
@@ -900,10 +972,15 @@ ELSE:
 **模式 D — 卡时价阶梯卡时 `tiered_card_time`（`tier_basis = multiplier`）**
 
 ```
-deal_to_list_ratio = (balance_consumption / total_card_hours) / list_price   -- total_card_hours > 0
-tier = match_tier_by_multiplier(tiers, deal_to_list_ratio)
-tier_unit = list_price × tier.list_price_multiplier
-sold_duration_cost_excl_tax = (tier_unit × balance_card_hours) / TAX_DIVISOR
+IF total_card_hours[a,r,g] <= 0:
+  sold_duration_cost_excl_tax = 0   -- 或阻断
+ELSE:
+  -- 成交价（元/卡时）= 余额消费 / 总卡时；总卡时 = 券卡时 + 余额卡时
+  deal_unit_price = balance_consumption / total_card_hours
+  deal_to_list_ratio = deal_unit_price / list_price
+  tier = match_tier_by_multiplier(tiers, deal_to_list_ratio)
+  tier_unit = list_price × tier.list_price_multiplier
+  sold_duration_cost_excl_tax = (tier_unit × balance_card_hours) / TAX_DIVISOR
 ```
 
 > **模式边界**：固定分成 / 阶梯分成 **不使用** `balance_card_hours` 乘单价；固定卡时 / 阶梯卡时 **不使用** `balance_consumption` 直接乘固定分成比例。阶梯模式 **必须** 能解析 `list_price_per_hour` 与 `tiers`。
@@ -953,7 +1030,7 @@ field_sum = Σ record.field   -- field ∈ {balance_consumption, balance_card_ho
 | 固定卡时 | `card_time` | 按采购卡时单价结算 | `(成交卡时单价 × 余额卡时) / 1.06` |
 | 固定分成 | `revenue_share` | 按固定供应商分成比例 | `(分成比例% × 余额消费) / 1.06` |
 | **卡时价阶梯分成** | `tiered_revenue_share` | 按 **实际成交卡时相对刊例价** 落档，取该档 **分成比例** | 见 §6.4.2 |
-| 卡时价阶梯卡时 | `tiered_card_time` | 按成交/刊例比例落档，取该档 **刊例倍数** 作为结算单价 | 见 §6.4.3 |
+| 卡时价阶梯卡时 | `tiered_card_time` | 按 **余额消费/(券卡时+余额卡时)** 相对刊例落档，取该档 **刊例倍数** 作为结算单价 | 见 §6.4.3 |
 | 赠送 | — | 券卡时部分（与主模式共用刊例/成交单价） | `(结算单价 × 券卡时) / 1.06` |
 
 #### 6.4.2 卡时价阶梯分成（`tiered_revenue_share`）
@@ -965,7 +1042,8 @@ field_sum = Σ record.field   -- field ∈ {balance_consumption, balance_card_ho
 | 符号 | 来源 | 说明 |
 |------|------|------|
 | `B` | `balance_consumption` | 余额消费（元，含税） |
-| `H_total` | `total_card_hours` | **总卡时**（Excel「总卡时」列，拆分后按 §6.4 汇总） |
+| `H_total` | `total_card_hours` | **总卡时 = 券卡时 + 余额卡时**（拆分聚合后；见 §4.6；**非** 仅余额卡时） |
+| `H_bal` | `balance_card_hours` | 余额卡时（售出成本 **数量** 仅阶梯卡时模式使用） |
 | `L` | `list_price_per_hour` | **刊例价**（元/卡时），`supplier_card_list_price` |
 | `Tiers[]` | `supplier_unit_cost.tier_json` 或 `supplier_pricing_tier` | 各档 `deal_to_list_ratio_min/max`、`revenue_share_percent` |
 
@@ -973,6 +1051,7 @@ field_sum = Σ record.field   -- field ∈ {balance_consumption, balance_card_ho
 
 ```
 deal_unit_price_per_hour = B / H_total        （要求 H_total > 0）
+H_total = voucher_card_hours + balance_card_hours
 ```
 
 **Step T2 — 成交/刊例比例**
@@ -1081,18 +1160,27 @@ function soldCostTieredRevenueShare(input: {
 }
 ```
 
-#### 6.4.3 卡时价阶梯卡时（`tiered_card_time`，可选）
+#### 6.4.3 卡时价阶梯卡时（`tiered_card_time`）
 
-当合同约定按落档后的 **卡时结算单价**（而非分成比例）计费时使用：
+当合同约定按落档后的 **卡时结算单价**（而非分成比例）计费时使用。
+
+**成交价定义**（与 §6.4.2 一致）：
 
 ```
-deal_to_list_ratio = (B / H_total) / L
+H_total = voucher_card_hours + balance_card_hours
+deal_unit_price_per_hour = balance_consumption / H_total     （要求 H_total > 0）
+deal_to_list_ratio = deal_unit_price_per_hour / list_price
+```
+
+**落档与售出成本**：
+
+```
 tier = match_tier(Tiers, deal_to_list_ratio, tier_basis)
-tier_unit_price = L × tier.list_price_multiplier     -- 或 tier.tier_deal_unit_price_per_hour
+tier_unit_price = list_price × tier.list_price_multiplier     -- 或 tier.tier_deal_unit_price_per_hour
 sold_duration_cost_excl_tax = (tier_unit_price × balance_card_hours) / TAX_DIVISOR
 ```
 
-> 阶梯卡时模式用 **余额卡时** 计数量；阶梯分成模式用 **余额消费** 计金额。二者勿混用。
+> **口径说明**：落档用的 **成交价** 为 `余额消费 / 总卡时`，其中 **总卡时 = 券卡时 + 余额卡时**；售出成本的数量仍按 **余额卡时** 计。阶梯分成模式（§6.4.2）用 **余额消费** 计金额、同样以 `H_total = 券卡时 + 余额卡时` 算成交价落档。二者勿混用数量字段。
 
 #### 6.4.4 赠送时长成本
 
@@ -1103,7 +1191,7 @@ gifted_duration_cost_excl_tax = (settlement_unit_price × voucher_card_hours) / 
 `settlement_unit_price` 取值：
 
 - 固定卡时 / 阶梯卡时：与售出成本相同逻辑的 `unit` 或 `tier_unit_price`；
-- 固定分成 / 阶梯分成：一般用 `deal_unit_price_per_hour`（Step T1），或合同约定的赠送结算价。
+- 固定分成 / 阶梯分成：一般用 `deal_unit_price_per_hour = balance_consumption / (voucher_card_hours + balance_card_hours)`（Step T1），或合同约定的赠送结算价。
 
 #### 6.4.5 完整公式卡片
 
@@ -1117,9 +1205,10 @@ gifted_duration_cost_excl_tax = (settlement_unit_price × voucher_card_hours) / 
     THEN (revenue_share_percent% × 余额消费) / 1.06
   ELSE IF pricing_mode = tiered_revenue_share
     THEN (档内revenue_share_percent% × 余额消费) / 1.06
-         其中 档内% 由 (余额消费/总卡时)/刊例价 落档得到
+         其中 档内% 由 (余额消费/(券卡时+余额卡时))/刊例价 落档得到
   ELSE IF pricing_mode = tiered_card_time
     THEN (档内结算卡时单价 × 余额卡时) / 1.06
+         其中 成交价 = 余额消费/(券卡时+余额卡时)，再落档得档内结算单价
 
 赠送时长成本(不含税) = (赠送结算单价 × 券卡时) / 1.06
 
@@ -1400,7 +1489,7 @@ sequenceDiagram
 **仍待确认**
 
 1. **分成成本是否含税**：本方案对 `balance_consumption` 先按分成比例再除 `1.06`；若合同为含税分成需去掉除税步骤。
-2. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**（`余额消费/总卡时` 再除以刊例价），**不按累计卡时划档**（见 §6.4.2；与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。  
+2. **阶梯落档口径**：已明确为 **成交卡时价 / 刊例价**，其中 **成交卡时价 = 余额消费 / 总卡时**，**总卡时 = 券卡时 + 余额卡时**（§4.6、§6.4.2、§6.4.3）；**不按累计卡时划档**（与 `supplier-database.md` 一致）。待确认：区间外 `overflow_policy`、末档是否右闭。
 3. **租户 984 多区域两行账单**：收入按租户汇总；成本先按租户×项目分成拆分，再按 AM×区域×卡型分项。  
 4. **多项目分成变更历史**：预置变更是否影响已发布账期 — 默认不影响已 `published` 账期，仅影响新账期。  
 5. **重新生成后是否保留本账期成本分成**：默认 `full` purge 会清空 `billing_tenant_cost_allocation`，需重新配置；若财务希望保留，可改为 `full` 不删分成表（实施时二选一）。

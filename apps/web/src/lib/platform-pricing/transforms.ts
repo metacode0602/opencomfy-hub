@@ -73,13 +73,20 @@ function expandPlatformSlots(): Array<{
   return slots
 }
 
-const PLATFORM_SLOTS = expandPlatformSlots()
+export const PLATFORM_PRICE_SLOTS = expandPlatformSlots()
+
+export function platformPriceSlotKey(
+  productLine: PlatformProductLine,
+  billingUnit: PlatformBillingUnit,
+): string {
+  return `${productLine}:${billingUnit}`
+}
 
 function recordKey(
   productLine: PlatformProductLine,
   billingUnit: PlatformBillingUnit,
 ): string {
-  return `${productLine}:${billingUnit}`
+  return platformPriceSlotKey(productLine, billingUnit)
 }
 
 function buildPlatformRecordMap(
@@ -157,7 +164,7 @@ export function toPlatformProductLinePriceRows(
 ): PlatformProductLinePriceRow[] {
   const map = buildPlatformRecordMap(platformRecords, cardTypeId, periodId)
 
-  return PLATFORM_SLOTS.map(({ productLine, billingUnit }) => {
+  return PLATFORM_PRICE_SLOTS.map(({ productLine, billingUnit }) => {
     const rec = map.get(recordKey(productLine, billingUnit))
     return {
       recordId: rec?.id ?? null,
@@ -187,7 +194,7 @@ export function toDatacenterProductLinePriceRows(
   const currentRecords = getCurrentPlatformRecords(platformRecords, cardTypeId)
   const platformMap = buildPlatformRecordMap(currentRecords, cardTypeId)
 
-  return PLATFORM_SLOTS.map(({ productLine, billingUnit }) => {
+  return PLATFORM_PRICE_SLOTS.map(({ productLine, billingUnit }) => {
     const sell = sellMap.get(recordKey(productLine, billingUnit))
     const platform = platformMap.get(recordKey(productLine, billingUnit))
     const sellPrice = sell?.sellPrice ?? null

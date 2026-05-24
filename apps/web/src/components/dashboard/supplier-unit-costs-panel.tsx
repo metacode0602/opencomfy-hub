@@ -47,32 +47,12 @@ export function SupplierUnitCostsPanel({ supplier, dataCenter }: SupplierUnitCos
   const utils = trpc.useUtils()
   const lockedDataCenter = dataCenter ?? null
 
-  const invalidatePricingQueries = async () => {
-    await utils.supplier.unitCosts.listRecords.invalidate(listInput)
-    await utils.supplier.unitCosts.listHistory.invalidate(listInput)
-  }
-
-  const invalidateRelatedQueries = async () => {
-    await invalidatePricingQueries()
-    if (lockedDataCenter) {
-      await utils.supplier.getDataCenterDetail.invalidate({ dataCenterId: lockedDataCenter.id })
-      await utils.supplier.listGpuInventory.invalidate()
-    }
-  }
-
   const { data: pricingRecords = [], isLoading: recordsLoading } =
     trpc.supplier.unitCosts.listRecords.useQuery(listInput)
   const { data: dataCenterOptions = [] } = trpc.supplier.listDataCenters.useQuery({
     supplierId: supplier.id,
   })
   const { data: activeCardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
-
-  const createMutation = trpc.supplier.unitCosts.create.useMutation({
-    onSuccess: async () => {
-      await invalidateRelatedQueries()
-      setCreateDialogOpen(false)
-    },
-  })
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [editRecord, setEditRecord] = useState<SupplierPricingRecord | null>(null)
@@ -188,24 +168,18 @@ export function SupplierUnitCostsPanel({ supplier, dataCenter }: SupplierUnitCos
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         supplier={supplier}
+        listInput={listInput}
         existingRecords={pricingRecords}
         cardTypes={activeCardTypes}
         dataCenters={dataCenterOptions}
         lockedDataCenter={lockedDataCenter ?? undefined}
-        isSubmitting={createMutation.isPending}
-        onCreated={(record) => {
-          const pricingMode = record.pricingMode ?? 'card_time'
-          createMutation.mutate({
-            supplierId: record.supplierId,
-            dataCenterId: record.dataCenterId,
-            gpuCardTypeId: record.cardTypeId,
-            pricingMode,
-            unitPricePerHour: record.unitPricePerHour,
-            revenueSharePercent: record.revenueSharePercent,
-            pricingTiers: record.pricingTiers,
-            effectiveFrom: record.effectiveFrom,
-            effectiveTo: record.effectiveTo ?? null,
-          })
+        onSuccess={async () => {
+          if (lockedDataCenter) {
+            await utils.supplier.getDataCenterDetail.invalidate({
+              dataCenterId: lockedDataCenter.id,
+            })
+            await utils.supplier.listGpuInventory.invalidate()
+          }
         }}
       />
 

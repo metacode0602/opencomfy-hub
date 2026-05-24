@@ -1354,8 +1354,10 @@ GROUP BY 1, 2, 3;
 | 环节 | 说明 |
 |------|------|
 | **成本行引用** | `platform_cost_monthly.supplier_unit_cost_id` → `supplier_unit_cost.id`（`billing-period-import-design.md` G5/G6） |
-| **单价解析** | 优先 FK 取 `deal_unit_price_per_hour`（或 `unit_cost`）；否则按 `data_center.container_instance_region` + `card_type` 匹配 `supplier_pricing_record.unit_price_per_hour`（账单 Excel `区域` 列对应该字段，非 `data_center.code`） |
-| **阶梯合同** | 月结取价须明确策略：① 全月统一用默认档 `list_price_multiplier`；② 按账期加权平均 `deal_to_list_ratio` 选档；③ 合同约定单一成交价。**不得**按累计卡时跳档。 |
+| **匹配** | 账单 `region_code` ↔ `data_center.container_instance_region`（精确）；账单 `gpu_model` ↔ **`gpu_card_type.code`（精确）**；详见 `billing-period-import-design.md` §4.6.1 |
+| **单价解析** | 优先 FK 取 `deal_unit_price_per_hour`（或 `unit_cost`）；否则 `supplier_pricing_record` 在 `period_end` 有效窗口；无窗口时回退 `supplier_pricing_history` / 历史 `supplier_unit_cost`（§4.6.2） |
+| **失败提示** | 分级：`card_type_not_found` / `region_not_found` / `pricing_pair_not_found`（§6.1.1） |
+| **阶梯合同** | 成交价 = `余额消费 / (券卡时 + 余额卡时)`，再 / 刊例价 落档；**不得**按累计卡时跳档（§6.4.2 / §6.4.3） |
 | **刊例价变更** | 刊例上调/下调不自动改变成交价；若需同步，须显式变更 `deal_unit_price_per_hour` 并记录 `supplier_pricing_history`（含新旧比例）。 |
 | **分成模式** | `supplier_unit_cost.revenue_share_percent` 或阶梯档 `revenue_share_percent`；客户消费来自账期 Raw |
 | **活动追溯** | 调价/刊例变更写 `supplier_pricing_history` + `supplier_activity(pricing_change)` |

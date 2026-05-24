@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import {
@@ -26,13 +26,13 @@ import {
   DATACENTER_SCALE_OPTIONS,
   type DatacenterScale,
 } from '@/lib/types/datacenter-create'
-import { normalizeDatacenterName } from '@/lib/supplier/datacenter-import-utils'
 import { trpc } from '@/lib/trpc/client'
 
 export type EditDatacenterFormValues = {
   name: string
   address: string
   description: string
+  location: string
   containerInstanceRegion: string
   bareMetalRegion: string
   scale: DatacenterScale | ''
@@ -48,6 +48,7 @@ function dataCenterToFormValues(dc: DataCenter): EditDatacenterFormValues {
     name: dc.name,
     address: dc.address ?? '',
     description: dc.description ?? '',
+    location: dc.location ?? '',
     containerInstanceRegion: dc.containerInstanceRegion ?? '',
     bareMetalRegion: dc.bareMetalRegion ?? '',
     scale: (dc.scale as DatacenterScale | undefined) ?? '',
@@ -59,21 +60,9 @@ function dataCenterToFormValues(dc: DataCenter): EditDatacenterFormValues {
   }
 }
 
-function validateForm(
-  values: EditDatacenterFormValues,
-  existingNames: Set<string>,
-  existingContainerRegions: Set<string>,
-): string | null {
+function validateForm(values: EditDatacenterFormValues): string | null {
   const name = values.name.trim()
   if (!name) return '请填写机房名称'
-
-  const normName = normalizeDatacenterName(name)
-  if (existingNames.has(normName)) return '机房名称已存在，请使用唯一名称'
-
-  const containerRegion = values.containerInstanceRegion.trim()
-  if (containerRegion && existingContainerRegions.has(containerRegion)) {
-    return `容器实例区域「${containerRegion}」已被使用，请填写唯一的 Karmada 标签值`
-  }
 
   if (!values.scale) return '请选择规模'
 
@@ -102,6 +91,7 @@ function formValuesToInput(dataCenterId: string, values: EditDatacenterFormValue
     name: values.name.trim(),
     address: values.address.trim() || undefined,
     description: values.description.trim() || undefined,
+    location: values.location.trim() || undefined,
     containerInstanceRegion: values.containerInstanceRegion.trim() || undefined,
     bareMetalRegion: values.bareMetalRegion.trim() || undefined,
     scale: values.scale as DatacenterScale,
@@ -133,6 +123,7 @@ export function EditDatacenterDialog({
       name: '',
       address: '',
       description: '',
+      location: '',
       containerInstanceRegion: '',
       bareMetalRegion: '',
       scale: '',
@@ -145,15 +136,6 @@ export function EditDatacenterDialog({
   )
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const { data: allDataCenters = [] } = trpc.supplier.listAllDataCenters.useQuery({}, {
-    enabled: open,
-  })
-
-  const { data: supplierDataCenters = [] } = trpc.supplier.listDataCenters.useQuery(
-    { supplierId: dataCenter?.supplierId ?? '' },
-    { enabled: open && Boolean(dataCenter?.supplierId) },
-  )
-
   const updateMutation = trpc.supplier.updateDataCenter.useMutation({
     onSuccess: (result) => {
       toast.success(`机房「${result.dataCenter.name}」已更新`)
@@ -162,27 +144,6 @@ export function EditDatacenterDialog({
     },
     onError: (error) => setSubmitError(error.message),
   })
-
-  const existingNames = useMemo(
-    () =>
-      new Set(
-        supplierDataCenters
-          .filter((dc) => dc.id !== dataCenter?.id)
-          .map((dc) => normalizeDatacenterName(dc.name)),
-      ),
-    [supplierDataCenters, dataCenter?.id],
-  )
-
-  const existingContainerRegions = useMemo(
-    () =>
-      new Set(
-        allDataCenters
-          .filter((dc) => dc.id !== dataCenter?.id)
-          .map((dc) => dc.containerInstanceRegion?.trim())
-          .filter((value): value is string => Boolean(value)),
-      ),
-    [allDataCenters, dataCenter?.id],
-  )
 
   useEffect(() => {
     if (open && dataCenter) {
@@ -198,7 +159,7 @@ export function EditDatacenterDialog({
 
   const handleSubmit = () => {
     if (!dataCenter) return
-    const error = validateForm(values, existingNames, existingContainerRegions)
+    const error = validateForm(values)
     if (error) {
       setSubmitError(error)
       return
@@ -274,6 +235,18 @@ export function EditDatacenterDialog({
             <h4 className="text-sm font-medium text-foreground">区域配置</h4>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
+                <Label htmlFor="edit-dc-location">容器区域</Label>
+                <Input
+                  id="edit-dc-location"
+                  value={values.location}
+                  onChange={(e) => patch({ location: e.target.value })}
+                  placeholder="如 华北-北京-亦庄"
+                />
+                <p className="text-xs text-muted-foreground">
+                  可选。若填写，须全局唯一，在弹性服务部署等容器应用中展示给用户的名称。
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="edit-dc-container-region">容器实例区域</Label>
                 <Input
                   id="edit-dc-container-region"
@@ -293,6 +266,9 @@ export function EditDatacenterDialog({
                   onChange={(e) => patch({ bareMetalRegion: e.target.value })}
                   placeholder="如 华北-北京-亦庄"
                 />
+                <p className="text-xs text-muted-foreground">
+                  可选。若填写，须全局唯一。
+                </p>
               </div>
             </div>
           </section>

@@ -16,8 +16,11 @@ import {
 } from './import-storage'
 import { parseWorkbookDetailed } from './excel-parser'
 export {
+  findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
+  type MissingPricingIssue,
   type MissingPricingPair,
+  type PricingFailureReason,
 } from './tenant-bill-pricing'
 
 export type CrossFileValidation = {
@@ -41,28 +44,32 @@ export async function validateCrossFileImports(
     where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
   })
   const okBatches = batches.filter((b) => b.parseStatus === 'ok')
-  const required: ImportFileType[] = [
-    'customer_consumption',
-    'baremetal_order',
-    'tenant_bill',
-  ]
-  if (!required.every((t) => okBatches.some((b) => b.fileType === t))) {
+  const hasCustomer = okBatches.some((b) => b.fileType === 'customer_consumption')
+  const hasBaremetal = okBatches.some((b) => b.fileType === 'baremetal_order')
+  const tenantBillBatches = okBatches.filter((b) => b.fileType === 'tenant_bill')
+  if (!hasCustomer || !hasBaremetal || tenantBillBatches.length === 0) {
     return { ok: false, errorsByFileType: {} }
   }
 
   const customerBatch = okBatches.find((b) => b.fileType === 'customer_consumption')!
-  const tenantBillBatch = okBatches.find((b) => b.fileType === 'tenant_bill')!
 
-  const [customerRows, tenantBillRows] = await Promise.all([
+  const [customerRows, tenantBillRowsNested] = await Promise.all([
     db
       .select()
       .from(billingPeriodRawCustomerConsumption)
       .where(eq(billingPeriodRawCustomerConsumption.batchId, customerBatch.id)),
-    db
-      .select()
-      .from(billingPeriodRawTenantBill)
-      .where(eq(billingPeriodRawTenantBill.batchId, tenantBillBatch.id)),
+    Promise.all(
+      tenantBillBatches.map(async (batch) => {
+        const rows = await db
+          .select()
+          .from(billingPeriodRawTenantBill)
+          .where(eq(billingPeriodRawTenantBill.batchId, batch.id))
+        return { batchId: batch.id, rows }
+      }),
+    ),
   ])
+
+  const tenantBillRows = tenantBillRowsNested.flatMap((x) => x.rows)
 
   const bPlatformIds = new Set(
     customerRows.filter((r) => r.customerType === 'B').map((r) => r.tenantPlatformId),
@@ -142,12 +149,17 @@ export async function persistBatchErrorReport(input: {
 export async function readErrorReportBySlot(input: {
   periodId: string
   fileType: ImportFileType
+  windowId?: string
 }): Promise<{ fileName: string; fileBase64: string } | null> {
+  const conditions = [
+    eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
+    eq(billingPeriodImportBatch.fileType, input.fileType),
+  ]
+  if (input.windowId) {
+    conditions.push(eq(billingPeriodImportBatch.windowId, input.windowId))
+  }
   const batch = await db.query.billingPeriodImportBatch.findFirst({
-    where: and(
-      eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
-      eq(billingPeriodImportBatch.fileType, input.fileType),
-    ),
+    where: and(...conditions),
   })
   if (!batch?.errorReportPath) return null
   const buf = await readStorageFile(batch.errorReportPath)

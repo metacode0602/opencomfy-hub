@@ -19,6 +19,11 @@ import {
   secondBeforePlatformDateTime,
 } from '@/lib/platform-pricing/datetime'
 import {
+  getPeriodPhase,
+  getRecordsForPeriod,
+  validatePeriodAgainstExisting,
+} from '@/lib/platform-pricing/periods'
+import {
   gpuCardType,
   platformCardListPrice,
   platformCardPriceHistory,
@@ -58,6 +63,7 @@ export type PlatformPriceUpsertInput = {
   billingUnit: PlatformBillingUnit
   sellPrice: number
   effectiveFrom: string
+  effectiveTo?: string | null
   status: PlatformPriceStatus
   remark?: string
   changedByStaffId?: string | null
@@ -65,6 +71,66 @@ export type PlatformPriceUpsertInput = {
 
 export type PlatformPriceUpdateInput = PlatformPriceUpsertInput & {
   recordId: string
+}
+
+export type PlatformPeriodManualPriceInput = {
+  productLine: PlatformProductLine
+  billingUnit: PlatformBillingUnit
+  sellPrice: number
+}
+
+export type PlatformPeriodCreateInput = {
+  gpuCardTypeId: string
+  effectiveFrom: string
+  effectiveTo?: string | null
+  copyFromPeriodId?: string
+  autoClosePreviousCurrent?: boolean
+  manualPrices?: PlatformPeriodManualPriceInput[]
+  changedByStaffId?: string | null
+}
+
+export type PlatformPeriodUpdateInput = {
+  gpuCardTypeId: string
+  periodId: string
+  effectiveFrom: string
+  effectiveTo?: string | null
+  changedByStaffId?: string | null
+}
+
+export type PlatformPeriodMutationResult = {
+  periodId: string
+  effectiveFrom: string
+  effectiveTo: string | null
+  recordCount: number
+}
+
+function periodIdFromEffectiveFrom(gpuCardTypeId: string, effectiveFrom: string): string {
+  return `${gpuCardTypeId}:${normalizePlatformDateTime(effectiveFrom)}`
+}
+
+function parsePeriodEffectiveFrom(periodId: string, gpuCardTypeId: string): string {
+  const prefix = `${gpuCardTypeId}:`
+  if (!periodId.startsWith(prefix)) {
+    throw new Error('无效的时间段 ID')
+  }
+  return normalizePlatformDateTime(periodId.slice(prefix.length))
+}
+
+async function closeOpenListPrices(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  gpuCardTypeId: string,
+  closeTo: string,
+) {
+  await tx
+    .update(platformCardListPrice)
+    .set({ effectiveTo: closeTo })
+    .where(
+      and(
+        eq(platformCardListPrice.gpuCardTypeId, gpuCardTypeId),
+        isNull(platformCardListPrice.effectiveTo),
+        eq(platformCardListPrice.status, 'active'),
+      ),
+    )
 }
 
 function mapHistoryRow(
@@ -388,16 +454,36 @@ export const platformPricingDbDataAccess = {
   async createPrice(input: PlatformPriceUpsertInput): Promise<PlatformCardPriceRecord> {
     const card = await assertCardTypeExists(input.gpuCardTypeId)
 
-    const duplicate = await db.query.platformCardPriceRecord.findFirst({
-      where: and(
-        eq(platformCardPriceRecord.gpuCardTypeId, input.gpuCardTypeId),
-        eq(platformCardPriceRecord.productLine, input.productLine),
-        eq(platformCardPriceRecord.billingUnit, input.billingUnit),
-      ),
-      columns: { id: true },
-    })
-    if (duplicate) {
-      throw new Error('该产品线与租期已有平台价，请编辑现有记录')
+    const normalizedFrom = normalizePlatformDateTime(input.effectiveFrom)
+    const normalizedTo =
+      input.effectiveTo != null ? normalizePlatformDateTime(input.effectiveTo) : null
+    const isSegmentPrice = normalizedTo != null
+
+    if (isSegmentPrice) {
+      const overlap = await db.query.platformCardListPrice.findFirst({
+        where: and(
+          eq(platformCardListPrice.gpuCardTypeId, input.gpuCardTypeId),
+          eq(platformCardListPrice.productLine, input.productLine),
+          eq(platformCardListPrice.billingUnit, input.billingUnit),
+          eq(platformCardListPrice.effectiveFrom, normalizedFrom),
+        ),
+        columns: { id: true },
+      })
+      if (overlap) {
+        throw new Error('该时间段内此产品线与租期已有价格，请编辑现有记录')
+      }
+    } else {
+      const duplicate = await db.query.platformCardPriceRecord.findFirst({
+        where: and(
+          eq(platformCardPriceRecord.gpuCardTypeId, input.gpuCardTypeId),
+          eq(platformCardPriceRecord.productLine, input.productLine),
+          eq(platformCardPriceRecord.billingUnit, input.billingUnit),
+        ),
+        columns: { id: true },
+      })
+      if (duplicate) {
+        throw new Error('该产品线与租期已有平台价，请编辑现有记录')
+      }
     }
 
     const listPriceId = newId()
@@ -412,41 +498,69 @@ export const platformPricingDbDataAccess = {
         billingUnit: input.billingUnit,
         sellPrice,
         currency: 'CNY',
-        effectiveFrom: normalizePlatformDateTime(input.effectiveFrom),
-        effectiveTo: null,
+        effectiveFrom: normalizedFrom,
+        effectiveTo: normalizedTo,
         status: input.status,
         remark: input.remark?.trim() || null,
-      })
-
-      await tx.insert(platformCardPriceRecord).values({
-        id: recordId,
-        gpuCardTypeId: input.gpuCardTypeId,
-        productLine: input.productLine,
-        billingUnit: input.billingUnit,
-        sellPrice,
-        platformCardListPriceId: listPriceId,
-        effectiveFrom: normalizePlatformDateTime(input.effectiveFrom),
         updatedByStaffId: input.changedByStaffId ?? null,
       })
 
-      await insertPriceHistory(tx, {
-        priceRecordId: recordId,
-        gpuCardTypeId: input.gpuCardTypeId,
-        productLine: input.productLine,
-        billingUnit: input.billingUnit,
-        previousSellPrice: null,
-        newSellPrice: sellPrice,
-        reason: input.remark,
-        changedByStaffId: input.changedByStaffId,
-      })
+      if (!isSegmentPrice) {
+        await tx.insert(platformCardPriceRecord).values({
+          id: recordId,
+          gpuCardTypeId: input.gpuCardTypeId,
+          productLine: input.productLine,
+          billingUnit: input.billingUnit,
+          sellPrice,
+          platformCardListPriceId: listPriceId,
+          effectiveFrom: normalizedFrom,
+          updatedByStaffId: input.changedByStaffId ?? null,
+        })
+
+        await insertPriceHistory(tx, {
+          priceRecordId: recordId,
+          gpuCardTypeId: input.gpuCardTypeId,
+          productLine: input.productLine,
+          billingUnit: input.billingUnit,
+          previousSellPrice: null,
+          newSellPrice: sellPrice,
+          reason: input.remark,
+          changedByStaffId: input.changedByStaffId,
+        })
+      }
     })
 
     platformPricingLog('createPrice', 'success', {
-      recordId,
+      recordId: isSegmentPrice ? listPriceId : recordId,
       gpuCardTypeId: input.gpuCardTypeId,
       productLine: input.productLine,
       billingUnit: input.billingUnit,
+      segment: isSegmentPrice,
     })
+
+    if (isSegmentPrice) {
+      const listPrice = await db.query.platformCardListPrice.findFirst({
+        where: eq(platformCardListPrice.id, listPriceId),
+      })
+      if (!listPrice) {
+        throw new Error('创建平台价后读取失败')
+      }
+      return {
+        id: listPrice.id,
+        gpuCardTypeId: input.gpuCardTypeId,
+        cardTypeName: card.name,
+        periodId: periodIdFromEffectiveFrom(input.gpuCardTypeId, normalizedFrom),
+        productLine: input.productLine,
+        billingUnit: input.billingUnit,
+        sellPrice: input.sellPrice,
+        currency: 'CNY',
+        effectiveFrom: normalizedFrom,
+        effectiveTo: normalizedTo,
+        status: input.status,
+        remark: input.remark,
+        updatedAt: listPrice.updatedAt.toISOString(),
+      }
+    }
 
     const record = await db.query.platformCardPriceRecord.findFirst({
       where: eq(platformCardPriceRecord.id, recordId),
@@ -559,5 +673,238 @@ export const platformPricingDbDataAccess = {
     }
 
     return mapRecordRow(record, listPrice ?? null, card.name)
+  },
+
+  async createPeriod(input: PlatformPeriodCreateInput): Promise<PlatformPeriodMutationResult> {
+    await assertCardTypeExists(input.gpuCardTypeId)
+
+    const normalizedFrom = normalizePlatformDateTime(input.effectiveFrom)
+    const normalizedTo =
+      input.effectiveTo != null ? normalizePlatformDateTime(input.effectiveTo) : null
+
+    const existingRecords = await this.listRecordsForCardType(input.gpuCardTypeId)
+    const validation = validatePeriodAgainstExisting(
+      input.gpuCardTypeId,
+      normalizedFrom,
+      normalizedTo,
+      existingRecords,
+    )
+    if (validation) {
+      throw new Error(validation.message)
+    }
+
+    let pricesToCreate: Array<{
+      productLine: PlatformProductLine
+      billingUnit: PlatformBillingUnit
+      sellPrice: number
+      status: PlatformPriceStatus
+      remark?: string
+    }> = []
+
+    if (input.copyFromPeriodId) {
+      const sourceRecords = getRecordsForPeriod(
+        existingRecords,
+        input.gpuCardTypeId,
+        input.copyFromPeriodId,
+      )
+      if (sourceRecords.length === 0) {
+        throw new Error('复制源时间段没有可复制的定价记录')
+      }
+      pricesToCreate = sourceRecords.map((record) => ({
+        productLine: record.productLine,
+        billingUnit: record.billingUnit,
+        sellPrice: record.sellPrice,
+        status: record.status,
+        remark: record.remark,
+      }))
+    } else if (input.manualPrices?.length) {
+      pricesToCreate = input.manualPrices.map((price) => ({
+        productLine: price.productLine,
+        billingUnit: price.billingUnit,
+        sellPrice: price.sellPrice,
+        status: 'active' as const,
+      }))
+    }
+
+    const newPhase = getPeriodPhase(normalizedFrom, normalizedTo, false)
+    const isCurrentPeriod = newPhase === 'current'
+
+    if (input.autoClosePreviousCurrent && !isCurrentPeriod) {
+      throw new Error('仅当新时间段为当前有效时，才可自动闭合原当前时间段')
+    }
+
+    await db.transaction(async (tx) => {
+      if (input.autoClosePreviousCurrent && isCurrentPeriod) {
+        await closeOpenListPrices(
+          tx,
+          input.gpuCardTypeId,
+          secondBeforePlatformDateTime(normalizedFrom),
+        )
+      }
+
+      for (const price of pricesToCreate) {
+        const listPriceId = newId()
+        const sellPriceStr = price.sellPrice.toFixed(4)
+
+        await tx.insert(platformCardListPrice).values({
+          id: listPriceId,
+          gpuCardTypeId: input.gpuCardTypeId,
+          productLine: price.productLine,
+          billingUnit: price.billingUnit,
+          sellPrice: sellPriceStr,
+          currency: 'CNY',
+          effectiveFrom: normalizedFrom,
+          effectiveTo: normalizedTo,
+          status: price.status,
+          remark: price.remark?.trim() || null,
+          updatedByStaffId: input.changedByStaffId ?? null,
+        })
+
+        if (isCurrentPeriod && price.status === 'active') {
+          const existingRecord = await tx.query.platformCardPriceRecord.findFirst({
+            where: and(
+              eq(platformCardPriceRecord.gpuCardTypeId, input.gpuCardTypeId),
+              eq(platformCardPriceRecord.productLine, price.productLine),
+              eq(platformCardPriceRecord.billingUnit, price.billingUnit),
+            ),
+          })
+
+          if (existingRecord) {
+            await tx
+              .update(platformCardPriceRecord)
+              .set({
+                sellPrice: sellPriceStr,
+                platformCardListPriceId: listPriceId,
+                effectiveFrom: normalizedFrom,
+                updatedByStaffId: input.changedByStaffId ?? null,
+              })
+              .where(eq(platformCardPriceRecord.id, existingRecord.id))
+
+            await insertPriceHistory(tx, {
+              priceRecordId: existingRecord.id,
+              gpuCardTypeId: input.gpuCardTypeId,
+              productLine: price.productLine,
+              billingUnit: price.billingUnit,
+              previousSellPrice: existingRecord.sellPrice,
+              newSellPrice: sellPriceStr,
+              reason: '时间段调价',
+              changedByStaffId: input.changedByStaffId,
+            })
+          } else {
+            const recordId = newId()
+            await tx.insert(platformCardPriceRecord).values({
+              id: recordId,
+              gpuCardTypeId: input.gpuCardTypeId,
+              productLine: price.productLine,
+              billingUnit: price.billingUnit,
+              sellPrice: sellPriceStr,
+              platformCardListPriceId: listPriceId,
+              effectiveFrom: normalizedFrom,
+              updatedByStaffId: input.changedByStaffId ?? null,
+            })
+
+            await insertPriceHistory(tx, {
+              priceRecordId: recordId,
+              gpuCardTypeId: input.gpuCardTypeId,
+              productLine: price.productLine,
+              billingUnit: price.billingUnit,
+              previousSellPrice: null,
+              newSellPrice: sellPriceStr,
+              reason: '时间段调价',
+              changedByStaffId: input.changedByStaffId,
+            })
+          }
+        }
+      }
+    })
+
+    platformPricingLog('createPeriod', 'success', {
+      gpuCardTypeId: input.gpuCardTypeId,
+      effectiveFrom: normalizedFrom,
+      recordCount: pricesToCreate.length,
+    })
+
+    return {
+      periodId: periodIdFromEffectiveFrom(input.gpuCardTypeId, normalizedFrom),
+      effectiveFrom: normalizedFrom,
+      effectiveTo: normalizedTo,
+      recordCount: pricesToCreate.length,
+    }
+  },
+
+  async updatePeriod(input: PlatformPeriodUpdateInput): Promise<PlatformPeriodMutationResult> {
+    await assertCardTypeExists(input.gpuCardTypeId)
+
+    const oldEffectiveFrom = parsePeriodEffectiveFrom(input.periodId, input.gpuCardTypeId)
+    const normalizedFrom = normalizePlatformDateTime(input.effectiveFrom)
+    const normalizedTo =
+      input.effectiveTo != null ? normalizePlatformDateTime(input.effectiveTo) : null
+
+    const existingRecords = await this.listRecordsForCardType(input.gpuCardTypeId)
+    const validation = validatePeriodAgainstExisting(
+      input.gpuCardTypeId,
+      normalizedFrom,
+      normalizedTo,
+      existingRecords,
+      input.periodId,
+    )
+    if (validation) {
+      throw new Error(validation.message)
+    }
+
+    const periodListPrices = await db
+      .select({ id: platformCardListPrice.id })
+      .from(platformCardListPrice)
+      .where(
+        and(
+          eq(platformCardListPrice.gpuCardTypeId, input.gpuCardTypeId),
+          eq(platformCardListPrice.effectiveFrom, oldEffectiveFrom),
+        ),
+      )
+
+    if (periodListPrices.length === 0) {
+      throw new Error('该时间段没有关联的定价记录，无法编辑')
+    }
+
+    const listPriceIds = periodListPrices.map((row) => row.id)
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(platformCardListPrice)
+        .set({
+          effectiveFrom: normalizedFrom,
+          effectiveTo: normalizedTo,
+        })
+        .where(
+          and(
+            eq(platformCardListPrice.gpuCardTypeId, input.gpuCardTypeId),
+            eq(platformCardListPrice.effectiveFrom, oldEffectiveFrom),
+          ),
+        )
+
+      for (const listPriceId of listPriceIds) {
+        await tx
+          .update(platformCardPriceRecord)
+          .set({
+            effectiveFrom: normalizedFrom,
+            updatedByStaffId: input.changedByStaffId ?? null,
+          })
+          .where(eq(platformCardPriceRecord.platformCardListPriceId, listPriceId))
+      }
+    })
+
+    platformPricingLog('updatePeriod', 'success', {
+      gpuCardTypeId: input.gpuCardTypeId,
+      periodId: input.periodId,
+      effectiveFrom: normalizedFrom,
+      recordCount: periodListPrices.length,
+    })
+
+    return {
+      periodId: periodIdFromEffectiveFrom(input.gpuCardTypeId, normalizedFrom),
+      effectiveFrom: normalizedFrom,
+      effectiveTo: normalizedTo,
+      recordCount: periodListPrices.length,
+    }
   },
 }

@@ -366,6 +366,8 @@ export interface ContractPricingTier {
   unitPricePerHour?: number
   /** 分成 / 阶梯分成：供应商分成 % */
   revenueSharePercent?: number
+  /** 阶梯卡时：相对刊例的结算倍数 */
+  listPriceMultiplier?: number
 }
 
 export interface Supplier {

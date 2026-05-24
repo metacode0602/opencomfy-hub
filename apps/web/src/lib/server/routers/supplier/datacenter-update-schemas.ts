@@ -6,6 +6,7 @@ export const datacenterUpdateSchema = z.object({
   name: z.string().trim().min(1, '请填写机房名称'),
   address: z.string().trim().optional(),
   description: z.string().trim().optional(),
+  location: z.string().trim().optional(),
   containerInstanceRegion: z.string().trim().optional(),
   bareMetalRegion: z.string().trim().optional(),
   scale: z.enum(DATACENTER_SCALE_OPTIONS, { message: '请选择规模' }),

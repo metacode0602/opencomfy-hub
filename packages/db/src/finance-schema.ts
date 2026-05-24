@@ -188,10 +188,35 @@ export const platformCostMonthly = pgTable(
 // ---------------------------------------------------------------------------
 
 /**
+ * 账期租户账单子窗口（平台刊例价变动时按时间段拆分上传 tenant_bill）
+ */
+export const billingPeriodTenantBillWindow = pgTable(
+  "billing_period_tenant_bill_window",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    windowStart: date("window_start").notNull(),
+    windowEnd: date("window_end").notNull(),
+    sortOrder: integer("sort_order").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_tenant_bill_window_uk").on(
+      table.billingPeriodId,
+      table.windowStart,
+      table.windowEnd,
+    ),
+    index("billing_period_tenant_bill_window_period_id_idx").on(table.billingPeriodId),
+  ],
+)
+
+/**
  * 导入批次 billing_period_import_batch
  * file_type: customer_consumption | baremetal_order | tenant_bill
  *
- * v1.4：每账期每 file_type 至多一条（唯一约束）；重新上传前先 DELETE 旧 batch（cascade raw）。
+ * customer / baremetal：每账期至多一条；tenant_bill：每 window 至多一条。
  */
 export const billingPeriodImportBatch = pgTable(
   "billing_period_import_batch",
@@ -200,6 +225,10 @@ export const billingPeriodImportBatch = pgTable(
     billingPeriodId: text("billing_period_id")
       .notNull()
       .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    /** tenant_bill 必填；其他 file_type 为 null */
+    windowId: text("window_id").references(() => billingPeriodTenantBillWindow.id, {
+      onDelete: "cascade",
+    }),
     fileType: varchar("file_type", { length: 32 }).notNull(),
     fileName: varchar("file_name", { length: 512 }).notNull(),
     /** 相对 FINANCE_IMPORT_STORAGE_ROOT 的路径 */
@@ -218,11 +247,17 @@ export const billingPeriodImportBatch = pgTable(
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("billing_period_import_batch_period_file_type_uk").on(
-      table.billingPeriodId,
-      table.fileType,
-    ),
+    uniqueIndex("billing_period_import_batch_period_customer_uk")
+      .on(table.billingPeriodId)
+      .where(sql`${table.fileType} = 'customer_consumption'`),
+    uniqueIndex("billing_period_import_batch_period_baremetal_uk")
+      .on(table.billingPeriodId)
+      .where(sql`${table.fileType} = 'baremetal_order'`),
+    uniqueIndex("billing_period_import_batch_period_tenant_window_uk")
+      .on(table.billingPeriodId, table.windowId)
+      .where(sql`${table.fileType} = 'tenant_bill'`),
     index("billing_period_import_batch_period_id_idx").on(table.billingPeriodId),
+    index("billing_period_import_batch_window_id_idx").on(table.windowId),
   ],
 )
 
@@ -592,6 +627,7 @@ export const voucherCardHoursAdjustmentHistory = pgTable(
 
 export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) => ({
   importBatches: many(billingPeriodImportBatch),
+  tenantBillWindows: many(billingPeriodTenantBillWindow),
   aggCustomerConsumptions: many(billingPeriodAggCustomerConsumption),
   tenantProjectEnrichments: many(billingPeriodTenantProjectEnrichment),
   tenantCostAllocations: many(billingTenantCostAllocation),
@@ -601,12 +637,27 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   operationLogs: many(billingPeriodOperationLog),
 }))
 
+export const billingPeriodTenantBillWindowRelations = relations(
+  billingPeriodTenantBillWindow,
+  ({ one, many }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodTenantBillWindow.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    importBatches: many(billingPeriodImportBatch),
+  }),
+)
+
 export const billingPeriodImportBatchRelations = relations(
   billingPeriodImportBatch,
   ({ one, many }) => ({
     billingPeriod: one(billingPeriod, {
       fields: [billingPeriodImportBatch.billingPeriodId],
       references: [billingPeriod.id],
+    }),
+    tenantBillWindow: one(billingPeriodTenantBillWindow, {
+      fields: [billingPeriodImportBatch.windowId],
+      references: [billingPeriodTenantBillWindow.id],
     }),
     customerConsumptionRows: many(billingPeriodRawCustomerConsumption),
     baremetalOrderRows: many(billingPeriodRawBaremetalOrder),
@@ -716,6 +767,7 @@ export type NewBillingPeriodRow = typeof billingPeriod.$inferInsert
 export type PlatformIncomeMonthlyRow = typeof platformIncomeMonthly.$inferSelect
 export type PlatformCostMonthlyRow = typeof platformCostMonthly.$inferSelect
 export type BillingPeriodImportBatchRow = typeof billingPeriodImportBatch.$inferSelect
+export type BillingPeriodTenantBillWindowRow = typeof billingPeriodTenantBillWindow.$inferSelect
 export type BillingPeriodRawCustomerConsumptionRow =
   typeof billingPeriodRawCustomerConsumption.$inferSelect
 export type BillingPeriodAggCustomerConsumptionRow =

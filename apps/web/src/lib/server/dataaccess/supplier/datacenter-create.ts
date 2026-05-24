@@ -57,6 +57,30 @@ async function assertUniqueContainerInstanceRegion(region: string): Promise<void
   }
 }
 
+async function assertUniqueLocation(location: string): Promise<void> {
+  const [hit] = await db
+    .select({ id: dataCenter.id, name: dataCenter.name })
+    .from(dataCenter)
+    .where(eq(dataCenter.location, location))
+    .limit(1)
+
+  if (hit) {
+    throw new Error(`容器区域「${location}」已被机房「${hit.name}」使用，请填写唯一名称`)
+  }
+}
+
+async function assertUniqueBareMetalRegion(region: string): Promise<void> {
+  const [hit] = await db
+    .select({ id: dataCenter.id, name: dataCenter.name })
+    .from(dataCenter)
+    .where(eq(dataCenter.bareMetalRegion, region))
+    .limit(1)
+
+  if (hit) {
+    throw new Error(`裸金属区域「${region}」已被机房「${hit.name}」使用，请填写唯一名称`)
+  }
+}
+
 export const datacenterCreateDataAccess = {
   async create(input: CreateDatacenterInput): Promise<CreateDatacenterResult> {
     await suppliersDataAccess.assertSupplierExists(input.supplierId)
@@ -71,12 +95,19 @@ export const datacenterCreateDataAccess = {
       throw new Error('供应商不存在')
     }
     const name = input.name.trim()
+    const location = input.location?.trim() || undefined
     const containerInstanceRegion = input.containerInstanceRegion?.trim() || undefined
     const bareMetalRegion = input.bareMetalRegion?.trim() || undefined
 
     await assertUniqueName(input.supplierId, name)
+    if (location) {
+      await assertUniqueLocation(location)
+    }
     if (containerInstanceRegion) {
       await assertUniqueContainerInstanceRegion(containerInstanceRegion)
+    }
+    if (bareMetalRegion) {
+      await assertUniqueBareMetalRegion(bareMetalRegion)
     }
 
     const existing = await suppliersDataAccess.listDataCentersBySupplier(input.supplierId)
@@ -103,7 +134,7 @@ export const datacenterCreateDataAccess = {
       supplierId: input.supplierId,
       code,
       name,
-      location: deriveLocation(importRow) || null,
+      location: location ?? deriveLocation(importRow) || null,
       address: input.address?.trim() || null,
       regionTags: buildRegionTags(importRow),
       status: input.status ?? 'offline',

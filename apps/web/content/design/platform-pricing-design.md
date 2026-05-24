@@ -307,13 +307,17 @@ UNIQUE (supplier_id, data_center_id, gpu_card_type_id, product_line, billing_uni
 4. 拒绝计费 / 告警「缺失定价」
 ```
 
-**成本单价**解析（与 `cost-row-utils.ts` 一致，补充 FK 优先）：
+**成本单价**解析（财务月结 / 账期导入，对齐 `billing-period-import-design.md` §4.6.1）：
 
 ```
-1. platform_cost_monthly.supplier_unit_cost_id → supplier_unit_cost.deal_unit_price_per_hour
-2. 按 data_center.container_instance_region + card_type 匹配 supplier_pricing_record.unit_price_per_hour
-3. supplier_gpu_inventory.card_time_cost_per_hour（展示缓存，不可作财务真值）
-4. NULL → 财务人工补录
+1. platform_cost_monthly.supplier_unit_cost_id → supplier_unit_cost（已计算行 FK 优先）
+2. 卡型：gpu_card_type.code 与账单 gpu_model 精确匹配（trim + lower）
+3. 机房：data_center.container_instance_region 与账单 region_code 精确匹配
+4. supplier_pricing_record：as_of = period_end 有效窗口 + config_status = active + 字段完整
+5. 若无账期窗口命中 → supplier_pricing_history 还原 period_end 时点快照（§4.6.2）
+6. 仍失败 → supplier_unit_cost 历史条款（effective 覆盖 period_end）
+7. supplier_gpu_inventory.card_time_cost_per_hour（展示缓存，不可作财务真值）
+8. NULL → pending_pricing；按 card_type_not_found / region_not_found / pricing_pair_not_found 分级提示
 ```
 
 ---
@@ -482,9 +486,10 @@ erDiagram
 | 环节 | 说明 |
 |------|------|
 | 成本行 FK | `supplier_unit_cost_id` → 机房成本价，**与销售价格无关** |
-| 单价解析 | 优先 `deal_unit_price_per_hour`；分成模式用 `revenue_share_percent`（`billing-period-import-design.md` §6.4） |
+| 匹配 | 机房 `container_instance_region` + 卡型 `gpu_card_type.code` **精确匹配**（§4.6.1） |
+| 单价解析 | 按 `pricing_mode` 分支；`card_time` 用 `unit_price_per_hour`；分成用 `revenue_share_percent`；无账期窗口时回退 `supplier_pricing_history`（§4.6.2） |
+| 阶梯落档 | 成交价 = `余额消费 / (券卡时 + 余额卡时)`，再 / 刊例价 得 `deal_to_list_ratio`；**禁止**按累计卡时跳档 |
 | 毛利 | `gross_profit = confirmed_revenue_excl_tax - sold_duration_cost - gifted_duration_cost` |
-| 阶梯 | 按成交/刊例比例选档，**禁止**按累计卡时跳档（`supplier-database.md` R-S2.4） |
 
 **收入侧**来自 Raw 客户消费 / 裸金属订单，其金额已由 **销售定价** 在计费侧产生；财务导入 **不回写** 定价表。
 

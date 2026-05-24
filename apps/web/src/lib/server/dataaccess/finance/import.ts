@@ -18,6 +18,10 @@ import {
   sha256Hex,
   type ParsedWorkbook,
 } from './excel-parser'
+import {
+  parseDeviceModel,
+  parsePurchaseQty,
+} from './baremetal-order-parse'
 import { resolveAndPersistEnrichment } from './enrichment'
 import type { ImportCellError } from './import-errors'
 import {
@@ -32,6 +36,7 @@ import {
 import { financeError, financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
+import { listTenantBillWindows, syncTenantBillWindowsForPeriod } from './tenant-bill-windows'
 import {
   persistBatchErrorReport,
   validateCrossFileImports,
@@ -163,22 +168,62 @@ function mapBaremetalRows(
       continue
     }
     if (orderedAt < start || orderedAt > end) continue
+
+    const idcName = pickColumn(row, ['机房名称', 'idc_name'])
+    const deviceModel = pickColumn(row, ['设备型号', 'device_model'])
+    const purchaseQtyText = pickColumn(row, ['购买数量', 'purchase_qty'])
+
+    if (!idcName?.trim()) {
+      errors.push({
+        rowNo,
+        columnAliases: ['机房名称', 'idc_name'],
+        message: '缺少机房名称',
+      })
+      continue
+    }
+    const parsedDevice = parseDeviceModel(deviceModel)
+    if (!parsedDevice) {
+      errors.push({
+        rowNo,
+        columnAliases: ['设备型号', 'device_model'],
+        message: '设备型号格式无效，应为「卡型code x 卡数量」（如 4090 x 8）',
+      })
+      continue
+    }
+    const parsedPurchase = parsePurchaseQty(purchaseQtyText)
+    if (!parsedPurchase) {
+      errors.push({
+        rowNo,
+        columnAliases: ['购买数量', 'purchase_qty'],
+        message:
+          '购买数量格式无效，应为「数量 x 时长包」（小时/24小时/7天/30天时长包）',
+      })
+      continue
+    }
+
     parsed.push({
       rowNo,
       orderId,
       orderNo: pickColumn(row, ['订单编号', 'order_no']),
       tenantPlatformId: tenantId,
-      idcName: pickColumn(row, ['机房名称', 'idc_name']),
-      deviceModel: pickColumn(row, ['设备型号', 'device_model']),
+      idcName,
+      deviceModel,
       payStatus: payStatus || '已支付',
       deviceStatus: pickColumn(row, ['设备状态', 'device_status']),
-      purchaseQtyText: pickColumn(row, ['购买数量', 'purchase_qty']),
-      deviceQty: null,
+      purchaseQtyText,
+      deviceQty: parsedDevice.cardCount,
       orderAmount: parseMoneyCell(pickColumn(row, ['订单金额', 'order_amount'])),
       refundAmount: parseMoneyCell(pickColumn(row, ['退款金额', 'refund_amount'])),
       finalAmount,
       orderedAt,
       rawJson: row,
+    })
+  }
+  if (parsed.length === 0 && errors.length === 0) {
+    errors.push({
+      rowNo: 2,
+      columnAliases: ['订单ID', 'order_id'],
+      message: '裸金属消费订单无有效数据行',
     })
   }
   return { parsed, errors }
@@ -226,17 +271,25 @@ async function syncPeriodImportStatus(periodId: string): Promise<string> {
   const batches = await db.query.billingPeriodImportBatch.findMany({
     where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
   })
-  const requiredTypes = [
-    'customer_consumption',
-    'baremetal_order',
-    'tenant_bill',
-  ] as const
-  const allPresent = requiredTypes.every((t) => batches.some((b) => b.fileType === t))
-  const allOk =
-    allPresent &&
-    requiredTypes.every((t) =>
-      batches.some((b) => b.fileType === t && b.parseStatus === 'ok'),
+  const windows = await listTenantBillWindows(periodId)
+  const hasCustomer = batches.some(
+    (b) => b.fileType === 'customer_consumption' && b.parseStatus === 'ok',
+  )
+  const hasBaremetal = batches.some(
+    (b) => b.fileType === 'baremetal_order' && b.parseStatus === 'ok',
+  )
+  const tenantBillOk =
+    windows.length > 0 &&
+    windows.every((w) =>
+      batches.some(
+        (b) =>
+          b.fileType === 'tenant_bill' &&
+          b.windowId === w.id &&
+          b.parseStatus === 'ok',
+      ),
     )
+
+  const allOk = hasCustomer && hasBaremetal && tenantBillOk
 
   let status = 'draft'
   if (allOk) {
@@ -246,9 +299,11 @@ async function syncPeriodImportStatus(periodId: string): Promise<string> {
     } else {
       status = 'import_error'
       for (const [fileType, errs] of Object.entries(cross.errorsByFileType)) {
-        const batch = batches.find((b) => b.fileType === fileType)
-        if (batch && errs?.length) {
-          await persistBatchErrorReport({ batchId: batch.id, errors: errs })
+        const matchingBatches = batches.filter((b) => b.fileType === fileType)
+        for (const batch of matchingBatches) {
+          if (errs?.length) {
+            await persistBatchErrorReport({ batchId: batch.id, errors: errs })
+          }
         }
       }
     }
@@ -271,6 +326,7 @@ async function recordParseFailure(input: {
   fileSha256: string
   fileSizeBytes: number
   actorId?: string | null
+  windowId?: string
 }): Promise<ImportFileResult> {
   const errorBuffer = buildMarkedErrorWorkbookBuffer({
     sheet: input.sheet,
@@ -286,6 +342,7 @@ async function recordParseFailure(input: {
   await db.insert(billingPeriodImportBatch).values({
     id: input.batchId,
     billingPeriodId: input.billingPeriodId,
+    windowId: input.windowId ?? null,
     fileType: input.fileType,
     fileName: input.fileName,
     storagePath: input.storagePath,
@@ -320,17 +377,30 @@ export async function importExcelFile(input: {
   fileName: string
   buffer: Buffer
   actorId?: string | null
+  windowId?: string
 }): Promise<ImportFileResult> {
   const period = await getPeriodOrThrow(input.billingPeriodId)
   financeLog('import', `start ${input.fileType}`, {
     periodId: input.billingPeriodId,
     fileName: input.fileName,
+    windowId: input.windowId,
   })
+
+  if (input.fileType === 'tenant_bill') {
+    if (!input.windowId) {
+      throw new FinanceError('BAD_REQUEST', '上传客户账单详情须指定时间段 windowId')
+    }
+    const windows = await listTenantBillWindows(input.billingPeriodId)
+    if (!windows.some((w) => w.id === input.windowId)) {
+      throw new FinanceError('BAD_REQUEST', '无效的客户账单时间段')
+    }
+  }
 
   await purgeBillingPeriodArtifacts({
     billingPeriodId: input.billingPeriodId,
     scope: 'file_type',
     fileType: input.fileType,
+    windowId: input.windowId,
     actorId: input.actorId,
   })
 
@@ -359,6 +429,7 @@ export async function importExcelFile(input: {
           await tx.insert(billingPeriodImportBatch).values({
             id: batchId,
             billingPeriodId: input.billingPeriodId,
+            windowId: input.windowId ?? null,
             fileType: input.fileType,
             fileName: input.fileName,
             storagePath,
@@ -383,6 +454,7 @@ export async function importExcelFile(input: {
           await tx.insert(billingPeriodImportBatch).values({
             id: batchId,
             billingPeriodId: input.billingPeriodId,
+            windowId: input.windowId ?? null,
             fileType: input.fileType,
             fileName: input.fileName,
             storagePath,
@@ -407,6 +479,7 @@ export async function importExcelFile(input: {
           await tx.insert(billingPeriodImportBatch).values({
             id: batchId,
             billingPeriodId: input.billingPeriodId,
+            windowId: input.windowId ?? null,
             fileType: input.fileType,
             fileName: input.fileName,
             storagePath,
@@ -437,6 +510,7 @@ export async function importExcelFile(input: {
         fileSha256,
         fileSizeBytes: input.buffer.length,
         actorId: input.actorId,
+        windowId: input.windowId,
       })
     }
 
@@ -449,18 +523,13 @@ export async function importExcelFile(input: {
     }
 
     const periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
-    const batches = await db.query.billingPeriodImportBatch.findMany({
-      where: eq(billingPeriodImportBatch.billingPeriodId, input.billingPeriodId),
-    })
-    const requiredTypes = [
-      'customer_consumption',
-      'baremetal_order',
-      'tenant_bill',
-    ] as const
+    const slotStatuses = await getImportSlotStatuses(input.billingPeriodId)
     const allParsed =
-      requiredTypes.every((t) =>
-        batches.some((b) => b.fileType === t && b.parseStatus === 'ok'),
-      ) && periodStatus === 'imported'
+      Boolean(slotStatuses.customer?.parseStatus === 'ok') &&
+      Boolean(slotStatuses.baremetal?.parseStatus === 'ok') &&
+      slotStatuses.tenantBillWindows.length > 0 &&
+      slotStatuses.tenantBillWindows.every((w) => w.parseStatus === 'ok') &&
+      periodStatus === 'imported'
 
     await appendOperationLog({
       billingPeriodId: input.billingPeriodId,
@@ -513,9 +582,29 @@ export async function getImportSlotStatuses(periodId: string) {
       hasErrorReport: Boolean(b.errorReportPath),
     }
   }
+
+  const windows = await listTenantBillWindows(periodId)
+  const tenantBillWindows = windows.map((w) => {
+    const b = batches.find(
+      (x) => x.fileType === 'tenant_bill' && x.windowId === w.id,
+    )
+    return {
+      windowId: w.id,
+      windowStart: w.windowStart,
+      windowEnd: w.windowEnd,
+      sortOrder: w.sortOrder,
+      batchId: b?.id ?? null,
+      fileName: b?.fileName ?? null,
+      parseStatus: (b?.parseStatus ?? 'empty') as 'ok' | 'error' | 'empty',
+      parseErrorCount: b?.parseErrorCount ?? 0,
+      rowCount: b?.rowCount ?? 0,
+      hasErrorReport: Boolean(b?.errorReportPath),
+    }
+  })
+
   return {
     customer: mapSlot('customer_consumption'),
     baremetal: mapSlot('baremetal_order'),
-    tenantBill: mapSlot('tenant_bill'),
+    tenantBillWindows,
   }
 }

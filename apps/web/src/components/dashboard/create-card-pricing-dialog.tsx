@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { DollarSign, Percent, Plus, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import {
@@ -25,7 +26,6 @@ import { mockDataCenters, mockSuppliers } from '@/lib/data/mock-data'
 import type {
   ContractPricingMode,
   ContractPricingTier,
-  CooperationMode,
   DataCenter,
   GPUCardType,
   Supplier,
@@ -36,7 +36,18 @@ import {
   nowPlatformDateTime,
   toDatetimeLocalValue,
 } from '@/lib/platform-pricing/datetime'
-import { contractPricingModeNames, isSharePricingMode } from '@/lib/data/types'
+import { contractPricingModeNames } from '@/lib/data/types'
+import {
+  type RevenueShareRatioTierDraft,
+  emptyRevenueShareRatioTier,
+  revenueShareRatioTiersToContractTiers,
+  validateRevenueShareRatioTiers,
+} from '@/lib/supplier/revenue-share-ratio-tiers'
+import { RevenueShareRatioTiersEditor } from '@/app/[locale]/(protected)/supplier/components/revenue-share-ratio-tiers-editor'
+import {
+  CardTypeSelect,
+  preventCardTypeSelectOutsideDismiss,
+} from '@/components/dashboard/card-type-select'
 import { trpc } from '@/lib/trpc/client'
 
 type PricingCategory = 'card_time' | 'revenue_share'
@@ -47,7 +58,10 @@ type CreateCardPricingDialogBaseProps = {
   onOpenChange: (open: boolean) => void
   existingRecords: SupplierPricingRecord[]
   cardTypes: GPUCardType[]
-  onCreated: (record: SupplierPricingRecord) => void
+  /** mutation 成功后 invalidate 列表缓存 */
+  listInput?: { supplierId: string }
+  /** 创建成功后的额外回调（如刷新机房详情） */
+  onSuccess?: (record: SupplierPricingRecord) => void | Promise<void>
   /** 来自数据库的供应商列表（优先于 mock） */
   suppliers?: Supplier[]
   /** 来自数据库的机房列表（已按供应商筛选时可直接传入） */
@@ -55,7 +69,6 @@ type CreateCardPricingDialogBaseProps = {
   lockedSupplierId?: string
   /** 锁定到指定机房（用于机房详情页） */
   lockedDataCenter?: Pick<DataCenter, 'id' | 'name'>
-  isSubmitting?: boolean
 }
 
 export type CreateCardPricingDialogProps =
@@ -68,10 +81,6 @@ function pricingModeFromSelection(
 ): ContractPricingMode {
   if (category === 'card_time') return variant === 'fixed' ? 'card_time' : 'tiered_card_time'
   return variant === 'fixed' ? 'revenue_share' : 'tiered_revenue_share'
-}
-
-function cooperationModeFromPricingMode(mode: ContractPricingMode): CooperationMode {
-  return isSharePricingMode(mode) ? 'revenue_share' : 'card_time'
 }
 
 const emptyTier = (order: number): ContractPricingTier => ({
@@ -116,14 +125,15 @@ export function CreateCardPricingDialog({
   onOpenChange,
   existingRecords,
   cardTypes,
-  onCreated,
+  listInput,
+  onSuccess,
   supplier: lockedSupplierProp,
   suppliers: suppliersProp,
   dataCenters: dataCentersProp,
   lockedSupplierId,
   lockedDataCenter,
-  isSubmitting = false,
 }: CreateCardPricingDialogProps) {
+  const utils = trpc.useUtils()
   const supplierOptions = suppliersProp ?? mockSuppliers
   const lockedSupplier =
     lockedSupplierProp ??
@@ -137,6 +147,10 @@ export function CreateCardPricingDialog({
   const [unitPrice, setUnitPrice] = useState('')
   const [sharePercent, setSharePercent] = useState('')
   const [tiers, setTiers] = useState<ContractPricingTier[]>([emptyTier(1), emptyTier(2)])
+  const [ratioTiers, setRatioTiers] = useState<RevenueShareRatioTierDraft[]>([
+    emptyRevenueShareRatioTier(1),
+    emptyRevenueShareRatioTier(2),
+  ])
   const [effectiveFrom, setEffectiveFrom] = useState('')
   const [effectiveTo, setEffectiveTo] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -144,11 +158,33 @@ export function CreateCardPricingDialog({
   const pricingMode = pricingModeFromSelection(category, variant)
   const isTiered = variant === 'tiered'
   const isShare = category === 'revenue_share'
+  const isTieredShare = isTiered && isShare
   const resolvedSupplierId = lockedSupplier?.id ?? supplierId
   const isDbMode =
     Boolean(suppliersProp?.length) ||
     Boolean(lockedSupplierProp) ||
     Boolean(lockedSupplierId)
+
+  const invalidateInput = listInput ?? (resolvedSupplierId ? { supplierId: resolvedSupplierId } : undefined)
+
+  const createMutation = trpc.supplier.unitCosts.create.useMutation({
+    onSuccess: async (record) => {
+      if (invalidateInput) {
+        await utils.supplier.unitCosts.listRecords.invalidate(invalidateInput)
+        await utils.supplier.unitCosts.listHistory.invalidate(invalidateInput)
+      }
+      await onSuccess?.(record)
+      toast.success('机房卡型配置已创建')
+      onOpenChange(false)
+    },
+    onError: (error) => {
+      const message = error.message || '创建失败，请稍后重试'
+      setSubmitError(message)
+      toast.error(message)
+    },
+  })
+
+  const isSubmitting = createMutation.isPending
 
   const { data: fetchedDataCenters = [], isLoading: dataCentersLoading } =
     trpc.supplier.listDataCenters.useQuery(
@@ -173,6 +209,7 @@ export function CreateCardPricingDialog({
       setUnitPrice('')
       setSharePercent('')
       setTiers([emptyTier(1), emptyTier(2)])
+      setRatioTiers([emptyRevenueShareRatioTier(1), emptyRevenueShareRatioTier(2)])
       setEffectiveFrom(toDatetimeLocalValue(nowPlatformDateTime()))
       setEffectiveTo('')
       setSubmitError(null)
@@ -210,6 +247,10 @@ export function CreateCardPricingDialog({
   }
 
   const handleSubmit = () => {
+    if (isSubmitting) return
+
+    setSubmitError(null)
+
     if (!resolvedSupplierId) {
       setSubmitError('请选择供应商')
       return
@@ -238,13 +279,8 @@ export function CreateCardPricingDialog({
       return
     }
 
-    const supplier = lockedSupplier ?? supplierOptions.find((s) => s.id === resolvedSupplierId)
-    const dataCenter =
-      lockedDataCenter ??
-      dataCenterOptions.find((dc) => dc.id === dataCenterId)
-    const cardType = cardTypes.find((c) => c.id === cardTypeId)
-    if (!supplier || !dataCenter || !cardType) {
-      setSubmitError('所选供应商、机房或卡型无效')
+    if (!isDbMode) {
+      setSubmitError('当前为演示模式，无法保存到数据库')
       return
     }
 
@@ -268,6 +304,13 @@ export function CreateCardPricingDialog({
         }
         revenueSharePercent = v
       }
+    } else if (isShare) {
+      const validationError = validateRevenueShareRatioTiers(ratioTiers)
+      if (validationError) {
+        setSubmitError(validationError)
+        return
+      }
+      pricingTiers = revenueShareRatioTiersToContractTiers(ratioTiers)
     } else {
       const parsed = tiers.map((t) => ({
         ...t,
@@ -277,20 +320,13 @@ export function CreateCardPricingDialog({
             ? null
             : Number(t.thresholdToHours),
         unitPricePerHour: t.unitPricePerHour != null ? Number(t.unitPricePerHour) : undefined,
-        revenueSharePercent:
-          t.revenueSharePercent != null ? Number(t.revenueSharePercent) : undefined,
       }))
       if (parsed.length < 1) {
         setSubmitError('请至少配置一档阶梯')
         return
       }
       for (const t of parsed) {
-        if (isShare) {
-          if (t.revenueSharePercent == null || Number.isNaN(t.revenueSharePercent)) {
-            setSubmitError(`请填写第 ${t.tierOrder} 档分成比例`)
-            return
-          }
-        } else if (t.unitPricePerHour == null || Number.isNaN(t.unitPricePerHour)) {
+        if (t.unitPricePerHour == null || Number.isNaN(t.unitPricePerHour)) {
           setSubmitError(`请填写第 ${t.tierOrder} 档卡时单价`)
           return
         }
@@ -298,35 +334,38 @@ export function CreateCardPricingDialog({
       pricingTiers = parsed
     }
 
-    const now = new Date().toISOString()
     const effectiveFromValue = fromDatetimeLocalValue(effectiveFrom)
     const effectiveToValue = effectiveTo.trim()
       ? fromDatetimeLocalValue(effectiveTo)
       : null
 
-    onCreated({
-      id: `spr-new-${Date.now()}`,
-      supplierId: supplier.id,
-      supplierName: supplier.name,
-      dataCenterId: dataCenter.id,
-      dataCenterName: dataCenter.name,
-      cardTypeId: cardType.id,
-      cardTypeName: cardType.name,
-      cooperationMode: cooperationModeFromPricingMode(pricingMode),
+    createMutation.mutate({
+      supplierId: resolvedSupplierId,
+      dataCenterId,
+      gpuCardTypeId: cardTypeId,
       pricingMode,
       unitPricePerHour,
       revenueSharePercent,
       pricingTiers,
       effectiveFrom: effectiveFromValue,
       effectiveTo: effectiveToValue,
-      updatedAt: now,
-      updatedBy: '当前用户',
     })
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && isSubmitting) return
+        onOpenChange(nextOpen)
+      }}
+    >
+      <DialogContent
+        className="sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+        onPointerDownOutside={preventCardTypeSelectOutsideDismiss}
+        onInteractOutside={preventCardTypeSelectOutsideDismiss}
+        onFocusOutside={preventCardTypeSelectOutsideDismiss}
+      >
         <DialogHeader>
           <DialogTitle>新增机房卡型配置</DialogTitle>
           <DialogDescription>
@@ -412,27 +451,15 @@ export function CreateCardPricingDialog({
                 </div>
               </div>
             )}
-            <div className="grid gap-2">
-              <Label>卡型 *</Label>
-              <Select
-                value={cardTypeId}
-                onValueChange={(v) => {
-                  setCardTypeId(v)
-                  setSubmitError(null)
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="选择卡型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cardTypes.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <CardTypeSelect
+              label="卡型 *"
+              value={cardTypeId}
+              cardTypes={cardTypes}
+              onChange={(v) => {
+                setCardTypeId(v)
+                setSubmitError(null)
+              }}
+            />
           </div>
 
           <div className="grid gap-2">
@@ -490,7 +517,7 @@ export function CreateCardPricingDialog({
                 description={
                   category === 'card_time'
                     ? '按自然月累计卡时分档，用量越大单价越低'
-                    : '按自然月累计卡时分档，用量越大分成比例越高'
+                    : '按成交/刊例比例划档，比例越高分成比例越高'
                 }
                 selected={variant === 'tiered'}
               />
@@ -531,7 +558,18 @@ export function CreateCardPricingDialog({
             </div>
           )}
 
-          {isTiered && (
+          {isTieredShare ? (
+            <RevenueShareRatioTiersEditor
+              tiers={ratioTiers}
+              onChange={(next) => {
+                setRatioTiers(next)
+                setSubmitError(null)
+              }}
+              error={submitError}
+            />
+          ) : null}
+
+          {isTiered && !isShare ? (
             <div className="space-y-3 rounded-lg border border-border p-4">
               <div className="flex items-center justify-between">
                 <Label>阶梯档位 *</Label>
@@ -576,22 +614,15 @@ export function CreateCardPricingDialog({
                     />
                   </div>
                   <div className="grid gap-1">
-                    <Label className="text-xs">{isShare ? '分成 %' : '单价 ¥/时'}</Label>
+                    <Label className="text-xs">单价 ¥/时</Label>
                     <Input
                       type="number"
                       min={0}
-                      value={
-                        isShare
-                          ? (tier.revenueSharePercent ?? '')
-                          : (tier.unitPricePerHour ?? '')
-                      }
+                      value={tier.unitPricePerHour ?? ''}
                       onChange={(e) =>
-                        updateTier(
-                          tier.tierOrder,
-                          isShare
-                            ? { revenueSharePercent: parseFloat(e.target.value) }
-                            : { unitPricePerHour: parseFloat(e.target.value) },
-                        )
+                        updateTier(tier.tierOrder, {
+                          unitPricePerHour: parseFloat(e.target.value),
+                        })
                       }
                     />
                   </div>
@@ -608,7 +639,7 @@ export function CreateCardPricingDialog({
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
 
           <div className="grid gap-2">
             <Label>生效时间 *</Label>
@@ -632,11 +663,17 @@ export function CreateCardPricingDialog({
             <p className="text-xs text-muted-foreground">留空表示长期有效</p>
           </div>
 
-          {submitError && <p className="text-sm text-destructive">{submitError}</p>}
+          {submitError && !isTieredShare ? (
+            <p className="text-sm text-destructive">{submitError}</p>
+          ) : null}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+          >
             取消
           </Button>
           <Button onClick={handleSubmit} disabled={isSubmitting}>

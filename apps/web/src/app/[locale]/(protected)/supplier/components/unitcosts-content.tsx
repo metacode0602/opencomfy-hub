@@ -87,14 +87,6 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
     { enabled: Boolean(scopeSupplierId) },
   )
 
-  const createMutation = trpc.supplier.unitCosts.create.useMutation({
-    onSuccess: async () => {
-      await utils.supplier.unitCosts.listRecords.invalidate(listInput)
-      await utils.supplier.unitCosts.listHistory.invalidate(listInput)
-      setCreateDialogOpen(false)
-    },
-  })
-
   const [historySearch, setHistorySearch] = useState('')
   const [historySupplierFilter, setHistorySupplierFilter] = useState('all')
 
@@ -438,26 +430,12 @@ export function UnitCostsContent({ supplierId: lockedSupplierId, embedded }: Uni
       <CreateCardPricingDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
+        listInput={listInput}
         existingRecords={pricingRecords}
         cardTypes={activeCardTypes}
         suppliers={suppliers}
         dataCenters={scopedDataCenters}
         lockedSupplierId={lockedSupplierId}
-        isSubmitting={createMutation.isPending}
-        onCreated={(record) => {
-          const pricingMode = record.pricingMode ?? 'card_time'
-          createMutation.mutate({
-            supplierId: record.supplierId,
-            dataCenterId: record.dataCenterId,
-            gpuCardTypeId: record.cardTypeId,
-            pricingMode,
-            unitPricePerHour: record.unitPricePerHour,
-            revenueSharePercent: record.revenueSharePercent,
-            pricingTiers: record.pricingTiers,
-            effectiveFrom: record.effectiveFrom,
-            effectiveTo: record.effectiveTo ?? null,
-          })
-        }}
       />
 
       <EditPricingDialog

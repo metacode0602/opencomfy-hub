@@ -232,6 +232,13 @@
       "when": 1779587298428,
       "tag": "0033_great_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1779600991776,
+      "tag": "0034_bright_screwball",
+      "breakpoints": true
     }
   ]
 }

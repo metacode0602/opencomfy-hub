@@ -38,6 +38,7 @@ const importSchema = z.object({
   fileName: z.string(),
   /** base64 encoded file content */
   fileBase64: z.string().min(1),
+  windowId: z.string().optional(),
 })
 
 const allocationItemSchema = z.object({
@@ -96,6 +97,7 @@ export const financeRouter = createTRPCRouter({
           fileName: input.fileName,
           buffer,
           actorId,
+          windowId: input.windowId,
         })
       } catch (e) {
         mapFinanceError(e)
@@ -200,6 +202,21 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    detectPriceWindows: protectedProcedure
+      .input(
+        z.object({
+          periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+          periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.detectPriceWindows(input)
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     validate: protectedProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
@@ -215,6 +232,7 @@ export const financeRouter = createTRPCRouter({
         z.object({
           billingPeriodId: z.string(),
           slot: z.enum(['customer', 'baremetal', 'tenantBill']),
+          windowId: z.string().optional(),
         }),
       )
       .query(async ({ input }) => {
