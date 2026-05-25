@@ -14,6 +14,7 @@ import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-te
 import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant-billing-lists'
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
+import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
@@ -78,6 +79,7 @@ const projectFilterSchema = z.object({
   search: z.string().optional(),
   stage: z.string().optional(),
   status: z.string().optional(),
+  tagIds: z.array(z.string()).optional(),
 })
 
 export const crmRouter = createTRPCRouter({
@@ -194,7 +196,14 @@ export const crmRouter = createTRPCRouter({
 
   tenants: createTRPCRouter({
     list: protectedProcedure
-      .input(z.object({ search: z.string().optional() }).optional())
+      .input(
+        z
+          .object({
+            search: z.string().optional(),
+            tagId: z.string().optional(),
+          })
+          .optional(),
+      )
       .query(({ input }) => billingTenantsDataAccess.list(input)),
     getById: protectedProcedure
       .input(z.object({ id: z.string() }))
@@ -335,5 +344,46 @@ export const crmRouter = createTRPCRouter({
       .input(z.object({ from: z.string().optional(), to: z.string().optional() }).optional())
       .query(({ input }) => calendarDataAccess.listActivities(input)),
     listActivityTypes: protectedProcedure.query(() => calendarDataAccess.listActivityTypes()),
+  }),
+
+  tenantProjectCost: createTRPCRouter({
+    getByProjectId: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(async ({ input }) => {
+        const context = await tenantProjectCostDataAccess.getContextByProjectId(input.projectId)
+        if (!context) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '未找到项目或关联计费租户' })
+        }
+        return context
+      }),
+    savePresets: adminProcedure
+      .input(
+        z.object({
+          tenantId: z.string(),
+          allocations: z.array(
+            z.object({
+              projectId: z.string(),
+              allocationPercent: z.string(),
+            }),
+          ),
+          remark: z.string().max(500).optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          await tenantProjectCostDataAccess.savePresets({
+            tenantId: input.tenantId,
+            allocations: input.allocations,
+            remark: input.remark,
+            createdBy,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '保存项目成本分成失败' })
+        }
+      }),
   }),
 })

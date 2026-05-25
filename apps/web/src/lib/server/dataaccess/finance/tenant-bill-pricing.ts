@@ -440,6 +440,27 @@ export async function loadPricingResolveContext(): Promise<PricingResolveContext
   return { gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard }
 }
 
+/** 按机房×卡型 ID 解析成本定价（与导入前校验 tenant-bill-pricing 同源） */
+export async function resolveUnitCostForDcCard(input: {
+  dataCenterId: string
+  gpuCardTypeId: string
+  asOfDate: string
+  ctx: PricingResolveContext
+}): Promise<ResolvedUnitCost | null> {
+  const records =
+    input.ctx.recordsByDcCard.get(recordKey(input.dataCenterId, input.gpuCardTypeId)) ?? []
+  for (const record of records) {
+    const resolved = await resolvePricingSnapshotForDcCard({
+      record,
+      dataCenterId: input.dataCenterId,
+      gpuCardTypeId: input.gpuCardTypeId,
+      periodEnd: input.asOfDate,
+    })
+    if (resolved) return resolved
+  }
+  return null
+}
+
 export function diagnosePricingPair(
   pair: MissingPricingPair,
   ctx: PricingResolveContext,

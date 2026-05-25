@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
   Plus,
@@ -12,6 +12,8 @@ import {
   Eye,
   Trash,
   Tag,
+  ChevronDown,
+  DollarSignIcon,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -28,6 +30,7 @@ import {
 } from '@workspace/ui/components/table'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -41,10 +44,12 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import type { Project } from '@/lib/data/types'
+import { TENANT_PROJECT_IMPORT_TAG_NAMES } from '@/lib/crm/tenant-project-import-utils'
 import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
 import { ProjectTagsDialog } from './project-tags-dialog'
+import { ProjectCostAllocationDialog } from './project-cost-allocation-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
@@ -57,25 +62,48 @@ export function ProjectsContent() {
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
   const [tagsOpen, setTagsOpen] = useState(false)
   const [taggingProject, setTaggingProject] = useState<Project | null>(null)
+  const [allocationOpen, setAllocationOpen] = useState(false)
+  const [allocatingProject, setAllocatingProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
+
+  const { data: allTags = [] } = trpc.crm.projectTags.list.useQuery()
+  const tagFilterOptions = useMemo(() => {
+    const allowed = new Set<string>(TENANT_PROJECT_IMPORT_TAG_NAMES)
+    return allTags.filter((tag) => allowed.has(tag.name))
+  }, [allTags])
 
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
     stage: stageFilter,
     status: statusFilter,
+    tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
   })
 
   const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
 
   const pagination = useListPagination(projects, {
-    resetDeps: [search, stageFilter, statusFilter],
+    resetDeps: [search, stageFilter, statusFilter, selectedTagIds.join(',')],
   })
+
+  const toggleTagFilter = (tagId: string, checked: boolean) => {
+    setSelectedTagIds((prev) =>
+      checked ? (prev.includes(tagId) ? prev : [...prev, tagId]) : prev.filter((id) => id !== tagId),
+    )
+  }
+
+  const tagFilterLabel =
+    selectedTagIds.length === 0
+      ? '全部标签'
+      : selectedTagIds.length === 1
+        ? (tagFilterOptions.find((tag) => tag.id === selectedTagIds[0])?.name ?? '已选 1 个标签')
+        : `已选 ${selectedTagIds.length} 个标签`
 
   const leadCount = stageCounts?.lead ?? 0
   const testingCount = stageCounts?.testing ?? 0
@@ -89,6 +117,11 @@ export function ProjectsContent() {
   const openTags = (project: Project) => {
     setTaggingProject(project)
     setTagsOpen(true)
+  }
+
+  const openAllocation = (project: Project) => {
+    setAllocatingProject(project)
+    setAllocationOpen(true)
   }
 
   return (
@@ -146,6 +179,12 @@ export function ProjectsContent() {
         onOpenChange={setTagsOpen}
         project={taggingProject}
         onSaved={() => void refetch()}
+      />
+
+      <ProjectCostAllocationDialog
+        open={allocationOpen}
+        onOpenChange={setAllocationOpen}
+        project={allocatingProject}
       />
 
       <CrmProjectImportDialog
@@ -212,7 +251,7 @@ export function ProjectsContent() {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="搜索项目名称、客户、客户经理..."
+                placeholder="搜索项目名称、客户、租户 ID..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
@@ -241,6 +280,32 @@ export function ProjectsContent() {
                   <SelectItem value="completed">已完成</SelectItem>
                 </SelectContent>
               </Select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-[180px] justify-between font-normal">
+                    <span className="truncate">{tagFilterLabel}</span>
+                    <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[200px]">
+                  {tagFilterOptions.map((tag) => (
+                    <DropdownMenuCheckboxItem
+                      key={tag.id}
+                      checked={selectedTagIds.includes(tag.id)}
+                      onCheckedChange={(checked) => toggleTagFilter(tag.id, checked === true)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
+                      {tag.name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  {selectedTagIds.length > 0 ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => setSelectedTagIds([])}>清除筛选</DropdownMenuItem>
+                    </>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardContent>
@@ -252,8 +317,10 @@ export function ProjectsContent() {
             <TableHeader>
               <TableRow>
                 <TableHead>项目名称</TableHead>
+                <TableHead>租户 ID</TableHead>
                 <TableHead>客户</TableHead>
                 <TableHead>业务线</TableHead>
+                <TableHead>标签</TableHead>
                 <TableHead>阶段</TableHead>
                 <TableHead>售前</TableHead>
                 <TableHead>客户经理</TableHead>
@@ -265,7 +332,20 @@ export function ProjectsContent() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {pagination.items.map((project) => (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                    加载中…
+                  </TableCell>
+                </TableRow>
+              ) : projects.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                    暂无数据
+                  </TableCell>
+                </TableRow>
+              ) : (
+                pagination.items.map((project) => (
                 <TableRow key={project.id}>
                   <TableCell>
                     <Link
@@ -275,6 +355,9 @@ export function ProjectsContent() {
                       {project.name}
                       <ArrowUpRight className="w-3 h-3 opacity-50" />
                     </Link>
+                  </TableCell>
+                  <TableCell className="font-mono text-sm text-muted-foreground">
+                    {project.platformTenantId ?? '—'}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -291,6 +374,19 @@ export function ProjectsContent() {
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {project.businessLineName}
+                  </TableCell>
+                  <TableCell>
+                    {project.tags.length > 0 ? (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {project.tags.map((tag) => (
+                          <Badge key={tag.id} variant="secondary" className="font-normal">
+                            {tag.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      '—'
+                    )}
                   </TableCell>
                   <TableCell>
                     <StatusBadge status={project.stage} />
@@ -341,7 +437,10 @@ export function ProjectsContent() {
                           <Tag className="w-4 h-4 mr-2" />
                           设置标签
                         </DropdownMenuItem>
-
+                        <DropdownMenuItem onClick={() => openAllocation(project)}>
+                          <DollarSignIcon className="w-4 h-4 mr-2" />
+                          项目分成
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>转为测试中</DropdownMenuItem>
                         <DropdownMenuItem>转为已转正</DropdownMenuItem>
@@ -356,7 +455,8 @@ export function ProjectsContent() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))}
+              ))
+              )}
             </TableBody>
           </Table>
           <ListPagination

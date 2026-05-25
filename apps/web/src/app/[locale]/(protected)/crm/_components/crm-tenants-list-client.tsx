@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Badge } from "@workspace/ui/components/badge"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -11,6 +12,13 @@ import {
 } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -19,6 +27,7 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { LocaleLink } from "@/lib/i18n/navigation"
+import { TENANT_PROJECT_IMPORT_TAG_NAMES } from "@/lib/crm/tenant-project-import-utils"
 import { trpc } from "@/lib/trpc/client"
 import { IconEye, IconPlus, IconUpload } from "@tabler/icons-react"
 import { CrmTenantImportDialog } from "./crm-tenant-import-dialog"
@@ -26,6 +35,8 @@ import { CrmPlatformTenantImportDialog } from "./crm-platform-tenant-import-dial
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { useListPagination } from "@/hooks/use-list-pagination"
 import { ListPagination } from "@/components/shared/list-pagination"
+
+const ALL_TAGS = "__all__"
 
 function formatMoney(n: number) {
   return `¥${n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -66,6 +77,7 @@ export function CrmTenantsListClient() {
   const utils = trpc.useUtils()
   const [searchInput, setSearchInput] = React.useState("")
   const [search, setSearch] = React.useState("")
+  const [tagFilter, setTagFilter] = React.useState(ALL_TAGS)
   const [platformImportOpen, setPlatformImportOpen] = React.useState(false)
   const [excelImportOpen, setExcelImportOpen] = React.useState(false)
 
@@ -74,8 +86,17 @@ export function CrmTenantsListClient() {
     return () => window.clearTimeout(t)
   }, [searchInput])
 
+  const { data: allTags = [] } = trpc.crm.projectTags.list.useQuery()
+  const tagFilterOptions = React.useMemo(() => {
+    const allowed = new Set<string>(TENANT_PROJECT_IMPORT_TAG_NAMES)
+    return allTags.filter((tag) => allowed.has(tag.name))
+  }, [allTags])
+
   const { data: tenants = [], isLoading, isFetching } = trpc.crm.tenants.list.useQuery(
-    { search: search || undefined },
+    {
+      search: search || undefined,
+      tagId: tagFilter === ALL_TAGS ? undefined : tagFilter,
+    },
     { placeholderData: (prev) => prev },
   )
 
@@ -84,7 +105,7 @@ export function CrmTenantsListClient() {
   }, [utils])
 
   const pagination = useListPagination(tenants, {
-    resetDeps: [search],
+    resetDeps: [search, tagFilter],
   })
 
   return (
@@ -122,12 +143,27 @@ export function CrmTenantsListClient() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Input
-            placeholder="搜索：平台租户ID / 租户名 / 手机号 / 客户名"
-            className="max-w-md"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <Input
+              placeholder="搜索：平台租户ID / 租户名 / 手机号 / 客户名"
+              className="max-w-md"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+            <Select value={tagFilter} onValueChange={setTagFilter}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="项目标签" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_TAGS}>全部标签</SelectItem>
+                {tagFilterOptions.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
           <div className="rounded-md border">
             <Table>
@@ -137,6 +173,7 @@ export function CrmTenantsListClient() {
                   <TableHead>租户名</TableHead>
                   <TableHead>租户手机</TableHead>
                   <TableHead>客户</TableHead>
+                  <TableHead>项目标签</TableHead>
                   <TableHead>联系人</TableHead>
                   <TableHead className="text-right">余额</TableHead>
                   <TableHead>欠费时间</TableHead>
@@ -150,13 +187,13 @@ export function CrmTenantsListClient() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : tenants.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -173,6 +210,19 @@ export function CrmTenantsListClient() {
                         >
                           {t.customerName}
                         </LocaleLink>
+                      </TableCell>
+                      <TableCell>
+                        {t.projectTags.length > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {t.projectTags.map((tag) => (
+                              <Badge key={tag.id} variant="secondary" className="font-normal">
+                                {tag.name}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : (
+                          "—"
+                        )}
                       </TableCell>
                       <TableCell className="text-sm">
                         {t.contactPerson || "—"}

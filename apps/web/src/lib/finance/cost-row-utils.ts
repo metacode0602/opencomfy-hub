@@ -98,6 +98,7 @@ export function recomputeStaffSumRows(
   const recordsByStaff = new Map<string, PlatformCostMonthly[]>()
   for (const r of rows) {
     if (r.type !== "record") continue
+    if (!r.staff_id) continue
     const list = recordsByStaff.get(r.staff_id) ?? []
     list.push(r)
     recordsByStaff.set(r.staff_id, list)
@@ -105,6 +106,7 @@ export function recomputeStaffSumRows(
 
   return rows.map((row) => {
     if (row.type !== "sum") return row
+    if (!row.staff_id) return row
     const records = recordsByStaff.get(row.staff_id)
     if (!records?.length) return row
     const latestUpdated = records.reduce<string | null>((latest, r) => {

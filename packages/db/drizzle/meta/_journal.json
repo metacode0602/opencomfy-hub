@@ -260,6 +260,20 @@
       "when": 1779681809281,
       "tag": "0037_mute_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1779704092751,
+      "tag": "0038_jittery_freak",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1779716825980,
+      "tag": "0039_tranquil_penance",
+      "breakpoints": true
     }
   ]
 }

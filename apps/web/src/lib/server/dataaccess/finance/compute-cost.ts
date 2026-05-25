@@ -6,16 +6,14 @@ import {
   billingPeriodRawBaremetalOrder,
   billingPeriodRawTenantBill,
   billingPeriodReconciliationReport,
+  platformCostMonthly,
 } from '@workspace/db/schema'
-import { eq } from 'drizzle-orm'
-import { aggregateBaremetalOrders } from './compute-cost-baremetal-agg'
-import { buildAndPersistCostDetail } from './compute-cost-detail'
-import {
-  getPendingCostAllocationTenants,
-  listCostEnrichments,
-  resolveAndPersistCostEnrichment,
-} from './compute-cost-enrichment'
-import { rollupCostDetailToPlatformMonthly } from './compute-cost-rollup'
+import { and, eq } from 'drizzle-orm'
+import { persistCostPricingSnapshots } from './compute-cost-pricing-snapshot'
+import { rollupSourceLinesToPlatformMonthly } from './compute-cost-rollup'
+import { persistCostSourceLines } from './compute-cost-source-line'
+import { formatPendingCostAllocationError } from './cost-allocation-errors'
+import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { RULE_VERSION } from './constants'
 import { FinanceError } from './errors'
 import { getImportSlotStatuses } from './import'
@@ -127,23 +125,23 @@ async function assertCostComputePreconditions(periodId: string): Promise<void> {
   }
 
   const tenantPlatformIds = await collectCostTenantPlatformIds(periodId)
-  const pendingTenants = await getPendingCostAllocationTenants({
+  const pendingIssues = await getPendingCostAllocationIssues({
     billingPeriodId: periodId,
     tenantPlatformIds,
     periodEnd: period.periodEnd,
   })
-  if (pendingTenants.length > 0) {
+  if (pendingIssues.length > 0) {
     await db
       .update(billingPeriod)
       .set({ status: 'pending_allocation' })
       .where(eq(billingPeriod.id, periodId))
     financeWarn('compute-cost', 'blocked: pending allocation', {
       periodId,
-      tenants: pendingTenants,
+      tenants: pendingIssues.map((i) => i.tenantPlatformId),
     })
     throw new FinanceError(
       'UNPROCESSABLE',
-      `${pendingTenants.length} 个租户需配置成本分成比例后方可计算`,
+      formatPendingCostAllocationError(pendingIssues, 'cost'),
     )
   }
 }
@@ -198,34 +196,38 @@ export async function computeBillingPeriodCost(input: {
   await syncTenantBillWindowsForPeriod(periodId)
 
   const tenantPlatformIds = await collectCostTenantPlatformIds(periodId)
-  await resolveAndPersistCostEnrichment({
+  const issues: string[] = []
+
+  await persistCostSourceLines({
     billingPeriodId: periodId,
     tenantPlatformIds,
     periodEnd: period.periodEnd,
-  })
-
-  const bindings = await listCostEnrichments(periodId)
-  const issues: string[] = []
-
-  const baremetalByKey = await aggregateBaremetalOrders({
-    billingPeriodId: periodId,
     issues,
   })
 
-  const windows = await listTenantBillWindows(periodId)
-  const detailRows = await buildAndPersistCostDetail({
+  const snapshots = await persistCostPricingSnapshots({
     billingPeriodId: periodId,
-    windows,
-    bindings,
-    baremetalByKey,
+    periodEnd: period.periodEnd,
+  })
+  const costCount = await rollupSourceLinesToPlatformMonthly({
+    billingPeriodId: periodId,
+    snapshots,
     issues,
   })
 
-  const costCount = await rollupCostDetailToPlatformMonthly(detailRows)
+  const recordRows = await db
+    .select()
+    .from(platformCostMonthly)
+    .where(
+      and(
+        eq(platformCostMonthly.billingPeriodId, periodId),
+        eq(platformCostMonthly.type, 'record'),
+      ),
+    )
 
   let totalCost = 0
   let totalGross = 0
-  for (const row of detailRows) {
+  for (const row of recordRows) {
     totalGross += parseNum(row.grossProfit)
     totalCost +=
       parseNum(row.soldDurationCostExclTax) + parseNum(row.giftedDurationCostExclTax)

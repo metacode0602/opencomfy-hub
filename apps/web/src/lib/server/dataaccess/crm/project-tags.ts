@@ -10,7 +10,7 @@ export const DEFAULT_PROJECT_TAG_NAMES = [
   '销售新客',
   '平台老客',
   '公海池-无人跟踪',
-  '平台直客',
+  '中台直客',
   '产品直客',
 ] as const
 

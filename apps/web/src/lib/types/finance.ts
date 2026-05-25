@@ -95,14 +95,19 @@ export type PlatformCostMonthly = {
   id: string
   billing_period_id: string
   supplier_unit_cost_id: string | null
-  account_manager: string
+  account_manager: string | null
   staff_name?: string | null
-  staff_id: string
+  staff_id: string | null
+  data_center_id?: string | null
+  gpu_card_type_id?: string | null
   idc_name: string | null
   idc_code: string | null
   card_type: string | null
   type: PlatformCostMonthlyType
+  total_consumption?: string | null
+  voucher_consumption?: string | null
   balance_consumption: string | null
+  total_card_hours?: string | null
   balance_card_hours: string | null
   voucher_card_hours: string | null
   confirmed_revenue_excl_tax: string | null
@@ -111,6 +116,8 @@ export type PlatformCostMonthly = {
   gross_profit: string | null
   deal_unit_price_per_hour: string | null
   list_price_per_hour: string | null
+  pricing_snapshot_id?: string | null
+  source_line_ids?: string[] | null
   created_at: string
   updated_at: string | null
 }

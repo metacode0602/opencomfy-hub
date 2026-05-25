@@ -1,105 +1,257 @@
 import { db } from '@/lib/db'
-import { platformCostMonthly } from '@workspace/db/schema'
+import type { ContractPricingMode, ContractPricingTier } from '@/lib/data/types'
+import {
+  computeGiftedDurationCostExclTaxForPricing,
+  computeSoldDurationCostExclTax,
+  parsePositiveMoney,
+  parsePositivePercent,
+  parsePricingTiers,
+  resolveTierCostContext,
+  type ResolvedPricingFields,
+} from '@/lib/finance/cost-pricing-utils'
+import {
+  COST_TAX_DIVISOR,
+  computeGrossProfit,
+  toHoursString,
+} from '@/lib/finance/cost-row-utils'
 import { parseMoney, toMoneyString } from '@/lib/finance/income-row-utils'
-import { toHoursString } from '@/lib/finance/cost-row-utils'
+import {
+  billingPeriodCostSourceLine,
+  dataCenter,
+  gpuCardType,
+  platformCostMonthly,
+} from '@workspace/db/schema'
+import { eq } from 'drizzle-orm'
+import {
+  findLatestPricingSnapshot,
+  type CostPricingSnapshotRow,
+} from './compute-cost-pricing-snapshot'
 import { financeLog } from './logger'
 import { newId } from './operation-log'
-import type { CostDetailRow } from './compute-cost-detail'
+import { listTenantBillWindows } from './tenant-bill-windows'
 
-type RollupAccumulator = {
-  id: string
-  billingPeriodId: string
+type RollupGroup = {
   staffId: string
   staffName: string
-  accountManager: string
-  idcCode: string
-  idcName: string | null
-  cardType: string
+  dataCenterId: string
+  dataCenterName: string
+  dataCenterCode: string
+  gpuCardTypeId: string
+  gpuCardTypeCode: string
+  totalConsumption: number
+  voucherConsumption: number
   balanceConsumption: number
-  balanceCardHours: number
+  totalCardHours: number
   voucherCardHours: number
-  confirmedRevenueExclTax: number
-  soldDurationCostExclTax: number
-  giftedDurationCostExclTax: number
-  grossProfit: number
-  dealUnitPricePerHour: string | null
-  listPricePerHour: string | null
-  supplierUnitCostId: string | null
+  balanceCardHours: number
+  sourceLineIds: string[]
+  windowIds: string[]
 }
 
-function rollupKey(staffId: string, idcCode: string, cardType: string): string {
-  return `${staffId}::${idcCode}::${cardType}`
+function pricingFieldString(value: number | null | undefined): string | null {
+  if (value == null || value <= 0) return null
+  return toMoneyString(value)
 }
 
-export async function rollupCostDetailToPlatformMonthly(
-  details: CostDetailRow[],
-): Promise<number> {
-  if (details.length === 0) return 0
+function snapshotToPricingFields(snap: CostPricingSnapshotRow): ResolvedPricingFields {
+  return {
+    pricingMode: snap.pricingMode as ContractPricingMode,
+    unitPricePerHour:
+      parsePositiveMoney(snap.dealUnitPricePerHour) ??
+      parsePositiveMoney(snap.listPricePerHour),
+    revenueSharePercent: parsePositivePercent(snap.revenueSharePercent),
+    listPricePerHour: parsePositiveMoney(snap.listPricePerHour),
+    pricingTiers: parsePricingTiers(snap.pricingTiers) as ContractPricingTier[],
+  }
+}
 
-  const periodId = details[0]!.billingPeriodId!
-  const bucket = new Map<string, RollupAccumulator>()
+function rollupKey(staffId: string, dataCenterId: string, gpuCardTypeId: string): string {
+  return `${staffId}::${dataCenterId}::${gpuCardTypeId}`
+}
 
-  for (const row of details) {
-    const key = rollupKey(row.staffId, row.idcCode, row.cardType)
+export async function rollupSourceLinesToPlatformMonthly(input: {
+  billingPeriodId: string
+  snapshots: Map<string, CostPricingSnapshotRow>
+  issues: string[]
+}): Promise<number> {
+  const { billingPeriodId: periodId, snapshots, issues } = input
+
+  const lines = await db
+    .select()
+    .from(billingPeriodCostSourceLine)
+    .where(eq(billingPeriodCostSourceLine.billingPeriodId, periodId))
+
+  if (lines.length === 0) return 0
+
+  const windows = await listTenantBillWindows(periodId)
+  const windowIds = windows.map((w) => w.id)
+
+  const dcCodes = new Map<string, string>()
+  const cardCodes = new Map<string, string>()
+  const dcRows = await db
+    .select({ id: dataCenter.id, code: dataCenter.code })
+    .from(dataCenter)
+  for (const row of dcRows) dcCodes.set(row.id, row.code)
+  const cardRows = await db
+    .select({ id: gpuCardType.id, code: gpuCardType.code })
+    .from(gpuCardType)
+  for (const row of cardRows) cardCodes.set(row.id, row.code)
+
+  const bucket = new Map<string, RollupGroup>()
+
+  for (const line of lines) {
+    if (!line.staffId) continue
+    const key = rollupKey(line.staffId, line.dataCenterId, line.gpuCardTypeId)
     const existing = bucket.get(key)
     if (!existing) {
       bucket.set(key, {
-        id: newId(),
-        billingPeriodId: periodId,
-        staffId: row.staffId,
-        staffName: row.accountManagerName ?? row.staffId,
-        accountManager: row.accountManagerName ?? row.staffId,
-        idcCode: row.idcCode,
-        idcName: row.idcName ?? null,
-        cardType: row.cardType,
-        balanceConsumption: parseMoney(row.balanceConsumption),
-        balanceCardHours: Number(row.balanceCardHours ?? 0),
-        voucherCardHours: Number(row.voucherCardHours ?? 0),
-        confirmedRevenueExclTax: parseMoney(row.confirmedRevenueExclTax),
-        soldDurationCostExclTax: parseMoney(row.soldDurationCostExclTax),
-        giftedDurationCostExclTax: parseMoney(row.giftedDurationCostExclTax),
-        grossProfit: parseMoney(row.grossProfit),
-        dealUnitPricePerHour: row.dealUnitPricePerHour ?? null,
-        listPricePerHour: row.listPricePerHour ?? null,
-        supplierUnitCostId: row.supplierUnitCostId ?? null,
+        staffId: line.staffId,
+        staffName: line.staffName ?? line.staffId,
+        dataCenterId: line.dataCenterId,
+        dataCenterName: line.dataCenterName ?? '',
+        dataCenterCode: dcCodes.get(line.dataCenterId) ?? '',
+        gpuCardTypeId: line.gpuCardTypeId,
+        gpuCardTypeCode: cardCodes.get(line.gpuCardTypeId) ?? '',
+        totalConsumption: parseMoney(line.totalConsumption),
+        voucherConsumption: parseMoney(line.voucherConsumption),
+        balanceConsumption: parseMoney(line.balanceConsumption),
+        totalCardHours: Number(line.totalCardHours ?? 0),
+        voucherCardHours: Number(line.voucherCardHours ?? 0),
+        balanceCardHours: Number(line.balanceCardHours ?? 0),
+        sourceLineIds: [line.id],
+        windowIds: line.windowId ? [line.windowId] : [],
       })
       continue
     }
 
-    existing.balanceConsumption += parseMoney(row.balanceConsumption)
-    existing.balanceCardHours += Number(row.balanceCardHours ?? 0)
-    existing.voucherCardHours += Number(row.voucherCardHours ?? 0)
-    existing.confirmedRevenueExclTax += parseMoney(row.confirmedRevenueExclTax)
-    existing.soldDurationCostExclTax += parseMoney(row.soldDurationCostExclTax)
-    existing.giftedDurationCostExclTax += parseMoney(row.giftedDurationCostExclTax)
-    existing.grossProfit += parseMoney(row.grossProfit)
+    existing.totalConsumption += parseMoney(line.totalConsumption)
+    existing.voucherConsumption += parseMoney(line.voucherConsumption)
+    existing.balanceConsumption += parseMoney(line.balanceConsumption)
+    existing.totalCardHours += Number(line.totalCardHours ?? 0)
+    existing.voucherCardHours += Number(line.voucherCardHours ?? 0)
+    existing.balanceCardHours += Number(line.balanceCardHours ?? 0)
+    existing.sourceLineIds.push(line.id)
+    if (line.windowId && !existing.windowIds.includes(line.windowId)) {
+      existing.windowIds.push(line.windowId)
+    }
   }
 
-  const dbRows = [...bucket.values()].map((r) => ({
-    id: r.id,
-    billingPeriodId: r.billingPeriodId,
-    type: 'record' as const,
-    staffId: r.staffId,
-    staffName: r.staffName,
-    accountManager: r.accountManager,
-    projectId: null,
-    supplierUnitCostId: r.supplierUnitCostId,
-    idcName: r.idcName,
-    idcCode: r.idcCode,
-    cardType: r.cardType,
-    balanceConsumption: toMoneyString(r.balanceConsumption),
-    balanceCardHours: toHoursString(r.balanceCardHours),
-    voucherCardHours: toHoursString(r.voucherCardHours),
-    confirmedRevenueExclTax: toMoneyString(r.confirmedRevenueExclTax),
-    soldDurationCostExclTax: toMoneyString(r.soldDurationCostExclTax),
-    giftedDurationCostExclTax: toMoneyString(r.giftedDurationCostExclTax),
-    grossProfit: toMoneyString(r.grossProfit),
-    dealUnitPricePerHour: r.dealUnitPricePerHour,
-    listPricePerHour: r.listPricePerHour,
-    sourceRawIds: null,
-  }))
+  const recordRows: (typeof platformCostMonthly.$inferInsert)[] = []
 
-  await db.insert(platformCostMonthly).values(dbRows)
-  financeLog('compute-cost-rollup', 'done', { periodId, rollupCount: dbRows.length })
-  return dbRows.length
+  for (const group of bucket.values()) {
+    const snap = findLatestPricingSnapshot({
+      snapshots,
+      dataCenterId: group.dataCenterId,
+      gpuCardTypeId: group.gpuCardTypeId,
+      windowIds: group.windowIds.length > 0 ? group.windowIds : windowIds,
+    })
+    if (!snap) {
+      issues.push(
+        `缺定价快照 staff=${group.staffId} dc=${group.dataCenterId} card=${group.gpuCardTypeId}`,
+      )
+      continue
+    }
+
+    const pricing = snapshotToPricingFields(snap)
+    const metrics = {
+      balanceConsumption: group.balanceConsumption,
+      balanceCardHours: group.balanceCardHours,
+      voucherCardHours: group.voucherCardHours,
+    }
+    const tierCtx = resolveTierCostContext(pricing, metrics)
+    const confirmed = group.balanceConsumption / COST_TAX_DIVISOR
+    const sold = computeSoldDurationCostExclTax(pricing, metrics, tierCtx)
+    const gifted = computeGiftedDurationCostExclTaxForPricing(pricing, metrics, tierCtx)
+    const gross = computeGrossProfit(confirmed, sold, gifted)
+
+    recordRows.push({
+      id: newId(),
+      billingPeriodId: periodId,
+      type: 'record',
+      staffId: group.staffId,
+      staffName: group.staffName,
+      accountManager: group.staffName,
+      dataCenterId: group.dataCenterId,
+      gpuCardTypeId: group.gpuCardTypeId,
+      supplierUnitCostId: snap.supplierUnitCostId,
+      pricingSnapshotId: snap.id,
+      idcName: group.dataCenterName,
+      idcCode: group.dataCenterCode,
+      cardType: group.gpuCardTypeCode,
+      totalConsumption: toMoneyString(group.totalConsumption),
+      voucherConsumption: toMoneyString(group.voucherConsumption),
+      balanceConsumption: toMoneyString(group.balanceConsumption),
+      totalCardHours: toHoursString(group.totalCardHours),
+      balanceCardHours: toHoursString(group.balanceCardHours),
+      voucherCardHours: toHoursString(group.voucherCardHours),
+      confirmedRevenueExclTax: toMoneyString(confirmed),
+      soldDurationCostExclTax: toMoneyString(sold),
+      giftedDurationCostExclTax: toMoneyString(gifted),
+      grossProfit: toMoneyString(gross),
+      dealUnitPricePerHour: pricingFieldString(tierCtx.dealUnitPricePerHour),
+      listPricePerHour: pricingFieldString(pricing.listPricePerHour),
+      dealToListRatio:
+        tierCtx.dealToListRatio != null ? tierCtx.dealToListRatio.toFixed(6) : null,
+      matchedTierOrder: tierCtx.matchedTierOrder,
+      revenueSharePercentApplied:
+        tierCtx.revenueSharePercentApplied != null
+          ? tierCtx.revenueSharePercentApplied.toFixed(4)
+          : null,
+      sourceLineIds: group.sourceLineIds,
+    })
+  }
+
+  if (recordRows.length === 0) return 0
+
+  const sumRow: typeof platformCostMonthly.$inferInsert = {
+    id: newId(),
+    billingPeriodId: periodId,
+    type: 'sum',
+    staffId: null,
+    staffName: '合计',
+    accountManager: '合计',
+    dataCenterId: null,
+    gpuCardTypeId: null,
+    supplierUnitCostId: null,
+    pricingSnapshotId: null,
+    idcName: null,
+    idcCode: null,
+    cardType: null,
+    totalConsumption: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.totalConsumption), 0),
+    ),
+    voucherConsumption: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.voucherConsumption), 0),
+    ),
+    balanceConsumption: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.balanceConsumption), 0),
+    ),
+    totalCardHours: toHoursString(
+      recordRows.reduce((a, r) => a + Number(r.totalCardHours ?? 0), 0),
+    ),
+    balanceCardHours: toHoursString(
+      recordRows.reduce((a, r) => a + Number(r.balanceCardHours ?? 0), 0),
+    ),
+    voucherCardHours: toHoursString(
+      recordRows.reduce((a, r) => a + Number(r.voucherCardHours ?? 0), 0),
+    ),
+    confirmedRevenueExclTax: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.confirmedRevenueExclTax), 0),
+    ),
+    soldDurationCostExclTax: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.soldDurationCostExclTax), 0),
+    ),
+    giftedDurationCostExclTax: toMoneyString(
+      recordRows.reduce((a, r) => a + parseMoney(r.giftedDurationCostExclTax), 0),
+    ),
+    grossProfit: toMoneyString(recordRows.reduce((a, r) => a + parseMoney(r.grossProfit), 0)),
+    sourceLineIds: null,
+  }
+
+  await db.insert(platformCostMonthly).values([...recordRows, sumRow])
+  financeLog('compute-cost-rollup', 'done', {
+    periodId,
+    recordCount: recordRows.length,
+  })
+  return recordRows.length
 }

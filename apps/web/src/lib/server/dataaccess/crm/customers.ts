@@ -3,7 +3,6 @@ import type { Customer, CustomerExpectedScale } from '@/lib/data/types'
 import {
   mapCustomerRow,
 } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import {
   billingTenant,
   consumptionRecord,
@@ -140,12 +139,10 @@ async function queryCustomersWithMetrics(
 
 export const customersDataAccess = {
   async list(filters: CustomerListFilters = {}): Promise<Customer[]> {
-    await ensureCrmSeeded()
     return queryCustomersWithMetrics(buildCustomerListConditions(filters))
   },
 
   async getById(id: string): Promise<Customer | null> {
-    await ensureCrmSeeded()
     const rows = await queryCustomersWithMetrics([eq(customer.id, id)])
     return rows[0] ?? null
   },

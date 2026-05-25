@@ -1,7 +1,6 @@
 import { db } from '@/lib/db'
 import type { Project } from '@/lib/data/types'
 import { mapProjectRow } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import {
   billingTenant,
   businessLine,
@@ -9,18 +8,22 @@ import {
   crmProject,
   customer,
   projectStaffAssignment,
+  projectTag,
+  projectTagAssignment,
   projectTenant,
   userStaff,
 } from '@workspace/db/schema'
 function newId() {
   return crypto.randomUUID()
 }
-import { and, count, eq, ilike, inArray, isNull, or, sql, sum } from 'drizzle-orm'
+import { and, asc, count, eq, ilike, inArray, isNull, or, sql, sum } from 'drizzle-orm'
+import type { ProjectTag } from '@/lib/data/types'
 
 export type ProjectListFilters = {
   search?: string
   stage?: string
   status?: string
+  tagIds?: string[]
 }
 
 export type ProjectStaffInput = {
@@ -74,6 +77,49 @@ async function getBillingTenantIdsForProject(projectId: string): Promise<string[
   return [...ids]
 }
 
+async function loadProjectIdsWithAnyTag(tagIds: string[]): Promise<Set<string>> {
+  const uniqueIds = [...new Set(tagIds.filter(Boolean))]
+  if (uniqueIds.length === 0) return new Set()
+
+  const rows = await db
+    .select({ projectId: projectTagAssignment.projectId })
+    .from(projectTagAssignment)
+    .where(inArray(projectTagAssignment.tagId, uniqueIds))
+
+  return new Set(rows.map((r) => r.projectId))
+}
+
+async function loadTagsByProjectIds(projectIds: string[]): Promise<Map<string, ProjectTag[]>> {
+  const result = new Map<string, ProjectTag[]>()
+  if (projectIds.length === 0) return result
+
+  const rows = await db
+    .select({
+      projectId: projectTagAssignment.projectId,
+      id: projectTag.id,
+      name: projectTag.name,
+      sortOrder: projectTag.sortOrder,
+    })
+    .from(projectTagAssignment)
+    .innerJoin(projectTag, eq(projectTagAssignment.tagId, projectTag.id))
+    .where(inArray(projectTagAssignment.projectId, projectIds))
+    .orderBy(asc(projectTag.sortOrder), asc(projectTag.name))
+
+  for (const projectId of projectIds) {
+    result.set(projectId, [])
+  }
+
+  for (const row of rows) {
+    const list = result.get(row.projectId) ?? []
+    if (!list.some((tag) => tag.id === row.id)) {
+      list.push({ id: row.id, name: row.name })
+    }
+    result.set(row.projectId, list)
+  }
+
+  return result
+}
+
 async function loadProjectEnrichment(projectIds: string[]) {
   if (projectIds.length === 0) {
     return {
@@ -81,6 +127,8 @@ async function loadProjectEnrichment(projectIds: string[]) {
       consumptionMap: new Map<string, number>(),
       customerMap: new Map<string, { name: string; type: string }>(),
       lineMap: new Map<string, string>(),
+      tagsMap: new Map<string, ProjectTag[]>(),
+      platformTenantIdMap: new Map<string, string | undefined>(),
     }
   }
 
@@ -128,11 +176,56 @@ async function loadProjectEnrichment(projectIds: string[]) {
           .groupBy(consumptionRecord.projectId)
       : []
 
+  const tagsMap = await loadTagsByProjectIds(projectIds)
+
+  const tenantIdsNeeded = new Set<string>()
+  const projectTenantId = new Map<string, string>()
+  for (const p of projects) {
+    if (p.primaryTenantId) {
+      tenantIdsNeeded.add(p.primaryTenantId)
+      projectTenantId.set(p.id, p.primaryTenantId)
+    }
+  }
+
+  const projectsWithoutPrimary = projects.filter((p) => !p.primaryTenantId)
+  if (projectsWithoutPrimary.length > 0) {
+    const defaultCustomerIds = [...new Set(projectsWithoutPrimary.map((p) => p.customerId))]
+    const defaults = await db
+      .select({ customerId: billingTenant.customerId, id: billingTenant.id })
+      .from(billingTenant)
+      .where(and(inArray(billingTenant.customerId, defaultCustomerIds), eq(billingTenant.isDefault, true)))
+    const defaultByCustomer = new Map(defaults.map((d) => [d.customerId, d.id]))
+    for (const p of projectsWithoutPrimary) {
+      const tenantId = defaultByCustomer.get(p.customerId)
+      if (tenantId) {
+        tenantIdsNeeded.add(tenantId)
+        projectTenantId.set(p.id, tenantId)
+      }
+    }
+  }
+
+  const tenantRows =
+    tenantIdsNeeded.size > 0
+      ? await db
+          .select({ id: billingTenant.id, platformTenantId: billingTenant.platformTenantId })
+          .from(billingTenant)
+          .where(inArray(billingTenant.id, [...tenantIdsNeeded]))
+      : []
+  const platformIdByTenantId = new Map(
+    tenantRows.map((r) => [r.id, r.platformTenantId ?? undefined]),
+  )
+  const platformTenantIdMap = new Map<string, string | undefined>()
+  for (const [projectId, tenantId] of projectTenantId) {
+    platformTenantIdMap.set(projectId, platformIdByTenantId.get(tenantId))
+  }
+
   return {
     staffMap,
     consumptionMap: new Map(consumptionSums.map((r) => [r.projectId!, Number(r.value ?? 0)])),
     customerMap: new Map(customers.map((c) => [c.id, { name: c.name, type: c.type }])),
     lineMap: new Map(lines.map((l) => [l.id, l.name])),
+    tagsMap,
+    platformTenantIdMap,
   }
 }
 
@@ -152,6 +245,8 @@ function mapToProject(
     deliveryManager: staff.delivery_manager ?? '',
     projectManager: staff.project_manager ?? '',
     totalConsumption: enrich.consumptionMap.get(row.id) ?? 0,
+    platformTenantId: enrich.platformTenantIdMap.get(row.id),
+    tags: enrich.tagsMap.get(row.id) ?? [],
   })
 }
 
@@ -189,7 +284,6 @@ export const projectsDataAccess = {
   getBillingTenantIdsForProject,
 
   async list(filters: ProjectListFilters = {}): Promise<Project[]> {
-    await ensureCrmSeeded()
 
     const conditions = []
     if (filters.stage && filters.stage !== 'all') {
@@ -200,7 +294,38 @@ export const projectsDataAccess = {
     }
     if (filters.search?.trim()) {
       const q = `%${filters.search.trim()}%`
-      conditions.push(or(ilike(crmProject.name, q), ilike(customer.name, q))!)
+      const matchingTenants = await db
+        .select({
+          id: billingTenant.id,
+          customerId: billingTenant.customerId,
+          isDefault: billingTenant.isDefault,
+        })
+        .from(billingTenant)
+        .where(ilike(billingTenant.platformTenantId, q))
+
+      const matchingTenantIds = matchingTenants.map((t) => t.id)
+      const matchingDefaultCustomerIds = matchingTenants
+        .filter((t) => t.isDefault)
+        .map((t) => t.customerId)
+
+      const searchConditions = [ilike(crmProject.name, q), ilike(customer.name, q)]
+      if (matchingTenantIds.length > 0) {
+        searchConditions.push(inArray(crmProject.primaryTenantId, matchingTenantIds))
+      }
+      if (matchingDefaultCustomerIds.length > 0) {
+        searchConditions.push(
+          and(
+            isNull(crmProject.primaryTenantId),
+            inArray(crmProject.customerId, matchingDefaultCustomerIds),
+          )!,
+        )
+      }
+      conditions.push(or(...searchConditions)!)
+    }
+    if (filters.tagIds && filters.tagIds.length > 0) {
+      const projectIdsWithTag = await loadProjectIdsWithAnyTag(filters.tagIds)
+      if (projectIdsWithTag.size === 0) return []
+      conditions.push(inArray(crmProject.id, [...projectIdsWithTag]))
     }
 
     const rows = await db
@@ -216,14 +341,12 @@ export const projectsDataAccess = {
   },
 
   async listByCustomerId(customerId: string): Promise<Project[]> {
-    await ensureCrmSeeded()
     const rows = await db.select().from(crmProject).where(eq(crmProject.customerId, customerId))
     const enrich = await loadProjectEnrichment(rows.map((r) => r.id))
     return rows.map((row) => mapToProject(row, enrich))
   },
 
   async getById(id: string): Promise<Project | null> {
-    await ensureCrmSeeded()
     const row = await db.query.crmProject.findFirst({ where: eq(crmProject.id, id) })
     if (!row) return null
     const enrich = await loadProjectEnrichment([id])
@@ -326,7 +449,6 @@ export const projectsDataAccess = {
   },
 
   async countByStage(): Promise<{ lead: number; testing: number; converted: number }> {
-    await ensureCrmSeeded()
     const rows = await db
       .select({ stage: crmProject.stage, value: count() })
       .from(crmProject)

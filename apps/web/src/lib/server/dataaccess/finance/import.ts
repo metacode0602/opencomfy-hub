@@ -10,7 +10,7 @@ import { eq } from 'drizzle-orm'
 import type { ImportFileType } from './constants'
 import { FinanceError } from './errors'
 import {
-  isTenantTotalRow,
+  isCustomerConsumptionTotalRow,
   isTotalRow,
   normalizeCustomerType,
   parseMoneyCell,
@@ -87,7 +87,7 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
   const errors: ImportCellError[] = []
 
   for (const { rowNo, row } of sheet.rows) {
-    if (isTenantTotalRow(row)) continue
+    if (isCustomerConsumptionTotalRow(row)) continue
     const tenantId = pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES])
     if (!tenantId) {
       errors.push({

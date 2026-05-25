@@ -22,23 +22,32 @@ type StaffCostGroup = {
   recordRows: PlatformCostMonthly[]
 }
 
-function groupCostByStaff(rows: PlatformCostMonthly[]): StaffCostGroup[] {
+function groupCostByStaff(rows: PlatformCostMonthly[]): {
+  staffGroups: StaffCostGroup[]
+  periodSumRow: PlatformCostMonthly | null
+} {
+  const periodSumRow = rows.find((r) => r.type === 'sum' && r.staff_id == null) ?? null
+  const recordAndStaffSumRows = rows.filter(
+    (r) => !(r.type === 'sum' && r.staff_id == null),
+  )
+
   const map = new Map<
     string,
     { sum: PlatformCostMonthly | null; records: PlatformCostMonthly[] }
   >()
 
-  for (const r of rows) {
-    let g = map.get(r.staff_id)
+  for (const r of recordAndStaffSumRows) {
+    const staffKey = r.staff_id ?? '__unknown__'
+    let g = map.get(staffKey)
     if (!g) {
       g = { sum: null, records: [] }
-      map.set(r.staff_id, g)
+      map.set(staffKey, g)
     }
-    if (r.type === "sum") g.sum = r
+    if (r.type === 'sum') g.sum = r
     else g.records.push(r)
   }
 
-  const groups: StaffCostGroup[] = []
+  const staffGroups: StaffCostGroup[] = []
   for (const [staffId, g] of map) {
     if (!g.sum && g.records.length === 0) continue
     const accountManager =
@@ -46,9 +55,9 @@ function groupCostByStaff(rows: PlatformCostMonthly[]): StaffCostGroup[] {
       g.sum?.account_manager ??
       g.records[0]?.staff_name ??
       g.records[0]?.account_manager ??
-      ""
-    groups.push({
-      staffId,
+      ''
+    staffGroups.push({
+      staffId: staffId === '__unknown__' ? '' : staffId,
       accountManager,
       sumRow: g.sum,
       recordRows: [...g.records].sort((a, b) =>
@@ -57,9 +66,12 @@ function groupCostByStaff(rows: PlatformCostMonthly[]): StaffCostGroup[] {
     })
   }
 
-  return groups.sort((a, b) =>
-    a.accountManager.localeCompare(b.accountManager, "zh-CN"),
-  )
+  return {
+    staffGroups: staffGroups.sort((a, b) =>
+      a.accountManager.localeCompare(b.accountManager, 'zh-CN'),
+    ),
+    periodSumRow,
+  }
 }
 
 function CostRowCells({
@@ -164,7 +176,10 @@ export function CostGroupedTable({
   voucherAdjustmentHistoryCount,
 }: CostGroupedTableProps) {
   const colCount = BASE_COL_COUNT + (editable ? 1 : 0)
-  const groups = React.useMemo(() => groupCostByStaff(rows), [rows])
+  const { staffGroups: groups, periodSumRow } = React.useMemo(
+    () => groupCostByStaff(rows),
+    [rows],
+  )
   const [openStaff, setOpenStaff] = React.useState<Set<string>>(() => new Set())
 
   const toggle = (staffId: string) => {
@@ -307,6 +322,12 @@ export function CostGroupedTable({
               </React.Fragment>
             )
           })}
+          {periodSumRow && (
+            <TableRow className="bg-muted/50 font-medium">
+              <TableCell className="p-1" />
+              <CostRowCells r={periodSumRow} />
+            </TableRow>
+          )}
         </TableBody>
       </Table>
     </div>

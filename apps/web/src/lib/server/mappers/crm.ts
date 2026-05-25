@@ -150,6 +150,8 @@ export function mapProjectRow(
     deliveryManager: string
     projectManager: string
     totalConsumption: number
+    platformTenantId?: string
+    tags?: Project['tags']
   },
 ): Project {
   return {
@@ -159,6 +161,7 @@ export function mapProjectRow(
     customerName: row.customerName,
     customerType: row.customerType as Project['customerType'],
     primaryTenantId: row.primaryTenantId ?? undefined,
+    platformTenantId: row.platformTenantId,
     businessLineId: row.businessLineId,
     businessLineName: row.businessLineName,
     stage: row.stage as Project['stage'],
@@ -178,6 +181,7 @@ export function mapProjectRow(
     thisMonthConsumption: toNumber(row.thisMonthConsumption),
     totalConsumption: row.totalConsumption,
     balance: toNumber(row.balance),
+    tags: row.tags ?? [],
   }
 }
 

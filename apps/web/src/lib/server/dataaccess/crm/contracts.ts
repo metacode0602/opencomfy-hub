@@ -1,13 +1,11 @@
 import { db } from '@/lib/db'
 import type { Contract } from '@/lib/data/types'
 import { mapContractRow } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import { contract, crmProject, customer } from '@workspace/db/schema'
 import { desc, eq } from 'drizzle-orm'
 
 export const contractsDataAccess = {
   async list(): Promise<Contract[]> {
-    await ensureCrmSeeded()
     const rows = await db.select().from(contract).orderBy(desc(contract.createdAt))
 
     const allProjects = await db.select().from(crmProject)

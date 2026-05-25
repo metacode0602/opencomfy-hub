@@ -22,6 +22,8 @@ import { loadBaremetalByTenant, processMultiProjectTenants } from './compute-inc
 import { RULE_VERSION } from './constants'
 import type { TenantProjectBinding } from './enrichment'
 import { listTenantProjectBindings } from './enrichment'
+import { formatPendingCostAllocationError } from './cost-allocation-errors'
+import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { FinanceError } from './errors'
 import { financeLog, financeWarn } from './logger'
 import { appendOperationLog } from './operation-log'
@@ -95,20 +97,21 @@ async function assertIncomeComputePreconditions(periodId: string): Promise<void>
     )
   }
 
-  const bindings = await listTenantProjectBindings(periodId)
-  const pendingTenants = bindings.filter(
-    (b) =>
-      b.projects.length >= 2 &&
-      b.projects.some((p) => p.allocationPercent == null),
-  )
-  if (pendingTenants.length > 0) {
+  const customerRows = await loadCustomerConsumptionRows(periodId)
+  const incomeTenantPlatformIds = [...new Set(customerRows.map((r) => r.tenantPlatformId))]
+  const pendingIssues = await getPendingCostAllocationIssues({
+    billingPeriodId: periodId,
+    tenantPlatformIds: incomeTenantPlatformIds,
+    periodEnd: period.periodEnd,
+  })
+  if (pendingIssues.length > 0) {
     await db
       .update(billingPeriod)
       .set({ status: 'pending_allocation' })
       .where(eq(billingPeriod.id, periodId))
     throw new FinanceError(
       'UNPROCESSABLE',
-      `${pendingTenants.length} 个租户需配置成本分成比例后方可计算`,
+      formatPendingCostAllocationError(pendingIssues, 'income'),
     )
   }
 }

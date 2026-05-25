@@ -110,19 +110,59 @@ export const TENANT_PLATFORM_ID_ALIASES = [
   'customerId',
 ] as const
 
+const CUSTOMER_CONSUMPTION_LABEL_ALIASES = [
+  ['类型', 'product_type'],
+  ['项目名称', 'project_name'],
+  ['租户类型', 'tenant_type'],
+  ['客户类型', 'customer_type'],
+] as const
+
+const CUSTOMER_CONSUMPTION_AMOUNT_ALIASES = new Set(
+  ['总消费', 'total_consumption', '券消费', 'voucher_consumption', '余额消费', 'balance_consumption'].map(
+    normalizeHeader,
+  ),
+)
+
 function normalizeTotalMarker(value: string): string {
-  return value.trim().replace(/\s+/g, '').toLowerCase()
+  return value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[：:，,。.；;]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
 }
 
-/** 租户 ID 为「总计 / 合计 / Total」时视为表尾汇总行，不参与导入 */
-export function isTotalRow(tenantId: string | null): boolean {
-  if (!tenantId) return false
-  return TOTAL_ROW_MARKERS.has(normalizeTotalMarker(tenantId))
+function isAmountColumnKey(key: string): boolean {
+  return CUSTOMER_CONSUMPTION_AMOUNT_ALIASES.has(normalizeHeader(key))
 }
 
-/** 行内租户/客户 ID 列为汇总标识时跳过（客户消费明细等） */
+/** 单元格值为「总计 / 合计 / Total」时视为汇总标识 */
+export function isTotalRow(value: string | null): boolean {
+  if (!value) return false
+  return TOTAL_ROW_MARKERS.has(normalizeTotalMarker(value))
+}
+
+/** 行内租户/客户 ID 列为汇总标识时跳过 */
 export function isTenantTotalRow(row: SheetRow): boolean {
   return isTotalRow(pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES]))
+}
+
+/**
+ * 客户消费明细表尾合计行：租户 ID 或其它标识列出现汇总文案时跳过，不参与导入与校验。
+ */
+export function isCustomerConsumptionTotalRow(row: SheetRow): boolean {
+  if (isTenantTotalRow(row)) return true
+
+  for (const aliases of CUSTOMER_CONSUMPTION_LABEL_ALIASES) {
+    if (isTotalRow(pickColumn(row, [...aliases]))) return true
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    if (value == null || isAmountColumnKey(key)) continue
+    if (isTotalRow(String(value))) return true
+  }
+
+  return false
 }
 
 export function parseMoneyCell(raw: string | null): string {

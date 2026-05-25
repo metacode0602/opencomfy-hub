@@ -108,6 +108,11 @@ export interface BusinessLine {
   status: 'active' | 'inactive'
 }
 
+export type ProjectTag = {
+  id: string
+  name: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -116,6 +121,8 @@ export interface Project {
   customerType: 'B' | 'C'
   /** 主计费租户；空则使用客户默认 tenant */
   primaryTenantId?: string
+  /** 主计费租户对应的平台租户 ID */
+  platformTenantId?: string
   businessLineId: string
   businessLineName: string
   stage: 'lead' | 'testing' | 'converted'
@@ -140,6 +147,7 @@ export interface Project {
   thisMonthConsumption: number
   totalConsumption: number
   balance: number
+  tags: ProjectTag[]
 }
 
 export interface Contract {
