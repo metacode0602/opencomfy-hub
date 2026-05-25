@@ -74,6 +74,8 @@ export function EditProjectDialog({
       id: project.id,
       data: {
         ...formValuesToProjectInput(values),
+        customerId: project.customerId,
+        primaryTenantId: project.primaryTenantId,
         status: project.status,
       },
     })
@@ -95,6 +97,7 @@ export function EditProjectDialog({
             onChange={handleChange}
             businessLines={businessLines}
             idPrefix="edit-project"
+            disableCustomerAndTenant
           />
         )}
 

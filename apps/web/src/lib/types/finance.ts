@@ -18,6 +18,10 @@ export type PlatformIncomeMonthly = {
   project_name: string | null
   tenant_name: string
   tenant_id: string
+  tenant_platform_id: string
+  customer_id: string | null
+  customer_full_name: string | null
+  project_id: string | null
   supplementary_consumption: string | null
   balance_consumption: string | null
   bare_metal_consumption: string | null
@@ -104,6 +108,8 @@ export type PlatformCostMonthly = {
   sold_duration_cost_excl_tax: string | null
   gifted_duration_cost_excl_tax: string | null
   gross_profit: string | null
+  deal_unit_price_per_hour: string | null
+  list_price_per_hour: string | null
   created_at: string
   updated_at: string | null
 }

@@ -285,7 +285,7 @@ export const billingTenantsDataAccess = {
             await tx.insert(customer).values({
               id: customerId,
               name: custName,
-              accountName: custName,
+              shortName: custName,
               type: 'C',
               status: 'active',
               contactPerson: row.contactPerson?.trim() ?? '',

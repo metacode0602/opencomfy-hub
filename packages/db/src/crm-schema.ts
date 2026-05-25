@@ -51,8 +51,8 @@ export const customer = pgTable(
   {
     id: text("id").primaryKey(),
     name: varchar("name", { length: 255 }).notNull(),
-    customerCode: varchar("customer_code", { length: 64 }),
-    accountName: varchar("account_name", { length: 255 }),
+    customerCode: varchar("customer_code", { length: 64 }), // 客户编码
+    shortName: varchar("short_name", { length: 255 }), // 客户简称
     certCode: varchar("cert_code", { length: 64 }),
     type: varchar("type", { length: 8 }).notNull(), // B | C
     status: varchar("status", { length: 32 }).notNull(), // active | inactive | suspended

@@ -105,7 +105,7 @@ export function mapCustomerRow(
   return {
     id: row.id,
     name: row.name,
-    shortName: row.accountName ?? undefined,
+    shortName: row.shortName ?? undefined,
     type: row.type as Customer['type'],
     status: row.status as Customer['status'],
     contactPerson: row.contactPerson ?? '',

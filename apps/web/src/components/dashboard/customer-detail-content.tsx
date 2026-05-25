@@ -123,16 +123,6 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
           </div>
           <p className="text-muted-foreground">{customer.industry}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline">
-            <Download className="w-4 h-4 mr-2" />
-            导出数据
-          </Button>
-          <Button>
-            <Plus className="w-4 h-4 mr-2" />
-            充值
-          </Button>
-        </div>
       </div>
 
       {/* Info Cards */}

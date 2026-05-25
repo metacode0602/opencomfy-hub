@@ -1,0 +1,1 @@
+ALTER TABLE "customer" RENAME COLUMN "account_name" TO "short_name";

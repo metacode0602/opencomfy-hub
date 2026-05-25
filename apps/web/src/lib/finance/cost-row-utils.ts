@@ -1,23 +1,13 @@
-import {
-  mockDataCenterDevices,
-  mockSupplierPricingRecords,
-} from "@/lib/data/mock-data"
-import { supplierDomainSeed } from "@/lib/data/supplier-domain-mock"
 import type { PlatformCostMonthly } from "@/lib/types/finance"
 import { parseMoney, toMoneyString } from "@/lib/finance/income-row-utils"
 
 export const COST_TAX_DIVISOR = 1.06
 
-/** finance mock 中 supplier_unit_cost_id 与单价的兜底映射（元/卡时） */
-const FINANCE_UNIT_COST_FALLBACKS: Record<string, number> = {
-  "suc-v1": 158.505,
-  "suc-v2": 132.5,
-  "suc-mock-1": 42,
-  "suc-mock-2": 85,
-}
-
-function normalizeKey(value: string | null | undefined): string {
-  return (value ?? "").trim().toLowerCase().replace(/\s+/g, "")
+function parsePositiveMoney(value: string | null | undefined): number | null {
+  if (value == null || value === "") return null
+  const n = Number(value)
+  if (Number.isNaN(n) || n <= 0) return null
+  return n
 }
 
 function parseHours(value: string | null | undefined): number {
@@ -51,62 +41,10 @@ export function computeGrossProfit(
 }
 
 export function resolveUnitPricePerHour(row: PlatformCostMonthly): number | null {
-  if (row.supplier_unit_cost_id) {
-    const fromFallback =
-      FINANCE_UNIT_COST_FALLBACKS[row.supplier_unit_cost_id]
-    if (fromFallback != null) return fromFallback
-
-    const uc = supplierDomainSeed.unitCosts.find(
-      (u) => u.id === row.supplier_unit_cost_id,
-    )
-    if (uc?.unit_cost != null) {
-      const n = Number(uc.unit_cost)
-      if (!Number.isNaN(n) && n > 0) return n
-    }
-  }
-
-  const idcKey = normalizeKey(row.idc_code)
-  const cardKey = normalizeKey(row.card_type)
-
-  if (idcKey || cardKey) {
-    const device = mockDataCenterDevices.find((d) => {
-      const dcCode = normalizeKey(d.dataCenterName)
-      const dcName = normalizeKey(d.dataCenterName)
-      const card = normalizeKey(d.cardTypeName)
-      const idcMatch =
-        !idcKey ||
-        dcCode.includes(idcKey) ||
-        idcKey.includes(dcCode) ||
-        dcName.includes(idcKey) ||
-        idcKey.includes(dcName)
-      const cardMatch =
-        !cardKey ||
-        card.includes(cardKey) ||
-        cardKey.includes(card) ||
-        cardKey.replace(/-/g, "").includes(card.replace(/\s+/g, ""))
-      return idcMatch && cardMatch
-    })
-    if (device) {
-      const price =
-        device.cardTimeCostPerHour ?? device.revenueShareCostPerHour
-      if (price != null && price > 0) return price
-    }
-
-    const pricing = mockSupplierPricingRecords.find((p) => {
-      const dc = normalizeKey(p.dataCenterName)
-      const card = normalizeKey(p.cardTypeName)
-      const idcMatch =
-        !idcKey || dc.includes(idcKey) || idcKey.includes(dc)
-      const cardMatch =
-        !cardKey || card.includes(cardKey) || cardKey.includes(card)
-      return idcMatch && cardMatch
-    })
-    if (pricing?.unitPricePerHour != null && pricing.unitPricePerHour > 0) {
-      return pricing.unitPricePerHour
-    }
-  }
-
-  return null
+  return (
+    parsePositiveMoney(row.deal_unit_price_per_hour) ??
+    parsePositiveMoney(row.list_price_per_hour)
+  )
 }
 
 export type CostRowOverride = {

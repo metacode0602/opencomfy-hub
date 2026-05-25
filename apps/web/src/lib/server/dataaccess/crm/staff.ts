@@ -233,7 +233,7 @@ export const staffDataAccess = {
         ? await db.select().from(customer).where(inArray(customer.id, customerIds))
         : []
     const customerMap = new Map(
-      customers.map((c) => [c.id, c.accountName || c.name]),
+      customers.map((c) => [c.id, c.shortName || c.name]),
     )
 
     return rows.map((r) => ({

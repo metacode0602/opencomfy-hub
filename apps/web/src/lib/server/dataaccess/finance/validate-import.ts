@@ -102,6 +102,24 @@ export async function validateCrossFileImports(
     errorsByFileType.customer_consumption = list
   }
 
+  const typesByTenant = new Map<string, Set<string>>()
+  for (const row of customerRows) {
+    const set = typesByTenant.get(row.tenantPlatformId) ?? new Set<string>()
+    set.add(row.customerType)
+    typesByTenant.set(row.tenantPlatformId, set)
+  }
+  for (const row of customerRows) {
+    const types = typesByTenant.get(row.tenantPlatformId)
+    if (!types || types.size <= 1) continue
+    const list = errorsByFileType.customer_consumption ?? []
+    list.push({
+      rowNo: row.rowNo,
+      columnAliases: ['客户类型', 'customer_type'],
+      message: `租户 ${row.tenantPlatformId} 同时存在多种客户类型（B/C 混用），请修正后重新上传`,
+    })
+    errorsByFileType.customer_consumption = list
+  }
+
   for (const row of tenantBillRows) {
     if (!bPlatformIds.has(row.tenantPlatformId)) continue
     if (known.has(row.tenantPlatformId)) continue

@@ -1,6 +1,10 @@
 "use client"
 
+import { IncomeDetailEditable } from "../../_components/income-detail-editable"
+import { downloadIncomeDetailExcel } from "@/lib/finance/income-detail-export"
+import { mergeIncomeRowsWithOverrides } from "@/lib/finance/income-row-utils"
 import { LocaleLink } from "@/lib/i18n/navigation"
+import { useFinanceIncomeOpsStore } from "@/lib/stores/finance-income-ops-store"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -10,8 +14,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { IncomeDetailEditable } from "../../_components/income-detail-editable"
+import { Download } from "lucide-react"
 import { useParams } from "next/navigation"
+import { useMemo } from "react"
+import { toast } from "sonner"
 
 export default function FinancePeriodIncomePage() {
   const params = useParams<{ id: string }>()
@@ -23,7 +29,26 @@ export default function FinancePeriodIncomePage() {
   )
 
   const period = bundle?.period
-  const rows = bundle?.income ?? []
+  const rows = useMemo(() => bundle?.income ?? [], [bundle?.income])
+  const overrides = useFinanceIncomeOpsStore((s) => s.overrides)
+  const displayRows = useMemo(
+    () => mergeIncomeRowsWithOverrides(rows, overrides),
+    [rows, overrides],
+  )
+
+  function handleExportExcel() {
+    if (displayRows.length === 0) {
+      toast.error("暂无收入明细，无法导出")
+      return
+    }
+    if (!period) return
+    const ok = downloadIncomeDetailExcel({
+      rows: displayRows,
+      periodCode: period.period_code,
+      showPeriodColumn: false,
+    })
+    if (ok) toast.success("收入明细 Excel 已下载")
+  }
 
   if (!id) {
     return (
@@ -64,11 +89,24 @@ export default function FinancePeriodIncomePage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>收入明细 · {period.period_code}</CardTitle>
-          <CardDescription>
-            platform_income_monthly（账期 {period.period_start} ~ {period.period_end}）
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>收入明细 · {period.period_code}</CardTitle>
+            <CardDescription>
+              platform_income_monthly（账期 {period.period_start} ~{" "}
+              {period.period_end}）
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportExcel}
+            disabled={displayRows.length === 0}
+          >
+            <Download className="size-4" />
+            导出 Excel
+          </Button>
         </CardHeader>
         <CardContent>
           <IncomeDetailEditable baseRows={rows} showPeriodColumn={false} />

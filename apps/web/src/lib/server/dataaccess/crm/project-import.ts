@@ -141,7 +141,7 @@ async function findCustomerByShortName(shortName: string) {
   const trimmed = shortName.trim()
   if (!trimmed) return null
   return db.query.customer.findFirst({
-    where: ilike(customer.accountName, trimmed),
+    where: ilike(customer.shortName, trimmed),
   })
 }
 
@@ -280,7 +280,7 @@ async function enrichPreviewRowAsync(
       customerPreview = {
         id: existingCustomer.id,
         name: existingCustomer.name,
-        shortName: existingCustomer.accountName ?? existingCustomer.name,
+        shortName: existingCustomer.shortName ?? existingCustomer.name,
       }
     }
   }
@@ -308,7 +308,7 @@ async function enrichPreviewRowAsync(
         customerPreview = {
           id: existingCustomer.id,
           name: existingCustomer.name,
-          shortName: existingCustomer.accountName ?? existingCustomer.name,
+          shortName: existingCustomer.shortName ?? existingCustomer.name,
         }
       }
     }
@@ -644,7 +644,7 @@ export const projectImportDataAccess = {
               await db.insert(customer).values({
                 id: customerId,
                 name: legalName,
-                accountName: shortName,
+                shortName: shortName,
                 type: 'C',
                 status: 'active',
                 contactPerson: '',

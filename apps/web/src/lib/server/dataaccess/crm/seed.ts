@@ -109,7 +109,7 @@ export async function seedCrmFromMock(): Promise<void> {
         id: c.id,
         name: c.name,
         customerCode: null,
-        accountName: c.name,
+        shortName: c.name,
         certCode: c.certCode ?? null,
         type: c.type,
         status: c.status,

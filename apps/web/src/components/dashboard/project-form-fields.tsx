@@ -42,6 +42,8 @@ type ProjectFormFieldsProps = {
   onChange: (patch: Partial<ProjectFormValues>) => void
   businessLines: BusinessLine[]
   idPrefix?: string
+  /** 编辑模式下禁止修改客户与租户 */
+  disableCustomerAndTenant?: boolean
 }
 
 function tenantLabel(t: PlatformTenant) {
@@ -55,6 +57,7 @@ export function ProjectFormFields({
   onChange,
   businessLines,
   idPrefix = 'project',
+  disableCustomerAndTenant = false,
 }: ProjectFormFieldsProps) {
   const { data: customers = [] } = trpc.crm.customers.list.useQuery({})
   const { data: customerTenants = [] } = trpc.crm.customers.listTenants.useQuery(
@@ -76,7 +79,11 @@ export function ProjectFormFields({
     <div className="grid gap-4 py-4">
       <div className="grid gap-2">
         <Label htmlFor={`${idPrefix}-customer`}>选择客户</Label>
-        <Select value={values.customerId || undefined} onValueChange={handleCustomerChange}>
+        <Select
+          value={values.customerId || undefined}
+          onValueChange={handleCustomerChange}
+          disabled={disableCustomerAndTenant}
+        >
           <SelectTrigger id={`${idPrefix}-customer`} className="w-full">
             <SelectValue placeholder="请选择客户" />
           </SelectTrigger>
@@ -100,7 +107,7 @@ export function ProjectFormFields({
           onValueChange={(v) =>
             onChange({ primaryTenantId: v === NONE_TENANT ? '' : v })
           }
-          disabled={!values.customerId}
+          disabled={disableCustomerAndTenant || !values.customerId}
         >
           <SelectTrigger id={`${idPrefix}-tenant`} className="w-full">
             <SelectValue

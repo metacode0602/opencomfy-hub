@@ -9,7 +9,7 @@ import {
   computeGrossProfit,
   recomputeStaffSumRows,
 } from '@/lib/finance/cost-row-utils'
-import { computeTotalConsumption, toMoneyString } from '@/lib/finance/income-row-utils'
+import { toMoneyString } from '@/lib/finance/income-row-utils'
 import type { PlatformCostMonthly } from '@/lib/types/finance'
 import {
   billingPeriod,
@@ -20,15 +20,15 @@ import {
   billingPeriodRawTenantBill,
   billingPeriodReconciliationReport,
   billingPeriodTenantProjectEnrichment,
-  billingTenant,
   billingTenantCostAllocation,
   platformCostMonthly,
   platformIncomeMonthly,
 } from '@workspace/db/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { RULE_VERSION } from './constants'
 import { FinanceError } from './errors'
-import { getTenantDisplayNames, listTenantProjectBindings } from './enrichment'
+import { computePeriodIncome } from './compute-income'
+import { listTenantProjectBindings } from './enrichment'
 import { financeError, financeLog, financeWarn } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
@@ -97,64 +97,14 @@ async function loadCurrentRaw(periodId: string) {
   return { customerRows, baremetalRows, tenantBillRows, tenantBillByWindow }
 }
 
-function buildAggRows(
-  periodId: string,
-  customerRows: (typeof billingPeriodRawCustomerConsumption.$inferSelect)[],
+function buildAggRowsForCost(
+  rows: (typeof billingPeriodAggCustomerConsumption.$inferSelect)[],
 ) {
-  const map = new Map<
-    string,
-    {
-      tenantPlatformId: string
-      customerType: string
-      total: number
-      voucher: number
-      balance: number
-      sourceRawIds: string[]
-      rowCount: number
-    }
-  >()
-  for (const row of customerRows) {
-    const key = `${row.tenantPlatformId}::${row.customerType}`
-    const cur = map.get(key) ?? {
-      tenantPlatformId: row.tenantPlatformId,
-      customerType: row.customerType,
-      total: 0,
-      voucher: 0,
-      balance: 0,
-      sourceRawIds: [],
-      rowCount: 0,
-    }
-    cur.total += parseNum(row.totalConsumption)
-    cur.voucher += parseNum(row.voucherConsumption)
-    cur.balance += parseNum(row.balanceConsumption)
-    cur.sourceRawIds.push(row.id)
-    cur.rowCount += 1
-    map.set(key, cur)
-  }
-  return [...map.values()].map((a) => ({
-    id: newId(),
-    billingPeriodId: periodId,
+  return rows.map((a) => ({
     tenantPlatformId: a.tenantPlatformId,
     customerType: a.customerType,
-    totalConsumption: toMoneyString(a.total),
-    voucherConsumption: toMoneyString(a.voucher),
-    balanceConsumption: toMoneyString(a.balance),
-    sourceRawIds: a.sourceRawIds,
-    rowCountByType: a.rowCount,
+    balanceConsumption: a.balanceConsumption,
   }))
-}
-
-async function resolveTenantIdMap(platformIds: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
-  if (platformIds.length === 0) return map
-  const rows = await db
-    .select({ id: billingTenant.id, platformId: billingTenant.platformTenantId })
-    .from(billingTenant)
-    .where(inArray(billingTenant.platformTenantId, platformIds))
-  for (const t of rows) {
-    if (t.platformId) map.set(t.platformId, t.id)
-  }
-  return map
 }
 
 type SplitCostRow = {
@@ -185,13 +135,18 @@ function recordKey(
   return `${staffId}::${projectId}::${regionCode}::${gpuModel}`
 }
 
+function pricingFieldString(value: number | null | undefined): string | null {
+  if (value == null || value <= 0) return null
+  return toMoneyString(value)
+}
+
 type CostRecordRow = PlatformCostMonthly & { project_id?: string }
 
 function buildCostRecords(input: {
   periodId: string
   windowId: string
   tenantBillRows: (typeof billingPeriodRawTenantBill.$inferSelect)[]
-  aggRows: ReturnType<typeof buildAggRows>
+  aggRows: ReturnType<typeof buildAggRowsForCost>
   enrichments: (typeof billingPeriodTenantProjectEnrichment.$inferSelect)[]
   allocByTenantProject: Map<string, number>
   bindings: Awaited<ReturnType<typeof listTenantProjectBindings>>
@@ -371,6 +326,8 @@ function buildCostRecords(input: {
       sold_duration_cost_excl_tax: toMoneyString(sold),
       gifted_duration_cost_excl_tax: toMoneyString(gifted),
       gross_profit: toMoneyString(gross),
+      deal_unit_price_per_hour: pricingFieldString(pricing.unitPricePerHour),
+      list_price_per_hour: pricingFieldString(pricing.listPricePerHour),
       created_at: new Date().toISOString(),
       updated_at: null,
     })
@@ -478,11 +435,6 @@ export async function computeBillingPeriod(input: {
     tenantBill: tenantBillRows.length,
   })
 
-  const aggRows = buildAggRows(periodId, customerRows)
-  if (aggRows.length > 0) {
-    await db.insert(billingPeriodAggCustomerConsumption).values(aggRows)
-  }
-
   const bBalanceByTenant = new Map<string, number>()
   for (const row of tenantBillRows) {
     const cur = bBalanceByTenant.get(row.tenantPlatformId) ?? 0
@@ -492,28 +444,6 @@ export async function computeBillingPeriod(input: {
     )
   }
 
-  const bareByTenant = new Map<string, number>()
-  for (const row of baremetalRows) {
-    const cur = bareByTenant.get(row.tenantPlatformId) ?? 0
-    bareByTenant.set(row.tenantPlatformId, cur + parseNum(row.finalAmount))
-  }
-
-  const platformIds = [
-    ...new Set([
-      ...aggRows.map((a) => a.tenantPlatformId),
-      ...tenantBillRows.map((r) => r.tenantPlatformId),
-    ]),
-  ]
-  const tenantIdMap = await resolveTenantIdMap(platformIds)
-  const tenantIds = [...new Set([...tenantIdMap.values()])]
-  const displayNames = await getTenantDisplayNames(tenantIds)
-
-  const enrichments = await db
-    .select()
-    .from(billingPeriodTenantProjectEnrichment)
-    .where(eq(billingPeriodTenantProjectEnrichment.billingPeriodId, periodId))
-
-  const incomeInserts: (typeof platformIncomeMonthly.$inferInsert)[] = []
   const reconciliationIssues: string[] = []
 
   const baremetalListPriceNotes: string[] = []
@@ -527,68 +457,41 @@ export async function computeBillingPeriod(input: {
   }
   reconciliationIssues.push(...baremetalListPriceNotes.slice(0, 50))
 
-  for (const agg of aggRows) {
-    const tenantId = tenantIdMap.get(agg.tenantPlatformId)
-    if (!tenantId) {
-      if (agg.customerType === 'B') {
-        throw new FinanceError(
-          'PRECONDITION_FAILED',
-          `B 端租户 ${agg.tenantPlatformId} 未在 CRM 中维护`,
-        )
-      }
-      reconciliationIssues.push(`未知租户 platform_id=${agg.tenantPlatformId}`)
-      continue
-    }
-    const bBalance = bBalanceByTenant.get(agg.tenantPlatformId) ?? 0
-    const mBare = bareByTenant.get(agg.tenantPlatformId) ?? 0
-    const supplementary = 0
-    const balance = bBalance
-    const bare = mBare
-    const supStr = toMoneyString(supplementary)
-    const balStr = toMoneyString(balance)
-    const bareStr = toMoneyString(bare)
-    const total = computeTotalConsumption({
-      supplementary_consumption: supStr,
-      balance_consumption: balStr,
-      bare_metal_consumption: bareStr,
+  let incomeResult: Awaited<ReturnType<typeof computePeriodIncome>>
+  try {
+    incomeResult = await computePeriodIncome({
+      periodId,
+      customerRows,
+      baremetalRows,
+      tenantBillBalanceByTenant: bBalanceByTenant,
+      bindings,
     })
-
-    const cBalance = parseNum(agg.balanceConsumption)
-    reconciliationIssues.push(
-      `ref_gap tenant=${agg.tenantPlatformId}: ${(cBalance - bBalance - mBare).toFixed(4)}`,
-    )
-
-    const tenantEnrich = enrichments.filter(
-      (e) => e.tenantPlatformId === agg.tenantPlatformId,
-    )
-    let projectName: string | null = null
-    if (tenantEnrich.length === 1) {
-      projectName = tenantEnrich[0]!.projectName
-    } else if (tenantEnrich.length > 1) {
-      projectName = tenantEnrich.map((e) => e.projectName).join(' / ')
+  } catch (error) {
+    if (error instanceof FinanceError && error.code === 'PRECONDITION_FAILED') {
+      await db
+        .update(billingPeriod)
+        .set({ status: 'import_error' })
+        .where(eq(billingPeriod.id, periodId))
     }
-
-    const names = displayNames.get(tenantId)
-    incomeInserts.push({
-      id: newId(),
-      billingPeriodId: periodId,
-      customerType: agg.customerType,
-      tenantId,
-      tenantPlatformId: agg.tenantPlatformId,
-      tenantName: names?.tenantName ?? agg.tenantPlatformId,
-      projectName,
-      customerFullName: names?.customerFullName ?? null,
-      supplementaryConsumption: supStr,
-      balanceConsumption: balStr,
-      bareMetalConsumption: bareStr,
-      totalConsumption: total,
-    })
+    throw error
   }
 
-  if (incomeInserts.length > 0) {
-    await db.insert(platformIncomeMonthly).values(incomeInserts)
-  }
-  financeLog('compute', 'income written', { periodId, count: incomeInserts.length })
+  reconciliationIssues.push(...incomeResult.reconciliationIssues)
+  financeLog('compute', 'income written', {
+    periodId,
+    count: incomeResult.incomeCount,
+  })
+
+  const aggDbRows = await db
+    .select()
+    .from(billingPeriodAggCustomerConsumption)
+    .where(eq(billingPeriodAggCustomerConsumption.billingPeriodId, periodId))
+  const aggRows = buildAggRowsForCost(aggDbRows)
+
+  const enrichments = await db
+    .select()
+    .from(billingPeriodTenantProjectEnrichment)
+    .where(eq(billingPeriodTenantProjectEnrichment.billingPeriodId, periodId))
 
   const allocations = await db
     .select()
@@ -690,6 +593,8 @@ export async function computeBillingPeriod(input: {
       sold_duration_cost_excl_tax: '0',
       gifted_duration_cost_excl_tax: '0',
       gross_profit: '0',
+      deal_unit_price_per_hour: null,
+      list_price_per_hour: null,
       created_at: new Date().toISOString(),
       updated_at: null,
     }
@@ -716,6 +621,8 @@ export async function computeBillingPeriod(input: {
       soldDurationCostExclTax: r.sold_duration_cost_excl_tax,
       giftedDurationCostExclTax: r.gifted_duration_cost_excl_tax,
       grossProfit: r.gross_profit,
+      dealUnitPricePerHour: r.deal_unit_price_per_hour,
+      listPricePerHour: r.list_price_per_hour,
       sourceRawIds: null,
     }),
   )
@@ -725,11 +632,16 @@ export async function computeBillingPeriod(input: {
   }
   financeLog('compute', 'cost written', { periodId, count: costDbRows.length })
 
+  const incomeRows = await db
+    .select()
+    .from(platformIncomeMonthly)
+    .where(eq(platformIncomeMonthly.billingPeriodId, periodId))
+
   let totalIncome = 0
   let balanceIncome = 0
   let baremetalIncome = 0
   let supplementary = 0
-  for (const row of incomeInserts) {
+  for (const row of incomeRows) {
     totalIncome += parseNum(row.totalConsumption)
     balanceIncome += parseNum(row.balanceConsumption)
     baremetalIncome += parseNum(row.bareMetalConsumption)
@@ -765,7 +677,7 @@ export async function computeBillingPeriod(input: {
     billingPeriodId: periodId,
     reportJson: {
       issues: reconciliationIssues,
-      incomeRowCount: incomeInserts.length,
+      incomeRowCount: incomeResult.incomeCount,
       costRowCount: costDbRows.length,
       computedAt: new Date().toISOString(),
     },
@@ -778,7 +690,7 @@ export async function computeBillingPeriod(input: {
     actorId: input.actorId,
     metadata: {
       ruleVersion: RULE_VERSION,
-      incomeCount: incomeInserts.length,
+      incomeCount: incomeResult.incomeCount,
       costCount: costDbRows.length,
     },
   })
@@ -792,7 +704,7 @@ export async function computeBillingPeriod(input: {
   })
 
   return {
-    incomeCount: incomeInserts.length,
+    incomeCount: incomeResult.incomeCount,
     costCount: costDbRows.length,
     status: 'computed',
   }

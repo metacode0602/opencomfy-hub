@@ -169,7 +169,7 @@ export const customersDataAccess = {
         certCode: input.certCode?.trim() || null,
         salesManagerId: input.salesManagerId || null,
         expectedScale: input.expectedScale ?? null,
-        accountName: input.shortName?.trim() || null,
+        shortName: input.shortName?.trim() || null,
       })
       await tx.insert(billingTenant).values({
         id: tenantId,
@@ -201,7 +201,7 @@ export const customersDataAccess = {
         certCode: input.certCode?.trim() || null,
         salesManagerId: input.salesManagerId || null,
         expectedScale: input.expectedScale ?? null,
-        accountName: input.shortName?.trim() || null,
+        shortName: input.shortName?.trim() || null,
       })
       .where(eq(customer.id, id))
 

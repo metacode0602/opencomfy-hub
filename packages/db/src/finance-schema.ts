@@ -28,7 +28,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core"
 
-import { billingTenant, crmProject, userStaff } from "./crm-schema"
+import { billingTenant, crmProject, customer, userStaff } from "./crm-schema"
 import { supplierUnitCost } from "./supply-schema"
 
 /** 金额 decimal(15,4) */
@@ -102,8 +102,14 @@ export const platformIncomeMonthly = pgTable(
       .references(() => billingTenant.id, { onDelete: "restrict" }),
     tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
     tenantName: varchar("tenant_name", { length: 255 }).notNull(),
-    projectName: varchar("project_name", { length: 255 }),
+    customerId: text("customer_id").references(() => customer.id, {
+      onDelete: "restrict",
+    }),
     customerFullName: varchar("customer_full_name", { length: 255 }),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    projectName: varchar("project_name", { length: 255 }),
     supplementaryConsumption: money("supplementary_consumption"),
     balanceConsumption: money("balance_consumption"),
     bareMetalConsumption: money("bare_metal_consumption"),
@@ -112,10 +118,10 @@ export const platformIncomeMonthly = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
   (table) => [
-    uniqueIndex("platform_income_monthly_period_tenant_type_uk").on(
+    uniqueIndex("platform_income_monthly_period_tenant_project_uk").on(
       table.billingPeriodId,
       table.tenantId,
-      table.customerType,
+      table.projectId,
     ),
     index("platform_income_monthly_billing_period_id_idx").on(table.billingPeriodId),
     index("platform_income_monthly_tenant_platform_id_idx").on(table.tenantPlatformId),
@@ -299,6 +305,18 @@ export const billingPeriodAggCustomerConsumption = pgTable(
       .references(() => billingPeriod.id, { onDelete: "cascade" }),
     tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
     customerType: varchar("customer_type", { length: 8 }).notNull(),
+    tenantId: text("tenant_id").references(() => billingTenant.id, {
+      onDelete: "restrict",
+    }),
+    customerId: text("customer_id").references(() => customer.id, {
+      onDelete: "restrict",
+    }),
+    customerFullName: varchar("customer_full_name", { length: 255 }),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    projectName: varchar("project_name", { length: 255 }),
+    allocationPercent: allocationPercent("allocation_percent"),
     totalConsumption: money("total_consumption").notNull(),
     voucherConsumption: money("voucher_consumption").notNull().default("0"),
     balanceConsumption: money("balance_consumption").notNull(),
@@ -310,7 +328,7 @@ export const billingPeriodAggCustomerConsumption = pgTable(
     uniqueIndex("billing_period_agg_customer_consumption_uk").on(
       table.billingPeriodId,
       table.tenantPlatformId,
-      table.customerType,
+      table.projectId,
     ),
     index("billing_period_agg_customer_consumption_period_id_idx").on(
       table.billingPeriodId,

@@ -17,7 +17,7 @@ import { Label } from "@workspace/ui/components/label"
 import { IconDownload, IconLoader2, IconUpload } from "@tabler/icons-react"
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { formatMoney } from "../_lib/display"
+import { formatMoney, formatText } from "../_lib/display"
 import { getPeriodDateRange, isValidPeriodCode } from "../_lib/period"
 import { CostGroupedTable } from "../[id]/cost/_components/cost-grouped-table"
 
@@ -1332,11 +1332,13 @@ export default function FinanceCreateBillingPeriodPage() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b bg-muted/50">
-                          <th className="px-3 py-2 text-left">租户</th>
-                          <th className="px-3 py-2 text-right">补充消费</th>
-                          <th className="px-3 py-2 text-right">余额消费</th>
-                          <th className="px-3 py-2 text-right">裸金属</th>
-                          <th className="px-3 py-2 text-right">总消费</th>
+                          <th className="px-3 py-2 text-left whitespace-nowrap">项目名称</th>
+                          <th className="px-3 py-2 text-left whitespace-nowrap">客户全称</th>
+                          <th className="px-3 py-2 text-left whitespace-nowrap">租户Id</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">补充消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">余额消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">线上裸金属消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">总消费</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1348,7 +1350,13 @@ export default function FinanceCreateBillingPeriodPage() {
                             (Number(row.bare_metal_consumption ?? 0) || 0)
                           return (
                             <tr key={row.id} className="border-b">
-                              <td className="px-3 py-2">{row.tenant_name}</td>
+                              <td className="px-3 py-2">{formatText(row.project_name)}</td>
+                              <td className="max-w-[200px] px-3 py-2">
+                                {formatText(row.customer_full_name ?? row.tenant_name)}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs">
+                                {row.tenant_platform_id}
+                              </td>
                               <td className="px-3 py-2 text-right">
                                 <Input
                                   className="ml-auto max-w-[140px] text-right tabular-nums"
@@ -1367,7 +1375,7 @@ export default function FinanceCreateBillingPeriodPage() {
                               <td className="px-3 py-2 text-right tabular-nums">
                                 {formatMoney(row.bare_metal_consumption ?? "0")}
                               </td>
-                              <td className="px-3 py-2 text-right tabular-nums">
+                              <td className="px-3 py-2 text-right font-medium tabular-nums">
                                 {formatMoney(String(total))}
                               </td>
                             </tr>

@@ -257,7 +257,7 @@ export const platformTenantImportDataAccess = {
             await tx.insert(customer).values({
               id: customerId,
               name,
-              accountName: name,
+              shortName: name,
               type: customerAssignment.type,
               status: 'active',
               contactPerson: customerAssignment.contactPerson?.trim() ?? '',
