@@ -206,9 +206,12 @@ export const platformCostMonthly = pgTable(
     uniqueIndex("platform_cost_monthly_record_uk")
       .on(table.billingPeriodId, table.staffId, table.dataCenterId, table.gpuCardTypeId)
       .where(sql`${table.type} = 'record'`),
-    uniqueIndex("platform_cost_monthly_sum_uk")
+    uniqueIndex("platform_cost_monthly_period_sum_uk")
       .on(table.billingPeriodId)
-      .where(sql`${table.type} = 'sum'`),
+      .where(sql`${table.type} = 'sum' AND ${table.staffId} IS NULL`),
+    uniqueIndex("platform_cost_monthly_staff_sum_uk")
+      .on(table.billingPeriodId, table.staffId)
+      .where(sql`${table.type} = 'sum' AND ${table.staffId} IS NOT NULL`),
   ],
 )
 

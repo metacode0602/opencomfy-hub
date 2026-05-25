@@ -72,7 +72,7 @@ export default function FinancePeriodCostPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <CostGroupedEditable baseRows={rows} />
+          <CostGroupedEditable baseRows={rows} periodCode={period.period_code} />
         </CardContent>
       </Card>
     </div>

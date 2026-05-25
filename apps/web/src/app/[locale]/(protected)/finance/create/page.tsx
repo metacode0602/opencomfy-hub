@@ -983,12 +983,6 @@ export default function FinanceCreateBillingPeriodPage() {
     setComputeError(null)
   }, [])
 
-  const allParsed =
-    fixedSlots.customer.status === "done" &&
-    fixedSlots.baremetal.status === "done" &&
-    tenantBillSlots.length > 0 &&
-    tenantBillSlots.every((w) => w.state.status === "done")
-
   const ensurePeriod = useCallback(async (): Promise<string> => {
     if (periodId) return periodId
     const created = await createPeriod.mutateAsync({
@@ -1624,7 +1618,10 @@ export default function FinanceCreateBillingPeriodPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <CostGroupedTable rows={draftBundle!.cost} />
+                  <CostGroupedTable
+                    rows={draftBundle!.cost}
+                    periodCode={draftBundle!.period.period_code}
+                  />
                 </CardContent>
               </Card>
 

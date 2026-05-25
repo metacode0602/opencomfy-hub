@@ -274,6 +274,13 @@
       "when": 1779716825980,
       "tag": "0039_tranquil_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1779719221003,
+      "tag": "0040_youthful_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

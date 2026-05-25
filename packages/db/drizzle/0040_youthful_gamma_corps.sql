@@ -1,0 +1,3 @@
+DROP INDEX "platform_cost_monthly_sum_uk";--> statement-breakpoint
+CREATE UNIQUE INDEX "platform_cost_monthly_period_sum_uk" ON "platform_cost_monthly" USING btree ("billing_period_id") WHERE "platform_cost_monthly"."type" = 'sum' AND "platform_cost_monthly"."staff_id" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "platform_cost_monthly_staff_sum_uk" ON "platform_cost_monthly" USING btree ("billing_period_id","staff_id") WHERE "platform_cost_monthly"."type" = 'sum' AND "platform_cost_monthly"."staff_id" IS NOT NULL;

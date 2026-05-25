@@ -35,7 +35,7 @@ type RollupGroup = {
   staffName: string
   dataCenterId: string
   dataCenterName: string
-  dataCenterCode: string
+  dataCenterRegion: string
   gpuCardTypeId: string
   gpuCardTypeCode: string
   totalConsumption: number
@@ -69,6 +69,80 @@ function rollupKey(staffId: string, dataCenterId: string, gpuCardTypeId: string)
   return `${staffId}::${dataCenterId}::${gpuCardTypeId}`
 }
 
+type CostMonthlyInsert = typeof platformCostMonthly.$inferInsert
+
+function sumRecordField(
+  records: CostMonthlyInsert[],
+  field: keyof Pick<
+    CostMonthlyInsert,
+    | 'totalConsumption'
+    | 'voucherConsumption'
+    | 'balanceConsumption'
+    | 'totalCardHours'
+    | 'balanceCardHours'
+    | 'voucherCardHours'
+    | 'confirmedRevenueExclTax'
+    | 'soldDurationCostExclTax'
+    | 'giftedDurationCostExclTax'
+    | 'grossProfit'
+  >,
+  asHours = false,
+): string {
+  const total = records.reduce((acc, row) => {
+    const raw = row[field]
+    if (raw == null || raw === '') return acc
+    return acc + (asHours ? Number(raw) : parseMoney(String(raw)))
+  }, 0)
+  return asHours ? toHoursString(total) : toMoneyString(total)
+}
+
+function buildStaffSumRows(
+  periodId: string,
+  recordRows: CostMonthlyInsert[],
+): CostMonthlyInsert[] {
+  const byStaff = new Map<string, CostMonthlyInsert[]>()
+  for (const row of recordRows) {
+    if (!row.staffId) continue
+    const list = byStaff.get(row.staffId) ?? []
+    list.push(row)
+    byStaff.set(row.staffId, list)
+  }
+
+  const sumRows: CostMonthlyInsert[] = []
+  for (const [staffId, records] of byStaff) {
+    const staffName =
+      records[0]?.staffName ?? records[0]?.accountManager ?? staffId
+    sumRows.push({
+      id: newId(),
+      billingPeriodId: periodId,
+      type: 'sum',
+      staffId,
+      staffName,
+      accountManager: staffName,
+      dataCenterId: null,
+      gpuCardTypeId: null,
+      supplierUnitCostId: null,
+      pricingSnapshotId: null,
+      idcName: null,
+      idcCode: null,
+      cardType: null,
+      totalConsumption: sumRecordField(records, 'totalConsumption'),
+      voucherConsumption: sumRecordField(records, 'voucherConsumption'),
+      balanceConsumption: sumRecordField(records, 'balanceConsumption'),
+      totalCardHours: sumRecordField(records, 'totalCardHours', true),
+      balanceCardHours: sumRecordField(records, 'balanceCardHours', true),
+      voucherCardHours: sumRecordField(records, 'voucherCardHours', true),
+      confirmedRevenueExclTax: sumRecordField(records, 'confirmedRevenueExclTax'),
+      soldDurationCostExclTax: sumRecordField(records, 'soldDurationCostExclTax'),
+      giftedDurationCostExclTax: sumRecordField(records, 'giftedDurationCostExclTax'),
+      grossProfit: sumRecordField(records, 'grossProfit'),
+      sourceLineIds: null,
+    })
+  }
+
+  return sumRows
+}
+
 export async function rollupSourceLinesToPlatformMonthly(input: {
   billingPeriodId: string
   snapshots: Map<string, CostPricingSnapshotRow>
@@ -86,12 +160,17 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
   const windows = await listTenantBillWindows(periodId)
   const windowIds = windows.map((w) => w.id)
 
-  const dcCodes = new Map<string, string>()
+  const dcRegions = new Map<string, string>()
   const cardCodes = new Map<string, string>()
   const dcRows = await db
-    .select({ id: dataCenter.id, code: dataCenter.code })
+    .select({
+      id: dataCenter.id,
+      containerInstanceRegion: dataCenter.containerInstanceRegion,
+    })
     .from(dataCenter)
-  for (const row of dcRows) dcCodes.set(row.id, row.code)
+  for (const row of dcRows) {
+    dcRegions.set(row.id, row.containerInstanceRegion?.trim() ?? '')
+  }
   const cardRows = await db
     .select({ id: gpuCardType.id, code: gpuCardType.code })
     .from(gpuCardType)
@@ -109,7 +188,7 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
         staffName: line.staffName ?? line.staffId,
         dataCenterId: line.dataCenterId,
         dataCenterName: line.dataCenterName ?? '',
-        dataCenterCode: dcCodes.get(line.dataCenterId) ?? '',
+        dataCenterRegion: dcRegions.get(line.dataCenterId) ?? '',
         gpuCardTypeId: line.gpuCardTypeId,
         gpuCardTypeCode: cardCodes.get(line.gpuCardTypeId) ?? '',
         totalConsumption: parseMoney(line.totalConsumption),
@@ -176,7 +255,7 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
       supplierUnitCostId: snap.supplierUnitCostId,
       pricingSnapshotId: snap.id,
       idcName: group.dataCenterName,
-      idcCode: group.dataCenterCode,
+      idcCode: group.dataCenterRegion || null,
       cardType: group.gpuCardTypeCode,
       totalConsumption: toMoneyString(group.totalConsumption),
       voucherConsumption: toMoneyString(group.voucherConsumption),
@@ -203,7 +282,9 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
 
   if (recordRows.length === 0) return 0
 
-  const sumRow: typeof platformCostMonthly.$inferInsert = {
+  const staffSumRows = buildStaffSumRows(periodId, recordRows)
+
+  const sumRow: CostMonthlyInsert = {
     id: newId(),
     billingPeriodId: periodId,
     type: 'sum',
@@ -248,10 +329,13 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
     sourceLineIds: null,
   }
 
-  await db.insert(platformCostMonthly).values([...recordRows, sumRow])
+  await db
+    .insert(platformCostMonthly)
+    .values([...recordRows, ...staffSumRows, sumRow])
   financeLog('compute-cost-rollup', 'done', {
     periodId,
     recordCount: recordRows.length,
+    staffSumCount: staffSumRows.length,
   })
   return recordRows.length
 }
