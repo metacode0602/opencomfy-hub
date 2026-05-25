@@ -1,6 +1,9 @@
 "use client"
 
+import { downloadCostDetailExcel } from "@/lib/finance/cost-detail-export"
+import { mergeCostRowsWithOverrides } from "@/lib/finance/cost-row-utils"
 import { LocaleLink } from "@/lib/i18n/navigation"
+import { useFinanceCostOpsStore } from "@/lib/stores/finance-cost-ops-store"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -10,7 +13,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
+import { Download } from "lucide-react"
 import { useParams } from "next/navigation"
+import { useMemo } from "react"
+import { toast } from "sonner"
 import { CostGroupedEditable } from "./_components/cost-grouped-editable"
 
 export default function FinancePeriodCostPage() {
@@ -23,7 +29,26 @@ export default function FinancePeriodCostPage() {
   )
 
   const period = bundle?.period
-  const rows = bundle?.cost ?? []
+  const rows = useMemo(() => bundle?.cost ?? [], [bundle?.cost])
+  const overrides = useFinanceCostOpsStore((s) => s.overrides)
+  const displayRows = useMemo(
+    () => mergeCostRowsWithOverrides(rows, overrides),
+    [rows, overrides],
+  )
+  const hasRecordRows = displayRows.some((r) => r.type === "record")
+
+  function handleExportExcel() {
+    if (!hasRecordRows) {
+      toast.error("暂无成本明细，无法导出")
+      return
+    }
+    if (!period) return
+    const ok = downloadCostDetailExcel({
+      rows: displayRows,
+      periodCode: period.period_code,
+    })
+    if (ok) toast.success("成本毛利明细 Excel 已下载")
+  }
 
   if (!id) {
     return (
@@ -64,15 +89,30 @@ export default function FinancePeriodCostPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>成本毛利 · {period.period_code}</CardTitle>
-          <CardDescription>
-            默认按客户经理展示汇总（sum）；点击行首箭头可展开或收起该经理下的分项（record）。
-            账期 {period.period_start} ~ {period.period_end}
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>成本毛利 · {period.period_code}</CardTitle>
+            <CardDescription>
+              默认按客户经理展示汇总（sum）；点击行首箭头可展开或收起该经理下的分项（record）。
+              账期 {period.period_start} ~ {period.period_end}
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportExcel}
+            disabled={!hasRecordRows}
+          >
+            <Download className="size-4" />
+            导出 Excel
+          </Button>
         </CardHeader>
         <CardContent>
-          <CostGroupedEditable baseRows={rows} periodCode={period.period_code} />
+          <CostGroupedEditable
+            baseRows={rows}
+            periodCode={period.period_code}
+          />
         </CardContent>
       </Card>
     </div>
