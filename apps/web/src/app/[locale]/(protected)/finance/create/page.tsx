@@ -806,7 +806,7 @@ export default function FinanceCreateBillingPeriodPage() {
 
   const createPeriod = trpc.finance.periods.create.useMutation()
   const importFile = trpc.finance.periods.importFile.useMutation()
-  const computePeriod = trpc.finance.periods.compute.useMutation()
+  const computeCostPeriod = trpc.finance.periods.computeCost.useMutation()
   const computeIncomePeriod = trpc.finance.periods.computeIncome.useMutation()
   const publishPeriod = trpc.finance.periods.publish.useMutation()
   const saveSupplementary = trpc.finance.periods.saveSupplementary.useMutation()
@@ -1183,12 +1183,17 @@ export default function FinanceCreateBillingPeriodPage() {
   const incomeImportsParsed =
     fixedSlots.customer.status === "done" && fixedSlots.baremetal.status === "done"
 
+  const costImportsParsed =
+    tenantBillSlots.length > 0 &&
+    tenantBillSlots.every((w) => w.state.status === "done") &&
+    fixedSlots.baremetal.status === "done"
+
   const canRunCompute =
     isValidPeriodCode(periodCode) &&
     Boolean(periodStart) &&
     Boolean(periodEnd) &&
-    allParsed &&
-    (validation?.canCompute ?? false) &&
+    costImportsParsed &&
+    (validation?.canComputeCost ?? validation?.canCompute ?? false) &&
     !computing &&
     !computingIncome &&
     !persisting &&
@@ -1229,11 +1234,11 @@ export default function FinanceCreateBillingPeriodPage() {
     setComputeError(null)
     try {
       const id = await ensurePeriod()
-      await computePeriod.mutateAsync({ billingPeriodId: id })
+      await computeCostPeriod.mutateAsync({ billingPeriodId: id })
       await utils.finance.periods.getBundle.invalidate({ id })
       await refetchValidation()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "计算失败"
+      const msg = e instanceof Error ? e.message : "计算成本失败"
       setComputeError(msg)
       if (periodId) await refetchValidation()
     } finally {

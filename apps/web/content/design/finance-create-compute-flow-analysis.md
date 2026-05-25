@@ -1,8 +1,8 @@
 # 账期创建页「计算成功」流程可行性分析
 
-> 版本：v2.1  
+> 版本：v2.2  
 > 日期：2026-05-25  
-> 状态：**方案设计（含成本重构 v2.1 + 页面双轨交互）**  
+> 状态：**方案设计（含成本重构 v2.2 + 裸金属卡时解析）**  
 > 关联：`income-sql-compute-design.md` v1.3、`apps/web/src/app/[locale]/(protected)/finance/create/page.tsx`、`compute-cost.ts`（待建）、`compute-billing-period-income.ts`、`billing-periods.ts`  
 > 说明：§1～§7 为创建页流程分析；**§9 为成本 v2 实现方案**；**§2.4 为页面双按钮 + Tab 展示约定**（与现网 `page.tsx` 对齐）。
 
@@ -31,7 +31,7 @@
 | **成本中间层（v2）** | **需新建**。与收入 agg / enrichment **分离**；明细落 `billing_period_cost_detail`，再 rollup 至精简版 `platform_cost_monthly`。 |
 | **页面计算入口（v2.1）** | **已拆分**。主操作区两个按钮：「计算收入」（`computeIncome`）与「**计算成本**」（`computeCost`）；**不再**通过单一「计算」同时跑收入+成本。 |
 | **结果展示（v2.1）** | **Tab 分栏**。收入明细与成本明细分属「收入」「成本」两个 Tab；汇总卡（`ComputeResultCard`）可同时展示两侧汇总字段。 |
-| **成本汇总表（v2.1）** | `platform_cost_monthly` 增加 **`staff_name`** 快照列（§9.5），页面成本 Tab / 导出直接读该列，不联表 `user_staff`。 |
+| **裸金属成本计量（v2.2）** | 从 `billing_period_raw_baremetal_order` **TypeScript 解析**设备数/卡数/资源包 → 写入 `billing_period_cost_baremetal_agg`；租用时长折算 **消费卡时** 并入 `balance_card_hours`，**final_amount** 并入 `balance_consumption`（§9.3.2）。 |
 | **交互完整性** | **存在 2 处需修复的缺口**（见 §5）：补充消费未保存即可发布；成本/收入重算门禁需分别对齐 `canComputeCost` / `canComputeIncome`。 |
 
 **一句话**：收入与成本在页面按钮、API、purge、Tab 展示四层解耦；后端需落地独立 `computeCost` endpoint；`platform_cost_monthly` 补 `staff_name`。
@@ -180,7 +180,7 @@ flowchart TD
 
 - **余额收入口径**：仍来自 **客户消费 Raw**（收入专用）；与成本 v2 **解耦**。
 - **成本余额口径（v2）**：`balance_consumption` / 卡时来自 **账户消费详情（tenant_bill Raw）**；tenant_bill 已含平台侧客户消费汇总，**不再**引用 `billing_period_raw_customer_consumption` 或 `billing_period_agg_customer_consumption`。
-- **裸金属（v2）**：在成本中间表按 **租户 Id × 机房 × 卡型** 汇总 `baremetal_order.final_amount`；与 tenant_bill 同粒度合并后再算售出/赠送成本与毛利。
+- **裸金属（v2.2）**：从 Raw **TS 解析**设备台数、单机卡数、资源包（份数 + hour/day/week/month）→ 按公式折算 **消费卡时** 写入 `baremetal_agg.balance_card_hours`；`final_amount` 写入 `baremetal_agg.balance_consumption`；与 tenant_bill **同键相加** 进入 `cost_detail` / `platform_cost_monthly` 的 balance 列（§9.3.2～§9.3.3）。
 - **展示字段快照**：收入 → `platform_income_monthly`；成本明细 → `billing_period_cost_detail`；成本汇总 → `platform_cost_monthly`（含 **`staff_name`**，§9.5）。
 
 ### 4.2 交互流程 — 基本可行，有缺口
@@ -309,8 +309,9 @@ canComputeIncome :=
 | T7 | 成本 Tab 列 | 计算成本后切 Tab | 展示 `staff_name` + §9.5 列 |
 | T8 | 仅算收入 | 不算成本 | 成本 Tab 空态 |
 | T9 | 仅算成本 | 无 customer | 收入 Tab 空态；成本成功 |
-| T10 | 裸金属汇总 | 同租户同机房卡型多订单 | `cost_detail.bare_metal_consumption` 合计正确 |
+| T10 | 裸金属卡时 | 2 台 × 8 卡 × 24 小时包 × 1 份 | `baremetal_agg.balance_card_hours` = 384；`balance_consumption` = SUM(final_amount) |
 | T11 | Tab 默认选中 | 先算收入再算成本 | 每次计算完成后自动切到对应 Tab |
+| T12 | 裸金属并入 cost 行 | 同租户同机房卡型 tenant_bill + baremetal | `cost_detail.balance_card_hours` / `balance_consumption` 为两侧相加 |
 
 ---
 
@@ -322,6 +323,7 @@ canComputeIncome :=
 | v1.1 | 2026-05-25 | 新增 §9：成本计算流程与表结构读写清单（描述现实现） |
 | v2.0 | 2026-05-25 | §9 重写：成本与收入分离、独立中间表、精简 `platform_cost_monthly` |
 | v2.1 | 2026-05-25 | 页面「计算成本」独立 API；Tab 分栏展示；`platform_cost_monthly` 增加 `staff_name` |
+| v2.2 | 2026-05-25 | §9.3.2 裸金属 agg 解析设备/卡数/资源包与消费卡时；并入 balance 计量列 |
 
 ---
 
@@ -345,7 +347,7 @@ canComputeIncome :=
 | 数据 | Raw 表 | 在成本中的作用 |
 |------|--------|----------------|
 | **账户消费详情** | `billing_period_raw_tenant_bill` | 主计量：`balance_consumption`、`balance_card_hours`、`voucher_card_hours`；按租户×window×`region_code`×`gpu_model` |
-| **裸金属消费订单** | `billing_period_raw_baremetal_order` | 按租户×机房×卡型汇总 `final_amount` → 写入中间表 **`bare_metal_consumption`** 列；参与同机房卡型的成本/毛利计算 |
+| **裸金属消费订单** | `billing_period_raw_baremetal_order` | **K2**：逐行 TS 解析 → `billing_period_cost_baremetal_agg`；**机房 / 卡型 / 消费卡时 / 支付金额** 分别计入 `idc_*`、`card_type`、`balance_card_hours`、`balance_consumption`（§9.3.2） |
 | ~~客户消费明细~~ | ~~`billing_period_raw_customer_consumption`~~ | **不参与成本**（仅服务收入与 B/C 交叉校验） |
 
 **B 端租户判定（v2）**：不再读 customer_type agg；改为 tenant_bill 行上的 `tenant_platform_id` 必须在 `billing_tenant` 存在且关联 CRM 客户（与 import 期校验一致）。C 端-only 租户若无 CRM 绑定，写入 reconciliation issue 并跳过。
@@ -376,23 +378,93 @@ canComputeIncome :=
 
 写入时机：tenant_bill import 成功后 **或** 成本计算前 lazy resolve（读 CRM + `billing_tenant_cost_allocation` + `tenant_project_cost`，逻辑同现 `resolveAndPersistEnrichment`，但 **INSERT 目标为本表**）。
 
-#### 9.3.2 `billing_period_cost_baremetal_agg`（裸金属按租户×机房×卡型汇总）
+#### 9.3.2 `billing_period_cost_baremetal_agg`（裸金属 · 租户×机房×卡型汇总）
+
+> **实现原则**：解析与卡时换算全部在 **TypeScript**（`compute-cost-baremetal-agg.ts` + 复用 `baremetal-order-parse.ts`），**不用**复杂 SQL 字符串解析或 GROUP BY 内嵌正则。流程：`读 Raw 行 → 逐行 parse → 逐行算 card_hours → Map 内存聚合 → 批量 INSERT`。
+
+##### Raw 来源字段（`billing_period_raw_baremetal_order`）
+
+| Raw 列 | 用途 |
+|--------|------|
+| `tenant_platform_id` | 租户 |
+| `idc_name` | 机房（`normalizeBaremetalRegion` → `idc_code`） |
+| `device_model` | 设备型号文本，如 `A800 x 8` |
+| `device_qty` | Excel 设备数量（台）；缺失时默认 1 |
+| `purchase_qty_text` | 购买数量文本，如 `2 x 24小时时长包` |
+| `final_amount` | 最终支付金额 → **`balance_consumption`** |
+| `order_id` | 审计 |
+
+##### 逐行解析（复用 / 扩展现有 parser）
+
+```typescript
+// baremetal-order-parse.ts（已有）
+parseDeviceModel(device_model)  → { cardCode, cardCount }      // 卡型 code + 单机卡数
+parsePurchaseQty(purchase_qty_text) → { qty, billingUnit }    // 资源包份数 + hour|day|week|month
+
+// 新增 baremetal-card-hours.ts（建议）
+function billingUnitToHours(unit: PlatformBillingUnit): number {
+  // hour=1, day=24, week=168, month=720（30×24，与刊例价口径一致即可配置）
+}
+
+function computeBaremetalCardHours(input: {
+  deviceQty: number
+  cardCount: number
+  packageQty: number
+  billingUnit: PlatformBillingUnit
+}): number {
+  // 消费卡时 = 设备台数 × 单机卡数 × 资源包份数 × 单位小时数
+  return input.deviceQty * input.cardCount * input.packageQty * billingUnitToHours(input.billingUnit)
+}
+```
+
+解析失败（无法识别型号 / 购买数量）→ 写入 `billing_period_reconciliation_report` issue，**跳过该行**或整单阻断（与 import 错误策略一致，默认 skip + issue）。
+
+##### 聚合表结构（写入 DB）
+
+**UK**：`(billing_period_id, tenant_platform_id, idc_code, card_type)`
 
 | 列 | 类型 | 说明 |
 |----|------|------|
 | `id` | text PK | |
 | `billing_period_id` | text FK | |
 | `tenant_platform_id` | varchar | |
-| `idc_code` | varchar | 由 `baremetal_order.idc_name` 归一化 |
-| `idc_name` | varchar | 原始机房名快照 |
-| `card_type` | varchar | 由 `device_model` 解析出的 GPU code |
-| `bare_metal_consumption` | money | **SUM(`final_amount`)** |
+| `idc_code` | varchar | 归一化机房 code |
+| `idc_name` | varchar | 机房显示名快照（取首条或众数） |
+| `card_type` | varchar | GPU code（`parseDeviceModel.cardCode`） |
+| **`device_qty_total`** | integer | **SUM(`device_qty`)** — 设备台数合计 |
+| **`card_count_per_device`** | integer | 单机卡数（同 UK 内应一致；不一致记 issue 取首条） |
+| **`total_gpu_cards`** | integer | **SUM(`device_qty × card_count_per_device`)** — 总 GPU 卡数 |
+| **`package_qty_total`** | numeric | 资源包份数 SUM（**仅当 UK 内 billing_unit 相同**；否则见下） |
+| **`billing_unit`** | varchar | `hour` / `day` / `week` / `month`；UK 内混用时置 `mixed` 且 **`package_breakdown` 存明细** |
+| **`package_breakdown`** | jsonb | 可选；`[{ billing_unit, package_qty, device_qty, card_hours }]` 混单位审计 |
+| **`balance_card_hours`** | card_hours | **SUM(逐行消费卡时)** — 租用时长折算后的消费卡时 |
+| **`balance_consumption`** | money | **SUM(`final_amount`)** — 裸金属产品线支付金额 |
 | `order_count` | integer | 订单行数 |
-| `source_order_ids` | jsonb | 来源 `order_id` 列表（审计） |
+| `source_order_ids` | jsonb | 来源 `order_id` 列表 |
 
-**UK**：`(billing_period_id, tenant_platform_id, idc_code, card_type)`
+> **口径对齐（v2.2）**：裸金属产品线在成本侧的四大维度——**机房、卡型、租用时长（卡时）、支付金额**——在本表已分别落为 `idc_*`、`card_type`、`balance_card_hours`、`balance_consumption`；下游 **不再** 使用单独的 `bare_metal_consumption` 列，而与 tenant_bill 同键 **相加** 进入 `cost_detail`（§9.3.3）。
 
-解析规则：复用 `baremetal-order-parse`（`parseDeviceModel` → 卡型 code；`normalizeBaremetalRegion` → 机房 code）。
+##### K2 伪代码（保持清晰，无复杂 SQL）
+
+```typescript
+async function aggregateBaremetalOrders(periodId: string): Promise<void> {
+  const rows = await loadBaremetalRawRows(periodId) // 简单 SELECT by batch_id
+  const bucket = new Map<string, BaremetalAggAccumulator>()
+
+  for (const row of rows) {
+    const parsed = parseBaremetalOrderRow(row) // 封装 parseDeviceModel + parsePurchaseQty + 默认值
+    if (!parsed.ok) { issues.push(parsed.error); continue }
+
+    const cardHours = computeBaremetalCardHours(parsed.metrics)
+    const key = `${row.tenantPlatformId}::${parsed.idcCode}::${parsed.cardCode}`
+    const acc = bucket.get(key) ?? newBaremetalAccumulator(row, parsed)
+    acc.addOrder(row, parsed, cardHours)
+    bucket.set(key, acc)
+  }
+
+  await db.insert(billingPeriodCostBaremetalAgg).values([...bucket.values()].map(toDbRow))
+}
+```
 
 #### 9.3.3 `billing_period_cost_detail`（成本明细 — enriched + 单价 + 裸金属列）
 
@@ -413,10 +485,10 @@ canComputeIncome :=
 | `window_id` | text FK | tenant_bill 时间段（可空：跨 window 合并后为 null） |
 | `idc_code` / `idc_name` | varchar | 机房 |
 | `card_type` | varchar | GPU 型号 |
-| `balance_consumption` | money | tenant_bill × allocation |
-| `balance_card_hours` | card_hours | |
-| `voucher_card_hours` | card_hours | |
-| **`bare_metal_consumption`** | money | 来自 §9.3.2 同租户×机房×卡型汇总 × allocation |
+| `balance_consumption` | money | tenant_bill 余额消费 × allocation **+ baremetal_agg.`balance_consumption` × allocation** |
+| `balance_card_hours` | card_hours | tenant_bill 卡时 × allocation **+ baremetal_agg.`balance_card_hours` × allocation** |
+| `voucher_card_hours` | card_hours | 仅 tenant_bill（裸金属无券卡时则不加） |
+| ~~`bare_metal_consumption`~~ | — | **v2.2 移除**；裸金属金额已并入 `balance_consumption` |
 | `supplier_unit_cost_id` | text FK | 解析的机房×卡型成本 |
 | `deal_unit_price_per_hour` | money | 单价快照 |
 | `list_price_per_hour` | money | 刊例/清单价快照 |
@@ -430,7 +502,14 @@ canComputeIncome :=
 
 **UK（合并后）**：`(billing_period_id, staff_id, project_id, idc_code, card_type)`
 
-> **裸金属列语义**：同一租户在 `baremetal_agg` 中按机房×卡型汇总的金额，按项目 `allocation_percent` 拆分到各 `cost_detail` 行；与 tenant_bill 同机房×卡型行 **共存于同一 detail 行**（LEFT JOIN 无 tenant_bill 仅有裸金属时仍生成 detail，balance 字段为 0）。
+> **合并语义（v2.2）**：K4 按 `(tenant_platform_id, idc_code, card_type)` 将 **tenant_bill 窗口汇总** 与 **baremetal_agg** 对齐；同一项目分成比例下：
+>
+> ```text
+> detail.balance_consumption = alloc × (Σ tenant_bill.balance_consumption + baremetal_agg.balance_consumption)
+> detail.balance_card_hours  = alloc × (Σ tenant_bill.balance_card_hours  + baremetal_agg.balance_card_hours)
+> ```
+>
+> 仅有裸金属、无 tenant_bill 时仍生成 detail（tenant_bill 部分为 0）；仅有 tenant_bill 时 baremetal 部分为 0。确认收入 / 售出成本 / 毛利仍由 `cost-pricing-utils` 基于 **合并后的** 卡时与消费计算。
 
 ### 9.4 成本 pipeline（K0～K7）
 
@@ -445,9 +524,9 @@ flowchart TD
 
     subgraph k [computeBillingPeriodCost]
         K0[purgeCostDerived] --> K1[resolveCostEnrichment → cost_enrichment]
-        K1 --> K2[aggregateBaremetal → cost_baremetal_agg]
+        K1 --> K2[TS 逐行 parse baremetal → baremetal_agg]
         K2 --> K3[按 window 读 tenant_bill + pricingMap]
-        K3 --> K4[JOIN baremetal_agg + enrichment + allocation]
+        K3 --> K4[合并 tenant_bill + baremetal 至 balance 列]
         K4 --> K5[计算单价/阶梯 → cost_detail]
         K5 --> K6[rollup staff×idc×card → platform_cost_monthly]
         K6 --> K7[UPDATE billing_period.total_cost / total_gross_profit]
@@ -461,10 +540,10 @@ flowchart TD
 |------|------|------|
 | K0 | D: `cost_enrichment`, `cost_baremetal_agg`, `cost_detail`, `platform_cost_monthly` | `purgeCostDerived`；**不**删 income / agg |
 | K1 | W: `billing_period_cost_enrichment` | CRM 补全 + 分成；读 `billing_tenant`、`crm_project`、`billing_tenant_cost_allocation`、`tenant_project_cost` |
-| K2 | W: `billing_period_cost_baremetal_agg` | GROUP BY tenant×idc×card；SUM final_amount |
+| K2 | W: `billing_period_cost_baremetal_agg` | **TS 逐行**读 Raw → parse → `computeBaremetalCardHours` → Map 聚合 INSERT；**无复杂 SQL** |
 | K3 | R: tenant_bill Raw；R: 供应商单价表 | `buildTenantBillPricingMap` |
-| K4 | 内存 | tenant_bill 行 × 项目分成 LEFT JOIN baremetal_agg 同键 |
-| K5 | W: `billing_period_cost_detail` | 应用 `cost-pricing-utils`；写 enriched 列 + 裸金属列 + 毛利 |
+| K4 | 内存 | 同键合并 tenant_bill + baremetal 的 `balance_consumption` / `balance_card_hours`；× 项目 `allocation_percent` |
+| K5 | W: `billing_period_cost_detail` | 合并后的 balance 列 → `cost-pricing-utils` → 毛利 |
 | K6 | W: `platform_cost_monthly` | GROUP BY staff_id, idc_code, card_type；写入 §9.5 列含 **`staff_name`** |
 | K7 | W: `billing_period` | `total_cost` = SUM(sold+gifted)；`total_gross_profit` = SUM(gross_profit) |
 
@@ -561,16 +640,12 @@ import tenant_bill 时：成本路径写入 `billing_period_cost_enrichment`（�
 ```text
 apps/web/src/lib/server/dataaccess/finance/
   compute-cost.ts              # K0～K7 主编排
-  compute-cost-enrichment.ts   # K1，镜像 enrichment 但写 cost_enrichment
-  compute-cost-baremetal-agg.ts # K2
-  compute-cost-detail.ts       # K4～K5
+  compute-cost-enrichment.ts   # K1
+  compute-cost-baremetal-agg.ts # K2：读 Raw、逐行 parse、内存聚合、写 agg 表
+  baremetal-card-hours.ts      # 资源包单位 → 小时；消费卡时公式（纯函数，易单测）
+  compute-cost-detail.ts       # K4～K5：合并 tenant_bill + baremetal → detail
   compute-cost-rollup.ts       # K6
-  purge-cost.ts                # purgeCostDerived
-packages/db/src/finance-schema.ts
-  billingPeriodCostEnrichment
-  billingPeriodCostBaremetalAgg
-  billingPeriodCostDetail
-  platformCostMonthly          # 精简列 migration
+  purge-cost.ts
 ```
 
 ### 9.9 测试用例（成本 v2）
@@ -578,13 +653,16 @@ packages/db/src/finance-schema.ts
 | # | 场景 | 期望 |
 |---|------|------|
 | C1 | 仅 tenant_bill + baremetal，无 customer | 成本成功；`cost_detail` 有项目/客户；income 空 |
-| C2 | 同租户裸金属多订单同机房卡型 | `cost_baremetal_agg.bare_metal_consumption` = 合计；detail 列一致 |
+| C2 | 同租户裸金属多订单同机房卡型 | `balance_consumption` = SUM(final_amount)；`balance_card_hours` = SUM(逐行卡时) |
 | C3 | 多项目租户 | detail 按 allocation 拆分；rollup 后 `platform_cost_monthly` 无 project 列 |
-| C4 | 仅有裸金属无 tenant_bill 行 | detail 仍生成（balance=0，bare_metal>0）或 issue（产品确认） |
+| C4 | 仅有裸金属无 tenant_bill | detail 仍生成；balance 仅来自 baremetal_agg |
 | C5 | 重算成本 | purgeCostDerived 后中间表与汇总表全部重建；income 不受影响 |
 | C6 | getBundle | cost 含 `staff_name`；单表无联 staff |
 | C7 | 计算成本后再算收入 | income 追加；cost 不被 purge |
 | C8 | Tab 切换 | 成本计算完成默认打开成本 Tab |
+| **C9** | **解析资源包** | `2 x 24小时时长包` + `A800 x 8` + device_qty=1 → card_hours=384 |
+| **C10** | **tenant_bill + baremetal 合并** | 同键两侧 balance 相加后进 cost_detail / platform_cost_monthly |
+| **C11** | **解析失败** | 无效 purchase_qty_text → reconciliation issue，该行跳过 |
 
 ### 9.10 迁移说明
 

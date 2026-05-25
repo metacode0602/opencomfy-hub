@@ -42,7 +42,11 @@ function groupCostByStaff(rows: PlatformCostMonthly[]): StaffCostGroup[] {
   for (const [staffId, g] of map) {
     if (!g.sum && g.records.length === 0) continue
     const accountManager =
-      g.sum?.account_manager ?? g.records[0]?.account_manager ?? ""
+      g.sum?.staff_name ??
+      g.sum?.account_manager ??
+      g.records[0]?.staff_name ??
+      g.records[0]?.account_manager ??
+      ""
     groups.push({
       staffId,
       accountManager,
@@ -75,7 +79,7 @@ function CostRowCells({
       <TableCell className="font-mono text-xs">
         {formatText(r.supplier_unit_cost_id)}
       </TableCell>
-      <TableCell>{r.account_manager}</TableCell>
+      <TableCell>{r.staff_name ?? r.account_manager}</TableCell>
       <TableCell>{formatText(r.idc_name)}</TableCell>
       <TableCell>{formatText(r.idc_code)}</TableCell>
       <TableCell>{formatText(r.card_type)}</TableCell>

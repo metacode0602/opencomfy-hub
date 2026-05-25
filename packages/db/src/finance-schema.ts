@@ -161,6 +161,8 @@ export const platformCostMonthly = pgTable(
     soldDurationCostExclTax: money("sold_duration_cost_excl_tax"),
     giftedDurationCostExclTax: money("gifted_duration_cost_excl_tax"),
     grossProfit: money("gross_profit"),
+    /** v2.2 成本汇总：客户经理姓名快照（读路径不联 staff 表） */
+    staffName: varchar("staff_name", { length: 128 }),
     /** 多项目拆分行占原 Raw 的比例（审计） */
     allocationPercent: allocationPercent("allocation_percent"),
     sourceRawIds: jsonb("source_raw_ids").$type<string[]>(),
@@ -186,6 +188,153 @@ export const platformCostMonthly = pgTable(
     index("platform_cost_monthly_supplier_unit_cost_id_idx").on(
       table.supplierUnitCostId,
     ),
+    uniqueIndex("platform_cost_monthly_period_staff_idc_card_uk").on(
+      table.billingPeriodId,
+      table.staffId,
+      table.idcCode,
+      table.cardType,
+    ),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// §4.6 成本派生中间层（v2.2 — 与收入 agg/enrichment 分离）
+// ---------------------------------------------------------------------------
+
+export const billingPeriodCostEnrichment = pgTable(
+  "billing_period_cost_enrichment",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    customerId: text("customer_id").references(() => customer.id, {
+      onDelete: "restrict",
+    }),
+    customerFullName: varchar("customer_full_name", { length: 255 }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "restrict" }),
+    projectName: varchar("project_name", { length: 255 }).notNull(),
+    staffId: text("staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    accountManagerName: varchar("account_manager_name", { length: 128 }),
+    allocationPercent: allocationPercent("allocation_percent"),
+    source: varchar("source", { length: 32 }).notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_cost_enrichment_uk").on(
+      table.billingPeriodId,
+      table.tenantPlatformId,
+      table.projectId,
+    ),
+    index("billing_period_cost_enrichment_period_id_idx").on(table.billingPeriodId),
+  ],
+)
+
+export type CostBaremetalPackageBreakdownEntry = {
+  billing_unit: string
+  package_qty: number
+  device_qty: number
+  card_hours: number
+}
+
+export const billingPeriodCostBaremetalAgg = pgTable(
+  "billing_period_cost_baremetal_agg",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    idcCode: varchar("idc_code", { length: 64 }).notNull(),
+    idcName: varchar("idc_name", { length: 255 }),
+    cardType: varchar("card_type", { length: 128 }).notNull(),
+    deviceQtyTotal: integer("device_qty_total").notNull().default(0),
+    cardCountPerDevice: integer("card_count_per_device").notNull().default(0),
+    totalGpuCards: integer("total_gpu_cards").notNull().default(0),
+    packageQtyTotal: numeric("package_qty_total", { precision: 15, scale: 4 }),
+    billingUnit: varchar("billing_unit", { length: 16 }),
+    packageBreakdown: jsonb("package_breakdown").$type<CostBaremetalPackageBreakdownEntry[]>(),
+    balanceCardHours: cardHours("balance_card_hours").notNull().default("0"),
+    balanceConsumption: money("balance_consumption").notNull().default("0"),
+    orderCount: integer("order_count").notNull().default(0),
+    sourceOrderIds: jsonb("source_order_ids").$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_cost_baremetal_agg_uk").on(
+      table.billingPeriodId,
+      table.tenantPlatformId,
+      table.idcCode,
+      table.cardType,
+    ),
+    index("billing_period_cost_baremetal_agg_period_id_idx").on(table.billingPeriodId),
+  ],
+)
+
+export const billingPeriodCostDetail = pgTable(
+  "billing_period_cost_detail",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantId: text("tenant_id").references(() => billingTenant.id, {
+      onDelete: "set null",
+    }),
+    customerId: text("customer_id").references(() => customer.id, {
+      onDelete: "set null",
+    }),
+    customerFullName: varchar("customer_full_name", { length: 255 }),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    projectName: varchar("project_name", { length: 255 }),
+    staffId: text("staff_id")
+      .notNull()
+      .references(() => userStaff.id, { onDelete: "restrict" }),
+    accountManagerName: varchar("account_manager_name", { length: 128 }),
+    windowId: text("window_id").references(() => billingPeriodTenantBillWindow.id, {
+      onDelete: "set null",
+    }),
+    idcCode: varchar("idc_code", { length: 64 }).notNull(),
+    idcName: varchar("idc_name", { length: 255 }),
+    cardType: varchar("card_type", { length: 128 }).notNull(),
+    balanceConsumption: money("balance_consumption"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours"),
+    supplierUnitCostId: text("supplier_unit_cost_id").references(
+      () => supplierUnitCost.id,
+      { onDelete: "set null" },
+    ),
+    dealUnitPricePerHour: money("deal_unit_price_per_hour"),
+    listPricePerHour: money("list_price_per_hour"),
+    confirmedRevenueExclTax: money("confirmed_revenue_excl_tax"),
+    soldDurationCostExclTax: money("sold_duration_cost_excl_tax"),
+    giftedDurationCostExclTax: money("gifted_duration_cost_excl_tax"),
+    grossProfit: money("gross_profit"),
+    allocationPercent: allocationPercent("allocation_percent"),
+    sourceTenantBillRawIds: jsonb("source_tenant_bill_raw_ids").$type<string[]>(),
+    sourceBaremetalAggId: text("source_baremetal_agg_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_cost_detail_uk").on(
+      table.billingPeriodId,
+      table.staffId,
+      table.projectId,
+      table.idcCode,
+      table.cardType,
+    ),
+    index("billing_period_cost_detail_period_id_idx").on(table.billingPeriodId),
   ],
 )
 
@@ -651,6 +800,9 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   tenantCostAllocations: many(billingTenantCostAllocation),
   incomeRows: many(platformIncomeMonthly),
   costRows: many(platformCostMonthly),
+  costEnrichments: many(billingPeriodCostEnrichment),
+  costBaremetalAggs: many(billingPeriodCostBaremetalAgg),
+  costDetails: many(billingPeriodCostDetail),
   reconciliationReport: one(billingPeriodReconciliationReport),
   operationLogs: many(billingPeriodOperationLog),
 }))

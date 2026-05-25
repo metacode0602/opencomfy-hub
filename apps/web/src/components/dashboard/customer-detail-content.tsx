@@ -18,11 +18,23 @@ import {
   Ticket,
   TrendingUp,
   ArrowUpRight,
+  ArrowLeftRight,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@workspace/ui/components/dialog'
+import { Label } from '@workspace/ui/components/label'
+import { Textarea } from '@workspace/ui/components/textarea'
 import { StatusBadge } from '@/components/dashboard/status-badge'
 import {
   Table,
@@ -35,6 +47,11 @@ import {
 import type { Customer } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
+import { EditCustomerDialog } from './edit-customer-dialog'
+import {
+  customerToFormValues,
+  formValuesToCustomerInput,
+} from './customer-form-utils'
 import {
   ChartContainer,
   ChartTooltip,
@@ -85,9 +102,42 @@ const productLineChartConfig = Object.fromEntries(
   ]),
 ) satisfies ChartConfig
 
-export function CustomerDetailContent({ customer }: CustomerDetailContentProps) {
+export function CustomerDetailContent({ customer: initialCustomer }: CustomerDetailContentProps) {
+  const [customer, setCustomer] = useState(initialCustomer)
   const [activeTab, setActiveTab] = useState('overview')
-  
+  const [editOpen, setEditOpen] = useState(false)
+  const [convertOpen, setConvertOpen] = useState(false)
+  const [convertNote, setConvertNote] = useState('')
+  const [convertError, setConvertError] = useState<string | null>(null)
+
+  const utils = trpc.useUtils()
+  const convertMutation = trpc.crm.customers.update.useMutation({
+    onSuccess: (updated) => {
+      setCustomer(updated)
+      void utils.crm.customers.getById.invalidate({ id: customer.id })
+      setConvertOpen(false)
+      setConvertNote('')
+      setConvertError(null)
+    },
+    onError: (e) => setConvertError(e.message),
+  })
+
+  const targetType = customer.type === 'B' ? 'C' : 'B'
+  const currentTypeLabel = customer.type === 'B' ? '企业' : '个人'
+  const targetTypeLabel = targetType === 'B' ? '企业' : '个人'
+
+  const handleConvertType = () => {
+    const values = customerToFormValues(customer)
+    values.type = targetType
+    convertMutation.mutate({
+      id: customer.id,
+      data: {
+        ...formValuesToCustomerInput(values),
+        status: customer.status,
+      },
+    })
+  }
+
   const { data: projects = [] } = trpc.crm.customers.listProjects.useQuery({
     customerId: customer.id,
   })
@@ -123,7 +173,79 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
           </div>
           <p className="text-muted-foreground">{customer.industry}</p>
         </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setEditOpen(true)}>
+            编辑信息
+          </Button>
+          <Dialog
+            open={convertOpen}
+            onOpenChange={(open) => {
+              setConvertOpen(open)
+              if (!open) {
+                setConvertNote('')
+                setConvertError(null)
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <ArrowLeftRight className="w-4 h-4 mr-2" />
+                类型转换
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>客户类型转换</DialogTitle>
+                <DialogDescription>
+                  将客户从{currentTypeLabel}转换为{targetTypeLabel}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4 space-y-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">当前类型:</span>
+                  <Badge variant="outline">{currentTypeLabel}</Badge>
+                  <ArrowLeftRight className="w-4 h-4 text-muted-foreground" />
+                  <Badge variant="outline">{targetTypeLabel}</Badge>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="convert-note">转换说明</Label>
+                  <Textarea
+                    id="convert-note"
+                    placeholder="请输入转换说明（选填）"
+                    rows={3}
+                    value={convertNote}
+                    onChange={(e) => setConvertNote(e.target.value)}
+                  />
+                </div>
+                {convertError && (
+                  <p className="text-sm text-destructive">{convertError}</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConvertOpen(false)}>
+                  取消
+                </Button>
+                <Button
+                  onClick={handleConvertType}
+                  disabled={convertMutation.isPending}
+                >
+                  {convertMutation.isPending ? '转换中…' : '确认转换'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
+
+      <EditCustomerDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        customer={customer}
+        onUpdated={async () => {
+          const updated = await utils.crm.customers.getById.fetch({ id: customer.id })
+          if (updated) setCustomer(updated)
+        }}
+      />
 
       {/* Info Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -368,7 +490,7 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                     <TableRow key={project.id}>
                       <TableCell>
                         <Link 
-                          href={`/projects/${project.id}`}
+                          href={`/crm/projects/${project.id}`}
                           className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                         >
                           {project.name}
@@ -387,7 +509,7 @@ export function CustomerDetailContent({ customer }: CustomerDetailContentProps) 
                         <StatusBadge status={project.status} />
                       </TableCell>
                       <TableCell>
-                        <Link href={`/projects/${project.id}`}>
+                        <Link href={`/crm/projects/${project.id}`}>
                           <Button variant="ghost" size="sm">查看</Button>
                         </Link>
                       </TableCell>

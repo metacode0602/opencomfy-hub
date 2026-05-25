@@ -132,6 +132,20 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    computeCost: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.computeBillingPeriodCost({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     saveAllocations: adminProcedure
       .input(
         z.object({

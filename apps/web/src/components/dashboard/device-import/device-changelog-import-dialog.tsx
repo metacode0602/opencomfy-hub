@@ -339,8 +339,10 @@ export function DeviceChangelogImportDialog({
                   <TableRow>
                     <TableHead>行</TableHead>
                     <TableHead>设备ID</TableHead>
+                    <TableHead>内网IP</TableHead>
                     <TableHead>操作时间</TableHead>
                     <TableHead>变更动作</TableHead>
+                    <TableHead>变更内容</TableHead>
                     <TableHead>工单</TableHead>
                     <TableHead>校验</TableHead>
                   </TableRow>
@@ -350,8 +352,15 @@ export function DeviceChangelogImportDialog({
                     <TableRow key={r.row_no}>
                       <TableCell>{r.row_no}</TableCell>
                       <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{r.internal_ip ?? '—'}</TableCell>
                       <TableCell className="text-xs">{r.occurred_at}</TableCell>
                       <TableCell>{r.change_action}</TableCell>
+                      <TableCell
+                        className="max-w-[200px] truncate text-xs"
+                        title={r.change_content ?? undefined}
+                      >
+                        {r.change_content ?? '—'}
+                      </TableCell>
                       <TableCell>{r.ticket_no ?? '—'}</TableCell>
                       <TableCell>
                         <ParseStatusBadge status={r.parse_status} />

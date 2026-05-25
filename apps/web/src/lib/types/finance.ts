@@ -96,6 +96,7 @@ export type PlatformCostMonthly = {
   billing_period_id: string
   supplier_unit_cost_id: string | null
   account_manager: string
+  staff_name?: string | null
   staff_id: string
   idc_name: string | null
   idc_code: string | null

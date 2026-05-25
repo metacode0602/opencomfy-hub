@@ -6,7 +6,9 @@ import {
 } from '@workspace/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { computeBillingPeriod } from './compute'
+import { computeBillingPeriodCost, collectCostTenantPlatformIds } from './compute-cost'
 import { computeBillingPeriodIncome } from './compute-billing-period-income'
+import { getPendingCostAllocationTenants } from './compute-cost-enrichment'
 import { FinanceError } from './errors'
 import { importExcelFile, getImportSlotStatuses } from './import'
 import { financeLog } from './logger'
@@ -140,6 +142,7 @@ export const financeBillingPeriodsDataAccess = {
         billing_period_id: r.billingPeriodId,
         supplier_unit_cost_id: r.supplierUnitCostId,
         account_manager: r.accountManager,
+        staff_name: r.staffName,
         staff_id: r.staffId,
         idc_name: r.idcName,
         idc_code: r.idcCode,
@@ -163,6 +166,7 @@ export const financeBillingPeriodsDataAccess = {
   importExcelFile,
   getImportSlotStatuses,
   computeBillingPeriod,
+  computeBillingPeriodCost,
   computeBillingPeriodIncome,
   listTenantProjectBindings,
 
@@ -179,18 +183,31 @@ export const financeBillingPeriodsDataAccess = {
     const missingTenantBill = await findMissingTenantBillPricing({ periodId })
     const missingBaremetal = await findMissingBaremetalPlatformListPrice({ periodId })
     const missingPricing = [...missingTenantBill, ...missingBaremetal]
-    const bindings = await listTenantProjectBindings(periodId)
-    const pendingAllocation = bindings.filter(
-      (b) =>
-        b.projects.length >= 2 &&
-        b.projects.some((p) => p.allocationPercent == null),
-    )
     const tenantBillReady =
       windows.length > 0 &&
       slots.tenantBillWindows.length === windows.length &&
       slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
     const incomeImportsReady =
       slots.customer?.parseStatus === 'ok' && slots.baremetal?.parseStatus === 'ok'
+    const costImportsReady =
+      tenantBillReady && slots.baremetal?.parseStatus === 'ok'
+    const costTenantPlatformIds = await collectCostTenantPlatformIds(periodId)
+    const pendingCostAllocation = await getPendingCostAllocationTenants({
+      billingPeriodId: periodId,
+      tenantPlatformIds: costTenantPlatformIds,
+      periodEnd: period.period_end,
+    })
+    const bindings = await listTenantProjectBindings(periodId)
+    const pendingAllocation = bindings.filter(
+      (b) =>
+        b.projects.length >= 2 &&
+        b.projects.some((p) => p.allocationPercent == null),
+    )
+    const canComputeCost =
+      (period.status === 'imported' || period.status === 'computed') &&
+      missingPricing.length === 0 &&
+      pendingCostAllocation.length === 0 &&
+      costImportsReady
     const canRunBase =
       cross.ok && missingPricing.length === 0 && pendingAllocation.length === 0
     return {
@@ -201,10 +218,9 @@ export const financeBillingPeriodsDataAccess = {
       crossFileOk: cross.ok,
       missingPricing,
       pendingAllocationCount: pendingAllocation.length,
-      canCompute:
-        (period.status === 'imported' || period.status === 'computed') &&
-        canRunBase &&
-        tenantBillReady,
+      pendingCostAllocationCount: pendingCostAllocation.length,
+      canCompute: canComputeCost,
+      canComputeCost,
       canComputeIncome:
         (period.status === 'imported' ||
           period.status === 'computed' ||
