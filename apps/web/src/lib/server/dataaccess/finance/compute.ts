@@ -27,7 +27,7 @@ import {
 import { eq } from 'drizzle-orm'
 import { RULE_VERSION } from './constants'
 import { FinanceError } from './errors'
-import { computePeriodIncome } from './compute-income'
+import { runPeriodIncomePipeline } from './compute-billing-period-income'
 import { listTenantProjectBindings } from './enrichment'
 import { financeError, financeLog, financeWarn } from './logger'
 import { appendOperationLog, newId } from './operation-log'
@@ -457,14 +457,14 @@ export async function computeBillingPeriod(input: {
   }
   reconciliationIssues.push(...baremetalListPriceNotes.slice(0, 50))
 
-  let incomeResult: Awaited<ReturnType<typeof computePeriodIncome>>
+  let incomeResult: Awaited<ReturnType<typeof runPeriodIncomePipeline>>
   try {
-    incomeResult = await computePeriodIncome({
+    incomeResult = await runPeriodIncomePipeline({
       periodId,
       customerRows,
-      baremetalRows,
       tenantBillBalanceByTenant: bBalanceByTenant,
       bindings,
+      markPeriodComputed: false,
     })
   } catch (error) {
     if (error instanceof FinanceError && error.code === 'PRECONDITION_FAILED') {

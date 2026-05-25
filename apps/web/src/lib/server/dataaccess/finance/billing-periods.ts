@@ -6,6 +6,7 @@ import {
 } from '@workspace/db/schema'
 import { desc, eq } from 'drizzle-orm'
 import { computeBillingPeriod } from './compute'
+import { computeBillingPeriodIncome } from './compute-billing-period-income'
 import { FinanceError } from './errors'
 import { importExcelFile, getImportSlotStatuses } from './import'
 import { financeLog } from './logger'
@@ -162,6 +163,7 @@ export const financeBillingPeriodsDataAccess = {
   importExcelFile,
   getImportSlotStatuses,
   computeBillingPeriod,
+  computeBillingPeriodIncome,
   listTenantProjectBindings,
 
   async validatePeriod(periodId: string) {
@@ -187,6 +189,10 @@ export const financeBillingPeriodsDataAccess = {
       windows.length > 0 &&
       slots.tenantBillWindows.length === windows.length &&
       slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
+    const incomeImportsReady =
+      slots.customer?.parseStatus === 'ok' && slots.baremetal?.parseStatus === 'ok'
+    const canRunBase =
+      cross.ok && missingPricing.length === 0 && pendingAllocation.length === 0
     return {
       periodStatus: period.status,
       slots,
@@ -196,11 +202,16 @@ export const financeBillingPeriodsDataAccess = {
       missingPricing,
       pendingAllocationCount: pendingAllocation.length,
       canCompute:
-        period.status === 'imported' &&
-        cross.ok &&
-        missingPricing.length === 0 &&
-        pendingAllocation.length === 0 &&
+        (period.status === 'imported' || period.status === 'computed') &&
+        canRunBase &&
         tenantBillReady,
+      canComputeIncome:
+        (period.status === 'imported' ||
+          period.status === 'computed' ||
+          period.status === 'draft') &&
+        cross.ok &&
+        pendingAllocation.length === 0 &&
+        incomeImportsReady,
     }
   },
 

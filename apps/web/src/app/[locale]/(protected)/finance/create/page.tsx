@@ -437,8 +437,10 @@ function BillingPeriodFormCard({
   fixedSlots,
   tenantBillSlots,
   computing,
+  computingIncome,
   persisting,
   canRunCompute,
+  canRunComputeIncome,
   onPeriodCodeChange,
   onPeriodStartChange,
   onPeriodEndChange,
@@ -447,6 +449,7 @@ function BillingPeriodFormCard({
   onDownloadFixedError,
   onDownloadTenantBillError,
   onCompute,
+  onComputeIncome,
   onCancelHref,
   compact,
   preCheckAlerts,
@@ -460,8 +463,10 @@ function BillingPeriodFormCard({
   fixedSlots: Record<FixedSlotKey, SlotState>
   tenantBillSlots: TenantBillWindowSlot[]
   computing: boolean
+  computingIncome: boolean
   persisting: boolean
   canRunCompute: boolean
+  canRunComputeIncome: boolean
   onPeriodCodeChange: (v: string) => void
   onPeriodStartChange: (v: string) => void
   onPeriodEndChange: (v: string) => void
@@ -470,6 +475,7 @@ function BillingPeriodFormCard({
   onDownloadFixedError: (slot: FixedSlotKey) => void
   onDownloadTenantBillError: (windowId: string) => void
   onCompute: () => void
+  onComputeIncome: () => void
   onCancelHref: string
   compact?: boolean
   preCheckAlerts?: React.ReactNode
@@ -669,14 +675,29 @@ function BillingPeriodFormCard({
         </div>
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2 border-t pt-6">
-        <Button type="button" disabled={!canRunCompute} onClick={onCompute}>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={!canRunComputeIncome || computing || computingIncome || persisting}
+          onClick={onComputeIncome}
+        >
+          {computingIncome ? (
+            <>
+              <IconLoader2 className="mr-2 size-4 animate-spin" />
+              计算收入中…
+            </>
+          ) : (
+            "计算收入"
+          )}
+        </Button>
+        <Button type="button" disabled={!canRunCompute || computing || computingIncome} onClick={onCompute}>
           {computing ? (
             <>
               <IconLoader2 className="mr-2 size-4 animate-spin" />
-              计算中…
+              成本计算中…
             </>
           ) : (
-            "计算"
+            "计算成本"
           )}
         </Button>
         <Button type="button" variant="outline" asChild disabled={persisting}>
@@ -777,6 +798,7 @@ export default function FinanceCreateBillingPeriodPage() {
   const [fixedSlots, setFixedSlots] = useState<Record<FixedSlotKey, SlotState>>(initialFixedSlots)
   const [tenantBillSlots, setTenantBillSlots] = useState<TenantBillWindowSlot[]>([])
   const [computing, setComputing] = useState(false)
+  const [computingIncome, setComputingIncome] = useState(false)
   const [persisting, setPersisting] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
   const [supplementaryDraft, setSupplementaryDraft] = useState<Record<string, string>>({})
@@ -785,6 +807,7 @@ export default function FinanceCreateBillingPeriodPage() {
   const createPeriod = trpc.finance.periods.create.useMutation()
   const importFile = trpc.finance.periods.importFile.useMutation()
   const computePeriod = trpc.finance.periods.compute.useMutation()
+  const computeIncomePeriod = trpc.finance.periods.computeIncome.useMutation()
   const publishPeriod = trpc.finance.periods.publish.useMutation()
   const saveSupplementary = trpc.finance.periods.saveSupplementary.useMutation()
 
@@ -1157,6 +1180,9 @@ export default function FinanceCreateBillingPeriodPage() {
     ],
   )
 
+  const incomeImportsParsed =
+    fixedSlots.customer.status === "done" && fixedSlots.baremetal.status === "done"
+
   const canRunCompute =
     isValidPeriodCode(periodCode) &&
     Boolean(periodStart) &&
@@ -1164,8 +1190,38 @@ export default function FinanceCreateBillingPeriodPage() {
     allParsed &&
     (validation?.canCompute ?? false) &&
     !computing &&
+    !computingIncome &&
     !persisting &&
     periodStart <= periodEnd
+
+  const canRunComputeIncome =
+    isValidPeriodCode(periodCode) &&
+    Boolean(periodStart) &&
+    Boolean(periodEnd) &&
+    incomeImportsParsed &&
+    (validation?.canComputeIncome ?? false) &&
+    !computing &&
+    !computingIncome &&
+    !persisting &&
+    periodStart <= periodEnd
+
+  const handleComputeIncome = async () => {
+    if (!canRunComputeIncome) return
+    setComputingIncome(true)
+    setComputeError(null)
+    try {
+      const id = await ensurePeriod()
+      await computeIncomePeriod.mutateAsync({ billingPeriodId: id })
+      await utils.finance.periods.getBundle.invalidate({ id })
+      await refetchValidation()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "计算收入失败"
+      setComputeError(msg)
+      if (periodId) await refetchValidation()
+    } finally {
+      setComputingIncome(false)
+    }
+  }
 
   const handleCompute = async () => {
     if (!canRunCompute) return
@@ -1220,9 +1276,10 @@ export default function FinanceCreateBillingPeriodPage() {
   }
 
   const p = draftBundle?.period
-  const hasResult =
+  const hasFullResult =
     draftBundle?.period?.status === "computed" ||
     draftBundle?.period?.status === "published"
+  const hasIncomePreview = (draftBundle?.income?.length ?? 0) > 0
 
   const preCheckAlerts = (
     <ImportPreCheckAlerts
@@ -1242,8 +1299,10 @@ export default function FinanceCreateBillingPeriodPage() {
       fixedSlots={fixedSlots}
       tenantBillSlots={tenantBillSlots}
       computing={computing}
+      computingIncome={computingIncome}
       persisting={persisting}
       canRunCompute={canRunCompute}
+      canRunComputeIncome={canRunComputeIncome}
       preCheckAlerts={preCheckAlerts}
       readOnlyMeta={isEditingExisting}
       title={isEditingExisting ? "重新上传账期" : undefined}
@@ -1274,8 +1333,9 @@ export default function FinanceCreateBillingPeriodPage() {
       onDownloadFixedError={(slot) => void onDownloadFixedError(slot)}
       onDownloadTenantBillError={(windowId) => void onDownloadTenantBillError(windowId)}
       onCompute={() => void handleCompute()}
+      onComputeIncome={() => void handleComputeIncome()}
       onCancelHref="/finance"
-      compact={hasResult}
+      compact={hasFullResult}
     />
   )
 
@@ -1288,8 +1348,95 @@ export default function FinanceCreateBillingPeriodPage() {
           </Button>
         </div>
 
-        {!hasResult ? (
-          formCard
+        {!hasFullResult ? (
+          <div className="space-y-6">
+            {formCard}
+            {hasIncomePreview && draftBundle && (
+              <Card>
+                <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <CardTitle>收入明细（SQL 计算预览）</CardTitle>
+                    <CardDescription>
+                      仅收入已计算 · 共 {draftBundle.income.length} 条 · 完成客户账单上传后可点击「计算」生成成本
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={savingSupplementary || computing || computingIncome}
+                    onClick={() => void handleSaveSupplementary()}
+                  >
+                    {savingSupplementary ? (
+                      <>
+                        <IconLoader2 className="mr-2 size-4 animate-spin" />
+                        保存中…
+                      </>
+                    ) : (
+                      "保存补充消费"
+                    )}
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="overflow-x-auto rounded-md border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="px-3 py-2 text-left whitespace-nowrap">项目名称</th>
+                          <th className="px-3 py-2 text-left whitespace-nowrap">客户全称</th>
+                          <th className="px-3 py-2 text-left whitespace-nowrap">租户Id</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">补充消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">余额消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">线上裸金属消费</th>
+                          <th className="px-3 py-2 text-right whitespace-nowrap">总消费</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {draftBundle.income.map((row) => {
+                          const sup = supplementaryDraft[row.id] ?? "0"
+                          const total =
+                            (Number(sup) || 0) +
+                            (Number(row.balance_consumption ?? 0) || 0) +
+                            (Number(row.bare_metal_consumption ?? 0) || 0)
+                          return (
+                            <tr key={row.id} className="border-b">
+                              <td className="px-3 py-2">{formatText(row.project_name)}</td>
+                              <td className="max-w-[200px] px-3 py-2">
+                                {formatText(row.customer_full_name ?? row.tenant_name)}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-xs">
+                                {row.tenant_platform_id}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <Input
+                                  className="ml-auto max-w-[140px] text-right tabular-nums"
+                                  value={sup}
+                                  onChange={(e) =>
+                                    setSupplementaryDraft((d) => ({
+                                      ...d,
+                                      [row.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {formatMoney(row.balance_consumption ?? "0")}
+                              </td>
+                              <td className="px-3 py-2 text-right tabular-nums">
+                                {formatMoney(row.bare_metal_consumption ?? "0")}
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium tabular-nums">
+                                {formatMoney(String(total))}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         ) : (
           <>
             <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
@@ -1314,7 +1461,7 @@ export default function FinanceCreateBillingPeriodPage() {
                   <Button
                     type="button"
                     size="sm"
-                    disabled={savingSupplementary || computing}
+                    disabled={savingSupplementary || computing || computingIncome}
                     onClick={() => void handleSaveSupplementary()}
                   >
                     {savingSupplementary ? (
@@ -1405,7 +1552,7 @@ export default function FinanceCreateBillingPeriodPage() {
                 </Button>
                 <Button
                   type="button"
-                  disabled={persisting || computing}
+                  disabled={persisting || computing || computingIncome}
                   onClick={() => void handlePersist()}
                 >
                   {persisting ? (
