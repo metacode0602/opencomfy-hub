@@ -13,11 +13,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { Download } from "lucide-react"
+import { Download, RefreshCw } from "lucide-react"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
 import { CostGroupedEditable } from "./_components/cost-grouped-editable"
+import { CostRegenerateDialog } from "./_components/cost-regenerate-dialog"
 
 export default function FinancePeriodCostPage() {
   const params = useParams<{ id: string }>()
@@ -36,6 +37,13 @@ export default function FinancePeriodCostPage() {
     [rows, overrides],
   )
   const hasRecordRows = displayRows.some((r) => r.type === "record")
+  const [regenerateOpen, setRegenerateOpen] = useState(false)
+  const canRegenerateCost =
+    period?.status !== "published" &&
+    period?.status !== "adjusted" &&
+    period?.status !== "void"
+
+  const utils = trpc.useUtils()
 
   function handleExportExcel() {
     if (!hasRecordRows) {
@@ -97,24 +105,48 @@ export default function FinancePeriodCostPage() {
               账期 {period.period_start} ~ {period.period_end}
             </CardDescription>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={handleExportExcel}
-            disabled={!hasRecordRows}
-          >
-            <Download className="size-4" />
-            导出 Excel
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {canRegenerateCost ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => setRegenerateOpen(true)}
+              >
+                <RefreshCw className="size-4" />
+                重新生成
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleExportExcel}
+              disabled={!hasRecordRows}
+            >
+              <Download className="size-4" />
+              导出 Excel
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          <CostGroupedEditable
-            baseRows={rows}
-            periodCode={period.period_code}
-          />
+          <CostGroupedEditable baseRows={rows} />
         </CardContent>
       </Card>
+
+      {period ? (
+        <CostRegenerateDialog
+          open={regenerateOpen}
+          onOpenChange={setRegenerateOpen}
+          billingPeriodId={id}
+          periodCode={period.period_code}
+          periodStart={period.period_start}
+          periodEnd={period.period_end}
+          onSuccess={() => {
+            void utils.finance.periods.getBundle.invalidate({ id })
+          }}
+        />
+      ) : null}
     </div>
   )
 }

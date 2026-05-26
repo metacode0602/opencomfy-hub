@@ -9,6 +9,7 @@ import {
   platformCostMonthly,
 } from '@workspace/db/schema'
 import { and, eq } from 'drizzle-orm'
+import type { ComputeCostMode } from './compute-cost-mode'
 import { persistCostPricingSnapshots } from './compute-cost-pricing-snapshot'
 import { rollupSourceLinesToPlatformMonthly } from './compute-cost-rollup'
 import { persistCostSourceLines } from './compute-cost-source-line'
@@ -23,8 +24,11 @@ import { purgeCostDerivedStandalone } from './purge-cost'
 import {
   findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
+  findMissingTenantBillPricingAtPeriodEnd,
 } from './tenant-bill-pricing'
-import { listTenantBillWindows, syncTenantBillWindowsForPeriod } from './tenant-bill-windows'
+import { listTenantBillWindows } from './tenant-bill-windows'
+
+export type { ComputeCostMode } from './compute-cost-mode'
 
 export type ComputeCostResult = {
   costCount: number
@@ -66,7 +70,27 @@ export async function collectCostTenantPlatformIds(periodId: string): Promise<st
   return [...ids]
 }
 
-async function assertCostComputePreconditions(periodId: string): Promise<void> {
+async function assertRegenerateCostImportsReady(periodId: string): Promise<void> {
+  const slots = await getImportSlotStatuses(periodId)
+  const windows = await listTenantBillWindows(periodId)
+  if (windows.length !== 1) {
+    throw new FinanceError('PRECONDITION_FAILED', '重新生成成本须使用整月单时间段')
+  }
+  const tenantBillReady =
+    slots.tenantBillWindows.length === 1 && slots.tenantBillWindows[0]?.parseStatus === 'ok'
+  const baremetalReady = slots.baremetal?.parseStatus === 'ok'
+  if (!tenantBillReady || !baremetalReady) {
+    throw new FinanceError(
+      'PRECONDITION_FAILED',
+      '重新生成成本须已上传并解析成功的客户账单详情与裸金属订单',
+    )
+  }
+}
+
+async function assertCostComputePreconditions(
+  periodId: string,
+  mode: ComputeCostMode = 'create',
+): Promise<void> {
   const period = await db.query.billingPeriod.findFirst({
     where: eq(billingPeriod.id, periodId),
   })
@@ -90,25 +114,39 @@ async function assertCostComputePreconditions(periodId: string): Promise<void> {
     throw new FinanceError('PRECONDITION_FAILED', '当前账期状态不允许计算成本')
   }
 
-  const slots = await getImportSlotStatuses(periodId)
-  const windows = await listTenantBillWindows(periodId)
-  const tenantBillReady =
-    windows.length > 0 &&
-    slots.tenantBillWindows.length === windows.length &&
-    slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
-  const baremetalReady = slots.baremetal?.parseStatus === 'ok'
+  if (mode === 'regenerate') {
+    await assertRegenerateCostImportsReady(periodId)
+  } else {
+    const slots = await getImportSlotStatuses(periodId)
+    const windows = await listTenantBillWindows(periodId)
+    const tenantBillReady =
+      windows.length > 0 &&
+      slots.tenantBillWindows.length === windows.length &&
+      slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
+    const baremetalReady = slots.baremetal?.parseStatus === 'ok'
 
-  if (!tenantBillReady || !baremetalReady) {
-    throw new FinanceError(
-      'PRECONDITION_FAILED',
-      '计算成本需已解析的客户账单与裸金属订单',
-    )
+    if (!tenantBillReady || !baremetalReady) {
+      throw new FinanceError(
+        'PRECONDITION_FAILED',
+        '计算成本需已解析的客户账单与裸金属订单',
+      )
+    }
   }
 
-  const missingPricing = [
-    ...(await findMissingTenantBillPricing({ periodId })),
-    ...(await findMissingBaremetalPlatformListPrice({ periodId })),
-  ]
+  const missingPricing =
+    mode === 'regenerate'
+      ? [
+          ...(await findMissingTenantBillPricingAtPeriodEnd({
+            periodId,
+            periodEnd: period.periodEnd,
+          })),
+          ...(await findMissingBaremetalPlatformListPrice({ periodId })),
+        ]
+      : [
+          ...(await findMissingTenantBillPricing({ periodId })),
+          ...(await findMissingBaremetalPlatformListPrice({ periodId })),
+        ]
+
   if (missingPricing.length > 0) {
     await db
       .update(billingPeriod)
@@ -182,18 +220,23 @@ async function upsertCostReconciliationReport(input: {
 export async function computeBillingPeriodCost(input: {
   billingPeriodId: string
   actorId?: string | null
+  mode?: ComputeCostMode
 }): Promise<ComputeCostResult> {
   const periodId = input.billingPeriodId
-  financeLog('compute-cost', 'start', { periodId, ruleVersion: RULE_VERSION })
+  const mode = input.mode ?? 'create'
+  financeLog('compute-cost', 'start', { periodId, ruleVersion: RULE_VERSION, mode })
 
-  await assertCostComputePreconditions(periodId)
+  await assertCostComputePreconditions(periodId, mode)
 
   const period = (await db.query.billingPeriod.findFirst({
     where: eq(billingPeriod.id, periodId),
   }))!
 
   await purgeCostDerivedStandalone(periodId)
-  await syncTenantBillWindowsForPeriod(periodId)
+  if (mode === 'create') {
+    const { syncTenantBillWindowsForPeriod } = await import('./tenant-bill-windows')
+    await syncTenantBillWindowsForPeriod(periodId)
+  }
 
   const tenantPlatformIds = await collectCostTenantPlatformIds(periodId)
   const issues: string[] = []
@@ -203,16 +246,20 @@ export async function computeBillingPeriodCost(input: {
     tenantPlatformIds,
     periodEnd: period.periodEnd,
     issues,
+    mode,
   })
 
   const snapshots = await persistCostPricingSnapshots({
     billingPeriodId: periodId,
     periodEnd: period.periodEnd,
+    mode,
   })
   const costCount = await rollupSourceLinesToPlatformMonthly({
     billingPeriodId: periodId,
     snapshots,
     issues,
+    periodEnd: period.periodEnd,
+    mode,
   })
 
   const recordRows = await db
@@ -251,12 +298,13 @@ export async function computeBillingPeriodCost(input: {
 
   await appendOperationLog({
     billingPeriodId: periodId,
-    operation: 'compute_cost',
+    operation: mode === 'regenerate' ? 'regenerate_cost' : 'compute_cost',
     actorId: input.actorId,
     metadata: {
       ruleVersion: RULE_VERSION,
       costCount,
       issueCount: issues.length,
+      mode,
     },
   })
 
@@ -266,6 +314,7 @@ export async function computeBillingPeriodCost(input: {
     totalCost,
     totalGross,
     issues: issues.length,
+    mode,
   })
 
   return {

@@ -18,13 +18,11 @@ import { formatMoney, formatText } from "../../../_lib/display"
 
 function CostRowCells({
   r,
-  periodCode,
   editable,
   onVoucherAdjust,
   voucherAdjustmentHistoryCount,
 }: {
   r: PlatformCostMonthly
-  periodCode?: string
   editable?: boolean
   onVoucherAdjust?: (row: PlatformCostMonthly) => void
   voucherAdjustmentHistoryCount?: (costId: string) => number
@@ -36,9 +34,6 @@ function CostRowCells({
 
   return (
     <>
-      <TableCell className="font-mono text-xs">
-        {formatText(periodCode ?? r.billing_period_id)}
-      </TableCell>
       <TableCell>{accountManagerLabel}</TableCell>
       <TableCell className="font-mono text-xs">
         {formatText(r.supplier_unit_cost_id)}
@@ -105,11 +100,10 @@ function CostRowCells({
   )
 }
 
-const BASE_COL_COUNT = 15
+const BASE_COL_COUNT = 14
 
 type CostGroupedTableProps = {
   rows: PlatformCostMonthly[]
-  periodCode?: string
   editable?: boolean
   onVoucherAdjust?: (row: PlatformCostMonthly) => void
   voucherAdjustmentHistoryCount?: (costId: string) => number
@@ -117,7 +111,6 @@ type CostGroupedTableProps = {
 
 export function CostGroupedTable({
   rows,
-  periodCode,
   editable = false,
   onVoucherAdjust,
   voucherAdjustmentHistoryCount,
@@ -163,7 +156,6 @@ export function CostGroupedTable({
         <TableHeader>
           <TableRow>
             <TableHead className="w-10 p-2" aria-label="展开分项" />
-            <TableHead className="whitespace-nowrap">账期编码</TableHead>
             <TableHead className="whitespace-nowrap">客户经理</TableHead>
             <TableHead className="whitespace-nowrap">成本单价版本</TableHead>
             <TableHead className="whitespace-nowrap">机房名称</TableHead>
@@ -223,7 +215,6 @@ export function CostGroupedTable({
                   {parentRow ? (
                     <CostRowCells
                       r={parentRow}
-                      periodCode={periodCode}
                       editable={editable}
                       onVoucherAdjust={onVoucherAdjust}
                       voucherAdjustmentHistoryCount={
@@ -232,14 +223,11 @@ export function CostGroupedTable({
                     />
                   ) : (
                     <>
-                      <TableCell className="font-mono text-xs">
-                        {formatText(periodCode)}
-                      </TableCell>
                       <TableCell className="font-medium">
                         {g.accountManager}
                       </TableCell>
                       <TableCell
-                        colSpan={BASE_COL_COUNT - 3 + (editable ? 1 : 0)}
+                        colSpan={BASE_COL_COUNT - 2 + (editable ? 1 : 0)}
                         className="text-muted-foreground text-sm"
                       >
                         无汇总行，共 {g.recordRows.length} 条分项
@@ -258,7 +246,6 @@ export function CostGroupedTable({
                       <TableCell />
                       <CostRowCells
                         r={r}
-                        periodCode={periodCode}
                         editable={editable}
                         onVoucherAdjust={onVoucherAdjust}
                         voucherAdjustmentHistoryCount={
@@ -273,7 +260,7 @@ export function CostGroupedTable({
           {periodSumRow && (
             <TableRow className="bg-muted/50 font-medium">
               <TableCell className="p-1" />
-              <CostRowCells r={periodSumRow} periodCode={periodCode} />
+              <CostRowCells r={periodSumRow} />
             </TableRow>
           )}
         </TableBody>

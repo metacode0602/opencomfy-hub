@@ -317,6 +317,10 @@ export const projectsDataAccess = {
       id: string
       name: string
       platformTenantId?: string
+      billingSyncCursorEndDate?: string | null
+      billingSyncLastFinishedAt?: string | null
+      billingSyncLastStatus?: string | null
+      billingSyncLastError?: string | null
     }>
   > {
     const tenantIds = await getBillingTenantIdsForProject(projectId)
@@ -327,6 +331,10 @@ export const projectsDataAccess = {
         id: billingTenant.id,
         name: billingTenant.name,
         platformTenantId: billingTenant.platformTenantId,
+        billingSyncCursorEndDate: billingTenant.billingSyncCursorEndDate,
+        billingSyncLastFinishedAt: billingTenant.billingSyncLastFinishedAt,
+        billingSyncLastStatus: billingTenant.billingSyncLastStatus,
+        billingSyncLastError: billingTenant.billingSyncLastError,
       })
       .from(billingTenant)
       .where(inArray(billingTenant.id, tenantIds))
@@ -339,6 +347,10 @@ export const projectsDataAccess = {
         id: row.id,
         name: row.name,
         platformTenantId: row.platformTenantId ?? undefined,
+        billingSyncCursorEndDate: row.billingSyncCursorEndDate ?? null,
+        billingSyncLastFinishedAt: row.billingSyncLastFinishedAt?.toISOString() ?? null,
+        billingSyncLastStatus: row.billingSyncLastStatus ?? null,
+        billingSyncLastError: row.billingSyncLastError ?? null,
       }))
   },
 

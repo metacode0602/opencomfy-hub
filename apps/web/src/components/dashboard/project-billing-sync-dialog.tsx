@@ -205,10 +205,23 @@ export function ProjectBillingSyncDialog({
                     <ul className="list-inside list-disc space-y-1">
                       {billingTenants.map((tenant) => (
                         <li key={tenant.id}>
-                          {tenant.name}
-                          {tenant.platformTenantId
-                            ? `（平台 ID：${tenant.platformTenantId}）`
-                            : '（未绑定平台 ID，将跳过）'}
+                          <div>
+                            {tenant.name}
+                            {tenant.platformTenantId
+                              ? `（平台 ID：${tenant.platformTenantId}）`
+                              : '（未绑定平台 ID，将跳过）'}
+                          </div>
+                          {tenant.billingSyncLastFinishedAt ? (
+                            <div className="text-muted-foreground ml-4 mt-0.5">
+                              自动同步：{tenant.billingSyncLastStatus ?? '—'} ·{' '}
+                              {new Date(tenant.billingSyncLastFinishedAt).toLocaleString('zh-CN', {
+                                hour12: false,
+                              })}
+                              {tenant.billingSyncCursorEndDate
+                                ? ` · 游标 ${tenant.billingSyncCursorEndDate}`
+                                : ''}
+                            </div>
+                          ) : null}
                         </li>
                       ))}
                     </ul>

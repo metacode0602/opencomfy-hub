@@ -382,6 +382,8 @@ export async function importExcelFile(input: {
   buffer: Buffer
   actorId?: string | null
   windowId?: string
+  /** 成本 Tab 重新生成上传：不清理收入派生 */
+  preserveIncomeDerived?: boolean
 }): Promise<ImportFileResult> {
   const period = await getPeriodOrThrow(input.billingPeriodId)
   financeLog('import', `start ${input.fileType}`, {
@@ -406,6 +408,7 @@ export async function importExcelFile(input: {
     fileType: input.fileType,
     windowId: input.windowId,
     actorId: input.actorId,
+    preserveIncomeDerived: input.preserveIncomeDerived,
   })
 
   const sheet = parseWorkbookDetailed(input.buffer, input.fileName)

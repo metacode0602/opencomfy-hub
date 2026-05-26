@@ -107,6 +107,12 @@ export const billingTenant = pgTable(
     type: varchar("type", { length: 32 }).notNull().default("external"), // internal 内部租户 | external 外部租户
     /** 平台侧租户注册时间（OpenAPI create_time） */
     platformRegisteredAt: timestamp("platform_registered_at", { withTimezone: true }),
+    /** 定时账单同步：上次成功同步的数据结束日（东八区自然日） */
+    billingSyncCursorEndDate: date("billing_sync_cursor_end_date"),
+    billingSyncLastStartedAt: timestamp("billing_sync_last_started_at", { withTimezone: true }),
+    billingSyncLastFinishedAt: timestamp("billing_sync_last_finished_at", { withTimezone: true }),
+    billingSyncLastStatus: varchar("billing_sync_last_status", { length: 32 }),
+    billingSyncLastError: text("billing_sync_last_error"),
     ...crmTimestamps,
   },
   (table) => [
@@ -913,6 +919,54 @@ export const engagementComment = pgTable(
   ],
 )
 
+/** 定时账单同步任务运行记录 */
+export const billingSyncJobRun = pgTable(
+  "billing_sync_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 32 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 32 }).notNull(),
+    syncEndDate: date("sync_end_date").notNull(),
+    safetyDays: integer("safety_days").notNull(),
+    projectCount: integer("project_count").notNull().default(0),
+    tenantCount: integer("tenant_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("billing_sync_job_run_started_at_idx").on(table.startedAt),
+    index("billing_sync_job_run_status_idx").on(table.status),
+  ],
+)
+
+/** 定时账单同步租户级明细 */
+export const billingSyncJobItem = pgTable(
+  "billing_sync_job_item",
+  {
+    id: text("id").primaryKey(),
+    jobRunId: text("job_run_id")
+      .notNull()
+      .references(() => billingSyncJobRun.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    summary: text("summary"),
+    error: text("error"),
+  },
+  (table) => [
+    index("billing_sync_job_item_job_run_id_idx").on(table.jobRunId),
+    index("billing_sync_job_item_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // Relations（查询用）
 // ---------------------------------------------------------------------------
@@ -934,6 +988,26 @@ export const billingTenantRelations = relations(billingTenant, ({ one, many }) =
   }),
   recharges: many(recharge),
   projectLinks: many(projectTenant),
+  billingSyncJobItems: many(billingSyncJobItem),
+}))
+
+export const billingSyncJobRunRelations = relations(billingSyncJobRun, ({ many }) => ({
+  items: many(billingSyncJobItem),
+}))
+
+export const billingSyncJobItemRelations = relations(billingSyncJobItem, ({ one }) => ({
+  jobRun: one(billingSyncJobRun, {
+    fields: [billingSyncJobItem.jobRunId],
+    references: [billingSyncJobRun.id],
+  }),
+  tenant: one(billingTenant, {
+    fields: [billingSyncJobItem.tenantId],
+    references: [billingTenant.id],
+  }),
+  project: one(crmProject, {
+    fields: [billingSyncJobItem.projectId],
+    references: [crmProject.id],
+  }),
 }))
 
 export const crmProjectRelations = relations(crmProject, ({ one, many }) => ({
@@ -1005,6 +1079,8 @@ export const tenantBillRelations = relations(tenantBill, ({ one, many }) => ({
 export type CustomerRow = typeof customer.$inferSelect
 export type NewCustomerRow = typeof customer.$inferInsert
 export type BillingTenantRow = typeof billingTenant.$inferSelect
+export type BillingSyncJobRunRow = typeof billingSyncJobRun.$inferSelect
+export type BillingSyncJobItemRow = typeof billingSyncJobItem.$inferSelect
 export type CrmProjectRow = typeof crmProject.$inferSelect
 export type ProjectTagRow = typeof projectTag.$inferSelect
 export type UserStaffRow = typeof userStaff.$inferSelect

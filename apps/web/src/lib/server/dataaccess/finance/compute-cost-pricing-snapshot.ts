@@ -14,22 +14,47 @@ import {
 import { financeLog } from './logger'
 import { newId } from './operation-log'
 import { listTenantBillWindows } from './tenant-bill-windows'
+import type { ComputeCostMode } from './compute-cost-mode'
 
 export type CostPricingSnapshotRow = typeof billingPeriodCostPricingSnapshot.$inferSelect
+
+function readLinePricingAsOf(
+  line: {
+    kind: string
+    windowId: string | null
+    sourceMeta: unknown
+  },
+  periodEnd: string,
+  windows: { id: string; windowEnd: string }[],
+  mode: ComputeCostMode,
+): string {
+  const meta = line.sourceMeta as { pricing_as_of?: string } | null
+  if (line.kind === 'baremetal' && meta?.pricing_as_of) {
+    return meta.pricing_as_of
+  }
+  if (line.windowId) {
+    if (mode === 'regenerate') return periodEnd
+    return windows.find((w) => w.id === line.windowId)?.windowEnd ?? periodEnd
+  }
+  return periodEnd
+}
 
 export async function persistCostPricingSnapshots(input: {
   billingPeriodId: string
   periodEnd: string
+  mode?: ComputeCostMode
 }): Promise<Map<string, CostPricingSnapshotRow>> {
-  const { billingPeriodId: periodId, periodEnd } = input
+  const { billingPeriodId: periodId, periodEnd, mode = 'create' } = input
   financeLog('compute-cost-pricing-snapshot', 'start', { periodId })
 
   const windows = await listTenantBillWindows(periodId)
   const sourceLines = await db
     .select({
+      kind: billingPeriodCostSourceLine.kind,
       dataCenterId: billingPeriodCostSourceLine.dataCenterId,
       gpuCardTypeId: billingPeriodCostSourceLine.gpuCardTypeId,
       windowId: billingPeriodCostSourceLine.windowId,
+      sourceMeta: billingPeriodCostSourceLine.sourceMeta,
     })
     .from(billingPeriodCostSourceLine)
     .where(eq(billingPeriodCostSourceLine.billingPeriodId, periodId))
@@ -51,52 +76,79 @@ export async function persistCostPricingSnapshots(input: {
     cardNameById.set(row.id, { name: row.name, code: row.code })
   }
 
-  const needed = new Map<
+  const pricingPairs = new Map<
     string,
-    { windowId: string; windowEnd: string; dataCenterId: string; gpuCardTypeId: string }
+    { dataCenterId: string; gpuCardTypeId: string; asOfDate: string }
+  >()
+  const snapshotGroups = new Map<
+    string,
+    {
+      windowId: string
+      dataCenterId: string
+      gpuCardTypeId: string
+      asOfDates: string[]
+    }
   >()
 
-  for (const window of windows) {
-    for (const line of sourceLines) {
-      const effectiveWindowId = line.windowId ?? window.id
-      const effectiveWindow = windows.find((w) => w.id === effectiveWindowId) ?? window
-      const asOfDate = line.windowId ? effectiveWindow.windowEnd : periodEnd
-      const key = `${effectiveWindowId}::${line.dataCenterId}::${line.gpuCardTypeId}::${asOfDate}`
-      if (!needed.has(key)) {
-        needed.set(key, {
-          windowId: effectiveWindowId,
-          windowEnd: asOfDate,
-          dataCenterId: line.dataCenterId,
-          gpuCardTypeId: line.gpuCardTypeId,
-        })
-      }
+  const defaultWindowId = windows[0]?.id
+  if (!defaultWindowId) {
+    financeLog('compute-cost-pricing-snapshot', 'done', { periodId, count: 0 })
+    return loadPricingSnapshotsForPeriod(periodId)
+  }
+
+  for (const line of sourceLines) {
+    const effectiveWindowId = line.windowId ?? defaultWindowId
+    const asOfDate = readLinePricingAsOf(line, periodEnd, windows, mode)
+
+    const pairKey = pricingRefKey(line.dataCenterId, line.gpuCardTypeId, asOfDate)
+    if (!pricingPairs.has(pairKey)) {
+      pricingPairs.set(pairKey, {
+        dataCenterId: line.dataCenterId,
+        gpuCardTypeId: line.gpuCardTypeId,
+        asOfDate,
+      })
+    }
+
+    const snapshotUk = `${effectiveWindowId}::${line.dataCenterId}::${line.gpuCardTypeId}`
+    const group = snapshotGroups.get(snapshotUk)
+    if (group) {
+      group.asOfDates.push(asOfDate)
+    } else {
+      snapshotGroups.set(snapshotUk, {
+        windowId: effectiveWindowId,
+        dataCenterId: line.dataCenterId,
+        gpuCardTypeId: line.gpuCardTypeId,
+        asOfDates: [asOfDate],
+      })
     }
   }
 
   const { map: pricingMap } = await loadResolvedPricingMap({
-    pairs: [...needed.values()].map((item) => ({
-      dataCenterId: item.dataCenterId,
-      gpuCardTypeId: item.gpuCardTypeId,
-      asOfDate: item.windowEnd,
-    })),
+    pairs: [...pricingPairs.values()],
   })
 
+  function pickSnapshotAsOf(asOfDates: string[]): string {
+    if (asOfDates.includes(periodEnd)) return periodEnd
+    return [...asOfDates].sort().at(-1) ?? periodEnd
+  }
+
   const inserts: (typeof billingPeriodCostPricingSnapshot.$inferInsert)[] = []
-  for (const item of needed.values()) {
+  for (const group of snapshotGroups.values()) {
+    const asOfDate = pickSnapshotAsOf(group.asOfDates)
     const resolved = pricingMap.get(
-      pricingRefKey(item.dataCenterId, item.gpuCardTypeId, item.windowEnd),
+      pricingRefKey(group.dataCenterId, group.gpuCardTypeId, asOfDate),
     )
     if (!resolved) continue
 
-    const dc = dcNameById.get(item.dataCenterId)
-    const card = cardNameById.get(item.gpuCardTypeId)
+    const dc = dcNameById.get(group.dataCenterId)
+    const card = cardNameById.get(group.gpuCardTypeId)
     inserts.push({
       id: newId(),
       billingPeriodId: periodId,
-      windowId: item.windowId,
-      dataCenterId: item.dataCenterId,
+      windowId: group.windowId,
+      dataCenterId: group.dataCenterId,
       dataCenterName: dc?.name ?? null,
-      gpuCardTypeId: item.gpuCardTypeId,
+      gpuCardTypeId: group.gpuCardTypeId,
       gpuCardTypeName: card?.name ?? null,
       ...resolvedUnitCostToPricingSnapshotFields(resolved),
     })

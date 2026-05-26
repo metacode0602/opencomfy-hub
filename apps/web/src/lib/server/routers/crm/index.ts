@@ -20,6 +20,7 @@ import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
 } from '@/lib/server/dataaccess/crm/tenant-billing-import'
+import { billingScheduledSyncDataAccess } from '@/lib/server/dataaccess/crm/billing-scheduled-sync'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
@@ -503,5 +504,31 @@ export const crmRouter = createTRPCRouter({
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '保存项目成本分成失败' })
         }
       }),
+  }),
+
+  billingSync: createTRPCRouter({
+    getConfig: adminProcedure.query(() => billingScheduledSyncDataAccess.getConfig()),
+    runNow: adminProcedure
+      .input(
+        z
+          .object({
+            projectIds: z.array(z.string()).optional(),
+          })
+          .optional(),
+      )
+      .mutation(async ({ input }) => billingScheduledSyncDataAccess.runNow(input)),
+    listRuns: adminProcedure
+      .input(
+        z
+          .object({
+            limit: z.number().int().min(1).max(100).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => billingScheduledSyncDataAccess.listRuns(input)),
+    getRunById: adminProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(({ input }) => billingScheduledSyncDataAccess.getRunById(input.id)),
   }),
 })

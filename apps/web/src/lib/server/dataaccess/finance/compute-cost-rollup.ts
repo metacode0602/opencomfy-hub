@@ -1,11 +1,7 @@
 import { db } from '@/lib/db'
-import type { ContractPricingMode, ContractPricingTier } from '@/lib/data/types'
 import {
   computeGiftedDurationCostExclTaxForPricing,
   computeSoldDurationCostExclTax,
-  parsePositiveMoney,
-  parsePositivePercent,
-  parsePricingTiers,
   resolveTierCostContext,
   type ResolvedPricingFields,
 } from '@/lib/finance/cost-pricing-utils'
@@ -26,6 +22,12 @@ import {
   findLatestPricingSnapshot,
   type CostPricingSnapshotRow,
 } from './compute-cost-pricing-snapshot'
+import type { ComputeCostMode } from './compute-cost-mode'
+import {
+  loadResolvedPricingMap,
+  pricingRefKey,
+} from './cost-pricing-resolve'
+import type { ResolvedUnitCost } from './tenant-bill-pricing'
 import { financeLog } from './logger'
 import { newId } from './operation-log'
 import { listTenantBillWindows } from './tenant-bill-windows'
@@ -46,23 +48,72 @@ type RollupGroup = {
   balanceCardHours: number
   sourceLineIds: string[]
   windowIds: string[]
+  confirmedRevenue: number
+  soldCost: number
+  giftedCost: number
+  grossProfit: number
+  pricingSnapshotId: string | null
+  dealUnitPricePerHour: number | null
+  listPricePerHour: number | null
+  dealToListRatio: number | null
+  matchedTierOrder: number | null
+  revenueSharePercentApplied: number | null
+  supplierUnitCostId: string | null
+}
+
+function readSourceLinePricingAsOf(
+  line: typeof billingPeriodCostSourceLine.$inferSelect,
+  periodEnd: string,
+  windows: { id: string; windowEnd: string }[],
+  mode: ComputeCostMode,
+): string {
+  const meta = line.sourceMeta as { pricing_as_of?: string } | null
+  if (line.kind === 'baremetal' && meta?.pricing_as_of) {
+    return meta.pricing_as_of
+  }
+  if (line.windowId) {
+    if (mode === 'regenerate') return periodEnd
+    return windows.find((w) => w.id === line.windowId)?.windowEnd ?? periodEnd
+  }
+  return periodEnd
+}
+
+function resolvedToPricingFields(resolved: ResolvedUnitCost): ResolvedPricingFields {
+  return {
+    pricingMode: resolved.pricingMode,
+    unitPricePerHour:
+      resolved.unitPricePerHour ?? resolved.listPricePerHour ?? null,
+    revenueSharePercent: resolved.revenueSharePercent,
+    listPricePerHour: resolved.listPricePerHour,
+    pricingTiers: resolved.pricingTiers,
+  }
+}
+
+function computeLineFinancials(
+  pricing: ResolvedPricingFields,
+  metrics: {
+    balanceConsumption: number
+    balanceCardHours: number
+    voucherCardHours: number
+  },
+): {
+  confirmed: number
+  sold: number
+  gifted: number
+  gross: number
+  tierCtx: ReturnType<typeof resolveTierCostContext>
+} {
+  const tierCtx = resolveTierCostContext(pricing, metrics)
+  const confirmed = metrics.balanceConsumption / COST_TAX_DIVISOR
+  const sold = computeSoldDurationCostExclTax(pricing, metrics, tierCtx)
+  const gifted = computeGiftedDurationCostExclTaxForPricing(pricing, metrics, tierCtx)
+  const gross = computeGrossProfit(confirmed, sold, gifted)
+  return { confirmed, sold, gifted, gross, tierCtx }
 }
 
 function pricingFieldString(value: number | null | undefined): string | null {
   if (value == null || value <= 0) return null
   return toMoneyString(value)
-}
-
-function snapshotToPricingFields(snap: CostPricingSnapshotRow): ResolvedPricingFields {
-  return {
-    pricingMode: snap.pricingMode as ContractPricingMode,
-    unitPricePerHour:
-      parsePositiveMoney(snap.dealUnitPricePerHour) ??
-      parsePositiveMoney(snap.listPricePerHour),
-    revenueSharePercent: parsePositivePercent(snap.revenueSharePercent),
-    listPricePerHour: parsePositiveMoney(snap.listPricePerHour),
-    pricingTiers: parsePricingTiers(snap.pricingTiers) as ContractPricingTier[],
-  }
 }
 
 function rollupKey(staffId: string, dataCenterId: string, gpuCardTypeId: string): string {
@@ -147,8 +198,10 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
   billingPeriodId: string
   snapshots: Map<string, CostPricingSnapshotRow>
   issues: string[]
+  periodEnd: string
+  mode?: ComputeCostMode
 }): Promise<number> {
-  const { billingPeriodId: periodId, snapshots, issues } = input
+  const { billingPeriodId: periodId, snapshots, issues, periodEnd, mode = 'create' } = input
 
   const lines = await db
     .select()
@@ -159,6 +212,13 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
 
   const windows = await listTenantBillWindows(periodId)
   const windowIds = windows.map((w) => w.id)
+
+  const pricingPairs = lines.map((line) => ({
+    dataCenterId: line.dataCenterId,
+    gpuCardTypeId: line.gpuCardTypeId,
+    asOfDate: readSourceLinePricingAsOf(line, periodEnd, windows, mode),
+  }))
+  const { map: pricingMap } = await loadResolvedPricingMap({ pairs: pricingPairs })
 
   const dcRegions = new Map<string, string>()
   const cardCodes = new Map<string, string>()
@@ -180,6 +240,34 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
 
   for (const line of lines) {
     if (!line.staffId) continue
+    const lineMetrics = {
+      balanceConsumption: parseMoney(line.balanceConsumption),
+      balanceCardHours: Number(line.balanceCardHours ?? 0),
+      voucherCardHours: Number(line.voucherCardHours ?? 0),
+    }
+    const asOf = readSourceLinePricingAsOf(line, periodEnd, windows, mode)
+    const resolved = pricingMap.get(
+      pricingRefKey(line.dataCenterId, line.gpuCardTypeId, asOf),
+    )
+    if (!resolved) {
+      issues.push(
+        `缺成本定价 staff=${line.staffId} dc=${line.dataCenterId} card=${line.gpuCardTypeId} asOf=${asOf}`,
+      )
+      continue
+    }
+
+    const pricing = resolvedToPricingFields(resolved)
+    const { confirmed, sold, gifted, gross, tierCtx } = computeLineFinancials(
+      pricing,
+      lineMetrics,
+    )
+    const snap = findLatestPricingSnapshot({
+      snapshots,
+      dataCenterId: line.dataCenterId,
+      gpuCardTypeId: line.gpuCardTypeId,
+      windowIds: line.windowId ? [line.windowId] : windowIds,
+    })
+
     const key = rollupKey(line.staffId, line.dataCenterId, line.gpuCardTypeId)
     const existing = bucket.get(key)
     if (!existing) {
@@ -193,23 +281,38 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
         gpuCardTypeCode: cardCodes.get(line.gpuCardTypeId) ?? '',
         totalConsumption: parseMoney(line.totalConsumption),
         voucherConsumption: parseMoney(line.voucherConsumption),
-        balanceConsumption: parseMoney(line.balanceConsumption),
+        balanceConsumption: lineMetrics.balanceConsumption,
         totalCardHours: Number(line.totalCardHours ?? 0),
-        voucherCardHours: Number(line.voucherCardHours ?? 0),
-        balanceCardHours: Number(line.balanceCardHours ?? 0),
+        voucherCardHours: lineMetrics.voucherCardHours,
+        balanceCardHours: lineMetrics.balanceCardHours,
         sourceLineIds: [line.id],
         windowIds: line.windowId ? [line.windowId] : [],
+        confirmedRevenue: confirmed,
+        soldCost: sold,
+        giftedCost: gifted,
+        grossProfit: gross,
+        pricingSnapshotId: snap?.id ?? null,
+        dealUnitPricePerHour: tierCtx.dealUnitPricePerHour,
+        listPricePerHour: pricing.listPricePerHour,
+        dealToListRatio: tierCtx.dealToListRatio,
+        matchedTierOrder: tierCtx.matchedTierOrder,
+        revenueSharePercentApplied: tierCtx.revenueSharePercentApplied,
+        supplierUnitCostId: resolved.supplierUnitCostId,
       })
       continue
     }
 
     existing.totalConsumption += parseMoney(line.totalConsumption)
     existing.voucherConsumption += parseMoney(line.voucherConsumption)
-    existing.balanceConsumption += parseMoney(line.balanceConsumption)
+    existing.balanceConsumption += lineMetrics.balanceConsumption
     existing.totalCardHours += Number(line.totalCardHours ?? 0)
-    existing.voucherCardHours += Number(line.voucherCardHours ?? 0)
-    existing.balanceCardHours += Number(line.balanceCardHours ?? 0)
+    existing.voucherCardHours += lineMetrics.voucherCardHours
+    existing.balanceCardHours += lineMetrics.balanceCardHours
     existing.sourceLineIds.push(line.id)
+    existing.confirmedRevenue += confirmed
+    existing.soldCost += sold
+    existing.giftedCost += gifted
+    existing.grossProfit += gross
     if (line.windowId && !existing.windowIds.includes(line.windowId)) {
       existing.windowIds.push(line.windowId)
     }
@@ -218,31 +321,6 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
   const recordRows: (typeof platformCostMonthly.$inferInsert)[] = []
 
   for (const group of bucket.values()) {
-    const snap = findLatestPricingSnapshot({
-      snapshots,
-      dataCenterId: group.dataCenterId,
-      gpuCardTypeId: group.gpuCardTypeId,
-      windowIds: group.windowIds.length > 0 ? group.windowIds : windowIds,
-    })
-    if (!snap) {
-      issues.push(
-        `缺定价快照 staff=${group.staffId} dc=${group.dataCenterId} card=${group.gpuCardTypeId}`,
-      )
-      continue
-    }
-
-    const pricing = snapshotToPricingFields(snap)
-    const metrics = {
-      balanceConsumption: group.balanceConsumption,
-      balanceCardHours: group.balanceCardHours,
-      voucherCardHours: group.voucherCardHours,
-    }
-    const tierCtx = resolveTierCostContext(pricing, metrics)
-    const confirmed = group.balanceConsumption / COST_TAX_DIVISOR
-    const sold = computeSoldDurationCostExclTax(pricing, metrics, tierCtx)
-    const gifted = computeGiftedDurationCostExclTaxForPricing(pricing, metrics, tierCtx)
-    const gross = computeGrossProfit(confirmed, sold, gifted)
-
     recordRows.push({
       id: newId(),
       billingPeriodId: periodId,
@@ -252,8 +330,8 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
       accountManager: group.staffName,
       dataCenterId: group.dataCenterId,
       gpuCardTypeId: group.gpuCardTypeId,
-      supplierUnitCostId: snap.supplierUnitCostId,
-      pricingSnapshotId: snap.id,
+      supplierUnitCostId: group.supplierUnitCostId,
+      pricingSnapshotId: group.pricingSnapshotId,
       idcName: group.dataCenterName,
       idcCode: group.dataCenterRegion || null,
       cardType: group.gpuCardTypeCode,
@@ -263,18 +341,18 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
       totalCardHours: toHoursString(group.totalCardHours),
       balanceCardHours: toHoursString(group.balanceCardHours),
       voucherCardHours: toHoursString(group.voucherCardHours),
-      confirmedRevenueExclTax: toMoneyString(confirmed),
-      soldDurationCostExclTax: toMoneyString(sold),
-      giftedDurationCostExclTax: toMoneyString(gifted),
-      grossProfit: toMoneyString(gross),
-      dealUnitPricePerHour: pricingFieldString(tierCtx.dealUnitPricePerHour),
-      listPricePerHour: pricingFieldString(pricing.listPricePerHour),
+      confirmedRevenueExclTax: toMoneyString(group.confirmedRevenue),
+      soldDurationCostExclTax: toMoneyString(group.soldCost),
+      giftedDurationCostExclTax: toMoneyString(group.giftedCost),
+      grossProfit: toMoneyString(group.grossProfit),
+      dealUnitPricePerHour: pricingFieldString(group.dealUnitPricePerHour),
+      listPricePerHour: pricingFieldString(group.listPricePerHour),
       dealToListRatio:
-        tierCtx.dealToListRatio != null ? tierCtx.dealToListRatio.toFixed(6) : null,
-      matchedTierOrder: tierCtx.matchedTierOrder,
+        group.dealToListRatio != null ? group.dealToListRatio.toFixed(6) : null,
+      matchedTierOrder: group.matchedTierOrder,
       revenueSharePercentApplied:
-        tierCtx.revenueSharePercentApplied != null
-          ? tierCtx.revenueSharePercentApplied.toFixed(4)
+        group.revenueSharePercentApplied != null
+          ? group.revenueSharePercentApplied.toFixed(4)
           : null,
       sourceLineIds: group.sourceLineIds,
     })

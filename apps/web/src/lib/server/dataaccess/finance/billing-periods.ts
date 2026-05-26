@@ -13,7 +13,10 @@ import { importExcelFile, getImportSlotStatuses } from './import'
 import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { purgeBillingPeriodArtifacts } from './purge'
-import type { ImportFileType } from './constants'
+import {
+  ensureRegenerateCostWindow,
+  purgeCostImportsForRegenerate,
+} from './purge-cost'
 import { listTenantProjectBindings } from './enrichment'
 import { billingTenantCostAllocation } from '@workspace/db/schema'
 import {
@@ -458,6 +461,46 @@ export const financeBillingPeriodsDataAccess = {
     return mapPeriod(
       (await db.query.billingPeriod.findFirst({ where: eq(billingPeriod.id, periodId) }))!,
     )
+  },
+
+  async prepareRegenerateCost(periodId: string, actorId?: string | null) {
+    const period = await db.query.billingPeriod.findFirst({
+      where: eq(billingPeriod.id, periodId),
+    })
+    if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+    if (period.status === 'published' || period.status === 'adjusted') {
+      throw new FinanceError('CONFLICT', '已发布账期不可重新生成成本，请先撤回发布')
+    }
+    if (period.status === 'void') {
+      throw new FinanceError('CONFLICT', '作废账期不可重新生成成本')
+    }
+
+    await purgeCostImportsForRegenerate(periodId)
+    const window = await ensureRegenerateCostWindow({
+      periodId,
+      periodStart: period.periodStart,
+      periodEnd: period.periodEnd,
+    })
+
+    await appendOperationLog({
+      billingPeriodId: periodId,
+      operation: 'prepare_regenerate_cost',
+      actorId,
+    })
+
+    financeLog('prepare-regenerate-cost', 'ready', { periodId, windowId: window.id })
+    return window
+  },
+
+  async regenerateCost(input: {
+    billingPeriodId: string
+    actorId?: string | null
+  }) {
+    return computeBillingPeriodCost({
+      billingPeriodId: input.billingPeriodId,
+      actorId: input.actorId,
+      mode: 'regenerate',
+    })
   },
 
   async voidPeriod(periodId: string, actorId?: string | null): Promise<BillingPeriodDto> {

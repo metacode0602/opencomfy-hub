@@ -29,6 +29,8 @@ import {
   splitTenantBindingToStaff,
   type CostTenantProjectBinding,
 } from './cost-tenant-resolve'
+import { asOfFromOrderedAt } from './platform-list-price'
+import type { ComputeCostMode } from './compute-cost-mode'
 import { financeLog } from './logger'
 import { newId } from './operation-log'
 import { listTenantBillWindows } from './tenant-bill-windows'
@@ -141,7 +143,6 @@ function buildFlexSourceLines(input: {
 
 function buildBaremetalSourceLines(input: {
   periodId: string
-  periodEnd: string
   rows: (typeof billingPeriodRawBaremetalOrder.$inferSelect)[]
   bindingsByTenant: Map<string, CostTenantProjectBinding>
   masterCtx: CostMasterDataContext
@@ -200,8 +201,9 @@ function buildBaremetalSourceLines(input: {
 
     for (const split of staffSplits) {
       const metrics = scaleMetrics({ ...baseMetrics, ratio: split.ratio })
+      const pricingAsOf = asOfFromOrderedAt(row.orderedAt)
       const pricing = input.pricingMap.get(
-        pricingRefKey(dc.id, card.id, input.periodEnd),
+        pricingRefKey(dc.id, card.id, pricingAsOf),
       )
       const pricingRefs = pricingRefsFromResolved(pricing)
       lines.push({
@@ -233,6 +235,8 @@ function buildBaremetalSourceLines(input: {
           purchase_qty_text: row.purchaseQtyText,
           idc_name: row.idcName,
           card_count_per_device: device.cardCount,
+          pricing_as_of: pricingAsOf,
+          ordered_at: row.orderedAt.toISOString(),
         },
       })
     }
@@ -246,8 +250,9 @@ export async function persistCostSourceLines(input: {
   tenantPlatformIds: string[]
   periodEnd: string
   issues: string[]
+  mode?: ComputeCostMode
 }): Promise<number> {
-  const { billingPeriodId: periodId, issues } = input
+  const { billingPeriodId: periodId, issues, mode = 'create' } = input
   financeLog('compute-cost-source-line', 'start', { periodId })
 
   const masterCtx = await loadCostMasterDataContext()
@@ -275,6 +280,7 @@ export async function persistCostSourceLines(input: {
       .select()
       .from(billingPeriodRawTenantBill)
       .where(eq(billingPeriodRawTenantBill.batchId, batch.id))
+    const flexAsOf = mode === 'regenerate' ? input.periodEnd : window.windowEnd
     for (const row of rows) {
       const dc = resolveDataCenterByContainerRegion(masterCtx, row.regionCode)
       const card = resolveGpuCardType(masterCtx, row.gpuModel)
@@ -282,7 +288,7 @@ export async function persistCostSourceLines(input: {
         unitCostPairs.push({
           dataCenterId: dc.id,
           gpuCardTypeId: card.id,
-          asOfDate: window.windowEnd,
+          asOfDate: flexAsOf,
         })
       }
     }
@@ -302,7 +308,7 @@ export async function persistCostSourceLines(input: {
         unitCostPairs.push({
           dataCenterId: dc.id,
           gpuCardTypeId: card.id,
-          asOfDate: input.periodEnd,
+          asOfDate: asOfFromOrderedAt(row.orderedAt),
         })
       }
     }
@@ -322,7 +328,7 @@ export async function persistCostSourceLines(input: {
       ...buildFlexSourceLines({
         periodId,
         windowId: window.id,
-        windowEnd: window.windowEnd,
+        windowEnd: mode === 'regenerate' ? input.periodEnd : window.windowEnd,
         rows,
         bindingsByTenant,
         masterCtx,
@@ -340,7 +346,6 @@ export async function persistCostSourceLines(input: {
     lines.push(
       ...buildBaremetalSourceLines({
         periodId,
-        periodEnd: input.periodEnd,
         rows: baremetalRows,
         bindingsByTenant,
         masterCtx,

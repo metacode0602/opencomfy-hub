@@ -91,6 +91,56 @@ export function validateBillingDateRange(startDate?: string, endDate?: string) {
   }
 }
 
+const CST_TIMEZONE = 'Asia/Shanghai'
+
+/** 东八区自然日 YYYY-MM-DD */
+export function formatCstDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: CST_TIMEZONE }).format(date)
+}
+
+/** 日期字符串减 N 天（日历日，非时区感知边界；用于 YYYY-MM-DD 运算） */
+export function subtractCalendarDays(dateStr: string, days: number): string {
+  const [yearStr, monthStr, dayStr] = dateStr.split('-')
+  const y = Number(yearStr)
+  const m = Number(monthStr)
+  const d = Number(dayStr)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() - days)
+  return dt.toISOString().slice(0, 10)
+}
+
+/** 东八区当月 1 日 */
+export function cstMonthStartDate(referenceDateStr: string): string {
+  const [y, m] = referenceDateStr.split('-')
+  return `${y}-${m}-01`
+}
+
+/** 定时账单同步增量窗口 */
+export function computeBillingSyncWindow(params: {
+  cursorEndDate: string | null
+  safetyDays: number
+  now?: Date
+  initialStartDate?: string | null
+}): { startDate: string; endDate: string; skipped: boolean } {
+  const now = params.now ?? new Date()
+  const endDate = subtractCalendarDays(formatCstDate(now), params.safetyDays)
+
+  let startDate: string
+  if (params.cursorEndDate?.trim()) {
+    startDate = params.cursorEndDate.trim()
+  } else if (params.initialStartDate?.trim()) {
+    startDate = params.initialStartDate.trim()
+  } else {
+    startDate = cstMonthStartDate(endDate)
+  }
+
+  return {
+    startDate,
+    endDate,
+    skipped: startDate > endDate,
+  }
+}
+
 /** 东八区自然日 00:00 → UTC ISO（月度账单 overview 查询） */
 export function cstDateStartToUtcIso(dateStr: string): string {
   return new Date(`${dateStr}T00:00:00+08:00`).toISOString()
