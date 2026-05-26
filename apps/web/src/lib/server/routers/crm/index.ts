@@ -15,6 +15,7 @@ import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
+import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
@@ -132,10 +133,45 @@ export const crmRouter = createTRPCRouter({
     updateStage: adminProcedure
       .input(z.object({ id: z.string(), stage: z.enum(['lead', 'testing', 'converted']) }))
       .mutation(({ input }) => projectsDataAccess.updateStage(input.id, input.stage)),
+    updateStatus: adminProcedure
+      .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))
+      .mutation(({ input }) => projectsDataAccess.updateStatus(input.id, input.status)),
     stageCounts: protectedProcedure.query(() => projectsDataAccess.countByStage()),
     listActivities: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listActivitiesByProject(input.projectId)),
+    createActivity: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          comment: z.string().max(5000).default(''),
+          files: z
+            .array(
+              z.object({
+                fileName: z.string().min(1).max(255),
+                mimeType: z.string().max(128).default('application/octet-stream'),
+                fileBase64: z.string().min(1),
+              }),
+            )
+            .max(5)
+            .default([]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await projectActivitiesDataAccess.createComment({
+            projectId: input.projectId,
+            comment: input.comment,
+            files: input.files,
+            user: ctx.user,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '发布动态失败' })
+        }
+      }),
     listConsumptions: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listConsumptionsByProject(input.projectId)),
@@ -312,6 +348,15 @@ export const crmRouter = createTRPCRouter({
     delete: adminProcedure.input(z.object({ id: z.string() })).mutation(({ input }) =>
       staffDataAccess.delete(input.id),
     ),
+    linkAuthUser: adminProcedure
+      .input(z.object({ staffId: z.string(), authUserId: z.string() }))
+      .mutation(({ input }) => staffDataAccess.linkAuthUser(input.staffId, input.authUserId)),
+    unlinkAuthUser: adminProcedure
+      .input(z.object({ staffId: z.string() }))
+      .mutation(({ input }) => staffDataAccess.unlinkAuthUser(input.staffId)),
+    searchLinkableAuthUsers: adminProcedure
+      .input(z.object({ query: z.string(), limit: z.number().int().min(1).max(50).optional() }))
+      .query(({ input }) => staffDataAccess.searchLinkableAuthUsers(input.query, input.limit)),
     listAssignments: protectedProcedure
       .input(z.object({ staffId: z.string() }))
       .query(({ input }) => staffDataAccess.listAssignments(input.staffId)),

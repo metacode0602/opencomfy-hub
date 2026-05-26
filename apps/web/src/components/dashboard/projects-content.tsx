@@ -15,6 +15,7 @@ import {
   ChevronDown,
   DollarSignIcon,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
 import { Badge } from '@workspace/ui/components/badge'
@@ -43,6 +44,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
 import type { Project } from '@/lib/data/types'
 import { TENANT_PROJECT_IMPORT_TAG_NAMES } from '@/lib/crm/tenant-project-import-utils'
 import { trpc } from '@/lib/trpc/client'
@@ -72,6 +83,9 @@ export function ProjectsContent() {
   const [allocatingProject, setAllocatingProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
+  const [pausingProject, setPausingProject] = useState<Project | null>(null)
+
+  const utils = trpc.useUtils()
 
   const { data: allTags = [] } = trpc.crm.projectTags.list.useQuery()
   const tagFilterOptions = useMemo(() => {
@@ -84,6 +98,16 @@ export function ProjectsContent() {
     stage: stageFilter,
     status: statusFilter,
     tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+  })
+
+  const pauseMutation = trpc.crm.projects.updateStatus.useMutation({
+    onSuccess: () => {
+      toast.success('项目已暂停')
+      setPausingProject(null)
+      void refetch()
+      void utils.crm.projects.stageCounts.invalidate()
+    },
+    onError: (e) => toast.error(e.message),
   })
 
   const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
@@ -122,6 +146,11 @@ export function ProjectsContent() {
   const openAllocation = (project: Project) => {
     setAllocatingProject(project)
     setAllocationOpen(true)
+  }
+
+  const handleConfirmPause = () => {
+    if (!pausingProject) return
+    pauseMutation.mutate({ id: pausingProject.id, status: 'paused' })
   }
 
   return (
@@ -199,6 +228,33 @@ export function ProjectsContent() {
         businessLines={businessLines}
         onSuccess={() => void refetch()}
       />
+
+      <AlertDialog
+        open={pausingProject !== null}
+        onOpenChange={(open) => !open && setPausingProject(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认暂停项目？</AlertDialogTitle>
+            <AlertDialogDescription>
+              暂停后项目「{pausingProject?.name}」将从默认列表中隐藏，且不再参与成本和收入计算。你仍可通过状态筛选查看已暂停项目。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={pauseMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={pauseMutation.isPending}
+              onClick={handleConfirmPause}
+            >
+              {pauseMutation.isPending ? '处理中…' : '确认暂停'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-l-4 border-l-yellow-500">
@@ -447,10 +503,15 @@ export function ProjectsContent() {
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>查看账单</DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">
-                          <Trash className="w-4 h-4 mr-2" />
-                          暂停项目
-                        </DropdownMenuItem>
+                        {project.status === 'active' ? (
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={() => setPausingProject(project)}
+                          >
+                            <Trash className="w-4 h-4 mr-2" />
+                            暂停项目
+                          </DropdownMenuItem>
+                        ) : null}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>

@@ -13,7 +13,6 @@ import type {
   Task,
 } from '@/lib/data/types'
 import {
-  mapActivityRow,
   mapBillRow,
   mapConsumptionRow,
   mapCouponRow,
@@ -24,6 +23,7 @@ import {
 } from '@/lib/server/mappers/crm'
 import { mapBillingTenantRow } from '@/lib/server/mappers/crm'
 import { projectsDataAccess } from './projects'
+import { projectActivitiesDataAccess } from './project-activities'
 import {
   billingTenant,
   commerceOrder,
@@ -31,7 +31,6 @@ import {
   computeTask,
   consumptionRecord,
   coupon,
-  projectActivity,
   recharge,
   tenantBill,
   tenantBillDetail,
@@ -48,7 +47,6 @@ async function tenantIdsForCustomer(customerId: string): Promise<string[]> {
 
 export const billingDataAccess = {
   async listTenantsByCustomer(customerId: string): Promise<PlatformTenant[]> {
-    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(billingTenant)
@@ -251,11 +249,6 @@ export const billingDataAccess = {
   },
 
   async listActivitiesByProject(projectId: string): Promise<Activity[]> {
-    const rows = await db
-      .select()
-      .from(projectActivity)
-      .where(eq(projectActivity.projectId, projectId))
-      .orderBy(desc(projectActivity.createdAt))
-    return rows.map(mapActivityRow)
+    return projectActivitiesDataAccess.listByProject(projectId)
   },
 }

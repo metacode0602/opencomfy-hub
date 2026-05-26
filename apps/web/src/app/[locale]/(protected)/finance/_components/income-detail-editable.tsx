@@ -1,6 +1,9 @@
 "use client"
 
-import { mergeIncomeRowsWithOverrides } from "@/lib/finance/income-row-utils"
+import {
+  mergeIncomeRowsWithOverrides,
+  sortIncomeRowsByTotalConsumptionDesc,
+} from "@/lib/finance/income-row-utils"
 import { useFinanceIncomeOpsStore } from "@/lib/stores/finance-income-ops-store"
 import type { PlatformIncomeMonthly } from "@/lib/types/finance"
 import { useMemo, useState } from "react"
@@ -26,7 +29,10 @@ export function IncomeDetailEditable({
   )
 
   const rows = useMemo(
-    () => mergeIncomeRowsWithOverrides(baseRows, overrides),
+    () =>
+      sortIncomeRowsByTotalConsumptionDesc(
+        mergeIncomeRowsWithOverrides(baseRows, overrides),
+      ),
     [baseRows, overrides],
   )
 

@@ -57,6 +57,7 @@ export type UserStaff = {
   is_default_account_manager: boolean
   is_default_delivery_manager: boolean
   is_default_project_manager: boolean
+  auth_user_id?: string | null
 }
 
 export type AccountManagerAssignment = {

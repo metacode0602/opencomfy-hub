@@ -4,6 +4,7 @@ import {
   mapActivityFlowRecord,
   mapChangelogFlowRecord,
   mapComputeNodeRow,
+  mapPhysicalDeviceListRows,
   mapPhysicalDeviceRow,
   mapStateTransitionFlowRecord,
 } from '@/lib/server/mappers/supply'
@@ -52,14 +53,9 @@ export const physicalDevicesDataAccess = {
       .where(conditions)
       .orderBy(sql`${supplierDevice.updatedAt} DESC`)
 
-    supplierLog('physical-devices', 'list done', { count: rows.length })
-    return rows.map(({ device, supplierShortName, cardTypeName, clusterName, nodeRole, expectedService }) =>
-      mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }, {
-        clusterName,
-        nodeRole,
-        expectedService,
-      }),
-    )
+    const devices = mapPhysicalDeviceListRows(rows)
+    supplierLog('physical-devices', 'list done', { count: devices.length })
+    return devices
   },
 
   async getStats(params: { supplierId?: string }): Promise<PhysicalDeviceStats> {

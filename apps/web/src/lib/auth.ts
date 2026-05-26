@@ -124,6 +124,12 @@ export const auth = betterAuth({
         type: 'string',
         required: false,
       },
+      mustChangePassword: {
+        type: 'boolean',
+        required: false,
+        defaultValue: false,
+        input: false,
+      },
     },
     // https://www.better-auth.com/docs/concepts/users-accounts#delete-user
     deleteUser: {
@@ -197,6 +203,22 @@ export const auth = betterAuth({
               ...session,
               activeOrganizationId: organization?.organization?.id,
             },
+          }
+        },
+        after: async (createdSession) => {
+          try {
+            const userInfo = await getUserById(createdSession.userId)
+            if (!userInfo) return
+            const { autoLinkStaffForAuthUser } = await import(
+              '@/lib/server/dataaccess/crm/staff-auth'
+            )
+            await autoLinkStaffForAuthUser({
+              id: userInfo.id,
+              email: userInfo.email,
+              phoneNumber: userInfo.phoneNumber,
+            })
+          } catch (error) {
+            console.error('Failed to auto-link staff for auth user:', error)
           }
         },
       },

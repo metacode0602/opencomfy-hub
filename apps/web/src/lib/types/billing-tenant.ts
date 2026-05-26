@@ -3,6 +3,8 @@ export type BillingTenantProjectTag = {
   name: string
 }
 
+export type BillingTenantType = 'internal' | 'external'
+
 export type BillingTenantListItem = {
   id: string
   customerId: string
@@ -10,6 +12,7 @@ export type BillingTenantListItem = {
   name: string
   phone?: string
   status: string
+  type: BillingTenantType
   balance: number
   overdueAt?: string
   creditLimit?: number
@@ -37,6 +40,7 @@ export type BillingTenantUpdateInput = {
     name: string
     phone?: string
     status: 'active' | 'inactive' | 'suspended'
+    type: BillingTenantType
     balance: number
     overdueAt?: string | null
     creditLimit?: number | null

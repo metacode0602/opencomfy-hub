@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { formatDate, formatMoney, formatText } from "../_lib/display"
+import Link from "next/link"
 
 type IncomeDetailTableProps = {
   rows: PlatformIncomeMonthly[]
@@ -82,20 +83,15 @@ export function IncomeDetailTable({
                 )}
                 <TableCell>{formatText(r.project_name)}</TableCell>
                 <TableCell className="max-w-[240px]">
-                  <div>{formatText(r.customer_full_name)}</div>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/crm/customers/${r.customer_id}`}>{formatText(r.customer_full_name)}</Link>
+                  </div>
                   <div className="text-muted-foreground mt-0.5 font-mono text-xs">
                     租户 {r.tenant_platform_id}
                   </div>
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  <span className="inline-flex items-center justify-end gap-1.5">
-                    {formatMoney(r.supplementary_consumption)}
-                    {(supplementaryHistoryCount?.(r.id) ?? 0) > 0 && (
-                      <Badge variant="secondary" className="text-[10px]">
-                        {supplementaryHistoryCount!(r.id)} 次
-                      </Badge>
-                    )}
-                  </span>
+                  {formatMoney(r.supplementary_consumption)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatMoney(r.balance_consumption)}

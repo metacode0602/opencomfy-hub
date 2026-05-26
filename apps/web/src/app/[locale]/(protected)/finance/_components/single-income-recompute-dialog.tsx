@@ -1,7 +1,10 @@
 "use client"
 
+import { useMemo } from "react"
 import { formatMoney, formatText } from "@/app/[locale]/(protected)/finance/_lib/display"
+import { downloadSingleIncomeIssuesExcel } from "@/lib/finance/single-income-issues-export"
 import { getProjectsFromSharedWarning } from "@/lib/finance/single-income-validation"
+import type { SingleIncomeIssueRow } from "@/lib/finance/single-income-types"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -20,8 +23,9 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
-import { IconLoader2 } from "@tabler/icons-react"
+import { IconDownload, IconLoader2 } from "@tabler/icons-react"
 import { useEffect, useState } from "react"
+import { toast } from "sonner"
 
 const FLOW_STEPS = [
   "筛选非归档经营项目，且计费租户已维护 platform_tenant_id（优先 primary_tenant_id，否则 project_tenant）。",
@@ -141,6 +145,23 @@ export function SingleIncomeRecomputeDialog({
   const canPreview = validation?.canPreviewSingleIncome ?? false
   const canConfirm = validation?.canComputeSingleIncome && !compute.isPending
 
+  const exportIssueRows = useMemo((): SingleIncomeIssueRow[] => {
+    if (preview?.issueRows?.length) return preview.issueRows
+    return validation?.issueRows ?? []
+  }, [preview?.issueRows, validation?.issueRows])
+
+  const handleDownloadIssues = () => {
+    if (exportIssueRows.length === 0) {
+      toast.error("暂无问题明细可导出")
+      return
+    }
+    const ok = downloadSingleIncomeIssuesExcel({
+      rows: exportIssueRows,
+      periodCode,
+    })
+    if (ok) toast.success(`已下载 ${exportIssueRows.length} 条问题明细`)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] min-w-[40vw] max-w-5xl flex-col gap-0 overflow-hidden p-0">
@@ -168,6 +189,24 @@ export function SingleIncomeRecomputeDialog({
             </p>
           ) : validation ? (
             <div className="space-y-3">
+              {exportIssueRows.length > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-muted-foreground text-xs">
+                    共 {exportIssueRows.length} 条问题/警告，可导出 Excel 便于排查
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={handleDownloadIssues}
+                  >
+                    <IconDownload className="size-3.5" />
+                    下载问题明细 Excel
+                  </Button>
+                </div>
+              )}
+
               <div className="rounded-md border bg-muted/30 px-3 py-3 space-y-1">
                 <p>
                   可参与项目：<span className="font-medium">{validation.projectsIncluded}</span> /{" "}
@@ -240,15 +279,29 @@ export function SingleIncomeRecomputeDialog({
             </div>
           ) : null}
 
-          {previewEnabled && (
+              {previewEnabled && (
             <div className="space-y-3 border-t pt-4">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-medium">试算结果（未写入数据库）</p>
-                {preview && (
-                  <p className="text-muted-foreground text-xs">
-                    共 {preview.incomeCount} 行 · 总收入 {formatMoney(preview.summary.totalIncome)}
-                  </p>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {preview && (
+                    <p className="text-muted-foreground text-xs">
+                      共 {preview.incomeCount} 行 · 总收入 {formatMoney(preview.summary.totalIncome)}
+                    </p>
+                  )}
+                  {exportIssueRows.length > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 h-7 text-xs"
+                      onClick={handleDownloadIssues}
+                    >
+                      <IconDownload className="size-3.5" />
+                      下载问题明细
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {previewLoading ? (

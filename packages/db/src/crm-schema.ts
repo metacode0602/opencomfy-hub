@@ -11,6 +11,7 @@
  */
 
 import { relations, sql } from "drizzle-orm"
+import { user } from "./auth-schema"
 import {
   bigint,
   boolean,
@@ -100,6 +101,7 @@ export const billingTenant = pgTable(
     overdue_at: timestamp("overdue_at", { withTimezone: true }),
     credit_limit: tenantMoney("credit_limit"),
     balance: tenantMoney("balance").notNull().default("0"),
+    type: varchar("type", { length: 32 }).notNull().default("external"), // internal 内部租户 | external 外部租户
     /** 平台侧租户注册时间（OpenAPI create_time） */
     platformRegisteredAt: timestamp("platform_registered_at", { withTimezone: true }),
     ...crmTimestamps,
@@ -240,6 +242,7 @@ export const userStaff = pgTable(
     isDefaultAccountManager: boolean("is_default_account_manager").notNull().default(false),
     isDefaultDeliveryManager: boolean("is_default_delivery_manager").notNull().default(false),
     isDefaultProjectManager: boolean("is_default_project_manager").notNull().default(false),
+    authUserId: text("auth_user_id").references(() => user.id, { onDelete: "set null" }),
     ...crmTimestamps,
   },
   (table) => [
@@ -258,6 +261,9 @@ export const userStaff = pgTable(
     uniqueIndex("user_staff_default_project_manager_uk")
       .on(table.isDefaultProjectManager)
       .where(sql`${table.isDefaultProjectManager} = true`),
+    uniqueIndex("user_staff_auth_user_id_uk")
+      .on(table.authUserId)
+      .where(sql`${table.authUserId} is not null`),
   ],
 )
 

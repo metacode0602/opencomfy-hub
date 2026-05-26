@@ -70,6 +70,7 @@ function mapListRow(
     name: t.name,
     phone: t.phone ?? undefined,
     status: t.status,
+    type: t.type as BillingTenantListItem['type'],
     balance: toNumber(t.balance),
     overdueAt: toIso(t.overdue_at ?? undefined),
     creditLimit: t.credit_limit != null ? toNumber(t.credit_limit) : undefined,
@@ -323,6 +324,7 @@ export const billingTenantsDataAccess = {
           name: input.tenant.name.trim(),
           phone: input.tenant.phone?.trim() || null,
           status: input.tenant.status,
+          type: input.tenant.type,
           balance: input.tenant.balance.toFixed(4),
           overdue_at: input.tenant.overdueAt ? new Date(input.tenant.overdueAt) : null,
           credit_limit:

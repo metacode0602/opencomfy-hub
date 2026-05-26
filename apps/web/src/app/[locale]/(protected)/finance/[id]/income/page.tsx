@@ -3,7 +3,10 @@
 import { IncomeDetailEditable } from "../../_components/income-detail-editable"
 import { SingleIncomeRecomputeDialog } from "../../_components/single-income-recompute-dialog"
 import { downloadIncomeDetailExcel } from "@/lib/finance/income-detail-export"
-import { mergeIncomeRowsWithOverrides } from "@/lib/finance/income-row-utils"
+import {
+  mergeIncomeRowsWithOverrides,
+  sortIncomeRowsByTotalConsumptionDesc,
+} from "@/lib/finance/income-row-utils"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { useFinanceIncomeOpsStore } from "@/lib/stores/finance-income-ops-store"
 import { trpc } from "@/lib/trpc/client"
@@ -36,7 +39,10 @@ export default function FinancePeriodIncomePage() {
   const rows = useMemo(() => bundle?.income ?? [], [bundle?.income])
   const overrides = useFinanceIncomeOpsStore((s) => s.overrides)
   const displayRows = useMemo(
-    () => mergeIncomeRowsWithOverrides(rows, overrides),
+    () =>
+      sortIncomeRowsByTotalConsumptionDesc(
+        mergeIncomeRowsWithOverrides(rows, overrides),
+      ),
     [rows, overrides],
   )
 

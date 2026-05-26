@@ -3,6 +3,7 @@ import createIntlMiddleware from "next-intl/middleware"
 import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
+import { auth } from "@/lib/auth"
 import { DEFAULT_LOCALE, LOCALES, routing } from "@/lib/i18n/routing"
 
 const corsHeaders: Record<string, string> = {
@@ -48,7 +49,7 @@ function isNavigationRedirect(response: NextResponse): boolean {
   return response.status >= 300 && response.status < 400
 }
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (pathname.startsWith("/api/v1/generate")) {
@@ -82,9 +83,28 @@ export function proxy(request: NextRequest) {
     pathForAuth.startsWith("/reset-password") ||
     pathForAuth.startsWith("/error")
 
+  const isChangePasswordRoute = pathForAuth.startsWith("/change-password")
+
   if (!sessionCookie && !isPublicRoute) {
     const signInHref = buildLocalizedHref(locale, "/signin")
     return NextResponse.redirect(new URL(signInHref, request.url))
+  }
+
+  if (sessionCookie && !isPublicRoute) {
+    const session = await auth.api.getSession({ headers: request.headers })
+    const mustChangePassword = Boolean(
+      (session?.user as { mustChangePassword?: boolean } | undefined)?.mustChangePassword,
+    )
+
+    if (mustChangePassword && !isChangePasswordRoute) {
+      const changePasswordHref = buildLocalizedHref(locale, "/change-password")
+      return NextResponse.redirect(new URL(changePasswordHref, request.url))
+    }
+
+    if (!mustChangePassword && isChangePasswordRoute) {
+      const dashboardHref = buildLocalizedHref(locale, "/dashboard")
+      return NextResponse.redirect(new URL(dashboardHref, request.url))
+    }
   }
 
   return intlResponse

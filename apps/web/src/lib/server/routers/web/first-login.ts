@@ -1,9 +1,23 @@
 import { createTRPCRouter, protectedProcedure } from '../trpc'
 import { db } from '@/lib/db'
 import { session, user } from '@workspace/db/schema'
+import { clearMustChangePassword } from '@/lib/server/dataaccess/crm/staff-auth'
 import { eq, and, gt, count } from 'drizzle-orm'
 
 export const firstLoginRouter = createTRPCRouter({
+  mustChangePassword: protectedProcedure.query(async ({ ctx }) => {
+    const currentUser = await db.query.user.findFirst({
+      where: eq(user.id, ctx.user.id),
+      columns: { mustChangePassword: true },
+    })
+    return { mustChangePassword: currentUser?.mustChangePassword ?? false }
+  }),
+
+  completePasswordChange: protectedProcedure.mutation(async ({ ctx }) => {
+    await clearMustChangePassword(ctx.user.id)
+    return { ok: true as const }
+  }),
+
   /**
    * 检查是否是首次登录
    * 判断逻辑：

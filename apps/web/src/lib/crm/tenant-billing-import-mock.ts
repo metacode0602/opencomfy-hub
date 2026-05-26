@@ -1,3 +1,7 @@
+import {
+  platformBillingValueToRmb,
+  platformOrderAmountToRmb,
+} from '@/lib/crm/tenant-billing-import-utils'
 import type {
   BillDetailPreviewItem,
   MetalOrderPreviewItem,
@@ -10,11 +14,13 @@ import type {
   TenantBillingImportSectionSummary,
 } from '@/lib/types/tenant-billing-import'
 
-const MOCK_DIVISOR = 10_000
+/** 平台整数 → 人民币元（与 tenant-billing-import-utils 一致） */
+function mockBillingValueToRmb(raw: number): number {
+  return platformBillingValueToRmb(raw)
+}
 
-/** 平台整数 → 人民币元（mock 与后续服务端规则一致，联调后写死） */
-export function mockPlatformAmountToRmb(raw: number): number {
-  return raw / MOCK_DIVISOR
+function mockOrderAmountToRmb(raw: number): number {
+  return platformOrderAmountToRmb(raw)
 }
 
 function summarize<T extends { action: string }>(
@@ -44,7 +50,7 @@ function buildMockMetalOrders(): MetalOrderPreviewItem[] {
       orderNo: '1779249022888',
       status: '已完成',
       idcName: '千岛湖机房',
-      amountRmb: mockPlatformAmountToRmb(260_000_000),
+      amountRmb: mockOrderAmountToRmb(260_000_000),
       deviceCount: 1,
       gpuSummary: '5090 × 8',
       createTime: '2026-05-20 11:50:22',
@@ -55,7 +61,7 @@ function buildMockMetalOrders(): MetalOrderPreviewItem[] {
       orderNo: '1778119022001',
       status: '已完成',
       idcName: '千岛湖机房',
-      amountRmb: mockPlatformAmountToRmb(180_000_000),
+      amountRmb: mockOrderAmountToRmb(180_000_000),
       deviceCount: 1,
       gpuSummary: '4090 × 8',
       createTime: '2026-04-12 09:20:10',
@@ -64,10 +70,10 @@ function buildMockMetalOrders(): MetalOrderPreviewItem[] {
 }
 
 function buildMockMonthlyBills(): MonthlyBillPreviewItem[] {
-  const mayTotal = mockPlatformAmountToRmb(234_703_140_855)
-  const mayCoupon = mockPlatformAmountToRmb(26_339_564)
-  const aprTotal = mockPlatformAmountToRmb(110_440_220_825)
-  const aprCoupon = mockPlatformAmountToRmb(11_776_786)
+  const mayTotal = mockBillingValueToRmb(234_703_140_855)
+  const mayCoupon = mockBillingValueToRmb(26_339_564)
+  const aprTotal = mockBillingValueToRmb(110_440_220_825)
+  const aprCoupon = mockBillingValueToRmb(11_776_786)
 
   return [
     {
@@ -99,7 +105,7 @@ function buildMockRecharges(): RechargePreviewItem[] {
       key: 'recharge-14431',
       action: 'create',
       transactionId: '1779110321760:984',
-      amountRmb: mockPlatformAmountToRmb(43_000_000),
+      amountRmb: mockOrderAmountToRmb(43_000_000),
       payChannel: '线下转账',
       status: '已完成',
       createTime: '2026-05-18 21:18:41',
@@ -108,7 +114,7 @@ function buildMockRecharges(): RechargePreviewItem[] {
       key: 'recharge-14332',
       action: 'create',
       transactionId: '1778747920013:984',
-      amountRmb: mockPlatformAmountToRmb(1_424_925),
+      amountRmb: mockOrderAmountToRmb(1_424_925),
       payChannel: '线下转账',
       status: '已完成',
       createTime: '2026-05-14 16:38:40',
@@ -118,7 +124,7 @@ function buildMockRecharges(): RechargePreviewItem[] {
       key: 'recharge-2688',
       action: 'skip',
       transactionId: '1754110187907-984',
-      amountRmb: mockPlatformAmountToRmb(5_000),
+      amountRmb: mockOrderAmountToRmb(5_000),
       payChannel: '微信',
       status: '已完成',
       createTime: '2025-08-02 12:49:47',
@@ -132,50 +138,50 @@ function buildMockBillDetails(): BillDetailPreviewItem[] {
       billMonth: '2026-05',
       productLine: 'pod_deployment',
       resourceName: 'Deployment',
-      amountRmb: mockPlatformAmountToRmb(233_107_978_313),
+      amountRmb: mockBillingValueToRmb(233_107_978_313),
       couponAmountRmb: 0,
-      balanceAmountRmb: mockPlatformAmountToRmb(233_107_978_313),
+      balanceAmountRmb: mockBillingValueToRmb(233_107_978_313),
     },
     {
       billMonth: '2026-05',
       productLine: 'bare_metal',
       resourceName: '裸金属整租',
-      amountRmb: mockPlatformAmountToRmb(1_550_240_000),
+      amountRmb: mockBillingValueToRmb(1_550_240_000),
       couponAmountRmb: 0,
-      balanceAmountRmb: mockPlatformAmountToRmb(1_550_240_000),
+      balanceAmountRmb: mockBillingValueToRmb(1_550_240_000),
     },
     {
       billMonth: '2026-05',
       productLine: 'harbor',
       resourceName: 'Harbor',
-      amountRmb: mockPlatformAmountToRmb(108_879_322),
-      couponAmountRmb: mockPlatformAmountToRmb(7_500_000),
+      amountRmb: mockBillingValueToRmb(108_879_322),
+      couponAmountRmb: mockBillingValueToRmb(7_500_000),
       balanceAmountRmb:
-        mockPlatformAmountToRmb(108_879_322) - mockPlatformAmountToRmb(7_500_000),
+        mockBillingValueToRmb(108_879_322) - mockBillingValueToRmb(7_500_000),
     },
     {
       billMonth: '2026-05',
       productLine: 'juicefs',
       resourceName: 'JuiceFS',
-      amountRmb: mockPlatformAmountToRmb(23_217_308),
-      couponAmountRmb: mockPlatformAmountToRmb(18_000_000),
+      amountRmb: mockBillingValueToRmb(23_217_308),
+      couponAmountRmb: mockBillingValueToRmb(18_000_000),
       balanceAmountRmb:
-        mockPlatformAmountToRmb(23_217_308) - mockPlatformAmountToRmb(18_000_000),
+        mockBillingValueToRmb(23_217_308) - mockBillingValueToRmb(18_000_000),
     },
     {
       billMonth: '2026-04',
       productLine: 'pod_deployment',
       resourceName: 'Deployment',
-      amountRmb: mockPlatformAmountToRmb(98_220_100_000),
+      amountRmb: mockBillingValueToRmb(98_220_100_000),
       couponAmountRmb: 0,
-      balanceAmountRmb: mockPlatformAmountToRmb(98_220_100_000),
+      balanceAmountRmb: mockBillingValueToRmb(98_220_100_000),
     },
     {
       billMonth: '2026-04',
       productLine: 'share_storage',
       resourceName: '共享存储',
-      amountRmb: mockPlatformAmountToRmb(839_880),
-      couponAmountRmb: mockPlatformAmountToRmb(839_880),
+      amountRmb: mockBillingValueToRmb(839_880),
+      couponAmountRmb: mockBillingValueToRmb(839_880),
       balanceAmountRmb: 0,
     },
   ]
@@ -197,8 +203,8 @@ function buildMockDailyUsageBills() {
       productLine: 'pod_deployment',
       periodStart: '2025-11-10T00:00:00+08:00',
       periodEnd: '2025-11-11T00:00:00+08:00',
-      totalAmountRmb: mockPlatformAmountToRmb(117_898),
-      couponAmountRmb: mockPlatformAmountToRmb(117_898),
+      totalAmountRmb: mockBillingValueToRmb(117_898),
+      couponAmountRmb: mockBillingValueToRmb(117_898),
       balanceAmountRmb: 0,
     },
   ]

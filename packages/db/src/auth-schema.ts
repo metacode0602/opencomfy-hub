@@ -11,6 +11,7 @@ export const user = pgTable("users", {
   phoneNumber: text('phone_number'), // 用户手机号码
   phoneNumberVerified: boolean('phone_number_verified').default(false).notNull(), // 手机号是否已验证
   role: varchar('role', { length: 256 }).default('user'), // 用户角色：admin, user, guest
+  mustChangePassword: boolean('must_change_password').default(false).notNull(),
   banned: boolean('banned'),
   banReason: text('ban_reason'),
   banExpires: timestamp('ban_expires'),

@@ -27,6 +27,13 @@ import {
   type StaffAppRole,
   type StaffDepartment,
 } from "@/lib/crm/staff-constants"
+import {
+  CrmStaffAuthLinkFields,
+  staffAuthInputFromValues,
+  staffAuthLinkEmptyValues,
+  validateStaffAuthLink,
+  type StaffAuthLinkValues,
+} from "./crm-staff-auth-link-fields"
 import { trpc } from "@/lib/trpc/client"
 import { toast } from "sonner"
 
@@ -123,7 +130,7 @@ export function CrmStaffFormFields({
         <div className="grid gap-2">
           <Label htmlFor={`${idPrefix}-status`}>状态</Label>
           <Select value={values.status} onValueChange={(v) => onChange({ status: v })}>
-            <SelectTrigger id={`${idPrefix}-status`}>
+            <SelectTrigger id={`${idPrefix}-status`} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -143,7 +150,7 @@ export function CrmStaffFormFields({
             value={values.department || undefined}
             onValueChange={(v) => onChange({ department: v as StaffDepartment })}
           >
-            <SelectTrigger id={`${idPrefix}-department`}>
+            <SelectTrigger id={`${idPrefix}-department`} className="w-full">
               <SelectValue placeholder="请选择部门" />
             </SelectTrigger>
             <SelectContent>
@@ -316,12 +323,23 @@ export function CrmStaffFormDialog({
     onError: (e) => toast.error(e.message),
   })
   const { values, patch, existing } = useCrmStaffFormState(staffId)
+  const [authLink, setAuthLink] = React.useState<StaffAuthLinkValues>(staffAuthLinkEmptyValues)
 
   React.useEffect(() => {
     if (!open && mode === "create") {
       patch(crmStaffEmptyValues)
+      setAuthLink(staffAuthLinkEmptyValues)
     }
   }, [open, mode, patch])
+
+  React.useEffect(() => {
+    if (!open) return
+    if (existing?.linked_auth_user) {
+      setAuthLink({ mode: "none", authUserId: existing.linked_auth_user.id })
+    } else if (mode === "create") {
+      setAuthLink(staffAuthLinkEmptyValues)
+    }
+  }, [existing, mode, open])
 
   const onSubmit = () => {
     const err = validateCrmStaffForm(values)
@@ -333,7 +351,19 @@ export function CrmStaffFormDialog({
       toast.error("员工不存在")
       return
     }
-    const input = staffInputFromForm(values)
+    if (mode === "create" || !existing?.linked_auth_user) {
+      const authErr = validateStaffAuthLink(authLink)
+      if (authErr) {
+        toast.error(authErr)
+        return
+      }
+    }
+    const input = {
+      ...staffInputFromForm(values),
+      ...(mode === "create" || !existing?.linked_auth_user
+        ? staffAuthInputFromValues(authLink)
+        : {}),
+    }
     if (mode === "edit" && staffId) {
       updateMutation.mutate({ id: staffId, data: input })
     } else {
@@ -375,7 +405,25 @@ export function CrmStaffFormDialog({
           onChange={patch}
           idPrefix={mode === "create" ? "staff-new" : `staff-edit-${staffId}`}
         />
-        <DialogFooter className="gap-2 sm:gap-0">
+        {(mode === "create" || !existing?.linked_auth_user) && (
+          <CrmStaffAuthLinkFields
+            mode={authLink.mode}
+            authUserId={authLink.authUserId}
+            onChange={(patchAuth) => setAuthLink((prev) => ({ ...prev, ...patchAuth }))}
+            linkedAuthUser={existing?.linked_auth_user}
+            idPrefix={mode === "create" ? "staff-new-auth" : `staff-edit-auth-${staffId}`}
+          />
+        )}
+        {mode === "edit" && existing?.linked_auth_user && (
+          <CrmStaffAuthLinkFields
+            mode="none"
+            authUserId={existing.linked_auth_user.id}
+            onChange={() => undefined}
+            linkedAuthUser={existing.linked_auth_user}
+            idPrefix={`staff-edit-linked-${staffId}`}
+          />
+        )}
+        <DialogFooter className="gap-2 sm:gap-2">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>

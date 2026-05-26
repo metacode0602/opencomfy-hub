@@ -14,8 +14,10 @@ import {
   moneyStringsEqual,
   parsePlatformDateTime,
   payChannelLabel,
-  platformAmountToMoneyString,
-  platformAmountToRmb,
+  platformBillingValueToMoneyString,
+  platformBillingValueToRmb,
+  platformOrderAmountToMoneyString,
+  platformOrderAmountToRmb,
   summarizeSection,
   usageDateFromPlatformPeriod,
   validateBillingDateRange,
@@ -150,9 +152,9 @@ function expandBillDetails(
       if (billingRaw === 0 && discountRaw === 0) continue
 
       const { productLine, resourceName } = mapPlatformProductLine(platformKey)
-      const amount = platformAmountToMoneyString(billingRaw)
-      const couponAmount = platformAmountToMoneyString(discountRaw)
-      const balanceAmount = platformAmountToRmb(billingRaw - discountRaw).toFixed(4)
+      const amount = platformBillingValueToMoneyString(billingRaw)
+      const couponAmount = platformBillingValueToMoneyString(discountRaw)
+      const balanceAmount = platformBillingValueToRmb(billingRaw - discountRaw).toFixed(4)
 
       lines.push({
         platformKey,
@@ -170,9 +172,9 @@ function expandBillDetails(
         billMonth,
         productLine,
         resourceName,
-        amountRmb: platformAmountToRmb(billingRaw),
-        couponAmountRmb: platformAmountToRmb(discountRaw),
-        balanceAmountRmb: platformAmountToRmb(billingRaw - discountRaw),
+        amountRmb: platformBillingValueToRmb(billingRaw),
+        couponAmountRmb: platformBillingValueToRmb(discountRaw),
+        balanceAmountRmb: platformBillingValueToRmb(billingRaw - discountRaw),
       })
     }
 
@@ -202,7 +204,7 @@ function buildMetalPreview(
   const cached: CachedBillingImport['metalOrders'] = []
 
   for (const record of records) {
-    const amount = platformAmountToMoneyString(record.total_price)
+    const amount = platformOrderAmountToMoneyString(record.total_price)
     const existing = existingByOrderNo.get(record.order_no)
     let action: TenantBillingImportAction = 'create'
     if (existing) {
@@ -216,7 +218,7 @@ function buildMetalPreview(
       orderNo: record.order_no,
       status: record.status === 'Finished' ? '已完成' : record.status,
       idcName: record.idc_name ?? '—',
-      amountRmb: platformAmountToRmb(record.total_price),
+      amountRmb: platformOrderAmountToRmb(record.total_price),
       deviceCount: record.device_count ?? 0,
       gpuSummary: formatGpuSummary(record.gpu_models),
       createTime: record.create_time.replace(' +00:00', '').slice(0, 19),
@@ -241,9 +243,9 @@ function buildMonthlyBillPreview(
 
   for (const record of records) {
     const billMonth = billMonthFromPlatformPeriod(record.start_time)
-    const totalAmount = platformAmountToMoneyString(record.total_billing_value)
-    const couponAmount = platformAmountToMoneyString(record.total_discount_value)
-    const balanceAmount = platformAmountToRmb(
+    const totalAmount = platformBillingValueToMoneyString(record.total_billing_value)
+    const couponAmount = platformBillingValueToMoneyString(record.total_discount_value)
+    const balanceAmount = platformBillingValueToRmb(
       record.total_billing_value - record.total_discount_value,
     ).toFixed(4)
 
@@ -264,9 +266,9 @@ function buildMonthlyBillPreview(
       billMonth,
       periodStart: record.start_time,
       periodEnd: record.end_time,
-      totalAmountRmb: platformAmountToRmb(record.total_billing_value),
-      couponAmountRmb: platformAmountToRmb(record.total_discount_value),
-      balanceAmountRmb: platformAmountToRmb(
+      totalAmountRmb: platformBillingValueToRmb(record.total_billing_value),
+      couponAmountRmb: platformBillingValueToRmb(record.total_discount_value),
+      balanceAmountRmb: platformBillingValueToRmb(
         record.total_billing_value - record.total_discount_value,
       ),
     })
@@ -291,9 +293,9 @@ function buildDailyUsagePreview(
   for (const record of records) {
     const usageDate = usageDateFromPlatformPeriod(record.start_time)
     const { productLine, label: taskTypeLabel } = mapPlatformTaskType(record.task_type)
-    const amount = platformAmountToMoneyString(record.total_billing_value)
-    const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
-    const balanceAmount = platformAmountToRmb(
+    const amount = platformBillingValueToMoneyString(record.total_billing_value)
+    const voucherAmount = platformBillingValueToMoneyString(record.total_discount_value)
+    const balanceAmount = platformBillingValueToRmb(
       record.total_billing_value - record.total_discount_value,
     ).toFixed(4)
     const diffKey = `${usageDate}:${productLine}`
@@ -317,9 +319,9 @@ function buildDailyUsagePreview(
       productLine,
       periodStart: record.start_time,
       periodEnd: record.end_time,
-      totalAmountRmb: platformAmountToRmb(record.total_billing_value),
-      couponAmountRmb: platformAmountToRmb(record.total_discount_value),
-      balanceAmountRmb: platformAmountToRmb(
+      totalAmountRmb: platformBillingValueToRmb(record.total_billing_value),
+      couponAmountRmb: platformBillingValueToRmb(record.total_discount_value),
+      balanceAmountRmb: platformBillingValueToRmb(
         record.total_billing_value - record.total_discount_value,
       ),
     })
@@ -339,7 +341,7 @@ function buildRechargePreview(
   const cached: CachedBillingImport['recharges'] = []
 
   for (const record of records) {
-    const amount = platformAmountToMoneyString(record.total_amount)
+    const amount = platformOrderAmountToMoneyString(record.total_amount)
     const mappedStatus = mapRechargeStatus(record.status)
     const existing = existingByTx.get(record.order_id)
     let action: TenantBillingImportAction = 'create'
@@ -355,7 +357,7 @@ function buildRechargePreview(
       key: `recharge-${record.id}`,
       action,
       transactionId: record.order_id,
-      amountRmb: platformAmountToRmb(record.total_amount),
+      amountRmb: platformOrderAmountToRmb(record.total_amount),
       payChannel: payChannelLabel(mapPayChannel(record.pay_channel)),
       status: record.status === 'Completed' ? '已完成' : record.status,
       createTime: record.create_time.replace(' +08:00', '').slice(0, 19),
@@ -720,9 +722,9 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record, billMonth } = item
-            const totalAmount = platformAmountToMoneyString(record.total_billing_value)
-            const couponAmount = platformAmountToMoneyString(record.total_discount_value)
-            const balanceAmount = platformAmountToRmb(
+            const totalAmount = platformBillingValueToMoneyString(record.total_billing_value)
+            const couponAmount = platformBillingValueToMoneyString(record.total_discount_value)
+            const balanceAmount = platformBillingValueToRmb(
               record.total_billing_value - record.total_discount_value,
             ).toFixed(4)
             const periodStart = parsePlatformDateTime(record.start_time)
@@ -833,9 +835,9 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record, usageDate, productLine } = item
-            const amount = platformAmountToMoneyString(record.total_billing_value)
-            const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
-            const balanceAmount = platformAmountToRmb(
+            const amount = platformBillingValueToMoneyString(record.total_billing_value)
+            const voucherAmount = platformBillingValueToMoneyString(record.total_discount_value)
+            const balanceAmount = platformBillingValueToRmb(
               record.total_billing_value - record.total_discount_value,
             ).toFixed(4)
             const rowId = `usage-daily-${cached.tenantId}-${usageDate}-${productLine}`
@@ -889,7 +891,7 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformAmountToMoneyString(record.total_amount)
+            const amount = platformOrderAmountToMoneyString(record.total_amount)
             const existing = await tx.query.recharge.findFirst({
               where: eq(recharge.transactionId, record.order_id),
               columns: { id: true },
@@ -904,8 +906,9 @@ export const tenantBillingImportDataAccess = {
               refundAmount: '0',
               remark: record.remark ?? null,
               createdAt: parsePlatformDateTime(record.create_time) ?? new Date(),
-              completedAt:
-                parsePlatformDateTime(record.last_update_time ?? record.create_time) ?? new Date(),
+              completedAt: record.last_update_time
+                ? parsePlatformDateTime(record.last_update_time)
+                : null,
             }
 
             if (existing) {
@@ -925,7 +928,7 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformAmountToMoneyString(record.total_price)
+            const amount = platformOrderAmountToMoneyString(record.total_price)
             const orderId = `metal-${record.order_id}`
             const existing = await tx.query.commerceOrder.findFirst({
               where: eq(commerceOrder.orderNo, record.order_no),
@@ -979,14 +982,14 @@ export const tenantBillingImportDataAccess = {
 
             for (let i = 0; i < models.length; i++) {
               const g = models[i]!
-              const lineTotal = platformAmountToMoneyString(g.total_price ?? record.total_price)
+              const lineTotal = platformOrderAmountToMoneyString(g.total_price ?? record.total_price)
               const qty = g.gpu_count ?? 1
               await tx.insert(commerceOrderItem).values({
                 id: `${targetOrderId}-item-${i}`,
                 orderId: targetOrderId,
                 name: g.gpu_model ?? 'GPU',
                 quantity: String(qty),
-                unitPrice: platformAmountToRmb(Number(lineTotal) / qty).toFixed(4),
+                unitPrice: platformOrderAmountToRmb(Number(lineTotal) / qty).toFixed(4),
                 total: lineTotal,
                 sortOrder: i,
               })

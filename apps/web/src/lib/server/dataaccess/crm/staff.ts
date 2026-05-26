@@ -1,6 +1,17 @@
 import { db } from '@/lib/db'
 import type { UserStaff } from '@/lib/types/crm'
 import { mapUserStaffRow } from '@/lib/server/mappers/crm'
+import {
+  autoLinkStaffForAuthUser,
+  createAuthUserForStaff,
+  getLinkedAuthUser,
+  linkStaffAuthUser,
+  searchLinkableAuthUsers,
+  syncStaffAuthContact,
+  unlinkStaffAuthUser,
+  unlinkStaffBeforeDelete,
+  type LinkedAuthUser,
+} from '@/lib/server/dataaccess/crm/staff-auth'
 import { accountManagerAssignment, customer, userStaff } from '@workspace/db/schema'
 import { and, count, desc, eq, ilike, inArray, isNull, ne, or } from 'drizzle-orm'
 
@@ -21,6 +32,14 @@ export type StaffUpsertInput = {
   isDefaultAccountManager?: boolean
   isDefaultDeliveryManager?: boolean
   isDefaultProjectManager?: boolean
+  authUserId?: string | null
+  createLoginAccount?: boolean
+}
+
+export type StaffDetail = UserStaff & {
+  assignmentCount: number
+  auth_user_id: string | null
+  linked_auth_user: LinkedAuthUser | null
 }
 
 type StaffListFilters = {
@@ -105,12 +124,55 @@ async function clearExclusiveDefaultFlags(
   await Promise.all(clears)
 }
 
+async function mapStaffDetail(row: typeof userStaff.$inferSelect): Promise<StaffDetail> {
+  const [countRow] = await db
+    .select({ value: count() })
+    .from(accountManagerAssignment)
+    .where(
+      and(eq(accountManagerAssignment.userStaffId, row.id), isNull(accountManagerAssignment.effectiveTo)),
+    )
+
+  return {
+    ...mapUserStaffRow(row),
+    assignmentCount: Number(countRow?.value ?? 0),
+    auth_user_id: row.authUserId ?? null,
+    linked_auth_user: await getLinkedAuthUser(row.authUserId ?? null),
+  }
+}
+
+async function applyStaffAuthLink(
+  staffId: string,
+  input: StaffUpsertInput,
+  options: { mode: 'create' | 'update'; previousAuthUserId?: string | null },
+): Promise<void> {
+  if (input.authUserId) {
+    await linkStaffAuthUser(staffId, input.authUserId)
+    return
+  }
+
+  if (input.authUserId === null) {
+    await unlinkStaffAuthUser(staffId)
+    return
+  }
+
+  const shouldCreate =
+    input.createLoginAccount === true &&
+    (options.mode === 'create' || !options.previousAuthUserId)
+
+  if (shouldCreate) {
+    const authUserId = await createAuthUserForStaff({
+      displayName: input.displayName,
+      email: input.email,
+      mobile: input.mobile,
+    })
+    await linkStaffAuthUser(staffId, authUserId)
+  }
+}
+
 export const staffDataAccess = {
   async list(filters: StaffListFilters = {}): Promise<
-    (UserStaff & { assignmentCount: number })[]
+    (UserStaff & { assignmentCount: number; auth_user_id: string | null })[]
   > {
-    // await ensureCrmSeeded()
-
     const conditions = []
     if (filters.status && filters.status !== 'all') {
       conditions.push(eq(userStaff.status, filters.status))
@@ -150,11 +212,11 @@ export const staffDataAccess = {
     return rows.map((row) => ({
       ...mapUserStaffRow(row),
       assignmentCount: countMap.get(row.id) ?? 0,
+      auth_user_id: row.authUserId ?? null,
     }))
   },
 
   async listActive(): Promise<UserStaff[]> {
-    // await ensureCrmSeeded()
     const rows = await db.select().from(userStaff).where(eq(userStaff.status, 'active'))
     return rows.map(mapUserStaffRow)
   },
@@ -162,7 +224,17 @@ export const staffDataAccess = {
   async resolveStaffIdForAuthUser(user: {
     id: string
     email?: string | null
+    phoneNumber?: string | null
   }): Promise<string | null> {
+    const byAuthUserId = await db.query.userStaff.findFirst({
+      where: and(eq(userStaff.authUserId, user.id), eq(userStaff.status, 'active')),
+      columns: { id: true },
+    })
+    if (byAuthUserId) return byAuthUserId.id
+
+    const autoLinked = await autoLinkStaffForAuthUser(user)
+    if (autoLinked) return autoLinked
+
     const byId = await db.query.userStaff.findFirst({
       where: and(eq(userStaff.id, user.id), eq(userStaff.status, 'active')),
       columns: { id: true },
@@ -179,47 +251,70 @@ export const staffDataAccess = {
     return byEmail?.id ?? null
   },
 
-  async getById(id: string): Promise<(UserStaff & { assignmentCount: number }) | null> {
-    // await ensureCrmSeeded()
+  async getById(id: string): Promise<StaffDetail | null> {
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) return null
-
-    const [countRow] = await db
-      .select({ value: count() })
-      .from(accountManagerAssignment)
-      .where(
-        and(eq(accountManagerAssignment.userStaffId, id), isNull(accountManagerAssignment.effectiveTo)),
-      )
-
-    return { ...mapUserStaffRow(row), assignmentCount: Number(countRow?.value ?? 0) }
+    return mapStaffDetail(row)
   },
 
-  async create(input: StaffUpsertInput): Promise<UserStaff> {
+  async create(input: StaffUpsertInput): Promise<StaffDetail> {
     await clearExclusiveDefaultFlags(input)
 
     const id = newId()
     const values = staffValuesFromInput(input)
     await db.insert(userStaff).values({ id, ...values })
+    await applyStaffAuthLink(id, input, { mode: 'create' })
+
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('创建员工失败')
-    return mapUserStaffRow(row)
+    return mapStaffDetail(row)
   },
 
-  async update(id: string, input: StaffUpsertInput): Promise<UserStaff> {
+  async update(id: string, input: StaffUpsertInput): Promise<StaffDetail> {
     await clearExclusiveDefaultFlags(input, id)
+
+    const previous = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
+    if (!previous) throw new Error('员工不存在')
 
     await db
       .update(userStaff)
       .set(staffValuesFromInput(input))
       .where(eq(userStaff.id, id))
 
+    const hasAuthIntent =
+      input.authUserId !== undefined || input.createLoginAccount !== undefined
+
+    if (hasAuthIntent) {
+      await applyStaffAuthLink(id, input, {
+        mode: 'update',
+        previousAuthUserId: previous.authUserId,
+      })
+    } else if (previous.authUserId) {
+      await syncStaffAuthContact(id, input)
+    }
+
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('员工不存在')
-    return mapUserStaffRow(row)
+    return mapStaffDetail(row)
   },
 
+  async linkAuthUser(staffId: string, authUserId: string): Promise<StaffDetail> {
+    await linkStaffAuthUser(staffId, authUserId)
+    const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, staffId) })
+    if (!row) throw new Error('员工不存在')
+    return mapStaffDetail(row)
+  },
+
+  async unlinkAuthUser(staffId: string): Promise<StaffDetail> {
+    await unlinkStaffAuthUser(staffId)
+    const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, staffId) })
+    if (!row) throw new Error('员工不存在')
+    return mapStaffDetail(row)
+  },
+
+  searchLinkableAuthUsers,
+
   async listAssignments(staffId: string) {
-    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(accountManagerAssignment)
@@ -254,6 +349,7 @@ export const staffDataAccess = {
       .where(
         and(eq(accountManagerAssignment.userStaffId, id), isNull(accountManagerAssignment.effectiveTo)),
       )
+    await unlinkStaffBeforeDelete(id)
     await db.delete(userStaff).where(eq(userStaff.id, id))
   },
 }

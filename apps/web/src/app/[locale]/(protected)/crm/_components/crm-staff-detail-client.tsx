@@ -25,6 +25,7 @@ import { CrmDeleteDialog } from "./crm-delete-dialog"
 import { CrmStaffFormDialog } from "./crm-staff-form-dialog"
 import { CrmStaffStatusBadge } from "./crm-staff-status-badge"
 import { staffAppRoleLabel } from "@/lib/crm/staff-constants"
+import { CrmStaffAuthLinkPanel } from "./crm-staff-auth-link-fields"
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -167,6 +168,19 @@ export function CrmStaffDetailClient({ staffId }: { staffId: string }) {
                   )}
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>登录账号</CardTitle>
+            <CardDescription>员工与系统登录账号的关联关系</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CrmStaffAuthLinkPanel
+              staffId={staff.id}
+              linkedAuthUser={staff.linked_auth_user}
+            />
           </CardContent>
         </Card>
 

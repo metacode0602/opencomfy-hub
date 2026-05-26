@@ -19,15 +19,45 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
 
 /** 租户账单同步 — 日期、金额、映射工具 */
 
-export const PLATFORM_AMOUNT_DIVISOR = 10_000
+/** billing_value / total_billing_value / discount_value — 10^6 平台单位 = 1 元 */
+export const PLATFORM_BILLING_VALUE_DIVISOR = 1_000_000
 
-export function platformAmountToRmb(raw: number | null | undefined): number {
+/** total_price（裸金属）/ total_amount（充值）— 10^4 平台单位 = 1 元 */
+export const PLATFORM_ORDER_AMOUNT_DIVISOR = 10_000
+
+/** @deprecated 请使用 PLATFORM_ORDER_AMOUNT_DIVISOR */
+export const PLATFORM_AMOUNT_DIVISOR = PLATFORM_ORDER_AMOUNT_DIVISOR
+
+export function platformBillingValueToRmb(raw: number | null | undefined): number {
   if (raw == null || Number.isNaN(raw)) return 0
-  return raw / PLATFORM_AMOUNT_DIVISOR
+  return raw / PLATFORM_BILLING_VALUE_DIVISOR
 }
 
+export function platformOrderAmountToRmb(raw: number | null | undefined): number {
+  if (raw == null || Number.isNaN(raw)) return 0
+  return raw / PLATFORM_ORDER_AMOUNT_DIVISOR
+}
+
+export function platformBillingValueToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformBillingValueToRmb(raw).toFixed(4)
+}
+
+export function platformOrderAmountToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformOrderAmountToRmb(raw).toFixed(4)
+}
+
+/** @deprecated 裸金属/充值请用 platformOrderAmountToRmb */
+export function platformAmountToRmb(raw: number | null | undefined): number {
+  return platformOrderAmountToRmb(raw)
+}
+
+/** @deprecated 裸金属/充值请用 platformOrderAmountToMoneyString */
 export function platformAmountToMoneyString(raw: number | null | undefined): string {
-  return platformAmountToRmb(raw).toFixed(4)
+  return platformOrderAmountToMoneyString(raw)
 }
 
 export function moneyStringsEqual(a: string, b: string): boolean {
@@ -156,7 +186,14 @@ export function dueDateForBillMonth(billMonth: string): string {
 
 export function parsePlatformDateTime(raw: string): Date | null {
   if (!raw?.trim()) return null
-  const normalized = raw.trim().replace(' +00:00', 'Z').replace(' ', 'T')
+  const trimmed = raw.trim()
+  const direct = new Date(trimmed)
+  if (!Number.isNaN(direct.getTime())) return direct
+
+  const normalized = trimmed
+    .replace(' +00:00', 'Z')
+    .replace(' ', 'T')
+    .replace(/ \+(\d{2}:\d{2})$/, '+$1')
   const d = new Date(normalized)
   return Number.isNaN(d.getTime()) ? null : d
 }

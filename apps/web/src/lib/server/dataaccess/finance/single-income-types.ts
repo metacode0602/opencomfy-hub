@@ -1,12 +1,4 @@
-export type SingleIncomeProjectDetail = {
-  projectId: string
-  projectName: string
-  tenantId: string
-  tenantName: string
-  platformTenantId: string
-  customerId: string
-  customerName: string
-}
+export type { SingleIncomeIssueRow, SingleIncomeProjectDetail } from '@/lib/finance/single-income-types'
 
 export type SharedPlatformTenantWarningDetail = {
   platformTenantId: string
@@ -31,10 +23,13 @@ export type SingleIncomePreviewRow = {
   totalConsumption: string
 }
 
+import type { SingleIncomeIssueRow } from '@/lib/finance/single-income-types'
+
 export type SingleIncomeComputePayload = {
   periodCode: string
   incomeCount: number
   reconciliationIssues: string[]
+  issueRows: SingleIncomeIssueRow[]
   rows: SingleIncomePreviewRow[]
   summary: {
     totalIncome: string

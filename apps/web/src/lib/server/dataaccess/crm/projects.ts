@@ -16,7 +16,7 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
-import { and, asc, count, eq, ilike, inArray, isNull, or, sql, sum } from 'drizzle-orm'
+import { and, asc, count, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
 import type { ProjectTag } from '@/lib/data/types'
 
 export type ProjectListFilters = {
@@ -291,6 +291,8 @@ export const projectsDataAccess = {
     }
     if (filters.status && filters.status !== 'all') {
       conditions.push(eq(crmProject.status, filters.status))
+    } else {
+      conditions.push(ne(crmProject.status, 'paused'))
     }
     if (filters.search?.trim()) {
       const q = `%${filters.search.trim()}%`
@@ -448,10 +450,18 @@ export const projectsDataAccess = {
     return updated
   },
 
+  async updateStatus(id: string, status: Project['status']): Promise<Project> {
+    await db.update(crmProject).set({ status }).where(eq(crmProject.id, id))
+    const updated = await this.getById(id)
+    if (!updated) throw new Error('项目不存在')
+    return updated
+  },
+
   async countByStage(): Promise<{ lead: number; testing: number; converted: number }> {
     const rows = await db
       .select({ stage: crmProject.stage, value: count() })
       .from(crmProject)
+      .where(ne(crmProject.status, 'paused'))
       .groupBy(crmProject.stage)
     const map = new Map(rows.map((r) => [r.stage, Number(r.value)]))
     return {

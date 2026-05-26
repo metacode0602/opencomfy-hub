@@ -56,7 +56,7 @@ export async function listIncomeEligibleProjects(): Promise<IncomeEligibleProjec
   const projects = await db
     .select()
     .from(crmProject)
-    .where(ne(crmProject.status, 'archived'))
+    .where(and(ne(crmProject.status, 'archived'), ne(crmProject.status, 'paused')))
 
   const result: IncomeEligibleProject[] = []
   const seen = new Set<string>()

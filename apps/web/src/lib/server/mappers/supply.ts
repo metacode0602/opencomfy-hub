@@ -479,3 +479,57 @@ export function mapPhysicalDeviceRow(
     updatedAt: toIsoDate(row.updatedAt),
   }
 }
+
+function joinDistinctValues(a: string | null, b: string | null): string | null {
+  const parts: string[] = []
+  const add = (value: string | null) => {
+    if (!value) return
+    for (const piece of value.split(', ')) {
+      const trimmed = piece.trim()
+      if (trimmed && !parts.includes(trimmed)) parts.push(trimmed)
+    }
+  }
+  add(a)
+  add(b)
+  return parts.length ? parts.join(', ') : null
+}
+
+/** 将 leftJoin compute_node 后的多行结果按设备 id 去重，并合并集群字段 */
+export function mapPhysicalDeviceListRows(
+  rows: Array<{
+    device: SupplierDeviceRow
+    supplierShortName: string
+    cardTypeName: string
+    clusterName: string | null
+    nodeRole: string | null
+    expectedService: string | null
+  }>,
+): PhysicalDevice[] {
+  const byId = new Map<string, PhysicalDevice>()
+
+  for (const row of rows) {
+    const { device, supplierShortName, cardTypeName, clusterName, nodeRole, expectedService } = row
+    const existing = byId.get(device.id)
+
+    if (!existing) {
+      byId.set(
+        device.id,
+        mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }, {
+          clusterName,
+          nodeRole,
+          expectedService,
+        }),
+      )
+      continue
+    }
+
+    byId.set(device.id, {
+      ...existing,
+      clusterName: joinDistinctValues(existing.clusterName, clusterName),
+      nodeRole: joinDistinctValues(existing.nodeRole, nodeRole),
+      expectedService: joinDistinctValues(existing.expectedService, expectedService),
+    })
+  }
+
+  return [...byId.values()]
+}
