@@ -267,6 +267,7 @@ async function upsertStaffAssignments(
           isNull(projectStaffAssignment.effectiveTo),
         ),
       )
+    if (!userStaffId) continue
     await db.insert(projectStaffAssignment).values({
       id: newId(),
       projectId,

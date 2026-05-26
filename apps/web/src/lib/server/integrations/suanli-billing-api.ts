@@ -187,6 +187,14 @@ export type PlatformDailyUsageBillRecord = PlatformMonthlyBillRecord & {
   task_type: string
 }
 
+export type PlatformDailyTaskSummaryRecord = {
+  task_id: number
+  task_type: string
+  task_name: string
+  billing_value: number
+  discount_value: number
+}
+
 export type PlatformRechargeRecord = {
   id: number
   tenant_id: number
@@ -393,6 +401,53 @@ export async function fetchPlatformDailyUsageBills(input: {
   }
 
   return all
+}
+
+/** 单日 × 任务类型下的任务消费明细（billing_pod_record_task_summary_list） */
+export async function fetchPlatformDailyTaskSummaries(input: {
+  platformTenantId: string
+  taskType: string
+  startTime: string
+  endTime: string
+  traceId: string
+}): Promise<PlatformDailyTaskSummaryRecord[]> {
+  if (!input.startTime?.trim() || !input.endTime?.trim()) return []
+
+  const params: Record<string, string | number> = {
+    tenant_tid: input.platformTenantId,
+    range: 'day',
+    task_type: input.taskType,
+    start_time: input.startTime,
+    end_time: input.endTime,
+    page: 1,
+    page_size: PAGE_SIZE,
+  }
+
+  return fetchAllPages<PlatformDailyTaskSummaryRecord>(
+    `daily_task_summary:${input.taskType}`,
+    input.traceId,
+    async (page) => {
+      const data = await throttledGet<unknown>(
+        `daily_task_summary:${input.taskType}`,
+        '/admin/tenant/billing_pod_record_task_summary_list',
+        { params: { ...params, page } },
+      )
+      const parsed = paginatedSchema.safeParse(data)
+      if (!parsed.success) {
+        throw new SuanliBillingApiError(
+          `每日任务消费明细（${input.taskType}）返回格式异常`,
+        )
+      }
+      const results = (parsed.data.results ?? []).map((row) => ({
+        task_id: Number(row.task_id ?? 0),
+        task_type: String(row.task_type ?? input.taskType),
+        task_name: String(row.task_name ?? ''),
+        billing_value: Number(row.billing_value ?? 0),
+        discount_value: Number(row.discount_value ?? 0),
+      }))
+      return { count: parsed.data.count ?? undefined, results }
+    },
+  )
 }
 
 export async function fetchPlatformRecharges(input: {

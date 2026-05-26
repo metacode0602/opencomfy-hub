@@ -11,6 +11,7 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
   push('月度账单', result.monthlyBills)
   push('充值', result.recharges)
   push('每日用量', result.dailyUsageBills)
+  push('每日任务明细', result.dailyConsumptionDetails)
   if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
     parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
   }
@@ -143,6 +144,11 @@ export function mapPlatformTaskType(taskType: string) {
   if (mapped) return mapped
   const snake = taskType.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
   return { productLine: snake, label: taskType }
+}
+
+/** 自然日 → 账期月 YYYY-MM */
+export function usageMonthFromDate(usageDate: string): string {
+  return usageDate.slice(0, 7)
 }
 
 /** 从平台账期 start_time 提取东八区 usage_date（YYYY-MM-DD） */

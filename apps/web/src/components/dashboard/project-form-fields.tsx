@@ -36,6 +36,7 @@ const STAGE_OPTIONS = [
 ]
 
 const NONE_TENANT = '__none__'
+const NONE_STAFF = '__none_staff__'
 
 type ProjectFormFieldsProps = {
   values: ProjectFormValues
@@ -193,13 +194,14 @@ export function ProjectFormFields({
         <div className="grid gap-2">
           <Label htmlFor={`${idPrefix}-pre-sales`}>售前经理</Label>
           <Select
-            value={values.preSalesStaffId || undefined}
-            onValueChange={(v) => onChange({ preSalesStaffId: v })}
+            value={values.preSalesStaffId || NONE_STAFF}
+            onValueChange={(v) => onChange({ preSalesStaffId: v === NONE_STAFF ? '' : v })}
           >
             <SelectTrigger id={`${idPrefix}-pre-sales`} className="w-full">
-              <SelectValue placeholder="请选择" />
+              <SelectValue placeholder="不指定" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={NONE_STAFF}>不指定</SelectItem>
               {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.display_name}
@@ -250,13 +252,14 @@ export function ProjectFormFields({
         <div className="grid gap-2">
           <Label htmlFor={`${idPrefix}-project-manager`}>项目经理</Label>
           <Select
-            value={values.projectManagerStaffId || undefined}
-            onValueChange={(v) => onChange({ projectManagerStaffId: v })}
+            value={values.projectManagerStaffId || NONE_STAFF}
+            onValueChange={(v) => onChange({ projectManagerStaffId: v === NONE_STAFF ? '' : v })}
           >
             <SelectTrigger id={`${idPrefix}-project-manager`} className="w-full">
-              <SelectValue placeholder="请选择" />
+              <SelectValue placeholder="不指定" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={NONE_STAFF}>不指定</SelectItem>
               {staff.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.display_name}

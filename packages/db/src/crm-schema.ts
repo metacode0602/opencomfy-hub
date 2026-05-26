@@ -31,6 +31,9 @@ import {
 /** 金额 decimal(15,4) */
 const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
 
+/** 卡时 decimal(15,4)，与财务域 cardHours 一致 */
+const cardHours = (name: string) => numeric(name, { precision: 15, scale: 4 })
+
 /** 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数） */
 const tenantMoney = (name: string) => numeric(name, { precision: 20, scale: 4 })
 
@@ -730,7 +733,7 @@ export const rechargeOrder = pgTable(
   (table) => [index("recharge_order_tenant_id_idx").on(table.tenantId)],
 )
 
-/** 客户消费明细，按天汇总 */
+/** 客户消费明细，按天汇总（租户 × 自然日 × 产品线） */
 export const consumptionUsageDaily = pgTable(
   "consumption_usage_daily",
   {
@@ -740,16 +743,85 @@ export const consumptionUsageDaily = pgTable(
       .notNull()
       .references(() => billingTenant.id, { onDelete: "restrict" }),
     usageDate: date("usage_date").notNull(),
+    usageMonth: varchar("usage_month", { length: 7 }).notNull(), // YYYY-MM，便于按月筛选
     productLine: varchar("product_line", { length: 64 }),
     unit: varchar("unit", { length: 32 }),
-    amount: money("amount"), // 消费金额
+    amount: money("amount"), // 总消费（元）
     balance: tenantMoney("balance"), // 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数）
     voucherAmount: money("voucher_amount"), // 算力券消费金额
-    balanceAmount: money("balance_amount"), // 余额消费金额
-    gpuSeconds: numeric("gpu_seconds"), // GPU 秒数
+    balanceAmount: money("balance_amount"), // 余额/实付消费金额
+    totalCardHours: cardHours("total_card_hours"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours").default("0"),
+    gpuSeconds: numeric("gpu_seconds"), // 遗留字段，新读路径用卡时列
   },
   (table) => [
+    uniqueIndex("consumption_usage_daily_tenant_date_pl_uk").on(
+      table.tenantId,
+      table.usageDate,
+      table.productLine,
+    ),
     index("consumption_usage_daily_tenant_date_idx").on(table.tenantId, table.usageDate),
+    index("consumption_usage_daily_tenant_month_pl_idx").on(
+      table.tenantId,
+      table.usageMonth,
+      table.productLine,
+    ),
+  ],
+)
+
+/**
+ * 租户每日消费明细（任务 / 机房×卡型）
+ * 设计依据：project-tenant-daily-consumption-design.md
+ */
+export const tenantConsumptionDailyDetail = pgTable(
+  "tenant_consumption_daily_detail",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    usageDate: date("usage_date").notNull(),
+    usageMonth: varchar("usage_month", { length: 7 }).notNull(),
+    productLine: varchar("product_line", { length: 64 }).notNull(),
+    dataCenterId: text("data_center_id"),
+    dataCenterCode: varchar("data_center_code", { length: 64 }).notNull(),
+    dataCenterName: varchar("data_center_name", { length: 255 }).notNull(),
+    gpuCardTypeId: text("gpu_card_type_id"),
+    gpuCardTypeCode: varchar("gpu_card_type_code", { length: 64 }).notNull(),
+    gpuCardTypeName: varchar("gpu_card_type_name", { length: 128 }),
+    platformTaskId: varchar("platform_task_id", { length: 64 }),
+    taskName: varchar("task_name", { length: 255 }),
+    totalAmount: money("total_amount").notNull(),
+    voucherAmount: money("voucher_amount").notNull().default("0"),
+    balanceAmount: money("balance_amount").notNull().default("0"),
+    totalCardHours: cardHours("total_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours").default("0"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    source: varchar("source", { length: 32 }).notNull().default("platform_sync"),
+    platformIdempotencyKey: varchar("platform_idempotency_key", { length: 256 }).notNull(),
+    rawJson: jsonb("raw_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("tenant_consumption_daily_detail_idempotency_uk").on(
+      table.platformIdempotencyKey,
+    ),
+    index("tenant_consumption_daily_detail_tenant_date_pl_idx").on(
+      table.tenantId,
+      table.usageDate,
+      table.productLine,
+    ),
+    index("tenant_consumption_daily_detail_tenant_month_pl_idx").on(
+      table.tenantId,
+      table.usageMonth,
+      table.productLine,
+    ),
   ],
 )
 

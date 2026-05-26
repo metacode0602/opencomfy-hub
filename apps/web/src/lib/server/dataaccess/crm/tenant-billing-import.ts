@@ -20,23 +20,30 @@ import {
   platformOrderAmountToRmb,
   summarizeSection,
   usageDateFromPlatformPeriod,
+  usageMonthFromDate,
   validateBillingDateRange,
 } from '@/lib/crm/tenant-billing-import-utils'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
   fetchPlatformBillDetailsForOverview,
+  fetchPlatformDailyTaskSummaries,
   fetchPlatformDailyUsageBills,
   fetchPlatformMetalOrders,
   fetchPlatformMonthlyBills,
   fetchPlatformRecharges,
   SuanliBillingApiError,
   type PlatformBillDetailRecord,
+  type PlatformDailyTaskSummaryRecord,
   type PlatformDailyUsageBillRecord,
   type PlatformMetalOrderRecord,
   type PlatformMonthlyBillRecord,
   type PlatformRechargeRecord,
 } from '@/lib/server/integrations/suanli-billing-api'
-import { BILLING_IMPORT_SECTION_DELAY_MS, delayBillingApi } from '@/lib/server/integrations/suanli-billing-api-throttle'
+import {
+  BILLING_API_PAGE_DELAY_MS,
+  BILLING_IMPORT_SECTION_DELAY_MS,
+  delayBillingApi,
+} from '@/lib/server/integrations/suanli-billing-api-throttle'
 import type {
   BillDetailPreviewItem,
   DailyUsageBillPreviewItem,
@@ -54,6 +61,7 @@ import {
   commerceOrder,
   commerceOrderItem,
   consumptionUsageDaily,
+  tenantConsumptionDailyDetail,
   recharge,
   tenantBill,
   tenantBillDetail,
@@ -61,6 +69,11 @@ import {
 import { and, eq, inArray } from 'drizzle-orm'
 
 const PREVIEW_TTL_MS = 15 * 60 * 1000
+
+/** 平台任务明细暂未返回机房/卡型时的占位 */
+const DETAIL_DC_CODE_NA = '_na'
+const DETAIL_DC_NAME_NA = '—'
+const DETAIL_GPU_CODE_NA = '_na'
 
 type BillDetailLine = {
   platformKey: string
@@ -95,6 +108,11 @@ type CachedBillingImport = {
     record: PlatformDailyUsageBillRecord
     usageDate: string
     productLine: string
+  }>
+  dailyTaskDetails: Array<{
+    usageDate: string
+    productLine: string
+    record: PlatformDailyTaskSummaryRecord
   }>
   billDetailGroups: BillDetailGroup[]
   billDetailItems: BillDetailPreviewItem[]
@@ -495,6 +513,40 @@ export const tenantBillingImportDataAccess = {
       crmWarn('tenant-billing-import', 'daily usage failed', { traceId, err: dailyUsageError })
     }
 
+    const dailyTaskDetails: CachedBillingImport['dailyTaskDetails'] = []
+    let dailyTaskDetailsError: string | undefined
+
+    if (dailyUsageRecords.length > 0 && !dailyUsageError) {
+      try {
+        for (let i = 0; i < dailyUsageRecords.length; i++) {
+          const row = dailyUsageRecords[i]!
+          if (i > 0) {
+            await delayBillingApi(BILLING_API_PAGE_DELAY_MS, 'daily_task_summary:interval')
+          }
+          const tasks = await fetchPlatformDailyTaskSummaries({
+            platformTenantId: tenant.platformTenantId!,
+            taskType: row.task_type,
+            startTime: row.start_time,
+            endTime: row.end_time,
+            traceId,
+          })
+          const usageDate = usageDateFromPlatformPeriod(row.start_time)
+          const { productLine } = mapPlatformTaskType(row.task_type)
+          for (const task of tasks) {
+            if (!task.task_id) continue
+            dailyTaskDetails.push({ usageDate, productLine, record: task })
+          }
+        }
+      } catch (e) {
+        dailyTaskDetailsError =
+          e instanceof Error ? e.message : '每日任务消费明细拉取失败'
+        crmWarn('tenant-billing-import', 'daily task details failed', {
+          traceId,
+          err: dailyTaskDetailsError,
+        })
+      }
+    }
+
     if (billRecords.length > 0) {
       await delayBillingApi(BILLING_IMPORT_SECTION_DELAY_MS, 'section:bill_details')
       try {
@@ -660,6 +712,7 @@ export const tenantBillingImportDataAccess = {
       monthlyBills: billsBuilt.cached,
       recharges: rechargesBuilt.cached,
       dailyUsageBills: dailyUsageBuilt.cached,
+      dailyTaskDetails,
       billDetailGroups,
       billDetailItems,
     })
@@ -690,7 +743,9 @@ export const tenantBillingImportDataAccess = {
       bills: billsBuilt.preview.length,
       recharges: rechargesBuilt.preview.length,
       dailyUsage: dailyUsageBuilt.preview.length,
+      dailyTaskDetails: dailyTaskDetails.length,
       details: billDetailItems.length,
+      dailyTaskDetailsError,
     })
 
     return result
@@ -711,6 +766,7 @@ export const tenantBillingImportDataAccess = {
       monthlyBills: { created: 0, updated: 0, errors: [] },
       recharges: { created: 0, updated: 0, errors: [] },
       dailyUsageBills: { created: 0, updated: 0, errors: [] },
+      dailyConsumptionDetails: { created: 0, updated: 0, errors: [] },
       billDetails: { created: 0, updated: 0, deleted: 0, errors: [] },
     }
 
@@ -855,6 +911,7 @@ export const tenantBillingImportDataAccess = {
               customerId: cached.customerId,
               tenantId: cached.tenantId,
               usageDate,
+              usageMonth: usageMonthFromDate(usageDate),
               productLine,
               unit: 'day',
               amount,
@@ -882,6 +939,69 @@ export const tenantBillingImportDataAccess = {
               traceId,
               usageDate: item.usageDate,
               productLine: item.productLine,
+              err: message,
+            })
+          }
+        }
+
+        for (const item of cached.dailyTaskDetails) {
+          try {
+            const { record, usageDate, productLine } = item
+            const totalAmount = platformBillingValueToMoneyString(record.billing_value)
+            const voucherAmount = platformBillingValueToMoneyString(record.discount_value)
+            const balanceAmount = platformBillingValueToRmb(
+              record.billing_value - record.discount_value,
+            ).toFixed(4)
+            const idempotencyKey = `${cached.tenantId}|${usageDate}|${productLine}|task|${record.task_id}`
+            const rowId = `usage-detail-${cached.tenantId}-${usageDate}-${productLine}-${record.task_id}`
+
+            const existing = await tx.query.tenantConsumptionDailyDetail.findFirst({
+              where: eq(tenantConsumptionDailyDetail.platformIdempotencyKey, idempotencyKey),
+              columns: { id: true },
+            })
+
+            const payload = {
+              customerId: cached.customerId,
+              tenantId: cached.tenantId,
+              usageDate,
+              usageMonth: usageMonthFromDate(usageDate),
+              productLine,
+              dataCenterId: null,
+              dataCenterCode: DETAIL_DC_CODE_NA,
+              dataCenterName: DETAIL_DC_NAME_NA,
+              gpuCardTypeId: null,
+              gpuCardTypeCode: DETAIL_GPU_CODE_NA,
+              gpuCardTypeName: null,
+              platformTaskId: String(record.task_id),
+              taskName: record.task_name || null,
+              totalAmount,
+              voucherAmount,
+              balanceAmount,
+              source: 'platform_sync',
+              platformIdempotencyKey: idempotencyKey,
+              rawJson: record,
+            }
+
+            if (existing) {
+              await tx
+                .update(tenantConsumptionDailyDetail)
+                .set(payload)
+                .where(eq(tenantConsumptionDailyDetail.id, existing.id))
+              result.dailyConsumptionDetails.updated += 1
+            } else {
+              await tx.insert(tenantConsumptionDailyDetail).values({ id: rowId, ...payload })
+              result.dailyConsumptionDetails.created += 1
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : '任务明细写入失败'
+            result.dailyConsumptionDetails.errors.push({
+              key: `${item.usageDate}:${item.record.task_id}`,
+              message,
+            })
+            crmWarn('tenant-billing-import', 'daily task detail row failed', {
+              traceId,
+              usageDate: item.usageDate,
+              taskId: item.record.task_id,
               err: message,
             })
           }

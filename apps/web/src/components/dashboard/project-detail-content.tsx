@@ -48,19 +48,8 @@ import { Label } from '@workspace/ui/components/label'
 import type { Project } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
-import {
-  consumptionTrend,
-  getRoleLabel,
-  stageSteps,
-} from '@/components/dashboard/project-detail-constants'
+import { getRoleLabel, stageSteps } from '@/components/dashboard/project-detail-constants'
+import { ProjectConsumptionTrendChart } from '@/components/dashboard/project-consumption-trend-chart'
 import { getActivityIcon } from '@/components/dashboard/project-detail-utils'
 import { ProjectTimelinePanel } from '@/components/dashboard/project-timeline-panel'
 import { ProjectConsumptionPanel } from '@/components/dashboard/project-consumption-panel'
@@ -171,9 +160,23 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
 
       <Card>
         <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-medium">项目阶段</h3>
-            <span className="text-sm text-muted-foreground">创建于 {project.createdAt}</span>
+          <div className="flex items-center mb-4 gap-6">
+            <div className="flex items-center gap-2">
+              <h3 className="font-medium">项目阶段</h3>
+              <span className="text-sm text-muted-foreground">创建于 {project.createdAt}</span>
+            </div>
+            <div className="flex flex-row items-center gap-3">
+              <Building2 className="w-4 h-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">所属客户</p>
+                <Link
+                  href={`/crm/customers/${project.customerId}`}
+                  className="font-medium hover:text-primary transition-colors"
+                >
+                  {project.customerName}
+                </Link>
+              </div>
+            </div>
           </div>
           <div className="relative">
             <div className="flex justify-between mb-2">
@@ -182,11 +185,10 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
                   <div
                     className={`
                     w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center
-                    ${
-                      index <= currentStageIndex
+                    ${index <= currentStageIndex
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-muted text-muted-foreground'
-                    }
+                      }
                   `}
                   >
                     {index < currentStageIndex ? (
@@ -232,22 +234,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <Building2 className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">所属客户</p>
-                <Link
-                  href={`/crm/customers/${project.customerId}`}
-                  className="font-medium hover:text-primary transition-colors"
-                >
-                  {project.customerName}
-                </Link>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -358,56 +344,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
 
         <TabsContent value="overview" className="space-y-6 mt-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">消费趋势（近两周）</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[240px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={consumptionTrend}>
-                      <defs>
-                        <linearGradient id="colorConsume" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis
-                        dataKey="date"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#71717a', fontSize: 12 }}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#71717a', fontSize: 12 }}
-                        tickFormatter={(value) => `${value / 1000}k`}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#18181b',
-                          border: '1px solid #27272a',
-                          borderRadius: '8px',
-                        }}
-                        formatter={(value) => [
-                          `¥${Number(value ?? 0).toLocaleString()}`,
-                          '消费金额',
-                        ]}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="amount"
-                        stroke="#6366f1"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorConsume)"
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+            <ProjectConsumptionTrendChart projectId={project.id} />
 
             <Card>
               <CardHeader>
@@ -500,7 +437,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
 
         <TabsContent value="consumption" className="mt-6 space-y-6">
           <ProjectDailyConsumptionPanel project={project} />
-          <ProjectConsumptionPanel project={project} />
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-6">

@@ -57,10 +57,10 @@ export const customerUpsertSchema = z
   })
 
 export const projectStaffSchema = z.object({
-  preSalesStaffId: z.string().min(1),
+  preSalesStaffId: z.string(),
   accountManagerStaffId: z.string().min(1),
   deliveryManagerStaffId: z.string().min(1),
-  projectManagerStaffId: z.string().min(1),
+  projectManagerStaffId: z.string(),
 })
 
 export const tenantProjectImportFormSchema = z.object({

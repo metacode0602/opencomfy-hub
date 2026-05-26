@@ -180,10 +180,28 @@ export const crmRouter = createTRPCRouter({
         z.object({
           projectId: z.string(),
           productLine: z.string().optional(),
+          usageMonth: z.string().optional(),
         }),
       )
       .query(({ input }) =>
         billingDataAccess.listDailyConsumptionsByProject(input.projectId, {
+          productLine: input.productLine,
+          usageMonth: input.usageMonth,
+        }),
+      ),
+    listDailyConsumptionDetails: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          tenantId: z.string(),
+          usageDate: z.string(),
+          productLine: z.string(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.listDailyConsumptionDetailsByProject(input.projectId, {
+          tenantId: input.tenantId,
+          usageDate: input.usageDate,
           productLine: input.productLine,
         }),
       ),

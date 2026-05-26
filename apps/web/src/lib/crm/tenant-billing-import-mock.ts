@@ -298,6 +298,7 @@ export async function mockCommitTenantBillingImport(
     monthlyBills: fromSection(preview.sections.monthlyBills),
     recharges: fromSection(preview.sections.recharges),
     dailyUsageBills: fromSection(preview.sections.dailyUsageBills),
+    dailyConsumptionDetails: { created: 0, updated: 0, errors: [] },
     billDetails: {
       ...fromSection(preview.sections.billDetails),
       deleted: 2,

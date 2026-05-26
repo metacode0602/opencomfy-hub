@@ -302,6 +302,20 @@
       "when": 1779780331565,
       "tag": "0044_glossy_genesis",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1779785000000,
+      "tag": "0045_project_tenant_daily_consumption",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1779783760377,
+      "tag": "0046_shiny_maelstrom",
+      "breakpoints": true
     }
   ]
 }

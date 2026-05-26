@@ -194,12 +194,42 @@ export interface Consumption {
   createdAt: string
 }
 
-/** 项目消费按日汇总（由 consumption_record 聚合） */
+/** 项目消费按日汇总（consumption_usage_daily） */
 export interface DailyConsumption {
+  id: string
+  tenantId: string
+  tenantName: string
   usageDate: string
-  productLine: Consumption['productLine']
+  usageMonth: string
+  productLine: string
   amount: number
-  recordCount: number
+  voucherAmount: number
+  balanceAmount: number
+  totalCardHours: number | null
+  voucherCardHours: number | null
+  balanceCardHours: number | null
+  taskCount: number
+}
+
+/** 项目每日消费明细（tenant_consumption_daily_detail） */
+export interface DailyConsumptionDetail {
+  id: string
+  tenantId: string
+  tenantName: string
+  usageDate: string
+  productLine: string
+  dataCenterCode: string
+  dataCenterName: string
+  gpuCardTypeCode: string
+  gpuCardTypeName: string | null
+  platformTaskId: string | null
+  taskName: string | null
+  totalAmount: number
+  voucherAmount: number
+  balanceAmount: number
+  totalCardHours: number | null
+  voucherCardHours: number | null
+  balanceCardHours: number | null
 }
 
 export interface Coupon {
@@ -306,6 +336,13 @@ export const productLineNames: Record<string, string> = {
   image_registry: '镜像仓库',
   shared_storage: '共享存储卷',
   object_storage: '对象存储加速',
+  pod_deployment: '弹性部署',
+  pod_job: 'Job',
+  pod_development: '开发机',
+  juicefs: 'JuiceFS',
+  harbor: 'Harbor',
+  share_storage: '共享存储',
+  prepaid_deduction: '预付费抵扣',
 }
 
 // 阶段中文名称映射
