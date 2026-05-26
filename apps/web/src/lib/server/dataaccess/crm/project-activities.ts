@@ -208,6 +208,48 @@ export const projectActivitiesDataAccess = {
     return attachments.length > 0 ? { ...activity, attachments } : activity
   },
 
+  async updateComment(input: {
+    projectId: string
+    activityId: string
+    comment: string
+    user: { id: string; email?: string | null; name?: string | null }
+  }): Promise<Activity> {
+    const comment = input.comment.trim()
+    if (!comment) {
+      throw new Error('评论内容不能为空')
+    }
+
+    const row = await db.query.projectActivity.findFirst({
+      where: eq(projectActivity.id, input.activityId),
+    })
+    if (!row || row.projectId !== input.projectId) {
+      throw new Error('评论不存在')
+    }
+    if (row.type !== 'comment') {
+      throw new Error('仅支持编辑评论')
+    }
+
+    const staffId = await staffDataAccess.resolveStaffIdForAuthUser(input.user)
+    if (!staffId || row.authorStaffId !== staffId) {
+      throw new Error('无权编辑此评论')
+    }
+
+    await db
+      .update(projectActivity)
+      .set({
+        description: comment,
+        updatedAt: new Date(),
+      })
+      .where(eq(projectActivity.id, input.activityId))
+
+    const activities = await this.listByProject(input.projectId)
+    const updated = activities.find((activity) => activity.id === input.activityId)
+    if (!updated) {
+      throw new Error('更新评论失败')
+    }
+    return updated
+  },
+
   async getAttachmentForDownload(attachmentId: string) {
     const attachment = await db.query.projectActivityAttachment.findFirst({
       where: eq(projectActivityAttachment.id, attachmentId),

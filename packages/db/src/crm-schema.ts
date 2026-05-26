@@ -564,6 +564,7 @@ export const projectActivity = pgTable(
     authorRole: varchar("author_role", { length: 32 }),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
   (table) => [index("project_activity_project_id_idx").on(table.projectId)],
 )

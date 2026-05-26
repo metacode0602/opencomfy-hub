@@ -70,6 +70,18 @@ const billingImportDateSchema = z.object({
     .optional(),
 })
 
+const projectBillingSyncSchema = z.object({
+  projectId: z.string().min(1),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+})
+
 const listFilterSchema = z.object({
   search: z.string().optional(),
   type: z.enum(['B', 'C', 'all']).optional(),
@@ -81,6 +93,7 @@ const projectFilterSchema = z.object({
   stage: z.string().optional(),
   status: z.string().optional(),
   tagIds: z.array(z.string()).optional(),
+  staffId: z.string().optional(),
 })
 
 export const crmRouter = createTRPCRouter({
@@ -137,6 +150,13 @@ export const crmRouter = createTRPCRouter({
       .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))
       .mutation(({ input }) => projectsDataAccess.updateStatus(input.id, input.status)),
     stageCounts: protectedProcedure.query(() => projectsDataAccess.countByStage()),
+    listStaffFilterOptions: protectedProcedure.query(async ({ ctx }) => {
+      const [staff, currentUserStaffId] = await Promise.all([
+        projectsDataAccess.listStaffFilterOptions(),
+        staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
+      ])
+      return { staff, currentUserStaffId }
+    }),
     listActivities: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listActivitiesByProject(input.projectId)),
@@ -170,6 +190,29 @@ export const crmRouter = createTRPCRouter({
             throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
           }
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '发布动态失败' })
+        }
+      }),
+    updateActivity: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          activityId: z.string(),
+          comment: z.string().min(1).max(5000),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await projectActivitiesDataAccess.updateComment({
+            projectId: input.projectId,
+            activityId: input.activityId,
+            comment: input.comment,
+            user: ctx.user,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '更新评论失败' })
         }
       }),
     listConsumptions: protectedProcedure
@@ -244,6 +287,18 @@ export const crmRouter = createTRPCRouter({
             throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
           }
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '导入租户项目失败' })
+        }
+      }),
+    listBillingTenants: protectedProcedure
+      .input(z.object({ projectId: z.string().min(1) }))
+      .query(({ input }) => projectsDataAccess.listBillingTenantsForProject(input.projectId)),
+    syncBilling: adminProcedure
+      .input(projectBillingSyncSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBillingImportDataAccess.syncBillingForProject(input)
+        } catch (e) {
+          mapBillingImportError(e)
         }
       }),
   }),

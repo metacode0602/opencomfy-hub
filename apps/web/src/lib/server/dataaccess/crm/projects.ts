@@ -24,7 +24,20 @@ export type ProjectListFilters = {
   stage?: string
   status?: string
   tagIds?: string[]
+  staffId?: string
 }
+
+export type ProjectStaffFilterOption = {
+  id: string
+  displayName: string
+}
+
+const PROJECT_STAFF_FILTER_ROLES = [
+  'pre_sales',
+  'account_manager',
+  'delivery_manager',
+  'project_manager',
+] as const
 
 export type ProjectStaffInput = {
   preSalesStaffId: string
@@ -75,6 +88,21 @@ async function getBillingTenantIdsForProject(projectId: string): Promise<string[
     for (const d of defaults) ids.add(d.id)
   }
   return [...ids]
+}
+
+async function loadProjectIdsWithStaff(staffId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ projectId: projectStaffAssignment.projectId })
+    .from(projectStaffAssignment)
+    .where(
+      and(
+        eq(projectStaffAssignment.userStaffId, staffId),
+        inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+        isNull(projectStaffAssignment.effectiveTo),
+      ),
+    )
+
+  return new Set(rows.map((r) => r.projectId))
 }
 
 async function loadProjectIdsWithAnyTag(tagIds: string[]): Promise<Set<string>> {
@@ -284,6 +312,36 @@ export { refreshProjectMonthlyMetrics } from './project-monthly-metrics'
 export const projectsDataAccess = {
   getBillingTenantIdsForProject,
 
+  async listBillingTenantsForProject(projectId: string): Promise<
+    Array<{
+      id: string
+      name: string
+      platformTenantId?: string
+    }>
+  > {
+    const tenantIds = await getBillingTenantIdsForProject(projectId)
+    if (tenantIds.length === 0) return []
+
+    const rows = await db
+      .select({
+        id: billingTenant.id,
+        name: billingTenant.name,
+        platformTenantId: billingTenant.platformTenantId,
+      })
+      .from(billingTenant)
+      .where(inArray(billingTenant.id, tenantIds))
+
+    const rowById = new Map(rows.map((row) => [row.id, row]))
+    return tenantIds
+      .map((id) => rowById.get(id))
+      .filter((row): row is NonNullable<typeof row> => row != null)
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        platformTenantId: row.platformTenantId ?? undefined,
+      }))
+  },
+
   async list(filters: ProjectListFilters = {}): Promise<Project[]> {
 
     const conditions = []
@@ -329,6 +387,11 @@ export const projectsDataAccess = {
       const projectIdsWithTag = await loadProjectIdsWithAnyTag(filters.tagIds)
       if (projectIdsWithTag.size === 0) return []
       conditions.push(inArray(crmProject.id, [...projectIdsWithTag]))
+    }
+    if (filters.staffId) {
+      const projectIdsWithStaff = await loadProjectIdsWithStaff(filters.staffId)
+      if (projectIdsWithStaff.size === 0) return []
+      conditions.push(inArray(crmProject.id, [...projectIdsWithStaff]))
     }
 
     const rows = await db
@@ -456,6 +519,25 @@ export const projectsDataAccess = {
     const updated = await this.getById(id)
     if (!updated) throw new Error('项目不存在')
     return updated
+  },
+
+  async listStaffFilterOptions(): Promise<ProjectStaffFilterOption[]> {
+    const rows = await db
+      .selectDistinct({
+        id: userStaff.id,
+        displayName: userStaff.displayName,
+      })
+      .from(projectStaffAssignment)
+      .innerJoin(userStaff, eq(projectStaffAssignment.userStaffId, userStaff.id))
+      .where(
+        and(
+          inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+          isNull(projectStaffAssignment.effectiveTo),
+        ),
+      )
+      .orderBy(asc(userStaff.displayName))
+
+    return rows
   },
 
   async countByStage(): Promise<{ lead: number; testing: number; converted: number }> {

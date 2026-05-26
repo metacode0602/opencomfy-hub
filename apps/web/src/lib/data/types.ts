@@ -290,10 +290,12 @@ export interface Activity {
   title: string
   description: string
   author: string
+  authorStaffId?: string | null
   authorRole: 'sales' | 'account_manager' | 'pre_sales' | 'system'
   attachments?: Attachment[]
   metadata?: Record<string, unknown>
   createdAt: string
+  editedAt?: string
 }
 
 export interface Attachment {

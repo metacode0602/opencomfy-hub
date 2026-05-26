@@ -18,6 +18,8 @@ import {
   platformBillingValueToRmb,
   platformOrderAmountToMoneyString,
   platformOrderAmountToRmb,
+  platformRechargeAmountToMoneyString,
+  platformRechargeAmountToRmb,
   summarizeSection,
   usageDateFromPlatformPeriod,
   usageMonthFromDate,
@@ -55,7 +57,11 @@ import type {
   TenantBillingImportPreviewResult,
   TenantBillingImportSection,
 } from '@/lib/types/tenant-billing-import'
-import type { PlatformImportBillingItemResult } from '@/lib/types/platform-tenant-import'
+import type {
+  PlatformImportBillingBatchResult,
+  PlatformImportBillingItemResult,
+} from '@/lib/types/platform-tenant-import'
+import { projectsDataAccess } from './projects'
 import {
   billingTenant,
   commerceOrder,
@@ -359,7 +365,7 @@ function buildRechargePreview(
   const cached: CachedBillingImport['recharges'] = []
 
   for (const record of records) {
-    const amount = platformOrderAmountToMoneyString(record.total_amount)
+    const amount = platformRechargeAmountToMoneyString(record.total_amount)
     const mappedStatus = mapRechargeStatus(record.status)
     const existing = existingByTx.get(record.order_id)
     let action: TenantBillingImportAction = 'create'
@@ -375,7 +381,7 @@ function buildRechargePreview(
       key: `recharge-${record.id}`,
       action,
       transactionId: record.order_id,
-      amountRmb: platformOrderAmountToRmb(record.total_amount),
+      amountRmb: platformRechargeAmountToRmb(record.total_amount),
       payChannel: payChannelLabel(mapPayChannel(record.pay_channel)),
       status: record.status === 'Completed' ? '已完成' : record.status,
       createTime: record.create_time.replace(' +08:00', '').slice(0, 19),
@@ -1011,7 +1017,7 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformOrderAmountToMoneyString(record.total_amount)
+            const amount = platformRechargeAmountToMoneyString(record.total_amount)
             const existing = await tx.query.recharge.findFirst({
               where: eq(recharge.transactionId, record.order_id),
               columns: { id: true },
@@ -1195,6 +1201,59 @@ export const tenantBillingImportDataAccess = {
         success: false,
         error: e instanceof Error ? e.message : '账单导入失败',
       }
+    }
+  },
+
+  async syncBillingForProject(input: {
+    projectId: string
+    startDate?: string
+    endDate?: string
+  }): Promise<PlatformImportBillingBatchResult> {
+    validateBillingDateRange(input.startDate, input.endDate)
+
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(input.projectId)
+    if (tenantIds.length === 0) {
+      throw new Error('未找到关联计费租户')
+    }
+
+    const tenantRows = await db
+      .select({
+        id: billingTenant.id,
+        name: billingTenant.name,
+        platformTenantId: billingTenant.platformTenantId,
+      })
+      .from(billingTenant)
+      .where(inArray(billingTenant.id, tenantIds))
+
+    const tenantById = new Map(tenantRows.map((row) => [row.id, row]))
+    const items: PlatformImportBillingItemResult[] = []
+
+    for (const tenantId of tenantIds) {
+      const tenant = tenantById.get(tenantId)
+      if (!tenant) continue
+
+      if (!tenant.platformTenantId?.trim()) {
+        items.push({
+          platformTenantId: '',
+          tenantName: tenant.name,
+          success: false,
+          error: '未关联平台租户 ID',
+        })
+        continue
+      }
+
+      const result = await tenantBillingImportDataAccess.directImport({
+        tenantId: tenant.id,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      })
+      items.push(result)
+    }
+
+    return {
+      items,
+      successCount: items.filter((item) => item.success).length,
+      failedCount: items.filter((item) => !item.success).length,
     }
   },
 }

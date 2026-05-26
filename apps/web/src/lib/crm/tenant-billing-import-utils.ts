@@ -23,8 +23,11 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
 /** billing_value / total_billing_value / discount_value — 10^6 平台单位 = 1 元 */
 export const PLATFORM_BILLING_VALUE_DIVISOR = 1_000_000
 
-/** total_price（裸金属）/ total_amount（充值）— 10^4 平台单位 = 1 元 */
+/** total_price（裸金属）— 10^4 平台单位 = 1 元 */
 export const PLATFORM_ORDER_AMOUNT_DIVISOR = 10_000
+
+/** total_amount（充值）— 1 分 = 0.01 元 */
+export const PLATFORM_RECHARGE_AMOUNT_DIVISOR = 100
 
 /** @deprecated 请使用 PLATFORM_ORDER_AMOUNT_DIVISOR */
 export const PLATFORM_AMOUNT_DIVISOR = PLATFORM_ORDER_AMOUNT_DIVISOR
@@ -51,12 +54,24 @@ export function platformOrderAmountToMoneyString(
   return platformOrderAmountToRmb(raw).toFixed(4)
 }
 
-/** @deprecated 裸金属/充值请用 platformOrderAmountToRmb */
+/** 充值 total_amount：第三方金额，单位为分，÷100 为元 */
+export function platformRechargeAmountToRmb(raw: number | null | undefined): number {
+  if (raw == null || Number.isNaN(raw)) return 0
+  return raw / PLATFORM_RECHARGE_AMOUNT_DIVISOR
+}
+
+export function platformRechargeAmountToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformRechargeAmountToRmb(raw).toFixed(4)
+}
+
+/** @deprecated 裸金属请用 platformOrderAmountToRmb；充值请用 platformRechargeAmountToRmb */
 export function platformAmountToRmb(raw: number | null | undefined): number {
   return platformOrderAmountToRmb(raw)
 }
 
-/** @deprecated 裸金属/充值请用 platformOrderAmountToMoneyString */
+/** @deprecated 裸金属请用 platformOrderAmountToMoneyString；充值请用 platformRechargeAmountToMoneyString */
 export function platformAmountToMoneyString(raw: number | null | undefined): string {
   return platformOrderAmountToMoneyString(raw)
 }

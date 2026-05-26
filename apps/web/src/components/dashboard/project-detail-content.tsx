@@ -52,7 +52,6 @@ import { getRoleLabel, stageSteps } from '@/components/dashboard/project-detail-
 import { ProjectConsumptionTrendChart } from '@/components/dashboard/project-consumption-trend-chart'
 import { getActivityIcon } from '@/components/dashboard/project-detail-utils'
 import { ProjectTimelinePanel } from '@/components/dashboard/project-timeline-panel'
-import { ProjectConsumptionPanel } from '@/components/dashboard/project-consumption-panel'
 import { ProjectDailyConsumptionPanel } from '@/components/dashboard/project-daily-consumption-panel'
 import { ProjectTasksPanel } from '@/components/dashboard/project-tasks-panel'
 import { ProjectOrdersPanel } from '@/components/dashboard/project-orders-panel'
@@ -61,6 +60,9 @@ import { ProjectRechargesPanel } from '@/components/dashboard/project-recharges-
 import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
 import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
 import { ProjectMonthMetricCell } from '@/components/dashboard/project-month-metric-cell'
+import { ProjectBillingSyncDialog } from '@/components/dashboard/project-billing-sync-dialog'
+import { IconCloudDownload } from '@tabler/icons-react'
+import { CopyToClipboard } from '@/components/shared/copy-to-clipboard'
 
 interface ProjectDetailContentProps {
   project: Project
@@ -71,6 +73,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
   const [activeTab, setActiveTab] = useState('overview')
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [billingSyncOpen, setBillingSyncOpen] = useState(false)
 
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const { data: activities = [] } = trpc.crm.projects.listActivities.useQuery({
@@ -106,6 +109,10 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
           <p className="text-muted-foreground">{project.description}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => setBillingSyncOpen(true)}>
+            <IconCloudDownload className="mr-1.5 size-4" />
+            同步账单
+          </Button>
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             编辑项目
           </Button>
@@ -177,6 +184,11 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
                 </Link>
               </div>
             </div>
+            <div className="flex flex-row items-center gap-2">
+              <span className="text-xs text-muted-foreground">平台租户Id：</span>
+              <span className="font-medium font-mono">{project.platformTenantId ?? '—'}</span>
+              {project.platformTenantId && <CopyToClipboard text={project.platformTenantId} />}
+            </div>
           </div>
           <div className="relative">
             <div className="flex justify-between mb-2">
@@ -228,6 +240,17 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         project={project}
         businessLines={businessLines}
         onUpdated={async () => {
+          const updated = await utils.crm.projects.getById.fetch({ id: project.id })
+          if (updated) setProject(updated)
+        }}
+      />
+
+      <ProjectBillingSyncDialog
+        open={billingSyncOpen}
+        onOpenChange={setBillingSyncOpen}
+        projectId={project.id}
+        projectName={project.name}
+        onSynced={async () => {
           const updated = await utils.crm.projects.getById.fetch({ id: project.id })
           if (updated) setProject(updated)
         }}

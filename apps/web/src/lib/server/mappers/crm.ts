@@ -400,9 +400,11 @@ export function mapActivityRow(row: {
   title: string
   description: string | null
   authorName: string | null
+  authorStaffId?: string | null
   authorRole: string | null
   metadata: unknown
   createdAt: Date
+  updatedAt?: Date | null
 }): Activity {
   return {
     id: row.id,
@@ -411,8 +413,10 @@ export function mapActivityRow(row: {
     title: row.title,
     description: row.description ?? '',
     author: row.authorName ?? '',
+    authorStaffId: row.authorStaffId ?? null,
     authorRole: (row.authorRole as Activity['authorRole']) ?? 'system',
     metadata: (row.metadata as Record<string, unknown>) ?? undefined,
     createdAt: toIsoDateTime(row.createdAt),
+    editedAt: row.updatedAt ? toIsoDateTime(row.updatedAt) : undefined,
   }
 }

@@ -68,11 +68,15 @@ import { IconUpload } from '@tabler/icons-react'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 
+const STAFF_FILTER_ALL = 'all'
+const STAFF_FILTER_ME = '__me__'
+
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [staffFilter, setStaffFilter] = useState<string>(STAFF_FILTER_ALL)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -93,11 +97,21 @@ export function ProjectsContent() {
     return allTags.filter((tag) => allowed.has(tag.name))
   }, [allTags])
 
+  const { data: staffFilterOptions } = trpc.crm.projects.listStaffFilterOptions.useQuery()
+
+  const effectiveStaffId =
+    staffFilter === STAFF_FILTER_ME
+      ? (staffFilterOptions?.currentUserStaffId ?? undefined)
+      : staffFilter === STAFF_FILTER_ALL
+        ? undefined
+        : staffFilter
+
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
     stage: stageFilter,
     status: statusFilter,
     tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+    staffId: effectiveStaffId,
   })
 
   const pauseMutation = trpc.crm.projects.updateStatus.useMutation({
@@ -113,8 +127,15 @@ export function ProjectsContent() {
   const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
 
   const pagination = useListPagination(projects, {
-    resetDeps: [search, stageFilter, statusFilter, selectedTagIds.join(',')],
+    resetDeps: [search, stageFilter, statusFilter, staffFilter, selectedTagIds.join(',')],
   })
+
+  const staffFilterLabel =
+    staffFilter === STAFF_FILTER_ALL
+      ? '全部负责人'
+      : staffFilter === STAFF_FILTER_ME
+        ? '我'
+        : (staffFilterOptions?.staff.find((staff) => staff.id === staffFilter)?.displayName ?? '负责人')
 
   const toggleTagFilter = (tagId: string, checked: boolean) => {
     setSelectedTagIds((prev) =>
@@ -334,6 +355,22 @@ export function ProjectsContent() {
                   <SelectItem value="active">活跃</SelectItem>
                   <SelectItem value="paused">已暂停</SelectItem>
                   <SelectItem value="completed">已完成</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={staffFilter} onValueChange={setStaffFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="负责人">{staffFilterLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={STAFF_FILTER_ALL}>全部负责人</SelectItem>
+                  {staffFilterOptions?.currentUserStaffId ? (
+                    <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
+                  ) : null}
+                  {staffFilterOptions?.staff.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {staff.displayName}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <DropdownMenu>
