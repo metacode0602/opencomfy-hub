@@ -62,11 +62,11 @@ export const websiteConfig = {
   },
   auth: {
     emailSuffix: 'gongjiyun.com', // 邮箱后缀
-    cookieDomain: process.env.NODE_ENV === 'production' ? '.gongjiyun.com' : 'localhost',
+    cookieDomain: process.env.NODE_ENV === 'production' ? '.gongjiyun.com' : '192.168.110.16',
     trustedOrigins:
       process.env.NODE_ENV === 'production'
         ? ['https://www.gongjiyun.com', 'https://gongjiyun.com']
-        : ['http://localhost:30041'],
+        : ['http://localhost:30041', 'http://192.168.110.16:30041'], // 信任的来源列表，允许跨域请求
     enableGoogleLogin: false,
     enableGithubLogin: false,
     requireEmailVerification: false,

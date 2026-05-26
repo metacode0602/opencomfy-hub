@@ -142,16 +142,7 @@ export const auth = betterAuth({
               body: {
                 name: user.name || user.email?.split('@')[0] || 'user', // 使用用户名或邮箱前缀作为组织名
                 slug: (user.name || user.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, '-'),
-                userId: user.id,
-                metadata: {
-                  langfuse: {
-                    organization: {
-                      id: process.env.LANGFUSE_ORG_ID as string,
-                      publicKey: process.env.LANGFUSE_ORG_PUBLIC_KEY as string,
-                      secretKey: process.env.LANGFUSE_ORG_SECRET_KEY as string,
-                    },
-                  },
-                },
+                userId: user.id
               },
             })
           } catch (error) {
@@ -171,16 +162,7 @@ export const auth = betterAuth({
                 body: {
                   name: userInfo?.email || userInfo?.name || '',
                   slug: (userInfo?.email?.replace('@', '-') || userInfo.id).toLowerCase().replace(/\s+/g, '-'),
-                  userId: userInfo?.id,
-                  metadata: {
-                    langfuse: {
-                      organization: {
-                        id: process.env.LANGFUSE_ORG_ID as string,
-                        publicKey: process.env.LANGFUSE_ORG_PUBLIC_KEY as string,
-                        secretKey: process.env.LANGFUSE_ORG_SECRET_KEY as string,
-                      },
-                    },
-                  },
+                  userId: userInfo?.id
                 },
               });
               const newId = newOrganization?.id as string;

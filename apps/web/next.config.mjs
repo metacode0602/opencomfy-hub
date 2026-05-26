@@ -9,6 +9,7 @@ const nextConfig = {
     "@workspace/db",
     "@workspace/shared-next",
   ],
+  allowedDevOrigins: ['192.168.110.16'],
   images: {
     remotePatterns: [
       {
