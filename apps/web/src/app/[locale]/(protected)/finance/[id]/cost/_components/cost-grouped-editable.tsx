@@ -9,10 +9,9 @@ import { CostGroupedTable } from "./cost-grouped-table"
 
 type CostGroupedEditableProps = {
   baseRows: PlatformCostMonthly[]
-  periodCode?: string
 }
 
-export function CostGroupedEditable({ baseRows, periodCode }: CostGroupedEditableProps) {
+export function CostGroupedEditable({ baseRows }: CostGroupedEditableProps) {
   const overrides = useFinanceCostOpsStore((s) => s.overrides)
   const voucherHistories = useFinanceCostOpsStore(
     (s) => s.voucherAdjustmentHistories,
@@ -42,7 +41,6 @@ export function CostGroupedEditable({ baseRows, periodCode }: CostGroupedEditabl
     <>
       <CostGroupedTable
         rows={rows}
-        periodCode={periodCode}
         editable
         onVoucherAdjust={openVoucherAdjust}
         voucherAdjustmentHistoryCount={(id) =>

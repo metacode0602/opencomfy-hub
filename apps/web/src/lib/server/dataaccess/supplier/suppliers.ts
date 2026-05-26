@@ -17,7 +17,7 @@ import {
   mapDataCenterRow,
   mapGpuCardTypeRow,
   mapGpuInventoryRow,
-  mapPhysicalDeviceRow,
+  mapPhysicalDeviceListRows,
   mapSupplierBillDetailRow,
   mapSupplierBillRow,
   mapSupplierContractRow,
@@ -390,14 +390,7 @@ export const suppliersDataAccess = {
       )
       .orderBy(sql`${supplierDevice.updatedAt} DESC`)
 
-    const physicalDevices = deviceRows.map(
-      ({ device, supplierShortName, cardTypeName, clusterName, nodeRole, expectedService }) =>
-        mapPhysicalDeviceRow(device, { supplierShortName, cardTypeName }, {
-          clusterName,
-          nodeRole,
-          expectedService,
-        }),
-    )
+    const physicalDevices = mapPhysicalDeviceListRows(deviceRows)
 
     return {
       inventory,

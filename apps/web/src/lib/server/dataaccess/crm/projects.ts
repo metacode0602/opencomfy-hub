@@ -16,7 +16,7 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
-import { and, asc, count, eq, ilike, inArray, isNull, or, sql, sum } from 'drizzle-orm'
+import { and, asc, count, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
 import type { ProjectTag } from '@/lib/data/types'
 
 export type ProjectListFilters = {
@@ -24,7 +24,20 @@ export type ProjectListFilters = {
   stage?: string
   status?: string
   tagIds?: string[]
+  staffId?: string
 }
+
+export type ProjectStaffFilterOption = {
+  id: string
+  displayName: string
+}
+
+const PROJECT_STAFF_FILTER_ROLES = [
+  'pre_sales',
+  'account_manager',
+  'delivery_manager',
+  'project_manager',
+] as const
 
 export type ProjectStaffInput = {
   preSalesStaffId: string
@@ -75,6 +88,21 @@ async function getBillingTenantIdsForProject(projectId: string): Promise<string[
     for (const d of defaults) ids.add(d.id)
   }
   return [...ids]
+}
+
+async function loadProjectIdsWithStaff(staffId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ projectId: projectStaffAssignment.projectId })
+    .from(projectStaffAssignment)
+    .where(
+      and(
+        eq(projectStaffAssignment.userStaffId, staffId),
+        inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+        isNull(projectStaffAssignment.effectiveTo),
+      ),
+    )
+
+  return new Set(rows.map((r) => r.projectId))
 }
 
 async function loadProjectIdsWithAnyTag(tagIds: string[]): Promise<Set<string>> {
@@ -267,6 +295,7 @@ async function upsertStaffAssignments(
           isNull(projectStaffAssignment.effectiveTo),
         ),
       )
+    if (!userStaffId) continue
     await db.insert(projectStaffAssignment).values({
       id: newId(),
       projectId,
@@ -283,6 +312,48 @@ export { refreshProjectMonthlyMetrics } from './project-monthly-metrics'
 export const projectsDataAccess = {
   getBillingTenantIdsForProject,
 
+  async listBillingTenantsForProject(projectId: string): Promise<
+    Array<{
+      id: string
+      name: string
+      platformTenantId?: string
+      billingSyncCursorEndDate?: string | null
+      billingSyncLastFinishedAt?: string | null
+      billingSyncLastStatus?: string | null
+      billingSyncLastError?: string | null
+    }>
+  > {
+    const tenantIds = await getBillingTenantIdsForProject(projectId)
+    if (tenantIds.length === 0) return []
+
+    const rows = await db
+      .select({
+        id: billingTenant.id,
+        name: billingTenant.name,
+        platformTenantId: billingTenant.platformTenantId,
+        billingSyncCursorEndDate: billingTenant.billingSyncCursorEndDate,
+        billingSyncLastFinishedAt: billingTenant.billingSyncLastFinishedAt,
+        billingSyncLastStatus: billingTenant.billingSyncLastStatus,
+        billingSyncLastError: billingTenant.billingSyncLastError,
+      })
+      .from(billingTenant)
+      .where(inArray(billingTenant.id, tenantIds))
+
+    const rowById = new Map(rows.map((row) => [row.id, row]))
+    return tenantIds
+      .map((id) => rowById.get(id))
+      .filter((row): row is NonNullable<typeof row> => row != null)
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        platformTenantId: row.platformTenantId ?? undefined,
+        billingSyncCursorEndDate: row.billingSyncCursorEndDate ?? null,
+        billingSyncLastFinishedAt: row.billingSyncLastFinishedAt?.toISOString() ?? null,
+        billingSyncLastStatus: row.billingSyncLastStatus ?? null,
+        billingSyncLastError: row.billingSyncLastError ?? null,
+      }))
+  },
+
   async list(filters: ProjectListFilters = {}): Promise<Project[]> {
 
     const conditions = []
@@ -291,6 +362,8 @@ export const projectsDataAccess = {
     }
     if (filters.status && filters.status !== 'all') {
       conditions.push(eq(crmProject.status, filters.status))
+    } else {
+      conditions.push(ne(crmProject.status, 'paused'))
     }
     if (filters.search?.trim()) {
       const q = `%${filters.search.trim()}%`
@@ -326,6 +399,11 @@ export const projectsDataAccess = {
       const projectIdsWithTag = await loadProjectIdsWithAnyTag(filters.tagIds)
       if (projectIdsWithTag.size === 0) return []
       conditions.push(inArray(crmProject.id, [...projectIdsWithTag]))
+    }
+    if (filters.staffId) {
+      const projectIdsWithStaff = await loadProjectIdsWithStaff(filters.staffId)
+      if (projectIdsWithStaff.size === 0) return []
+      conditions.push(inArray(crmProject.id, [...projectIdsWithStaff]))
     }
 
     const rows = await db
@@ -448,10 +526,37 @@ export const projectsDataAccess = {
     return updated
   },
 
+  async updateStatus(id: string, status: Project['status']): Promise<Project> {
+    await db.update(crmProject).set({ status }).where(eq(crmProject.id, id))
+    const updated = await this.getById(id)
+    if (!updated) throw new Error('项目不存在')
+    return updated
+  },
+
+  async listStaffFilterOptions(): Promise<ProjectStaffFilterOption[]> {
+    const rows = await db
+      .selectDistinct({
+        id: userStaff.id,
+        displayName: userStaff.displayName,
+      })
+      .from(projectStaffAssignment)
+      .innerJoin(userStaff, eq(projectStaffAssignment.userStaffId, userStaff.id))
+      .where(
+        and(
+          inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+          isNull(projectStaffAssignment.effectiveTo),
+        ),
+      )
+      .orderBy(asc(userStaff.displayName))
+
+    return rows
+  },
+
   async countByStage(): Promise<{ lead: number; testing: number; converted: number }> {
     const rows = await db
       .select({ stage: crmProject.stage, value: count() })
       .from(crmProject)
+      .where(ne(crmProject.status, 'paused'))
       .groupBy(crmProject.stage)
     const map = new Map(rows.map((r) => [r.stage, Number(r.value)]))
     return {

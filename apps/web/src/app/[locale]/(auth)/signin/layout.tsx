@@ -2,7 +2,7 @@ import { Metadata } from 'next'
 import { ReactNode } from 'react'
 
 export const metadata: Metadata = {
-  title: 'Welcome Back - login to continue'
+  title: '欢迎回来 - 登录继续'
 }
 
 interface SigninLayoutProps {

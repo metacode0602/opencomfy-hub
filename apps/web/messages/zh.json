@@ -13,8 +13,10 @@
     "login": {
       "title": "登录",
       "welcomeBack": "欢迎回来",
+      "description": "登录您的账号以继续",
       "email": "邮箱",
       "password": "密码",
+      "rememberMe": "记住我",
       "signIn": "登录",
       "signUpHint": "没有账号？注册",
       "forgotPassword": "忘记密码？",

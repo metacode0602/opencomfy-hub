@@ -11,6 +11,7 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
   push('月度账单', result.monthlyBills)
   push('充值', result.recharges)
   push('每日用量', result.dailyUsageBills)
+  push('每日任务明细', result.dailyConsumptionDetails)
   if ((result.billDetails.created ?? 0) + (result.billDetails.updated ?? 0) > 0) {
     parts.push(`账单明细 ${result.billDetails.created ?? 0} 行`)
   }
@@ -19,15 +20,60 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
 
 /** 租户账单同步 — 日期、金额、映射工具 */
 
-export const PLATFORM_AMOUNT_DIVISOR = 10_000
+/** billing_value / total_billing_value / discount_value — 10^6 平台单位 = 1 元 */
+export const PLATFORM_BILLING_VALUE_DIVISOR = 1_000_000
 
-export function platformAmountToRmb(raw: number | null | undefined): number {
+/** total_price（裸金属）— 10^4 平台单位 = 1 元 */
+export const PLATFORM_ORDER_AMOUNT_DIVISOR = 10_000
+
+/** total_amount（充值）— 1 分 = 0.01 元 */
+export const PLATFORM_RECHARGE_AMOUNT_DIVISOR = 100
+
+/** @deprecated 请使用 PLATFORM_ORDER_AMOUNT_DIVISOR */
+export const PLATFORM_AMOUNT_DIVISOR = PLATFORM_ORDER_AMOUNT_DIVISOR
+
+export function platformBillingValueToRmb(raw: number | null | undefined): number {
   if (raw == null || Number.isNaN(raw)) return 0
-  return raw / PLATFORM_AMOUNT_DIVISOR
+  return raw / PLATFORM_BILLING_VALUE_DIVISOR
 }
 
+export function platformOrderAmountToRmb(raw: number | null | undefined): number {
+  if (raw == null || Number.isNaN(raw)) return 0
+  return raw / PLATFORM_ORDER_AMOUNT_DIVISOR
+}
+
+export function platformBillingValueToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformBillingValueToRmb(raw).toFixed(4)
+}
+
+export function platformOrderAmountToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformOrderAmountToRmb(raw).toFixed(4)
+}
+
+/** 充值 total_amount：第三方金额，单位为分，÷100 为元 */
+export function platformRechargeAmountToRmb(raw: number | null | undefined): number {
+  if (raw == null || Number.isNaN(raw)) return 0
+  return raw / PLATFORM_RECHARGE_AMOUNT_DIVISOR
+}
+
+export function platformRechargeAmountToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformRechargeAmountToRmb(raw).toFixed(4)
+}
+
+/** @deprecated 裸金属请用 platformOrderAmountToRmb；充值请用 platformRechargeAmountToRmb */
+export function platformAmountToRmb(raw: number | null | undefined): number {
+  return platformOrderAmountToRmb(raw)
+}
+
+/** @deprecated 裸金属请用 platformOrderAmountToMoneyString；充值请用 platformRechargeAmountToMoneyString */
 export function platformAmountToMoneyString(raw: number | null | undefined): string {
-  return platformAmountToRmb(raw).toFixed(4)
+  return platformOrderAmountToMoneyString(raw)
 }
 
 export function moneyStringsEqual(a: string, b: string): boolean {
@@ -42,6 +88,56 @@ export function validateBillingDateRange(startDate?: string, endDate?: string) {
   }
   if (hasStart && hasEnd && startDate! > endDate!) {
     throw new Error('开始日期不能晚于结束日期')
+  }
+}
+
+const CST_TIMEZONE = 'Asia/Shanghai'
+
+/** 东八区自然日 YYYY-MM-DD */
+export function formatCstDate(date: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: CST_TIMEZONE }).format(date)
+}
+
+/** 日期字符串减 N 天（日历日，非时区感知边界；用于 YYYY-MM-DD 运算） */
+export function subtractCalendarDays(dateStr: string, days: number): string {
+  const [yearStr, monthStr, dayStr] = dateStr.split('-')
+  const y = Number(yearStr)
+  const m = Number(monthStr)
+  const d = Number(dayStr)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() - days)
+  return dt.toISOString().slice(0, 10)
+}
+
+/** 东八区当月 1 日 */
+export function cstMonthStartDate(referenceDateStr: string): string {
+  const [y, m] = referenceDateStr.split('-')
+  return `${y}-${m}-01`
+}
+
+/** 定时账单同步增量窗口 */
+export function computeBillingSyncWindow(params: {
+  cursorEndDate: string | null
+  safetyDays: number
+  now?: Date
+  initialStartDate?: string | null
+}): { startDate: string; endDate: string; skipped: boolean } {
+  const now = params.now ?? new Date()
+  const endDate = subtractCalendarDays(formatCstDate(now), params.safetyDays)
+
+  let startDate: string
+  if (params.cursorEndDate?.trim()) {
+    startDate = params.cursorEndDate.trim()
+  } else if (params.initialStartDate?.trim()) {
+    startDate = params.initialStartDate.trim()
+  } else {
+    startDate = cstMonthStartDate(endDate)
+  }
+
+  return {
+    startDate,
+    endDate,
+    skipped: startDate > endDate,
   }
 }
 
@@ -115,6 +211,11 @@ export function mapPlatformTaskType(taskType: string) {
   return { productLine: snake, label: taskType }
 }
 
+/** 自然日 → 账期月 YYYY-MM */
+export function usageMonthFromDate(usageDate: string): string {
+  return usageDate.slice(0, 7)
+}
+
 /** 从平台账期 start_time 提取东八区 usage_date（YYYY-MM-DD） */
 export function usageDateFromPlatformPeriod(startTime: string): string {
   const d = parsePlatformDateTime(startTime)
@@ -156,7 +257,14 @@ export function dueDateForBillMonth(billMonth: string): string {
 
 export function parsePlatformDateTime(raw: string): Date | null {
   if (!raw?.trim()) return null
-  const normalized = raw.trim().replace(' +00:00', 'Z').replace(' ', 'T')
+  const trimmed = raw.trim()
+  const direct = new Date(trimmed)
+  if (!Number.isNaN(direct.getTime())) return direct
+
+  const normalized = trimmed
+    .replace(' +00:00', 'Z')
+    .replace(' ', 'T')
+    .replace(/ \+(\d{2}:\d{2})$/, '+$1')
   const d = new Date(normalized)
   return Number.isNaN(d.getTime()) ? null : d
 }

@@ -4,16 +4,6 @@ export const stageSteps = [
   { key: 'converted', name: '已转正', requirements: ['正式运营', '持续维护', '定期回顾'] },
 ]
 
-export const consumptionTrend = [
-  { date: '05-01', amount: 8500 },
-  { date: '05-03', amount: 12000 },
-  { date: '05-05', amount: 9800 },
-  { date: '05-07', amount: 15600 },
-  { date: '05-09', amount: 11200 },
-  { date: '05-11', amount: 18900 },
-  { date: '05-13', amount: 14500 },
-]
-
 export function getRoleLabel(role: string) {
   switch (role) {
     case 'sales':

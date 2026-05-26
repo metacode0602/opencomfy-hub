@@ -4,10 +4,9 @@ import { eq } from 'drizzle-orm'
 import { financeBillingPeriodsDataAccess } from './billing-periods'
 import { FinanceError } from './errors'
 import { listIncomeEligibleProjects } from './single-income-projects'
-import type {
-  SharedPlatformTenantWarningDetail,
-  SingleIncomeProjectDetail,
-} from './single-income-types'
+import { buildValidationIssueRows } from '@/lib/finance/single-income-issue-rows'
+import type { SingleIncomeIssueRow, SingleIncomeProjectDetail } from '@/lib/finance/single-income-types'
+import type { SharedPlatformTenantWarningDetail } from './single-income-types'
 
 export type { SingleIncomeProjectDetail, SharedPlatformTenantWarningDetail }
 
@@ -20,6 +19,7 @@ export type ValidateSingleIncomeResult = {
   projectsIncludedList: SingleIncomeProjectDetail[]
   projectsMissingBill: SingleIncomeProjectDetail[]
   sharedPlatformTenantWarnings: SharedPlatformTenantWarningDetail[]
+  issueRows: SingleIncomeIssueRow[]
   canComputeSingleIncome: boolean
   canPreviewSingleIncome: boolean
 }
@@ -120,6 +120,17 @@ export async function validateSingleIncome(
     period.status !== 'published' &&
     period.status !== 'adjusted'
 
+  const projectDetailsById = new Map(
+    eligibleProjects.map((p) => [p.projectId, toProjectDetail(p)]),
+  )
+  const issueRows = buildValidationIssueRows({
+    projectDetailsById,
+    projectsMissingBill,
+    sharedPlatformTenantWarnings,
+    canPreviewSingleIncome,
+    canComputeSingleIncome,
+  })
+
   return {
     periodStatus: period.status,
     billMonth,
@@ -129,6 +140,7 @@ export async function validateSingleIncome(
     projectsIncludedList,
     projectsMissingBill,
     sharedPlatformTenantWarnings,
+    issueRows,
     canComputeSingleIncome,
     canPreviewSingleIncome,
   }

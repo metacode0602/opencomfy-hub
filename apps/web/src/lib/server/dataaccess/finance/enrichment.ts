@@ -72,7 +72,7 @@ async function listProjectsForPlatformTenant(
     .where(
       and(
         eq(billingTenant.platformTenantId, platformTenantId),
-        sql`${crmProject.status} <> 'archived'`,
+        sql`${crmProject.status} NOT IN ('archived', 'paused')`,
         or(
           eq(crmProject.primaryTenantId, billingTenant.id),
           eq(projectTenant.tenantId, billingTenant.id),

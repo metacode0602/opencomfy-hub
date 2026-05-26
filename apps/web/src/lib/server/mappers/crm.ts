@@ -74,6 +74,7 @@ export function mapUserStaffRow(row: {
   isDefaultAccountManager?: boolean
   isDefaultDeliveryManager?: boolean
   isDefaultProjectManager?: boolean
+  authUserId?: string | null
 }): UserStaff {
   return {
     id: row.id,
@@ -89,6 +90,7 @@ export function mapUserStaffRow(row: {
     is_default_account_manager: row.isDefaultAccountManager ?? false,
     is_default_delivery_manager: row.isDefaultDeliveryManager ?? false,
     is_default_project_manager: row.isDefaultProjectManager ?? false,
+    auth_user_id: row.authUserId ?? null,
   }
 }
 
@@ -398,9 +400,11 @@ export function mapActivityRow(row: {
   title: string
   description: string | null
   authorName: string | null
+  authorStaffId?: string | null
   authorRole: string | null
   metadata: unknown
   createdAt: Date
+  updatedAt?: Date | null
 }): Activity {
   return {
     id: row.id,
@@ -409,8 +413,10 @@ export function mapActivityRow(row: {
     title: row.title,
     description: row.description ?? '',
     author: row.authorName ?? '',
+    authorStaffId: row.authorStaffId ?? null,
     authorRole: (row.authorRole as Activity['authorRole']) ?? 'system',
     metadata: (row.metadata as Record<string, unknown>) ?? undefined,
     createdAt: toIsoDateTime(row.createdAt),
+    editedAt: row.updatedAt ? toIsoDateTime(row.updatedAt) : undefined,
   }
 }

@@ -15,10 +15,12 @@ import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
+import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
 } from '@/lib/server/dataaccess/crm/tenant-billing-import'
+import { billingScheduledSyncDataAccess } from '@/lib/server/dataaccess/crm/billing-scheduled-sync'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
@@ -69,6 +71,18 @@ const billingImportDateSchema = z.object({
     .optional(),
 })
 
+const projectBillingSyncSchema = z.object({
+  projectId: z.string().min(1),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  endDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+})
+
 const listFilterSchema = z.object({
   search: z.string().optional(),
   type: z.enum(['B', 'C', 'all']).optional(),
@@ -80,6 +94,7 @@ const projectFilterSchema = z.object({
   stage: z.string().optional(),
   status: z.string().optional(),
   tagIds: z.array(z.string()).optional(),
+  staffId: z.string().optional(),
 })
 
 export const crmRouter = createTRPCRouter({
@@ -132,10 +147,75 @@ export const crmRouter = createTRPCRouter({
     updateStage: adminProcedure
       .input(z.object({ id: z.string(), stage: z.enum(['lead', 'testing', 'converted']) }))
       .mutation(({ input }) => projectsDataAccess.updateStage(input.id, input.stage)),
+    updateStatus: adminProcedure
+      .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))
+      .mutation(({ input }) => projectsDataAccess.updateStatus(input.id, input.status)),
     stageCounts: protectedProcedure.query(() => projectsDataAccess.countByStage()),
+    listStaffFilterOptions: protectedProcedure.query(async ({ ctx }) => {
+      const [staff, currentUserStaffId] = await Promise.all([
+        projectsDataAccess.listStaffFilterOptions(),
+        staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
+      ])
+      return { staff, currentUserStaffId }
+    }),
     listActivities: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listActivitiesByProject(input.projectId)),
+    createActivity: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          comment: z.string().max(5000).default(''),
+          files: z
+            .array(
+              z.object({
+                fileName: z.string().min(1).max(255),
+                mimeType: z.string().max(128).default('application/octet-stream'),
+                fileBase64: z.string().min(1),
+              }),
+            )
+            .max(5)
+            .default([]),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await projectActivitiesDataAccess.createComment({
+            projectId: input.projectId,
+            comment: input.comment,
+            files: input.files,
+            user: ctx.user,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '发布动态失败' })
+        }
+      }),
+    updateActivity: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          activityId: z.string(),
+          comment: z.string().min(1).max(5000),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await projectActivitiesDataAccess.updateComment({
+            projectId: input.projectId,
+            activityId: input.activityId,
+            comment: input.comment,
+            user: ctx.user,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '更新评论失败' })
+        }
+      }),
     listConsumptions: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listConsumptionsByProject(input.projectId)),
@@ -144,10 +224,28 @@ export const crmRouter = createTRPCRouter({
         z.object({
           projectId: z.string(),
           productLine: z.string().optional(),
+          usageMonth: z.string().optional(),
         }),
       )
       .query(({ input }) =>
         billingDataAccess.listDailyConsumptionsByProject(input.projectId, {
+          productLine: input.productLine,
+          usageMonth: input.usageMonth,
+        }),
+      ),
+    listDailyConsumptionDetails: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          tenantId: z.string(),
+          usageDate: z.string(),
+          productLine: z.string(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.listDailyConsumptionDetailsByProject(input.projectId, {
+          tenantId: input.tenantId,
+          usageDate: input.usageDate,
           productLine: input.productLine,
         }),
       ),
@@ -190,6 +288,18 @@ export const crmRouter = createTRPCRouter({
             throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
           }
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '导入租户项目失败' })
+        }
+      }),
+    listBillingTenants: protectedProcedure
+      .input(z.object({ projectId: z.string().min(1) }))
+      .query(({ input }) => projectsDataAccess.listBillingTenantsForProject(input.projectId)),
+    syncBilling: adminProcedure
+      .input(projectBillingSyncSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBillingImportDataAccess.syncBillingForProject(input)
+        } catch (e) {
+          mapBillingImportError(e)
         }
       }),
   }),
@@ -312,6 +422,15 @@ export const crmRouter = createTRPCRouter({
     delete: adminProcedure.input(z.object({ id: z.string() })).mutation(({ input }) =>
       staffDataAccess.delete(input.id),
     ),
+    linkAuthUser: adminProcedure
+      .input(z.object({ staffId: z.string(), authUserId: z.string() }))
+      .mutation(({ input }) => staffDataAccess.linkAuthUser(input.staffId, input.authUserId)),
+    unlinkAuthUser: adminProcedure
+      .input(z.object({ staffId: z.string() }))
+      .mutation(({ input }) => staffDataAccess.unlinkAuthUser(input.staffId)),
+    searchLinkableAuthUsers: adminProcedure
+      .input(z.object({ query: z.string(), limit: z.number().int().min(1).max(50).optional() }))
+      .query(({ input }) => staffDataAccess.searchLinkableAuthUsers(input.query, input.limit)),
     listAssignments: protectedProcedure
       .input(z.object({ staffId: z.string() }))
       .query(({ input }) => staffDataAccess.listAssignments(input.staffId)),
@@ -385,5 +504,31 @@ export const crmRouter = createTRPCRouter({
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '保存项目成本分成失败' })
         }
       }),
+  }),
+
+  billingSync: createTRPCRouter({
+    getConfig: adminProcedure.query(() => billingScheduledSyncDataAccess.getConfig()),
+    runNow: adminProcedure
+      .input(
+        z
+          .object({
+            projectIds: z.array(z.string()).optional(),
+          })
+          .optional(),
+      )
+      .mutation(async ({ input }) => billingScheduledSyncDataAccess.runNow(input)),
+    listRuns: adminProcedure
+      .input(
+        z
+          .object({
+            limit: z.number().int().min(1).max(100).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => billingScheduledSyncDataAccess.listRuns(input)),
+    getRunById: adminProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(({ input }) => billingScheduledSyncDataAccess.getRunById(input.id)),
   }),
 })

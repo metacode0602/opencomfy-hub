@@ -58,8 +58,17 @@ export async function purgeBillingPeriodArtifacts(input: {
   fileType?: ImportFileType
   windowId?: string
   actorId?: string | null
+  /** file_type 清理时保留收入派生与 total_income 等字段（成本 Tab 重新生成上传） */
+  preserveIncomeDerived?: boolean
 }): Promise<void> {
-  const { billingPeriodId: periodId, scope, fileType, windowId, actorId } = input
+  const {
+    billingPeriodId: periodId,
+    scope,
+    fileType,
+    windowId,
+    actorId,
+    preserveIncomeDerived = false,
+  } = input
   financeLog('purge', `start scope=${scope}`, { periodId, fileType, windowId })
 
   await db.transaction(async (tx) => {
@@ -96,8 +105,19 @@ export async function purgeBillingPeriodArtifacts(input: {
           .delete(billingPeriodTenantProjectEnrichment)
           .where(eq(billingPeriodTenantProjectEnrichment.billingPeriodId, periodId))
       }
-      await deleteDerivedForPeriod(tx, periodId)
-      await resetPeriodTotals(tx, periodId)
+      if (preserveIncomeDerived) {
+        await purgeCostDerived(tx, periodId)
+        await tx
+          .update(billingPeriod)
+          .set({
+            totalCost: null,
+            totalGrossProfit: null,
+          })
+          .where(eq(billingPeriod.id, periodId))
+      } else {
+        await deleteDerivedForPeriod(tx, periodId)
+        await resetPeriodTotals(tx, periodId)
+      }
     } else if (scope === 'derived_income') {
       await deleteIncomeDerivedForPeriod(tx, periodId)
       await resetPeriodTotals(tx, periodId)

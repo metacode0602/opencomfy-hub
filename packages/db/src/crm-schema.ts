@@ -11,6 +11,7 @@
  */
 
 import { relations, sql } from "drizzle-orm"
+import { user } from "./auth-schema"
 import {
   bigint,
   boolean,
@@ -29,6 +30,9 @@ import {
 
 /** 金额 decimal(15,4) */
 const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
+
+/** 卡时 decimal(15,4)，与财务域 cardHours 一致 */
+const cardHours = (name: string) => numeric(name, { precision: 15, scale: 4 })
 
 /** 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数） */
 const tenantMoney = (name: string) => numeric(name, { precision: 20, scale: 4 })
@@ -100,8 +104,15 @@ export const billingTenant = pgTable(
     overdue_at: timestamp("overdue_at", { withTimezone: true }),
     credit_limit: tenantMoney("credit_limit"),
     balance: tenantMoney("balance").notNull().default("0"),
+    type: varchar("type", { length: 32 }).notNull().default("external"), // internal 内部租户 | external 外部租户
     /** 平台侧租户注册时间（OpenAPI create_time） */
     platformRegisteredAt: timestamp("platform_registered_at", { withTimezone: true }),
+    /** 定时账单同步：上次成功同步的数据结束日（东八区自然日） */
+    billingSyncCursorEndDate: date("billing_sync_cursor_end_date"),
+    billingSyncLastStartedAt: timestamp("billing_sync_last_started_at", { withTimezone: true }),
+    billingSyncLastFinishedAt: timestamp("billing_sync_last_finished_at", { withTimezone: true }),
+    billingSyncLastStatus: varchar("billing_sync_last_status", { length: 32 }),
+    billingSyncLastError: text("billing_sync_last_error"),
     ...crmTimestamps,
   },
   (table) => [
@@ -240,6 +251,7 @@ export const userStaff = pgTable(
     isDefaultAccountManager: boolean("is_default_account_manager").notNull().default(false),
     isDefaultDeliveryManager: boolean("is_default_delivery_manager").notNull().default(false),
     isDefaultProjectManager: boolean("is_default_project_manager").notNull().default(false),
+    authUserId: text("auth_user_id").references(() => user.id, { onDelete: "set null" }),
     ...crmTimestamps,
   },
   (table) => [
@@ -258,6 +270,9 @@ export const userStaff = pgTable(
     uniqueIndex("user_staff_default_project_manager_uk")
       .on(table.isDefaultProjectManager)
       .where(sql`${table.isDefaultProjectManager} = true`),
+    uniqueIndex("user_staff_auth_user_id_uk")
+      .on(table.authUserId)
+      .where(sql`${table.authUserId} is not null`),
   ],
 )
 
@@ -555,6 +570,7 @@ export const projectActivity = pgTable(
     authorRole: varchar("author_role", { length: 32 }),
     metadata: jsonb("metadata"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
   (table) => [index("project_activity_project_id_idx").on(table.projectId)],
 )
@@ -724,7 +740,7 @@ export const rechargeOrder = pgTable(
   (table) => [index("recharge_order_tenant_id_idx").on(table.tenantId)],
 )
 
-/** 客户消费明细，按天汇总 */
+/** 客户消费明细，按天汇总（租户 × 自然日 × 产品线） */
 export const consumptionUsageDaily = pgTable(
   "consumption_usage_daily",
   {
@@ -734,16 +750,85 @@ export const consumptionUsageDaily = pgTable(
       .notNull()
       .references(() => billingTenant.id, { onDelete: "restrict" }),
     usageDate: date("usage_date").notNull(),
+    usageMonth: varchar("usage_month", { length: 7 }).notNull(), // YYYY-MM，便于按月筛选
     productLine: varchar("product_line", { length: 64 }),
     unit: varchar("unit", { length: 32 }),
-    amount: money("amount"), // 消费金额
+    amount: money("amount"), // 总消费（元）
     balance: tenantMoney("balance"), // 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数）
     voucherAmount: money("voucher_amount"), // 算力券消费金额
-    balanceAmount: money("balance_amount"), // 余额消费金额
-    gpuSeconds: numeric("gpu_seconds"), // GPU 秒数
+    balanceAmount: money("balance_amount"), // 余额/实付消费金额
+    totalCardHours: cardHours("total_card_hours"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours").default("0"),
+    gpuSeconds: numeric("gpu_seconds"), // 遗留字段，新读路径用卡时列
   },
   (table) => [
+    uniqueIndex("consumption_usage_daily_tenant_date_pl_uk").on(
+      table.tenantId,
+      table.usageDate,
+      table.productLine,
+    ),
     index("consumption_usage_daily_tenant_date_idx").on(table.tenantId, table.usageDate),
+    index("consumption_usage_daily_tenant_month_pl_idx").on(
+      table.tenantId,
+      table.usageMonth,
+      table.productLine,
+    ),
+  ],
+)
+
+/**
+ * 租户每日消费明细（任务 / 机房×卡型）
+ * 设计依据：project-tenant-daily-consumption-design.md
+ */
+export const tenantConsumptionDailyDetail = pgTable(
+  "tenant_consumption_daily_detail",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    usageDate: date("usage_date").notNull(),
+    usageMonth: varchar("usage_month", { length: 7 }).notNull(),
+    productLine: varchar("product_line", { length: 64 }).notNull(),
+    dataCenterId: text("data_center_id"),
+    dataCenterCode: varchar("data_center_code", { length: 64 }).notNull(),
+    dataCenterName: varchar("data_center_name", { length: 255 }).notNull(),
+    gpuCardTypeId: text("gpu_card_type_id"),
+    gpuCardTypeCode: varchar("gpu_card_type_code", { length: 64 }).notNull(),
+    gpuCardTypeName: varchar("gpu_card_type_name", { length: 128 }),
+    platformTaskId: varchar("platform_task_id", { length: 64 }),
+    taskName: varchar("task_name", { length: 255 }),
+    totalAmount: money("total_amount").notNull(),
+    voucherAmount: money("voucher_amount").notNull().default("0"),
+    balanceAmount: money("balance_amount").notNull().default("0"),
+    totalCardHours: cardHours("total_card_hours"),
+    voucherCardHours: cardHours("voucher_card_hours").default("0"),
+    balanceCardHours: cardHours("balance_card_hours"),
+    source: varchar("source", { length: 32 }).notNull().default("platform_sync"),
+    platformIdempotencyKey: varchar("platform_idempotency_key", { length: 256 }).notNull(),
+    rawJson: jsonb("raw_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("tenant_consumption_daily_detail_idempotency_uk").on(
+      table.platformIdempotencyKey,
+    ),
+    index("tenant_consumption_daily_detail_tenant_date_pl_idx").on(
+      table.tenantId,
+      table.usageDate,
+      table.productLine,
+    ),
+    index("tenant_consumption_daily_detail_tenant_month_pl_idx").on(
+      table.tenantId,
+      table.usageMonth,
+      table.productLine,
+    ),
   ],
 )
 
@@ -834,6 +919,54 @@ export const engagementComment = pgTable(
   ],
 )
 
+/** 定时账单同步任务运行记录 */
+export const billingSyncJobRun = pgTable(
+  "billing_sync_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 32 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 32 }).notNull(),
+    syncEndDate: date("sync_end_date").notNull(),
+    safetyDays: integer("safety_days").notNull(),
+    projectCount: integer("project_count").notNull().default(0),
+    tenantCount: integer("tenant_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("billing_sync_job_run_started_at_idx").on(table.startedAt),
+    index("billing_sync_job_run_status_idx").on(table.status),
+  ],
+)
+
+/** 定时账单同步租户级明细 */
+export const billingSyncJobItem = pgTable(
+  "billing_sync_job_item",
+  {
+    id: text("id").primaryKey(),
+    jobRunId: text("job_run_id")
+      .notNull()
+      .references(() => billingSyncJobRun.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
+    startDate: date("start_date").notNull(),
+    endDate: date("end_date").notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    summary: text("summary"),
+    error: text("error"),
+  },
+  (table) => [
+    index("billing_sync_job_item_job_run_id_idx").on(table.jobRunId),
+    index("billing_sync_job_item_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // Relations（查询用）
 // ---------------------------------------------------------------------------
@@ -855,6 +988,26 @@ export const billingTenantRelations = relations(billingTenant, ({ one, many }) =
   }),
   recharges: many(recharge),
   projectLinks: many(projectTenant),
+  billingSyncJobItems: many(billingSyncJobItem),
+}))
+
+export const billingSyncJobRunRelations = relations(billingSyncJobRun, ({ many }) => ({
+  items: many(billingSyncJobItem),
+}))
+
+export const billingSyncJobItemRelations = relations(billingSyncJobItem, ({ one }) => ({
+  jobRun: one(billingSyncJobRun, {
+    fields: [billingSyncJobItem.jobRunId],
+    references: [billingSyncJobRun.id],
+  }),
+  tenant: one(billingTenant, {
+    fields: [billingSyncJobItem.tenantId],
+    references: [billingTenant.id],
+  }),
+  project: one(crmProject, {
+    fields: [billingSyncJobItem.projectId],
+    references: [crmProject.id],
+  }),
 }))
 
 export const crmProjectRelations = relations(crmProject, ({ one, many }) => ({
@@ -926,6 +1079,8 @@ export const tenantBillRelations = relations(tenantBill, ({ one, many }) => ({
 export type CustomerRow = typeof customer.$inferSelect
 export type NewCustomerRow = typeof customer.$inferInsert
 export type BillingTenantRow = typeof billingTenant.$inferSelect
+export type BillingSyncJobRunRow = typeof billingSyncJobRun.$inferSelect
+export type BillingSyncJobItemRow = typeof billingSyncJobItem.$inferSelect
 export type CrmProjectRow = typeof crmProject.$inferSelect
 export type ProjectTagRow = typeof projectTag.$inferSelect
 export type UserStaffRow = typeof userStaff.$inferSelect

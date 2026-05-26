@@ -1,23 +1,33 @@
 # 成本计算 v3 重设计方案（含逐步实例数据）
 
-> 版本：v3.3  
-> 日期：2026-05-25  
+> 版本：v3.4  
+> 日期：2026-05-26  
 > 状态：**方案设计**  
-> 关联：现网 `compute-cost.ts`、`finance-schema.ts`、`supply-schema.ts`  
-> 说明：本文按业务方最新口径重设计成本 pipeline；**每步附可手算验证的实例数据**。
+> 关联：现网 `compute-cost.ts`、`finance-schema.ts`、`supply-schema.ts`；成本页 `finance/[id]/cost/page.tsx`  
+> 说明：本文按业务方最新口径重设计成本 pipeline；**每步附可手算验证的实例数据**。v3.4 增加 **成本 Tab 重新生成**（仅成本、简化上传与定价口径）。
 
 ---
 
-## 0. 数据源约定（成本计算唯一 Raw 来源）
+## 0. 数据源约定（成本计算 Raw 来源）
 
-成本计算 **只读** 以下两张 Raw 表，全文以 **DB 表名** 描述，不依赖 import 层的 `file_type` 枚举名：
+成本计算 **只读** 以下两张 Raw 表。全文以 **DB 表名** 描述；import 层 `file_type` 映射见括号。
 
+### 0.1 成本 vs 收入 Raw 区分
 
-| Excel 业务文件    | 写入 Raw 表                             | 业务含义                     | 主要字段                                                                                                                                                          |
-| ------------- | ------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **客户消费明细**    | `billing_period_raw_tenant_bill`     | 卡时弹性消费（按租户×区域×GPU×卡时计量）  | `region_code`, `gpu_model`, `total_consumption`, `voucher_consumption`, `balance_consumption`, `total_card_hours`, `voucher_card_hours`, `balance_card_hours` |
-| **裸金属消费订单列表** | `billing_period_raw_baremetal_order` | 裸金属订单（设备型号、购买数量、机房、支付金额） | `idc_name`, `device_model`, `device_qty`, `purchase_qty_text`, `final_amount`, `order_id`                                                                     |
+| Excel 业务文件 | import `file_type` | 写入 Raw 表 | 用于 |
+| --- | --- | --- | --- |
+| **客户账单详情** | `tenant_bill` | `billing_period_raw_tenant_bill` | **成本**（卡时弹性） |
+| **裸金属消费订单列表** | `baremetal_order` | `billing_period_raw_baremetal_order` | **成本**（裸金属） |
+| **客户消费明细** | `customer_consumption` | `billing_period_raw_customer_consumption` | **收入**（Step I0～I4）；**不参与成本 pipeline** |
 
+> v3.3 及更早版本文档曾将「客户账单详情」误标为「客户消费明细」，以本表为准。
+
+**成本 Raw 主要字段**
+
+| Raw 表 | 业务含义 | 主要字段 |
+| --- | --- | --- |
+| `billing_period_raw_tenant_bill` | 卡时弹性消费（租户×区域×GPU×卡时） | `region_code`, `gpu_model`, `total_consumption`, `voucher_consumption`, `balance_consumption`, `total_card_hours`, `voucher_card_hours`, `balance_card_hours` |
+| `billing_period_raw_baremetal_order` | 裸金属订单 | `idc_name`, `device_model`, `device_qty`, `purchase_qty_text`, `final_amount`, `order_id`, `ordered_at` |
 
 ```text
 成本 pipeline 读路径：
@@ -25,11 +35,14 @@
   billing_period_raw_baremetal_order  ──► Step 2 kind=baremetal 补全
                                         ──► billing_period_cost_source_line
                                         ──► Step 4 聚合 + 定价 → platform_cost_monthly
+
+收入 pipeline（独立，成本重新生成不触碰）：
+  billing_period_raw_customer_consumption ──► agg / platform_income_monthly
 ```
 
 > **租户 Id 的用途**：Raw 中的 `tenant_platform_id` 仅用于 Step 2 解析 **项目 / 客户经理（staff_id、staff_name）**；结果写入 `source_line` 供审计。**成本 Tab 不展示租户列**，下游 **不** 按租户维度落库。
 
-### 0.2 派生层表职责（v3.3）
+### 0.2 派生层表职责
 
 
 | 表                                          | 职责                                  | 粒度            |
@@ -43,7 +56,7 @@
 
 ---
 
-## 0.1 与现网 v2.2 的差异（派生层改造）
+## 0.3 与现网 v2.2 的差异（派生层改造）
 
 
 | 维度       | 现网 v2.2                                     | 本方案 v3                                                                          |
@@ -125,9 +138,12 @@
 
 ## 2. Step 1 — 数据导入（Raw 层）
 
-### 2.1 导入：客户消费明细 Excel → `billing_period_raw_tenant_bill`
+> **首次创建账期**（`/finance/create`）需上传三类文件：客户消费明细（收入）、客户账单详情 + 裸金属（成本）。  
+> **成本 Tab 重新生成**（§10）仅替换后两类，**不要求**重传客户消费明细；详见 §10.2。
 
-> 卡时弹性消费：按 **租户 × 区域 × GPU 型号** 汇总消费与卡时。
+### 2.1 导入：客户账单详情 Excel → `billing_period_raw_tenant_bill`
+
+> 卡时弹性消费：按 **租户 × 区域 × GPU 型号** 汇总消费与卡时。`file_type = tenant_bill`。
 
 **Excel 列（建议）**：租户 Id、区域、GPU 型号、总消费、券消费、余额消费、总卡时、券卡时、余额卡时
 
@@ -150,7 +166,7 @@ INSERT billing_period_raw_tenant_bill × 3
 
 ### 2.2 导入：裸金属消费订单列表 Excel → `billing_period_raw_baremetal_order`
 
-> 裸金属订单：按 **租户 × 机房 × 设备型号 × 购买数量** 记录支付金额，计算阶段再折算卡时。
+> 裸金属订单：按 **租户 × 机房 × 设备型号 × 购买数量** 记录支付金额，计算阶段再折算卡时。`file_type = baremetal_order`。
 
 **Excel 列（建议）**：租户 Id、机房名称、设备型号、设备数量、购买数量、最终支付金额、订单号
 
@@ -574,18 +590,208 @@ flowchart TD
 | 5 账期   | monthly record 行                                     | `**billing_period**` 汇总字段                  |
 
 
-**purge 范围（重算成本）**：
+**purge 范围（重算成本，`scope = derived_cost`）**：
 
 ```text
 DELETE billing_period_cost_source_line
 DELETE billing_period_cost_pricing_snapshot
 DELETE platform_cost_monthly
--- 不删 Raw 表；不建 platform_cost_monthly_detail
+-- 不删 Raw 表；不删收入派生；不建 platform_cost_monthly_detail
 ```
+
+> 成本 Tab **重新生成**在重算前执行上述 purge，并在用户上传新文件时 **替换** 本账期 `tenant_bill` / `baremetal_order` 的 batch 与 Raw 行（§8.4）。整账期「重新生成」（`scope = full`）不在本文成本 Tab 流程内。
 
 ---
 
-## 8. Schema 迁移清单（建议）
+## 8. 成本 Tab 重新生成（v3.4）
+
+### 8.1 场景与入口
+
+用户在账期 **已存在** 且曾完成过成本计算后，于 **`/finance/[id]/cost`** 发起 **「重新生成成本」**：修正裸金属订单或客户账单详情，**仅重算成本毛利**，不影响已算收入与客户消费明细。
+
+| 项 | 说明 |
+| --- | --- |
+| 入口 | 成本页 CardHeader 操作区：「重新生成」→ 对话框 |
+| 权限 | 与 `computeCost` 相同（admin） |
+| 前置状态 | `imported` / `computed` / `draft`；**非** `published` / `adjusted` / `void`（已发布须先撤回） |
+| 产出 | 更新 `platform_cost_monthly`、`billing_period.total_cost` / `total_gross_profit`；**不**改 `total_income` 与 `platform_income_monthly` |
+
+### 8.2 与「整账期重新生成」的差异
+
+| 维度 | 账期列表 · `POST .../regenerate`（full） | 成本 Tab · 重新生成成本 |
+| --- | --- | --- |
+| purge | `scope=full`：全部 batch、Raw、收入与成本派生 | `derived_cost` + **仅替换** tenant_bill / baremetal 的 batch 与 Raw |
+| 需上传 | 客户消费明细 + 客户账单详情 + 裸金属 | **裸金属消费订单列表** + **客户账单详情** |
+| 客户消费明细 | 清空并重传 | **保留**，不读不写 |
+| 收入派生 | 清空 | **保留** |
+| 账期状态 afterward | `draft` | 保持可计算态；成功后 `computed` |
+| 刊例价时间窗 | 按平台定价变动拆多 window | **整月单 window**（§8.5） |
+
+### 8.3 用户流程（UI）
+
+```text
+1. 成本页点击「重新生成」
+2. 二次确认：将清空本账期已有成本计算结果（source_line / 定价快照 / platform_cost_monthly）
+3. 对话框内两个上传槽（**均必填**，不可沿用旧 Raw；可复用 create 页 baremetal + tenant_bill 组件）：
+   · 裸金属消费订单列表
+   · 客户账单详情（整账期一份，见 §8.5）
+4. 两个文件均解析成功后，「确认重新生成」**一次性**执行：
+   · purge derived_cost
+   · 替换 baremetal / tenant_bill Raw（§8.4）
+   · 执行成本 pipeline（§8.6）
+5. 关闭对话框，刷新成本表格
+```
+
+**不要求**：客户消费明细上传槽、收入试算、跨文件 B 端租户校验（客户消费 Excel 侧）。  
+**不支持**：跳过上传、仅对已有 Raw 重算。
+
+### 8.4 Raw 替换规则
+
+重新上传时 **Replace-in-Period**（与 `billing-period-import-design.md` §2 一致），但 **限定 file_type**：
+
+```text
+-- 用户提交新 baremetal 文件前/时：
+DELETE billing_period_import_batch WHERE period_id AND file_type = 'baremetal_order'  -- CASCADE raw 行
+INSERT batch + billing_period_raw_baremetal_order
+
+-- 用户提交新 tenant_bill 文件前/时（整月单 window，见 §8.5）：
+DELETE billing_period_import_batch WHERE period_id AND file_type = 'tenant_bill'
+INSERT batch + billing_period_raw_tenant_bill
+
+-- 不删除：
+billing_period_import_batch WHERE file_type = 'customer_consumption'
+billing_period_raw_customer_consumption
+platform_income_monthly / billing_period_agg_customer_consumption
+```
+
+磁盘：`FINANCE_IMPORT_STORAGE_ROOT` 下仅删除被替换的 baremetal / tenant_bill 源文件与 error report。
+
+### 8.5 定价口径：整月单窗口 + 分 kind 取 as-of（跳过「价格调整」校验）
+
+**背景**：首次创建账期时，若账期内 **平台刊例价变动**，系统会拆多个 `billing_period_tenant_bill_window`，要求 **分时间段** 上传客户账单，并在计算前校验各 window 的 `(region_code, gpu_model)` 成本配置（现网 `findMissingTenantBillPricing` + 平台刊例价缺失检查）。
+
+**成本 Tab 重新生成** 简化如下：
+
+| 规则 | 首次计算（create 页） | 成本 Tab 重新生成 |
+| --- | --- | --- |
+| tenant_bill window | 随 `detectPlatformListPriceWindows` 拆分 | **固定 1 个 window**：`window_start = period_start`，`window_end = period_end` |
+| 客户账单上传 | 每 window 各一份 | **整月一份** tenant_bill |
+| 计算前定价校验 | 各 window 的 `window_end` 作 as-of；缺失则 `pending_pricing` | **跳过** 多 window 平台刊例价变动校验 |
+| flex 定价 as-of | 各 line 的 `window_end` | **`period_end`**（整月单窗，取账期末生效成本） |
+| baremetal 定价 as-of | 订单 `ordered_at` | **仍为订单 `ordered_at`**（可能与账期末窗口成本不同） |
+| 计算前阻断校验 | 按上述 as-of 分别校验 | flex：`(region, gpu)` 在 **`period_end`** 须有成本配置；baremetal：按 **`ordered_at`** 逐单校验（与 create 裸金属逻辑一致） |
+
+```text
+重新生成模式 flag: mode = 'regenerate'
+
+-- flex / tenant_bill（整月单 window）
+persistCostPricingSnapshots (kind=flex):
+  window_id = 整月 window
+  asOfDate = billing_period.period_end
+  resolved = resolveUnitCostForDcCard(..., asOfDate)
+
+-- baremetal（与 §3.3 / create 一致）
+persistCostPricingSnapshots (kind=baremetal):
+  asOfDate = asOfFromOrderedAt(order.ordered_at)   -- 每订单独立
+  resolved = resolveUnitCostForDcCard(..., asOfDate)
+
+assertCostComputePreconditions (regenerate):
+  -- 不调用 findMissingTenantBillPricing 的多 window 逻辑
+  -- 仍调用 findMissingBaremetalPlatformListPrice（ordered_at 逐单 as-of）
+  -- flex：校验 period_end 日 (region_code, gpu_model) → 机房×卡型 成本配置存在
+```
+
+> **「只按当月生效刊例价」**（flex 侧）：客户账单详情不再因账月中段刊例价调整而分窗上传；弹性卡时成本统一以 **`period_end` 日** 有效的供应商成本配置定价。  
+> **裸金属**：仍按 **下单日 `ordered_at`** 取当时生效的成本配置（该时点可能与账期末配置不同，属预期行为）。
+
+flex source_line 的 `window_id`：重新生成模式下统一指向 **整月 window**。baremetal source_line 的 `window_id` 可空（与 §3.3 一致）。
+
+### 8.6 Pipeline（重新生成成本）
+
+与 §7 相同 Step 2～5，差异仅在 Step 1 范围与 Step 3 as-of：
+
+```mermaid
+flowchart TD
+    subgraph ui [成本 Tab 重新生成]
+        U1[上传 baremetal] --> R2
+        U2[上传 tenant_bill 整月] --> R1
+        P[purge derived_cost]
+    end
+
+    subgraph import [Step 1 局部 Raw 替换]
+        R1[billing_period_raw_tenant_bill]
+        R2[billing_period_raw_baremetal_order]
+    end
+
+    subgraph pipe [Step 2-5 与 §7 相同]
+        R1 --> SL[billing_period_cost_source_line]
+        R2 --> SL
+        SL --> SNAP["pricing_snapshot flex=period_end baremetal=ordered_at"]
+        SNAP --> PCM[platform_cost_monthly]
+        PCM --> BP[UPDATE billing_period total_cost / total_gross_profit]
+    end
+
+    P --> import
+    import --> pipe
+```
+
+| 步骤 | 重新生成成本 |
+| --- | --- |
+| 0 purge | `purgeCostDerived`；`total_cost` / `total_gross_profit` → NULL；**保留** `total_income` |
+| 1 导入 | **必须**重传并替换 baremetal + tenant_bill Raw；**不**动 customer_consumption |
+| 2 补全 | 同 §3 |
+| 3 定价快照 | flex：`as-of = period_end`、单 window；baremetal：`as-of = ordered_at`（逐单） |
+| 4 输出 | 同 §5 |
+| 5 账期 | 仅更新成本相关汇总字段；`status → computed` |
+
+### 8.7 API（建议）
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST .../import`（已有） | 对话框内分别上传 baremetal / tenant_bill；`replaceCostImports=true` 时先删对应 batch |
+| `POST .../regenerateCost` | 输入 `{ billingPeriodId }`；前置：**本账期** baremetal + tenant_bill 均已解析成功；内部：`purge(derived_cost)` → `computeBillingPeriodCost({ mode: 'regenerate' })` |
+
+`computeBillingPeriodCost` 增加可选参数：
+
+```typescript
+type ComputeCostOptions = {
+  billingPeriodId: string
+  actorId?: string | null
+  /** 默认 create；regenerate 启用 §8.5 口径 */
+  mode?: 'create' | 'regenerate'
+}
+```
+
+操作日志：`operation = 'regenerate_cost'`，`metadata.mode = 'regenerate'`。
+
+### 8.8 实例：重新生成后数据不变部分
+
+沿用 §1 账期 `bp-202604`：
+
+| 数据 | 首次计算后 | 重新生成（仅换 baremetal 一行金额）后 |
+| --- | --- | --- |
+| `billing_period_raw_customer_consumption` | 保留 | **不变** |
+| `platform_income_monthly` | 有 | **不变** |
+| `billing_period.total_income` | 有 | **不变** |
+| `billing_period_raw_tenant_bill` | 3 行 | 用户重传则 **整批替换** |
+| `platform_cost_monthly` | 3 record + sum | purge 后 **重算** |
+
+### 8.9 测试用例（重新生成）
+
+| # | 场景 | 期望 |
+| --- | --- | --- |
+| T9 | 成本页上传 baremetal + tenant_bill 后 regenerateCost | `derived_cost` 已 purge；新 Raw 生效；`platform_cost_monthly` 行数与 §5 一致 |
+| T10 | 重新生成 **不** 上传 customer_consumption | Raw / income 派生 **无变化** |
+| T11 | 账期内存在 2 个刊例价 window（create 场景） | 重新生成仅用 **1** 个整月 window；**不**要求分窗上传 |
+| T12a | flex 定价 as-of | tenant_bill 相关 snapshot 解析日 = `period_end` |
+| T12b | baremetal 定价 as-of | 各订单 snapshot 解析日 = 该订单 `ordered_at` 对应日期 |
+| T13 | `published` 账期点击重新生成 | 409，须先 unpublish |
+| T14 | 操作日志 | 存在 `regenerate_cost`，无 `regenerate`（full） |
+| T15 | 未重传两个文件即点确认 | 前端禁用 / 后端 412，不执行 purge |
+
+---
+
+## 9. Schema 迁移清单（建议）
 
 1. **Raw 表不变**
 2. **新建** `billing_period_cost_source_line`（kind + 统一计量列；含 tenant_id 仅审计）
@@ -599,12 +805,12 @@ DELETE platform_cost_monthly
 
 ---
 
-## 9. 测试用例（基于实例数据）
+## 10. 测试用例（基于实例数据 · 首次计算）
 
 
 | #   | 场景                    | 期望                                                                  |
 | --- | --------------------- | ------------------------------------------------------------------- |
-| T1  | 客户消费明细导入              | `billing_period_raw_tenant_bill` 3 行                                |
+| T1  | 客户账单详情导入              | `billing_period_raw_tenant_bill` 3 行                                |
 | T2  | 裸金属订单导入               | `billing_period_raw_baremetal_order` 2 行                            |
 | T3  | Step 2 source_line    | 5 行；kind=flex×3 + kind=baremetal×2；UK 不冲突                           |
 | T4  | 裸金属卡时                 | sl-bm-001=16；sl-bm-002=2688                                         |
@@ -625,5 +831,6 @@ DELETE platform_cost_monthly
 | v3.1 | 2026-05-25 | 修正 Raw 数据源映射                                                                                     |
 | v3.2 | 2026-05-25 | source_line 统一中间表（kind 区分）                                                                       |
 | v3.3 | 2026-05-25 | 取消 platform_cost_monthly_detail；source_line 直聚合写入扩展版 platform_cost_monthly；tenant_id 仅用于解析 staff |
+| v3.4 | 2026-05-26 | §0 区分客户账单详情 vs 客户消费明细；新增 §8 成本 Tab 重新生成（仅 baremetal+tenant_bill、整月单窗、purge derived_cost）；flex 用 period_end 定价，baremetal 仍用 ordered_at |
 
 

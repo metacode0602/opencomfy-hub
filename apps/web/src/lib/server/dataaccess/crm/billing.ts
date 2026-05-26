@@ -6,6 +6,7 @@ import type {
   Consumption,
   Coupon,
   DailyConsumption,
+  DailyConsumptionDetail,
   Order,
   OrderItem,
   PlatformTenant,
@@ -13,7 +14,6 @@ import type {
   Task,
 } from '@/lib/data/types'
 import {
-  mapActivityRow,
   mapBillRow,
   mapConsumptionRow,
   mapCouponRow,
@@ -24,14 +24,16 @@ import {
 } from '@/lib/server/mappers/crm'
 import { mapBillingTenantRow } from '@/lib/server/mappers/crm'
 import { projectsDataAccess } from './projects'
+import { projectActivitiesDataAccess } from './project-activities'
 import {
   billingTenant,
   commerceOrder,
   commerceOrderItem,
   computeTask,
   consumptionRecord,
+  consumptionUsageDaily,
+  tenantConsumptionDailyDetail,
   coupon,
-  projectActivity,
   recharge,
   tenantBill,
   tenantBillDetail,
@@ -48,7 +50,6 @@ async function tenantIdsForCustomer(customerId: string): Promise<string[]> {
 
 export const billingDataAccess = {
   async listTenantsByCustomer(customerId: string): Promise<PlatformTenant[]> {
-    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(billingTenant)
@@ -122,32 +123,125 @@ export const billingDataAccess = {
 
   async listDailyConsumptionsByProject(
     projectId: string,
-    options?: { productLine?: string },
+    options?: { productLine?: string; usageMonth?: string },
   ): Promise<DailyConsumption[]> {
-    const filters = [eq(consumptionRecord.projectId, projectId)]
-    if (options?.productLine) {
-      filters.push(eq(consumptionRecord.productLine, options.productLine))
-    }
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(projectId)
+    if (tenantIds.length === 0) return []
 
-    const usageDateExpr = sql<string>`date(${consumptionRecord.occurredAt})`
+    const filters = [inArray(consumptionUsageDaily.tenantId, tenantIds)]
+    if (options?.productLine) {
+      filters.push(eq(consumptionUsageDaily.productLine, options.productLine))
+    }
+    if (options?.usageMonth) {
+      filters.push(eq(consumptionUsageDaily.usageMonth, options.usageMonth))
+    }
 
     const rows = await db
       .select({
-        usageDate: usageDateExpr,
-        productLine: consumptionRecord.productLine,
-        amount: sql<string>`coalesce(sum(${consumptionRecord.amount}), 0)`,
-        recordCount: sql<number>`count(*)::int`,
+        id: consumptionUsageDaily.id,
+        tenantId: consumptionUsageDaily.tenantId,
+        tenantName: billingTenant.name,
+        usageDate: consumptionUsageDaily.usageDate,
+        usageMonth: consumptionUsageDaily.usageMonth,
+        productLine: consumptionUsageDaily.productLine,
+        amount: consumptionUsageDaily.amount,
+        voucherAmount: consumptionUsageDaily.voucherAmount,
+        balanceAmount: consumptionUsageDaily.balanceAmount,
+        totalCardHours: consumptionUsageDaily.totalCardHours,
+        voucherCardHours: consumptionUsageDaily.voucherCardHours,
+        balanceCardHours: consumptionUsageDaily.balanceCardHours,
+        taskCount: sql<number>`coalesce((
+          select count(*)::int from tenant_consumption_daily_detail d
+          where d.tenant_id = ${consumptionUsageDaily.tenantId}
+            and d.usage_date = ${consumptionUsageDaily.usageDate}
+            and d.product_line = ${consumptionUsageDaily.productLine}
+        ), 0)`.mapWith(Number),
       })
-      .from(consumptionRecord)
+      .from(consumptionUsageDaily)
+      .innerJoin(billingTenant, eq(consumptionUsageDaily.tenantId, billingTenant.id))
       .where(and(...filters))
-      .groupBy(usageDateExpr, consumptionRecord.productLine)
-      .orderBy(desc(usageDateExpr), consumptionRecord.productLine)
+      .orderBy(
+        desc(consumptionUsageDaily.usageDate),
+        billingTenant.name,
+        consumptionUsageDaily.productLine,
+      )
 
     return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      tenantName: row.tenantName,
       usageDate: String(row.usageDate).slice(0, 10),
-      productLine: row.productLine as DailyConsumption['productLine'],
+      usageMonth: row.usageMonth,
+      productLine: row.productLine ?? '',
       amount: toNumber(row.amount),
-      recordCount: Number(row.recordCount ?? 0),
+      voucherAmount: toNumber(row.voucherAmount),
+      balanceAmount: toNumber(row.balanceAmount),
+      totalCardHours: row.totalCardHours != null ? toNumber(row.totalCardHours) : null,
+      voucherCardHours: row.voucherCardHours != null ? toNumber(row.voucherCardHours) : null,
+      balanceCardHours: row.balanceCardHours != null ? toNumber(row.balanceCardHours) : null,
+      taskCount: Number(row.taskCount ?? 0),
+    }))
+  },
+
+  async listDailyConsumptionDetailsByProject(
+    projectId: string,
+    input: { usageDate: string; productLine: string; tenantId: string },
+  ): Promise<DailyConsumptionDetail[]> {
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(projectId)
+    if (!tenantIds.includes(input.tenantId)) return []
+
+    const rows = await db
+      .select({
+        id: tenantConsumptionDailyDetail.id,
+        tenantId: tenantConsumptionDailyDetail.tenantId,
+        tenantName: billingTenant.name,
+        usageDate: tenantConsumptionDailyDetail.usageDate,
+        productLine: tenantConsumptionDailyDetail.productLine,
+        dataCenterCode: tenantConsumptionDailyDetail.dataCenterCode,
+        dataCenterName: tenantConsumptionDailyDetail.dataCenterName,
+        gpuCardTypeCode: tenantConsumptionDailyDetail.gpuCardTypeCode,
+        gpuCardTypeName: tenantConsumptionDailyDetail.gpuCardTypeName,
+        platformTaskId: tenantConsumptionDailyDetail.platformTaskId,
+        taskName: tenantConsumptionDailyDetail.taskName,
+        totalAmount: tenantConsumptionDailyDetail.totalAmount,
+        voucherAmount: tenantConsumptionDailyDetail.voucherAmount,
+        balanceAmount: tenantConsumptionDailyDetail.balanceAmount,
+        totalCardHours: tenantConsumptionDailyDetail.totalCardHours,
+        voucherCardHours: tenantConsumptionDailyDetail.voucherCardHours,
+        balanceCardHours: tenantConsumptionDailyDetail.balanceCardHours,
+      })
+      .from(tenantConsumptionDailyDetail)
+      .innerJoin(billingTenant, eq(tenantConsumptionDailyDetail.tenantId, billingTenant.id))
+      .where(
+        and(
+          eq(tenantConsumptionDailyDetail.tenantId, input.tenantId),
+          eq(tenantConsumptionDailyDetail.usageDate, input.usageDate),
+          eq(tenantConsumptionDailyDetail.productLine, input.productLine),
+        ),
+      )
+      .orderBy(
+        desc(tenantConsumptionDailyDetail.totalAmount),
+        tenantConsumptionDailyDetail.taskName,
+      )
+
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      tenantName: row.tenantName,
+      usageDate: String(row.usageDate).slice(0, 10),
+      productLine: row.productLine,
+      dataCenterCode: row.dataCenterCode,
+      dataCenterName: row.dataCenterName,
+      gpuCardTypeCode: row.gpuCardTypeCode,
+      gpuCardTypeName: row.gpuCardTypeName,
+      platformTaskId: row.platformTaskId,
+      taskName: row.taskName,
+      totalAmount: toNumber(row.totalAmount),
+      voucherAmount: toNumber(row.voucherAmount),
+      balanceAmount: toNumber(row.balanceAmount),
+      totalCardHours: row.totalCardHours != null ? toNumber(row.totalCardHours) : null,
+      voucherCardHours: row.voucherCardHours != null ? toNumber(row.voucherCardHours) : null,
+      balanceCardHours: row.balanceCardHours != null ? toNumber(row.balanceCardHours) : null,
     }))
   },
 
@@ -251,11 +345,6 @@ export const billingDataAccess = {
   },
 
   async listActivitiesByProject(projectId: string): Promise<Activity[]> {
-    const rows = await db
-      .select()
-      .from(projectActivity)
-      .where(eq(projectActivity.projectId, projectId))
-      .orderBy(desc(projectActivity.createdAt))
-    return rows.map(mapActivityRow)
+    return projectActivitiesDataAccess.listByProject(projectId)
   },
 }

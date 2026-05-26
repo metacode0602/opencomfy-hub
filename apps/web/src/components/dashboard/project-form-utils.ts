@@ -104,10 +104,8 @@ export function validateProjectForm(values: ProjectFormValues): string | null {
   if (!values.name.trim()) return '请填写项目名称'
   if (!values.businessLineId) return '请选择业务线'
   if (!values.stage) return '请选择项目阶段'
-  if (!values.preSalesStaffId) return '请选择售前经理'
   if (!values.accountManagerStaffId) return '请选择客户经理'
   if (!values.deliveryManagerStaffId) return '请选择交付经理'
-  if (!values.projectManagerStaffId) return '请选择项目经理'
   return null
 }
 

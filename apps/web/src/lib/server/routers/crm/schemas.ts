@@ -57,10 +57,10 @@ export const customerUpsertSchema = z
   })
 
 export const projectStaffSchema = z.object({
-  preSalesStaffId: z.string().min(1),
+  preSalesStaffId: z.string(),
   accountManagerStaffId: z.string().min(1),
   deliveryManagerStaffId: z.string().min(1),
-  projectManagerStaffId: z.string().min(1),
+  projectManagerStaffId: z.string(),
 })
 
 export const tenantProjectImportFormSchema = z.object({
@@ -114,6 +114,8 @@ export const staffUpsertSchema = z.object({
   isDefaultAccountManager: z.boolean().optional().default(false),
   isDefaultDeliveryManager: z.boolean().optional().default(false),
   isDefaultProjectManager: z.boolean().optional().default(false),
+  authUserId: z.string().nullable().optional(),
+  createLoginAccount: z.boolean().optional().default(true),
 })
 
 export const staffListSchema = z
@@ -130,6 +132,7 @@ export const billingTenantUpdateSchema = z.object({
     name: z.string().min(1),
     phone: z.string().optional(),
     status: z.enum(['active', 'inactive', 'suspended']),
+    type: z.enum(['internal', 'external']),
     balance: z.number(),
     overdueAt: z.string().nullable().optional(),
     creditLimit: z.number().nullable().optional(),

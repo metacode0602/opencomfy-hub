@@ -12,8 +12,10 @@
     "login": {
       "title": "Login",
       "welcomeBack": "Welcome back",
+      "description": "Sign in to your account to continue",
       "email": "Email",
       "password": "Password",
+      "rememberMe": "Remember me",
       "signIn": "Sign In",
       "signUpHint": "Don't have an account? Sign up",
       "forgotPassword": "Forgot Password?",

@@ -112,7 +112,7 @@ async function listLinkedProjectsForBillingTenant(tenantId: string): Promise<
     .where(
       and(
         eq(billingTenant.id, tenantId),
-        sql`${crmProject.status} <> 'archived'`,
+        sql`${crmProject.status} NOT IN ('archived', 'paused')`,
         or(
           eq(crmProject.primaryTenantId, billingTenant.id),
           eq(projectTenant.tenantId, billingTenant.id),

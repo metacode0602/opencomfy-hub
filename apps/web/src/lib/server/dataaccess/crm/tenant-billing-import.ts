@@ -14,27 +14,38 @@ import {
   moneyStringsEqual,
   parsePlatformDateTime,
   payChannelLabel,
-  platformAmountToMoneyString,
-  platformAmountToRmb,
+  platformBillingValueToMoneyString,
+  platformBillingValueToRmb,
+  platformOrderAmountToMoneyString,
+  platformOrderAmountToRmb,
+  platformRechargeAmountToMoneyString,
+  platformRechargeAmountToRmb,
   summarizeSection,
   usageDateFromPlatformPeriod,
+  usageMonthFromDate,
   validateBillingDateRange,
 } from '@/lib/crm/tenant-billing-import-utils'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
   fetchPlatformBillDetailsForOverview,
+  fetchPlatformDailyTaskSummaries,
   fetchPlatformDailyUsageBills,
   fetchPlatformMetalOrders,
   fetchPlatformMonthlyBills,
   fetchPlatformRecharges,
   SuanliBillingApiError,
   type PlatformBillDetailRecord,
+  type PlatformDailyTaskSummaryRecord,
   type PlatformDailyUsageBillRecord,
   type PlatformMetalOrderRecord,
   type PlatformMonthlyBillRecord,
   type PlatformRechargeRecord,
 } from '@/lib/server/integrations/suanli-billing-api'
-import { BILLING_IMPORT_SECTION_DELAY_MS, delayBillingApi } from '@/lib/server/integrations/suanli-billing-api-throttle'
+import {
+  BILLING_API_PAGE_DELAY_MS,
+  BILLING_IMPORT_SECTION_DELAY_MS,
+  delayBillingApi,
+} from '@/lib/server/integrations/suanli-billing-api-throttle'
 import type {
   BillDetailPreviewItem,
   DailyUsageBillPreviewItem,
@@ -46,12 +57,17 @@ import type {
   TenantBillingImportPreviewResult,
   TenantBillingImportSection,
 } from '@/lib/types/tenant-billing-import'
-import type { PlatformImportBillingItemResult } from '@/lib/types/platform-tenant-import'
+import type {
+  PlatformImportBillingBatchResult,
+  PlatformImportBillingItemResult,
+} from '@/lib/types/platform-tenant-import'
+import { projectsDataAccess } from './projects'
 import {
   billingTenant,
   commerceOrder,
   commerceOrderItem,
   consumptionUsageDaily,
+  tenantConsumptionDailyDetail,
   recharge,
   tenantBill,
   tenantBillDetail,
@@ -59,6 +75,11 @@ import {
 import { and, eq, inArray } from 'drizzle-orm'
 
 const PREVIEW_TTL_MS = 15 * 60 * 1000
+
+/** 平台任务明细暂未返回机房/卡型时的占位 */
+const DETAIL_DC_CODE_NA = '_na'
+const DETAIL_DC_NAME_NA = '—'
+const DETAIL_GPU_CODE_NA = '_na'
 
 type BillDetailLine = {
   platformKey: string
@@ -93,6 +114,11 @@ type CachedBillingImport = {
     record: PlatformDailyUsageBillRecord
     usageDate: string
     productLine: string
+  }>
+  dailyTaskDetails: Array<{
+    usageDate: string
+    productLine: string
+    record: PlatformDailyTaskSummaryRecord
   }>
   billDetailGroups: BillDetailGroup[]
   billDetailItems: BillDetailPreviewItem[]
@@ -150,9 +176,9 @@ function expandBillDetails(
       if (billingRaw === 0 && discountRaw === 0) continue
 
       const { productLine, resourceName } = mapPlatformProductLine(platformKey)
-      const amount = platformAmountToMoneyString(billingRaw)
-      const couponAmount = platformAmountToMoneyString(discountRaw)
-      const balanceAmount = platformAmountToRmb(billingRaw - discountRaw).toFixed(4)
+      const amount = platformBillingValueToMoneyString(billingRaw)
+      const couponAmount = platformBillingValueToMoneyString(discountRaw)
+      const balanceAmount = platformBillingValueToRmb(billingRaw - discountRaw).toFixed(4)
 
       lines.push({
         platformKey,
@@ -170,9 +196,9 @@ function expandBillDetails(
         billMonth,
         productLine,
         resourceName,
-        amountRmb: platformAmountToRmb(billingRaw),
-        couponAmountRmb: platformAmountToRmb(discountRaw),
-        balanceAmountRmb: platformAmountToRmb(billingRaw - discountRaw),
+        amountRmb: platformBillingValueToRmb(billingRaw),
+        couponAmountRmb: platformBillingValueToRmb(discountRaw),
+        balanceAmountRmb: platformBillingValueToRmb(billingRaw - discountRaw),
       })
     }
 
@@ -202,7 +228,7 @@ function buildMetalPreview(
   const cached: CachedBillingImport['metalOrders'] = []
 
   for (const record of records) {
-    const amount = platformAmountToMoneyString(record.total_price)
+    const amount = platformOrderAmountToMoneyString(record.total_price)
     const existing = existingByOrderNo.get(record.order_no)
     let action: TenantBillingImportAction = 'create'
     if (existing) {
@@ -216,7 +242,7 @@ function buildMetalPreview(
       orderNo: record.order_no,
       status: record.status === 'Finished' ? '已完成' : record.status,
       idcName: record.idc_name ?? '—',
-      amountRmb: platformAmountToRmb(record.total_price),
+      amountRmb: platformOrderAmountToRmb(record.total_price),
       deviceCount: record.device_count ?? 0,
       gpuSummary: formatGpuSummary(record.gpu_models),
       createTime: record.create_time.replace(' +00:00', '').slice(0, 19),
@@ -241,9 +267,9 @@ function buildMonthlyBillPreview(
 
   for (const record of records) {
     const billMonth = billMonthFromPlatformPeriod(record.start_time)
-    const totalAmount = platformAmountToMoneyString(record.total_billing_value)
-    const couponAmount = platformAmountToMoneyString(record.total_discount_value)
-    const balanceAmount = platformAmountToRmb(
+    const totalAmount = platformBillingValueToMoneyString(record.total_billing_value)
+    const couponAmount = platformBillingValueToMoneyString(record.total_discount_value)
+    const balanceAmount = platformBillingValueToRmb(
       record.total_billing_value - record.total_discount_value,
     ).toFixed(4)
 
@@ -264,9 +290,9 @@ function buildMonthlyBillPreview(
       billMonth,
       periodStart: record.start_time,
       periodEnd: record.end_time,
-      totalAmountRmb: platformAmountToRmb(record.total_billing_value),
-      couponAmountRmb: platformAmountToRmb(record.total_discount_value),
-      balanceAmountRmb: platformAmountToRmb(
+      totalAmountRmb: platformBillingValueToRmb(record.total_billing_value),
+      couponAmountRmb: platformBillingValueToRmb(record.total_discount_value),
+      balanceAmountRmb: platformBillingValueToRmb(
         record.total_billing_value - record.total_discount_value,
       ),
     })
@@ -291,9 +317,9 @@ function buildDailyUsagePreview(
   for (const record of records) {
     const usageDate = usageDateFromPlatformPeriod(record.start_time)
     const { productLine, label: taskTypeLabel } = mapPlatformTaskType(record.task_type)
-    const amount = platformAmountToMoneyString(record.total_billing_value)
-    const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
-    const balanceAmount = platformAmountToRmb(
+    const amount = platformBillingValueToMoneyString(record.total_billing_value)
+    const voucherAmount = platformBillingValueToMoneyString(record.total_discount_value)
+    const balanceAmount = platformBillingValueToRmb(
       record.total_billing_value - record.total_discount_value,
     ).toFixed(4)
     const diffKey = `${usageDate}:${productLine}`
@@ -317,9 +343,9 @@ function buildDailyUsagePreview(
       productLine,
       periodStart: record.start_time,
       periodEnd: record.end_time,
-      totalAmountRmb: platformAmountToRmb(record.total_billing_value),
-      couponAmountRmb: platformAmountToRmb(record.total_discount_value),
-      balanceAmountRmb: platformAmountToRmb(
+      totalAmountRmb: platformBillingValueToRmb(record.total_billing_value),
+      couponAmountRmb: platformBillingValueToRmb(record.total_discount_value),
+      balanceAmountRmb: platformBillingValueToRmb(
         record.total_billing_value - record.total_discount_value,
       ),
     })
@@ -339,7 +365,7 @@ function buildRechargePreview(
   const cached: CachedBillingImport['recharges'] = []
 
   for (const record of records) {
-    const amount = platformAmountToMoneyString(record.total_amount)
+    const amount = platformRechargeAmountToMoneyString(record.total_amount)
     const mappedStatus = mapRechargeStatus(record.status)
     const existing = existingByTx.get(record.order_id)
     let action: TenantBillingImportAction = 'create'
@@ -355,7 +381,7 @@ function buildRechargePreview(
       key: `recharge-${record.id}`,
       action,
       transactionId: record.order_id,
-      amountRmb: platformAmountToRmb(record.total_amount),
+      amountRmb: platformRechargeAmountToRmb(record.total_amount),
       payChannel: payChannelLabel(mapPayChannel(record.pay_channel)),
       status: record.status === 'Completed' ? '已完成' : record.status,
       createTime: record.create_time.replace(' +08:00', '').slice(0, 19),
@@ -491,6 +517,40 @@ export const tenantBillingImportDataAccess = {
           ? dailyUsageRes.reason.message
           : '每日用量账单拉取失败'
       crmWarn('tenant-billing-import', 'daily usage failed', { traceId, err: dailyUsageError })
+    }
+
+    const dailyTaskDetails: CachedBillingImport['dailyTaskDetails'] = []
+    let dailyTaskDetailsError: string | undefined
+
+    if (dailyUsageRecords.length > 0 && !dailyUsageError) {
+      try {
+        for (let i = 0; i < dailyUsageRecords.length; i++) {
+          const row = dailyUsageRecords[i]!
+          if (i > 0) {
+            await delayBillingApi(BILLING_API_PAGE_DELAY_MS, 'daily_task_summary:interval')
+          }
+          const tasks = await fetchPlatformDailyTaskSummaries({
+            platformTenantId: tenant.platformTenantId!,
+            taskType: row.task_type,
+            startTime: row.start_time,
+            endTime: row.end_time,
+            traceId,
+          })
+          const usageDate = usageDateFromPlatformPeriod(row.start_time)
+          const { productLine } = mapPlatformTaskType(row.task_type)
+          for (const task of tasks) {
+            if (!task.task_id) continue
+            dailyTaskDetails.push({ usageDate, productLine, record: task })
+          }
+        }
+      } catch (e) {
+        dailyTaskDetailsError =
+          e instanceof Error ? e.message : '每日任务消费明细拉取失败'
+        crmWarn('tenant-billing-import', 'daily task details failed', {
+          traceId,
+          err: dailyTaskDetailsError,
+        })
+      }
     }
 
     if (billRecords.length > 0) {
@@ -658,6 +718,7 @@ export const tenantBillingImportDataAccess = {
       monthlyBills: billsBuilt.cached,
       recharges: rechargesBuilt.cached,
       dailyUsageBills: dailyUsageBuilt.cached,
+      dailyTaskDetails,
       billDetailGroups,
       billDetailItems,
     })
@@ -688,7 +749,9 @@ export const tenantBillingImportDataAccess = {
       bills: billsBuilt.preview.length,
       recharges: rechargesBuilt.preview.length,
       dailyUsage: dailyUsageBuilt.preview.length,
+      dailyTaskDetails: dailyTaskDetails.length,
       details: billDetailItems.length,
+      dailyTaskDetailsError,
     })
 
     return result
@@ -709,6 +772,7 @@ export const tenantBillingImportDataAccess = {
       monthlyBills: { created: 0, updated: 0, errors: [] },
       recharges: { created: 0, updated: 0, errors: [] },
       dailyUsageBills: { created: 0, updated: 0, errors: [] },
+      dailyConsumptionDetails: { created: 0, updated: 0, errors: [] },
       billDetails: { created: 0, updated: 0, deleted: 0, errors: [] },
     }
 
@@ -720,9 +784,9 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record, billMonth } = item
-            const totalAmount = platformAmountToMoneyString(record.total_billing_value)
-            const couponAmount = platformAmountToMoneyString(record.total_discount_value)
-            const balanceAmount = platformAmountToRmb(
+            const totalAmount = platformBillingValueToMoneyString(record.total_billing_value)
+            const couponAmount = platformBillingValueToMoneyString(record.total_discount_value)
+            const balanceAmount = platformBillingValueToRmb(
               record.total_billing_value - record.total_discount_value,
             ).toFixed(4)
             const periodStart = parsePlatformDateTime(record.start_time)
@@ -833,9 +897,9 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record, usageDate, productLine } = item
-            const amount = platformAmountToMoneyString(record.total_billing_value)
-            const voucherAmount = platformAmountToMoneyString(record.total_discount_value)
-            const balanceAmount = platformAmountToRmb(
+            const amount = platformBillingValueToMoneyString(record.total_billing_value)
+            const voucherAmount = platformBillingValueToMoneyString(record.total_discount_value)
+            const balanceAmount = platformBillingValueToRmb(
               record.total_billing_value - record.total_discount_value,
             ).toFixed(4)
             const rowId = `usage-daily-${cached.tenantId}-${usageDate}-${productLine}`
@@ -853,6 +917,7 @@ export const tenantBillingImportDataAccess = {
               customerId: cached.customerId,
               tenantId: cached.tenantId,
               usageDate,
+              usageMonth: usageMonthFromDate(usageDate),
               productLine,
               unit: 'day',
               amount,
@@ -885,11 +950,74 @@ export const tenantBillingImportDataAccess = {
           }
         }
 
+        for (const item of cached.dailyTaskDetails) {
+          try {
+            const { record, usageDate, productLine } = item
+            const totalAmount = platformBillingValueToMoneyString(record.billing_value)
+            const voucherAmount = platformBillingValueToMoneyString(record.discount_value)
+            const balanceAmount = platformBillingValueToRmb(
+              record.billing_value - record.discount_value,
+            ).toFixed(4)
+            const idempotencyKey = `${cached.tenantId}|${usageDate}|${productLine}|task|${record.task_id}`
+            const rowId = `usage-detail-${cached.tenantId}-${usageDate}-${productLine}-${record.task_id}`
+
+            const existing = await tx.query.tenantConsumptionDailyDetail.findFirst({
+              where: eq(tenantConsumptionDailyDetail.platformIdempotencyKey, idempotencyKey),
+              columns: { id: true },
+            })
+
+            const payload = {
+              customerId: cached.customerId,
+              tenantId: cached.tenantId,
+              usageDate,
+              usageMonth: usageMonthFromDate(usageDate),
+              productLine,
+              dataCenterId: null,
+              dataCenterCode: DETAIL_DC_CODE_NA,
+              dataCenterName: DETAIL_DC_NAME_NA,
+              gpuCardTypeId: null,
+              gpuCardTypeCode: DETAIL_GPU_CODE_NA,
+              gpuCardTypeName: null,
+              platformTaskId: String(record.task_id),
+              taskName: record.task_name || null,
+              totalAmount,
+              voucherAmount,
+              balanceAmount,
+              source: 'platform_sync',
+              platformIdempotencyKey: idempotencyKey,
+              rawJson: record,
+            }
+
+            if (existing) {
+              await tx
+                .update(tenantConsumptionDailyDetail)
+                .set(payload)
+                .where(eq(tenantConsumptionDailyDetail.id, existing.id))
+              result.dailyConsumptionDetails.updated += 1
+            } else {
+              await tx.insert(tenantConsumptionDailyDetail).values({ id: rowId, ...payload })
+              result.dailyConsumptionDetails.created += 1
+            }
+          } catch (e) {
+            const message = e instanceof Error ? e.message : '任务明细写入失败'
+            result.dailyConsumptionDetails.errors.push({
+              key: `${item.usageDate}:${item.record.task_id}`,
+              message,
+            })
+            crmWarn('tenant-billing-import', 'daily task detail row failed', {
+              traceId,
+              usageDate: item.usageDate,
+              taskId: item.record.task_id,
+              err: message,
+            })
+          }
+        }
+
         for (const item of cached.recharges) {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformAmountToMoneyString(record.total_amount)
+            const amount = platformRechargeAmountToMoneyString(record.total_amount)
             const existing = await tx.query.recharge.findFirst({
               where: eq(recharge.transactionId, record.order_id),
               columns: { id: true },
@@ -904,8 +1032,9 @@ export const tenantBillingImportDataAccess = {
               refundAmount: '0',
               remark: record.remark ?? null,
               createdAt: parsePlatformDateTime(record.create_time) ?? new Date(),
-              completedAt:
-                parsePlatformDateTime(record.last_update_time ?? record.create_time) ?? new Date(),
+              completedAt: record.last_update_time
+                ? parsePlatformDateTime(record.last_update_time)
+                : null,
             }
 
             if (existing) {
@@ -925,7 +1054,7 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformAmountToMoneyString(record.total_price)
+            const amount = platformOrderAmountToMoneyString(record.total_price)
             const orderId = `metal-${record.order_id}`
             const existing = await tx.query.commerceOrder.findFirst({
               where: eq(commerceOrder.orderNo, record.order_no),
@@ -979,14 +1108,14 @@ export const tenantBillingImportDataAccess = {
 
             for (let i = 0; i < models.length; i++) {
               const g = models[i]!
-              const lineTotal = platformAmountToMoneyString(g.total_price ?? record.total_price)
+              const lineTotal = platformOrderAmountToMoneyString(g.total_price ?? record.total_price)
               const qty = g.gpu_count ?? 1
               await tx.insert(commerceOrderItem).values({
                 id: `${targetOrderId}-item-${i}`,
                 orderId: targetOrderId,
                 name: g.gpu_model ?? 'GPU',
                 quantity: String(qty),
-                unitPrice: platformAmountToRmb(Number(lineTotal) / qty).toFixed(4),
+                unitPrice: platformOrderAmountToRmb(Number(lineTotal) / qty).toFixed(4),
                 total: lineTotal,
                 sortOrder: i,
               })
@@ -1072,6 +1201,59 @@ export const tenantBillingImportDataAccess = {
         success: false,
         error: e instanceof Error ? e.message : '账单导入失败',
       }
+    }
+  },
+
+  async syncBillingForProject(input: {
+    projectId: string
+    startDate?: string
+    endDate?: string
+  }): Promise<PlatformImportBillingBatchResult> {
+    validateBillingDateRange(input.startDate, input.endDate)
+
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(input.projectId)
+    if (tenantIds.length === 0) {
+      throw new Error('未找到关联计费租户')
+    }
+
+    const tenantRows = await db
+      .select({
+        id: billingTenant.id,
+        name: billingTenant.name,
+        platformTenantId: billingTenant.platformTenantId,
+      })
+      .from(billingTenant)
+      .where(inArray(billingTenant.id, tenantIds))
+
+    const tenantById = new Map(tenantRows.map((row) => [row.id, row]))
+    const items: PlatformImportBillingItemResult[] = []
+
+    for (const tenantId of tenantIds) {
+      const tenant = tenantById.get(tenantId)
+      if (!tenant) continue
+
+      if (!tenant.platformTenantId?.trim()) {
+        items.push({
+          platformTenantId: '',
+          tenantName: tenant.name,
+          success: false,
+          error: '未关联平台租户 ID',
+        })
+        continue
+      }
+
+      const result = await tenantBillingImportDataAccess.directImport({
+        tenantId: tenant.id,
+        startDate: input.startDate,
+        endDate: input.endDate,
+      })
+      items.push(result)
+    }
+
+    return {
+      items,
+      successCount: items.filter((item) => item.success).length,
+      failedCount: items.filter((item) => !item.success).length,
     }
   },
 }

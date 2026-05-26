@@ -39,6 +39,7 @@ const importSchema = z.object({
   /** base64 encoded file content */
   fileBase64: z.string().min(1),
   windowId: z.string().optional(),
+  preserveIncomeDerived: z.boolean().optional(),
 })
 
 const allocationItemSchema = z.object({
@@ -98,6 +99,7 @@ export const financeRouter = createTRPCRouter({
           buffer,
           actorId,
           windowId: input.windowId,
+          preserveIncomeDerived: input.preserveIncomeDerived,
         })
       } catch (e) {
         mapFinanceError(e)
@@ -162,6 +164,34 @@ export const financeRouter = createTRPCRouter({
         try {
           const actorId = await resolveFinanceActorId(ctx.user)
           return await financeBillingPeriodsDataAccess.computeBillingPeriodCost({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    prepareRegenerateCost: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.prepareRegenerateCost(
+            input.billingPeriodId,
+            actorId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    regenerateCost: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.regenerateCost({
             billingPeriodId: input.billingPeriodId,
             actorId,
           })

@@ -26,7 +26,6 @@ export const contractsDataAccess = {
   },
 
   async listByCustomerId(customerId: string): Promise<Contract[]> {
-    await ensureCrmSeeded()
     const rows = await db.select().from(contract).where(eq(contract.customerId, customerId))
     const allProjects = await db.select().from(crmProject)
     const cust = await db.query.customer.findFirst({ where: eq(customer.id, customerId) })

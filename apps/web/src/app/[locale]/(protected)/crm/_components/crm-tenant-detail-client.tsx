@@ -38,6 +38,10 @@ function formatCustomerType(type: "B" | "C") {
   return type === "B" ? "企业" : "个人"
 }
 
+function formatTenantType(type: "internal" | "external") {
+  return type === "internal" ? "内部租户" : "外部租户"
+}
+
 function formatMoney(amount: number) {
   return amount.toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
@@ -139,6 +143,7 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
           <CardContent className="space-y-4">
             <ReadOnly label="租户显示名" value={data.name} />
             <ReadOnly label="租户手机号" value={data.phone ?? "—"} />
+            <ReadOnly label="租户类型" value={formatTenantType(data.type)} />
             <ReadOnly label="状态" value={formatStatus(data.status)} />
             <ReadOnly label="余额(元)" value={formatMoney(data.balance)} />
             <ReadOnly label="欠费时间" value={formatDateTime(data.overdueAt)} />

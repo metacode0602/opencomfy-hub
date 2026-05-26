@@ -53,6 +53,15 @@ export function mergeIncomeRowsWithOverrides(
   return rows.map((row) => applyIncomeOverride(row, overrides[row.id]))
 }
 
+export function sortIncomeRowsByTotalConsumptionDesc(
+  rows: PlatformIncomeMonthly[],
+): PlatformIncomeMonthly[] {
+  return [...rows].sort(
+    (a, b) =>
+      parseMoney(b.total_consumption) - parseMoney(a.total_consumption),
+  )
+}
+
 export function validateMoneyInput(raw: string): string | null {
   const trimmed = raw.trim()
   if (trimmed === "") return "请输入金额"

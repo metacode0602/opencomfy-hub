@@ -731,6 +731,53 @@ export async function findMissingTenantBillPricing(input: {
   return missing
 }
 
+export async function findMissingTenantBillPricingAtPeriodEnd(input: {
+  periodId: string
+  periodEnd: string
+}): Promise<MissingPricingIssue[]> {
+  const batches = await db.query.billingPeriodImportBatch.findMany({
+    where: and(
+      eq(billingPeriodImportBatch.billingPeriodId, input.periodId),
+      eq(billingPeriodImportBatch.fileType, 'tenant_bill'),
+      eq(billingPeriodImportBatch.parseStatus, 'ok'),
+    ),
+  })
+  if (batches.length === 0) return []
+
+  const ctx = await loadPricingResolveContext()
+  const missing: MissingPricingIssue[] = []
+  const pairs = new Map<string, MissingPricingPair>()
+
+  for (const batch of batches) {
+    const rows = await db
+      .select({
+        regionCode: billingPeriodRawTenantBill.regionCode,
+        gpuModel: billingPeriodRawTenantBill.gpuModel,
+      })
+      .from(billingPeriodRawTenantBill)
+      .where(eq(billingPeriodRawTenantBill.batchId, batch.id))
+    for (const row of rows) {
+      const key = pairKey(row.regionCode, row.gpuModel)
+      if (!pairs.has(key)) {
+        pairs.set(key, { regionCode: row.regionCode, gpuModel: row.gpuModel })
+      }
+    }
+  }
+
+  for (const pair of pairs.values()) {
+    const resolved = await resolveUnitCostForPair(pair, input.periodEnd, ctx)
+    if (!resolved) {
+      const issue = await diagnoseMissingPricingForPair(pair, input.periodEnd, ctx)
+      missing.push({
+        ...issue,
+        windowEnd: input.periodEnd,
+      })
+    }
+  }
+
+  return missing
+}
+
 export async function findMissingBaremetalPlatformListPrice(input: {
   periodId: string
 }): Promise<MissingPricingIssue[]> {

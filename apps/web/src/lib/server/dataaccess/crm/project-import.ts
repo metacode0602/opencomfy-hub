@@ -119,7 +119,6 @@ async function loadTenantsByPlatformIds(platformIds: string[]) {
 }
 
 async function resolveBusinessLineId(name: string | null): Promise<{ id: string; name: string }> {
-  // await ensureCrmSeeded()
   if (name?.trim()) {
     const byName = await db.query.businessLine.findFirst({
       where: and(eq(businessLine.status, 'active'), ilike(businessLine.name, name.trim())),

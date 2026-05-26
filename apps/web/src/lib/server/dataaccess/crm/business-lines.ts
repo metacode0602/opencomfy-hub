@@ -6,7 +6,6 @@ import { asc, eq } from 'drizzle-orm'
 
 export const businessLinesDataAccess = {
   async listActive(): Promise<BusinessLine[]> {
-    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(businessLine)

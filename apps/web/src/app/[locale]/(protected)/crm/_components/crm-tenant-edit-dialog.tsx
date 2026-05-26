@@ -29,6 +29,7 @@ type FormState = {
   tenantName: string
   phone: string
   tenantStatus: "active" | "inactive" | "suspended"
+  tenantType: "internal" | "external"
   balance: string
   overdueAt: string
   creditLimit: string
@@ -59,6 +60,7 @@ function formFromDetail(d: BillingTenantDetail): FormState {
     tenantName: d.name,
     phone: d.phone ?? "",
     tenantStatus: d.status as FormState["tenantStatus"],
+    tenantType: d.type,
     balance: String(d.balance),
     overdueAt: toLocalInput(d.overdueAt),
     creditLimit: d.creditLimit != null ? String(d.creditLimit) : "",
@@ -84,6 +86,7 @@ function buildUpdatePayload(form: FormState): BillingTenantUpdateInput {
       name: form.tenantName.trim(),
       phone: form.phone.trim() || undefined,
       status: form.tenantStatus,
+      type: form.tenantType,
       balance,
       overdueAt: fromLocalInput(form.overdueAt),
       creditLimit,
@@ -191,6 +194,20 @@ export function CrmTenantEditDialog({
                     <SelectItem value="active">正常</SelectItem>
                     <SelectItem value="inactive">停用</SelectItem>
                     <SelectItem value="suspended">暂停</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="租户类型">
+                <Select
+                  value={form.tenantType}
+                  onValueChange={(v) => patch({ tenantType: v as FormState["tenantType"] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="external">外部租户</SelectItem>
+                    <SelectItem value="internal">内部租户</SelectItem>
                   </SelectContent>
                 </Select>
               </Field>

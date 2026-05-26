@@ -115,5 +115,6 @@ export type TenantBillingImportCommitResult = {
   monthlyBills: TenantBillingImportCommitSectionResult
   recharges: TenantBillingImportCommitSectionResult
   dailyUsageBills: TenantBillingImportCommitSectionResult
+  dailyConsumptionDetails: TenantBillingImportCommitSectionResult
   billDetails: TenantBillingImportCommitSectionResult
 }

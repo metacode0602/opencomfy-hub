@@ -17,7 +17,11 @@ import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
 import { listIncomeEligibleProjects } from './single-income-projects'
 import type { SingleIncomeComputePayload, SingleIncomePreviewRow } from './single-income-types'
-import { getProjectsFromSharedWarning } from '@/lib/finance/single-income-validation'
+import {
+  buildValidationIssueRows,
+  SINGLE_INCOME_ISSUE_TYPE,
+} from '@/lib/finance/single-income-issue-rows'
+import type { SingleIncomeIssueRow } from '@/lib/finance/single-income-types'
 import { validateSingleIncome } from './validate-single-income'
 
 const AMOUNT_TOLERANCE = 0.01
@@ -162,15 +166,41 @@ export async function buildSinglePeriodIncomePayload(
   const supplementaryByProject = await loadSupplementaryByProject(periodId)
 
   const issues: string[] = []
+  const projectDetailsById = new Map(
+    eligibleProjects.map((p) => [
+      p.projectId,
+      {
+        projectId: p.projectId,
+        projectName: p.projectName,
+        tenantId: p.tenantId,
+        tenantName: p.tenantName,
+        platformTenantId: p.platformTenantId,
+        customerId: p.customerId,
+        customerName: p.customerName,
+      },
+    ]),
+  )
+  const issueRows: SingleIncomeIssueRow[] = buildValidationIssueRows({
+    projectDetailsById,
+    projectsMissingBill: validation.projectsMissingBill,
+    sharedPlatformTenantWarnings: validation.sharedPlatformTenantWarnings,
+    canPreviewSingleIncome: validation.canPreviewSingleIncome,
+    canComputeSingleIncome: validation.canComputeSingleIncome,
+  })
   const rows: SingleIncomePreviewRow[] = []
 
-  for (const warning of validation.sharedPlatformTenantWarnings) {
-    const projectLabels = getProjectsFromSharedWarning(warning)
-      .map((p) => `${p.projectName}（项目ID: ${p.projectId}）`)
-      .join('、')
+  for (const p of validation.projectsMissingBill) {
     issues.push(
-      `平台租户 ${warning.platformTenantId}（租户ID: ${warning.tenantId}，${warning.tenantName}）对应多个项目：${projectLabels}；各项目将按同一账单全额计入收入`,
+      `项目「${p.projectName}」（项目ID: ${p.projectId}）· 平台租户 ${p.platformTenantId}（租户ID: ${p.tenantId}，${p.tenantName}）：账期内无 CRM 月度账单，试算时将跳过`,
     )
+  }
+
+  for (const row of issueRows) {
+    if (row.issueType === SINGLE_INCOME_ISSUE_TYPE.SHARED_PLATFORM_TENANT) {
+      issues.push(
+        `平台租户 ${row.platformTenantId}（租户ID: ${row.tenantId}，${row.tenantName}）· 项目「${row.projectName}」（项目ID: ${row.projectId}）：${row.errorMessage}`,
+      )
+    }
   }
 
   for (const project of projectsToCompute) {
@@ -194,9 +224,22 @@ export async function buildSinglePeriodIncomePayload(
     const headerTotal = Number(bill.totalAmount) || 0
     const detailSum = balanceConsumption + bareMetal
     if (Math.abs(detailSum - headerTotal) > AMOUNT_TOLERANCE && details.length > 0) {
+      const message = `明细合计 ${detailSum.toFixed(2)} 与账单头 ${headerTotal.toFixed(2)} 不一致`
       issues.push(
-        `项目「${project.projectName}」（项目ID: ${project.projectId}）· 平台租户 ${project.platformTenantId}（租户ID: ${project.tenantId}）· 账单ID ${bill.id}：明细合计 ${detailSum.toFixed(2)} 与账单头 ${headerTotal.toFixed(2)} 不一致`,
+        `项目「${project.projectName}」（项目ID: ${project.projectId}）· 平台租户 ${project.platformTenantId}（租户ID: ${project.tenantId}）· 账单ID ${bill.id}：${message}`,
       )
+      issueRows.push({
+        issueType: SINGLE_INCOME_ISSUE_TYPE.BILL_AMOUNT_MISMATCH,
+        errorMessage: message,
+        projectId: project.projectId,
+        projectName: project.projectName,
+        tenantId: project.tenantId,
+        tenantName: project.tenantName,
+        platformTenantId: project.platformTenantId,
+        customerId: project.customerId,
+        customerName: project.customerName,
+        billId: bill.id,
+      })
     }
 
     const supplementary = supplementaryByProject.get(project.projectId) ?? '0'
@@ -229,6 +272,7 @@ export async function buildSinglePeriodIncomePayload(
     periodCode,
     incomeCount: rows.length,
     reconciliationIssues: issues,
+    issueRows,
     rows,
     summary: buildSummary(rows),
   }

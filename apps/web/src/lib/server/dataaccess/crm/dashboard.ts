@@ -1,7 +1,6 @@
 import { db } from '@/lib/db'
 import type { Activity, Bill, Project } from '@/lib/data/types'
 import { mapActivityRow, mapBillRow } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import { customersDataAccess } from './customers'
 import { projectsDataAccess } from './projects'
 import { contractsDataAccess } from './contracts'
@@ -15,7 +14,6 @@ import { count, desc, eq, inArray, or, sql, sum } from 'drizzle-orm'
 
 export const dashboardDataAccess = {
   async summary() {
-    await ensureCrmSeeded()
     const customers = await customersDataAccess.list()
     const activeProjects = await db
       .select({ value: count() })
@@ -39,7 +37,6 @@ export const dashboardDataAccess = {
   },
 
   async recentActivities(limit = 6): Promise<Activity[]> {
-    await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(projectActivity)
@@ -49,7 +46,6 @@ export const dashboardDataAccess = {
   },
 
   async pendingBills(): Promise<Bill[]> {
-    await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(tenantBill)
@@ -76,7 +72,6 @@ export const dashboardDataAccess = {
   },
 
   async consumptionTrend() {
-    await ensureCrmSeeded()
     const rows = await db
       .select({
         month: sql<string>`to_char(${consumptionRecord.occurredAt}, 'YYYY-MM')`,
@@ -94,7 +89,6 @@ export const dashboardDataAccess = {
   },
 
   async productLineBreakdown() {
-    await ensureCrmSeeded()
     const rows = await db
       .select({
         productLine: consumptionRecord.productLine,

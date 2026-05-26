@@ -11,12 +11,12 @@ import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Separator } from "@workspace/ui/components/separator";
-import { SocialButton } from "./social-button";
-import Image from "next/image";
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 
 export const SigninForm = () => {
   const [pending, setPending] = useState(false);
+  const t = useTranslations("AuthPage.login");
 
   const router = useRouter();
   const form = useForm<SigninFormValues>({
@@ -51,12 +51,12 @@ export const SigninForm = () => {
   return (
     <form
       onSubmit={form.handleSubmit(onSubmit)}
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-4 p-6"
     >
       <FormInput
         control={form.control}
         name="email"
-        label="Email"
+        label={t("email")}
         type="email"
         disabled={loading}
       />
@@ -64,7 +64,7 @@ export const SigninForm = () => {
       <FormInputPassword
         control={form.control}
         name="password"
-        label="Password"
+        label={t("password")}
         disabled={loading}
       />
 
@@ -72,7 +72,7 @@ export const SigninForm = () => {
         <FormCheckbox
           control={form.control}
           name="remember"
-          label="Remember me"
+          label={t("rememberMe")}
           disabled={loading}
         />
 
@@ -81,19 +81,19 @@ export const SigninForm = () => {
           className="block shrink-0 text-sm hover:underline hover:underline-offset-4 aria-disabled:pointer-events-none"
           aria-disabled={loading}
         >
-          Forgot Password?
+          {t("forgotPassword")}
         </Link>
       </div>
 
       <Button type="submit" size={"lg"} className="w-full" disabled={loading}>
-        Sign in
+        {t("signIn")}
       </Button>
 
-      <div className="flex items-center justify-center my-4">
+      {/* <div className="flex items-center justify-center my-4">
         <Separator className="flex-1 w-full" />
-        <span className="shrink-0 text-sm text-muted-foreground px-4">OR</span>
+        <span className="shrink-0 text-sm text-muted-foreground px-4">{t("or")}</span>
         <Separator className="flex-1 w-full" />
-      </div>
+      </div> */}
 
       {/* <div className="grid md:grid-cols-2 gap-4">
         <SocialButton
