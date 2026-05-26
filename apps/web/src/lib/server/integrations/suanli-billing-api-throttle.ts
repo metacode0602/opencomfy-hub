@@ -3,25 +3,25 @@ import { crmLog } from '@/lib/server/dataaccess/crm/logger'
 /** 相邻两次 OpenAPI 请求的最小间隔（毫秒） */
 const MIN_INTERVAL_MS = Math.max(
   0,
-  Number(process.env.SUANLI_BILLING_API_MIN_INTERVAL_MS ?? 400),
+  Number(process.env.SUANLI_BILLING_API_MIN_INTERVAL_MS ?? 200),
 )
 
 /** 分页翻页时的额外等待（毫秒） */
 export const BILLING_API_PAGE_DELAY_MS = Math.max(
   0,
-  Number(process.env.SUANLI_BILLING_API_PAGE_DELAY_MS ?? 300),
+  Number(process.env.SUANLI_BILLING_API_PAGE_DELAY_MS ?? 100),
 )
 
 /** 账单明细逐账期请求时的额外等待（毫秒） */
 export const BILLING_API_DETAIL_DELAY_MS = Math.max(
   0,
-  Number(process.env.SUANLI_BILLING_API_DETAIL_DELAY_MS ?? 500),
+  Number(process.env.SUANLI_BILLING_API_DETAIL_DELAY_MS ?? 300),
 )
 
 /** 预览拉取各数据段之间的等待（毫秒） */
 export const BILLING_IMPORT_SECTION_DELAY_MS = Math.max(
   0,
-  Number(process.env.SUANLI_BILLING_IMPORT_SECTION_DELAY_MS ?? 600),
+  Number(process.env.SUANLI_BILLING_IMPORT_SECTION_DELAY_MS ?? 300),
 )
 
 let lastRequestAt = 0

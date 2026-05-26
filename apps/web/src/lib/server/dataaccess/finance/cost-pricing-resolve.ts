@@ -63,15 +63,26 @@ export function resolvedUnitCostToPricingSnapshotFields(
   | 'supplierUnitCostId'
   | 'supplierPricingRecordId'
   | 'pricingMode'
+  | 'billingUnit'
+  | 'monthlyRentPerMachine'
+  | 'cardsPerMachine'
   | 'listPricePerHour'
   | 'dealUnitPricePerHour'
   | 'revenueSharePercent'
   | 'pricingTiers'
 > {
+  const billingUnit = resolved.billingUnit ?? 'hour'
   return {
     supplierUnitCostId: resolved.supplierUnitCostId,
     supplierPricingRecordId: resolved.pricingRecordId,
     pricingMode: resolved.pricingMode,
+    billingUnit: billingUnit === 'month' ? 'month' : 'hour',
+    monthlyRentPerMachine:
+      billingUnit === 'month' ? moneyField(resolved.unitPrice) : null,
+    cardsPerMachine:
+      billingUnit === 'month'
+        ? (resolved.cardsPerMachine ?? null)
+        : null,
     listPricePerHour: moneyField(resolved.listPricePerHour),
     dealUnitPricePerHour: moneyField(resolved.unitPricePerHour),
     revenueSharePercent:

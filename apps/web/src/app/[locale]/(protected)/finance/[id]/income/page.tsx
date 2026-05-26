@@ -1,6 +1,7 @@
 "use client"
 
 import { IncomeDetailEditable } from "../../_components/income-detail-editable"
+import { SingleIncomeRecomputeDialog } from "../../_components/single-income-recompute-dialog"
 import { downloadIncomeDetailExcel } from "@/lib/finance/income-detail-export"
 import { mergeIncomeRowsWithOverrides } from "@/lib/finance/income-row-utils"
 import { LocaleLink } from "@/lib/i18n/navigation"
@@ -14,15 +15,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { Download } from "lucide-react"
+import { Download, RotateCcw } from "lucide-react"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { toast } from "sonner"
+import { isPublishedPeriodStatus } from "../../_lib/period"
 
 export default function FinancePeriodIncomePage() {
   const params = useParams<{ id: string }>()
   const id = params.id
+  const [recomputeOpen, setRecomputeOpen] = useState(false)
 
+  const utils = trpc.useUtils()
   const { data: bundle, isLoading } = trpc.finance.periods.getBundle.useQuery(
     { id: id ?? "" },
     { enabled: Boolean(id) },
@@ -36,6 +40,10 @@ export default function FinancePeriodIncomePage() {
     [rows, overrides],
   )
 
+  const periodPublished = period
+    ? isPublishedPeriodStatus(period.status)
+    : false
+
   function handleExportExcel() {
     if (displayRows.length === 0) {
       toast.error("暂无收入明细，无法导出")
@@ -48,6 +56,11 @@ export default function FinancePeriodIncomePage() {
       showPeriodColumn: false,
     })
     if (ok) toast.success("收入明细 Excel 已下载")
+  }
+
+  function handleRecomputeSuccess() {
+    toast.success("收入已根据 CRM 月度账单重新计算并写入")
+    if (id) void utils.finance.periods.getBundle.invalidate({ id })
   }
 
   if (!id) {
@@ -94,24 +107,48 @@ export default function FinancePeriodIncomePage() {
             <CardTitle>收入明细 · {period.period_code}</CardTitle>
             <CardDescription>
               platform_income_monthly（账期 {period.period_start} ~{" "}
-              {period.period_end}）
+              {period.period_end}）· 客户全称经租户关联 customer
             </CardDescription>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={handleExportExcel}
-            disabled={displayRows.length === 0}
-          >
-            <Download className="size-4" />
-            导出 Excel
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              title={
+                periodPublished
+                  ? "已发布账期可试算预览；写入须先撤回发布"
+                  : undefined
+              }
+              onClick={() => setRecomputeOpen(true)}
+            >
+              <RotateCcw className="size-4" />
+              重新计算
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleExportExcel}
+              disabled={displayRows.length === 0}
+            >
+              <Download className="size-4" />
+              导出 Excel
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <IncomeDetailEditable baseRows={rows} showPeriodColumn={false} />
         </CardContent>
       </Card>
+
+      <SingleIncomeRecomputeDialog
+        open={recomputeOpen}
+        onOpenChange={setRecomputeOpen}
+        billingPeriodId={id}
+        periodCode={period.period_code}
+        onSuccess={handleRecomputeSuccess}
+      />
     </div>
   )
 }

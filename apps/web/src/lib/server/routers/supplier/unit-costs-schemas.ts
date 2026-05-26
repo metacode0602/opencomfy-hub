@@ -9,6 +9,8 @@ const pricingModeSchema = z.enum([
   'tiered_revenue_share',
 ])
 
+const billingUnitSchema = z.enum(['hour', 'month'])
+
 const pricingTierSchema = z.object({
   tierOrder: z.number().int().positive(),
   tierBasis: z.enum(['hours', 'ratio_band']).optional(),
@@ -22,13 +24,24 @@ const pricingTierSchema = z.object({
 
 type PricingPayload = {
   pricingMode: z.infer<typeof pricingModeSchema>
+  billingUnit?: z.infer<typeof billingUnitSchema>
+  unitPrice?: number
   unitPricePerHour?: number
+  cardsPerMachine?: number
   revenueSharePercent?: number
   pricingTiers?: z.infer<typeof pricingTierSchema>[]
 }
 
 function refinePricingPayload(data: PricingPayload, ctx: z.RefinementCtx) {
-  const { pricingMode, unitPricePerHour, revenueSharePercent, pricingTiers } = data
+  const {
+    pricingMode,
+    billingUnit = 'hour',
+    unitPrice,
+    unitPricePerHour,
+    cardsPerMachine,
+    revenueSharePercent,
+    pricingTiers,
+  } = data
 
   if (pricingMode === 'tiered_revenue_share') {
     const tiers = pricingTiers ?? []
@@ -74,7 +87,26 @@ function refinePricingPayload(data: PricingPayload, ctx: z.RefinementCtx) {
     return
   }
 
-  if (unitPricePerHour == null || unitPricePerHour <= 0) {
+  if (billingUnit === 'month') {
+    if (unitPrice == null || unitPrice <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '请填写有效的月租金额',
+        path: ['unitPrice'],
+      })
+    }
+    if (cardsPerMachine != null && (cardsPerMachine <= 0 || !Number.isInteger(cardsPerMachine))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '每台卡数须为正整数',
+        path: ['cardsPerMachine'],
+      })
+    }
+    return
+  }
+
+  const hourly = unitPrice ?? unitPricePerHour
+  if (hourly == null || hourly <= 0) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: '请填写有效的卡时单价',
@@ -94,7 +126,10 @@ const unitCostUpsertBaseSchema = z.object({
   dataCenterId: z.string().min(1),
   gpuCardTypeId: z.string().min(1),
   pricingMode: pricingModeSchema,
+  billingUnit: billingUnitSchema.optional(),
+  unitPrice: z.number().positive().optional(),
   unitPricePerHour: z.number().positive().optional(),
+  cardsPerMachine: z.number().int().positive().optional(),
   revenueSharePercent: z.number().min(0).max(100).optional(),
   pricingTiers: z.array(pricingTierSchema).optional(),
   effectiveFrom: z
@@ -113,7 +148,10 @@ export const unitCostUpdateSchema = z
   .object({
     recordId: z.string().min(1),
     pricingMode: pricingModeSchema,
+    billingUnit: billingUnitSchema.optional(),
+    unitPrice: z.number().positive().optional(),
     unitPricePerHour: z.number().positive().optional(),
+    cardsPerMachine: z.number().int().positive().optional(),
     revenueSharePercent: z.number().min(0).max(100).optional(),
     pricingTiers: z.array(pricingTierSchema).optional(),
     effectiveFrom: z

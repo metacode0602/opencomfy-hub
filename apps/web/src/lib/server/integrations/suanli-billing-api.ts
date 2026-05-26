@@ -54,9 +54,103 @@ function parseApiError(e: unknown): never {
 }
 
 const paginatedSchema = z.object({
-  count: z.number().optional(),
+  /** 平台常返回 count: null，需兼容 */
+  count: z.number().nullish(),
   results: z.array(z.record(z.string(), z.unknown())).optional(),
 })
+
+const billDetailAmountsSchema = z.record(
+  z.string(),
+  z.object({
+    billing_value: z.number().optional(),
+    discount_value: z.number().optional(),
+  }),
+)
+
+const billDetailItemSchema = z.object({
+  start_time: z.string().optional(),
+  end_time: z.string().optional(),
+  amounts: billDetailAmountsSchema.optional(),
+  total_amount: z
+    .object({
+      billing_value: z.number().optional(),
+      discount_value: z.number().optional(),
+    })
+    .optional(),
+})
+
+function mapBillDetailItem(
+  item: z.infer<typeof billDetailItemSchema>,
+  fallbackPeriod: { start_time: string; end_time: string },
+): PlatformBillDetailRecord | null {
+  const start_time = String(item.start_time ?? fallbackPeriod.start_time)
+  const end_time = String(item.end_time ?? fallbackPeriod.end_time)
+  if (!start_time || !end_time) return null
+  return {
+    start_time,
+    end_time,
+    amounts: item.amounts ?? {},
+    total_amount: item.total_amount,
+  }
+}
+
+/**
+ * 归一化 billing_record_detail_list 响应。
+ * 兼容：{ results, count: null }、单条 { amounts, ... }、顶层数组。
+ */
+export function normalizeBillDetailRecords(
+  data: unknown,
+  fallbackPeriod: { start_time: string; end_time: string },
+): PlatformBillDetailRecord[] {
+  if (data == null) {
+    throw new SuanliBillingApiError('账单明细返回格式异常')
+  }
+
+  if (Array.isArray(data)) {
+    const records: PlatformBillDetailRecord[] = []
+    for (const raw of data) {
+      const parsed = billDetailItemSchema.safeParse(raw)
+      if (!parsed.success) {
+        throw new SuanliBillingApiError('账单明细返回格式异常')
+      }
+      const record = mapBillDetailItem(parsed.data, fallbackPeriod)
+      if (record) records.push(record)
+    }
+    return records
+  }
+
+  if (typeof data === 'object') {
+    const obj = data as Record<string, unknown>
+
+    if ('results' in obj) {
+      const results = obj.results
+      if (!Array.isArray(results)) {
+        throw new SuanliBillingApiError('账单明细返回格式异常')
+      }
+      const records: PlatformBillDetailRecord[] = []
+      for (const raw of results) {
+        const parsed = billDetailItemSchema.safeParse(raw)
+        if (!parsed.success) {
+          throw new SuanliBillingApiError('账单明细返回格式异常')
+        }
+        const record = mapBillDetailItem(parsed.data, fallbackPeriod)
+        if (record) records.push(record)
+      }
+      return records
+    }
+
+    if ('amounts' in obj) {
+      const parsed = billDetailItemSchema.safeParse(obj)
+      if (!parsed.success) {
+        throw new SuanliBillingApiError('账单明细返回格式异常')
+      }
+      const record = mapBillDetailItem(parsed.data, fallbackPeriod)
+      return record ? [record] : []
+    }
+  }
+
+  throw new SuanliBillingApiError('账单明细返回格式异常')
+}
 
 const gpuModelSchema = z.object({
   gpu_model: z.string().optional(),
@@ -199,7 +293,7 @@ export async function fetchPlatformMetalOrders(input: {
           is_paid: row.is_paid === true,
         } satisfies PlatformMetalOrderRecord
       })
-      return { count: parsed.data.count, results }
+      return { count: parsed.data.count ?? undefined, results }
     },
   )
 
@@ -239,7 +333,7 @@ export async function fetchPlatformMonthlyBills(input: {
         total_billing_value: Number(row.total_billing_value ?? 0),
         total_discount_value: Number(row.total_discount_value ?? 0),
       }))
-      return { count: parsed.data.count, results }
+      return { count: parsed.data.count ?? undefined, results }
     },
   )
 }
@@ -288,7 +382,7 @@ export async function fetchPlatformDailyUsageBills(input: {
           total_billing_value: Number(row.total_billing_value ?? 0),
           total_discount_value: Number(row.total_discount_value ?? 0),
         }))
-        return { count: parsed.data.count, results }
+        return { count: parsed.data.count ?? undefined, results }
       },
     )
 
@@ -341,7 +435,7 @@ export async function fetchPlatformRecharges(input: {
           row.last_update_time != null ? String(row.last_update_time) : undefined,
         remark: row.remark != null ? String(row.remark) : null,
       }))
-      return { count: parsed.data.count, results }
+      return { count: parsed.data.count ?? undefined, results }
     },
   )
 }
@@ -383,21 +477,9 @@ export async function fetchPlatformBillDetailsForOverview(input: {
           },
         },
       )
-      const parsed = paginatedSchema.safeParse(data)
-      if (!parsed.success) {
-        crmWarn('suanli-billing-api', 'bill_detail schema mismatch', {
-          traceId: input.traceId,
-        })
-        continue
-      }
-      for (const item of parsed.data.results ?? []) {
-        details.push({
-          start_time: String(item.start_time ?? row.start_time),
-          end_time: String(item.end_time ?? row.end_time),
-          amounts: (item.amounts as PlatformBillDetailAmounts) ?? {},
-          total_amount: item.total_amount as PlatformBillDetailRecord['total_amount'],
-        })
-      }
+      const period = { start_time: row.start_time, end_time: row.end_time }
+      const batch = normalizeBillDetailRecords(data, period)
+      details.push(...batch)
     } catch (e) {
       crmError('suanli-billing-api', 'bill_detail fetch failed', e, {
         traceId: input.traceId,

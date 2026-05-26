@@ -632,6 +632,21 @@ export const tenantBillingImportDataAccess = {
       expandBillDetails(detailRecords)
     const billDetailItems = diffBillDetailItems(rawDetailItems, existingDetailsByBillMonth)
 
+    if (
+      billRecords.length > 0 &&
+      !billsError &&
+      billDetailGroups.length === 0 &&
+      !detailsError
+    ) {
+      detailsError = '月度账单有数据但明细为空，请检查平台接口返回'
+      crmWarn('tenant-billing-import', 'details empty despite bills', {
+        traceId,
+        billCount: billRecords.length,
+        detailRecordCount: detailRecords.length,
+        detailItemCount: rawDetailItems.length,
+      })
+    }
+
     const previewId = newId()
     previewCache.set(previewId, {
       expiresAt: Date.now() + PREVIEW_TTL_MS,

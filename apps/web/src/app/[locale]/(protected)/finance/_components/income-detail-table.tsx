@@ -81,7 +81,12 @@ export function IncomeDetailTable({
                   </TableCell>
                 )}
                 <TableCell>{formatText(r.project_name)}</TableCell>
-                <TableCell className="max-w-[200px]">{r.tenant_name}</TableCell>
+                <TableCell className="max-w-[240px]">
+                  <div>{formatText(r.customer_full_name)}</div>
+                  <div className="text-muted-foreground mt-0.5 font-mono text-xs">
+                    租户 {r.tenant_platform_id}
+                  </div>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   <span className="inline-flex items-center justify-end gap-1.5">
                     {formatMoney(r.supplementary_consumption)}

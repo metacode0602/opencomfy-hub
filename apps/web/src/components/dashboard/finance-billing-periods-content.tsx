@@ -113,12 +113,20 @@ export function FinanceBillingPeriodsContent() {
             管理全部账期，按账期查看收入明细与成本毛利明细
           </p>
         </div>
-        <Button asChild>
-          <LocaleLink href="/finance/create">
-            <Plus className="w-4 h-4 mr-2" />
-            添加账期
-          </LocaleLink>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <LocaleLink href="/finance/create/single">
+              <Receipt className="w-4 h-4 mr-2" />
+              CRM 账单收入
+            </LocaleLink>
+          </Button>
+          <Button asChild>
+            <LocaleLink href="/finance/create">
+              <Plus className="w-4 h-4 mr-2" />
+              添加账期
+            </LocaleLink>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

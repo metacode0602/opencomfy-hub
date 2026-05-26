@@ -12,10 +12,16 @@ import type {
   SupplierBill,
   SupplierBillDetail,
   SupplierContract,
+  SupplierBillingUnit,
   SupplierPricingHistory,
   SupplierPricingRecord,
 } from '@/lib/data/types'
 import type { SupplierActivity } from '@/lib/types/supplier-domain'
+import {
+  DEFAULT_CARDS_PER_MACHINE,
+  normalizeSupplierBillingUnit,
+  resolveCardTimeUnitPrice,
+} from '@/lib/supplier/monthly-rent-pricing'
 import type {
   DataCenterRow,
   SupplierContractRow,
@@ -240,6 +246,20 @@ export function mapSupplierPricingRecordRow(
   updatedBy?: string | null,
 ): SupplierPricingRecord {
   const pricingMode = row.pricingMode as ContractPricingMode
+  const effectiveFrom = toPricingDateTime(row.effectiveFrom)
+  const billingUnit = normalizeSupplierBillingUnit(row.billingUnit) as SupplierBillingUnit
+  const cardsPerMachine = row.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE
+  const unitPriceRaw = row.unitPrice ? toNumber(row.unitPrice) : undefined
+  const unitPricePerHourDerived = resolveCardTimeUnitPrice(
+    {
+      billingUnit: row.billingUnit,
+      unitPrice: row.unitPrice,
+      unitPricePerHour: row.unitPricePerHour,
+      cardsPerMachine,
+      effectiveFrom,
+    },
+    effectiveFrom,
+  )
   return {
     id: row.id,
     supplierId: row.supplierId,
@@ -251,10 +271,14 @@ export function mapSupplierPricingRecordRow(
     configStatus: (row.configStatus ?? 'active') as SupplierPricingRecord['configStatus'],
     cooperationMode: pricingModeToCooperationMode(pricingMode),
     pricingMode,
-    unitPricePerHour: row.unitPricePerHour ? toNumber(row.unitPricePerHour) : undefined,
+    billingUnit,
+    unitPrice: unitPriceRaw,
+    cardsPerMachine,
+    unitPricePerHour:
+      unitPricePerHourDerived != null ? unitPricePerHourDerived : undefined,
     revenueSharePercent: row.revenueSharePercent ? toNumber(row.revenueSharePercent) : undefined,
     pricingTiers: (row.pricingTiers as SupplierPricingRecord['pricingTiers']) ?? undefined,
-    effectiveFrom: toPricingDateTime(row.effectiveFrom),
+    effectiveFrom: effectiveFrom,
     effectiveTo: row.effectiveTo ? toPricingDateTime(row.effectiveTo) : null,
     updatedAt: row.updatedAt.toISOString(),
     updatedBy: updatedBy ?? undefined,
@@ -280,6 +304,13 @@ export function mapSupplierPricingHistoryRow(
     cardTypeId: row.gpuCardTypeId,
     cardTypeName: names.cardTypeName,
     cooperationMode: pricingModeToCooperationMode(row.pricingMode),
+    billingUnit: row.newBillingUnit
+      ? (normalizeSupplierBillingUnit(row.newBillingUnit) as SupplierBillingUnit)
+      : undefined,
+    previousUnitPrice: row.previousUnitPrice ? toNumber(row.previousUnitPrice) : undefined,
+    newUnitPrice: row.newUnitPrice ? toNumber(row.newUnitPrice) : undefined,
+    previousCardsPerMachine: row.previousCardsPerMachine ?? undefined,
+    newCardsPerMachine: row.newCardsPerMachine ?? undefined,
     previousUnitPricePerHour: row.previousUnitPricePerHour
       ? toNumber(row.previousUnitPricePerHour)
       : undefined,

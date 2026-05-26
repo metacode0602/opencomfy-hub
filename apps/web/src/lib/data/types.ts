@@ -690,6 +690,9 @@ export interface SupplierBillDetail {
 /** 机房卡型成本配置状态 */
 export type SupplierPricingConfigStatus = 'active' | 'unavailable'
 
+/** 供应商成本侧计费单位 */
+export type SupplierBillingUnit = 'hour' | 'month'
+
 /** 供应商 × 机房 × 卡型 当前生效单价/分成配置 */
 export interface SupplierPricingRecord {
   id: string
@@ -704,7 +707,13 @@ export interface SupplierPricingRecord {
   cooperationMode: CooperationMode
   /** 固定卡时 / 阶梯卡时 / 固定分成 / 阶梯分成 */
   pricingMode?: ContractPricingMode
-  /** 卡时模式：元/卡时（固定卡时） */
+  /** 计费单位：hour=卡时价 / month=整租月租 */
+  billingUnit?: SupplierBillingUnit
+  /** 与 billingUnit 对应：hour=元/卡/时，month=元/台/月 */
+  unitPrice?: number
+  /** 月租折算时每台机器 GPU 卡数，默认 8 */
+  cardsPerMachine?: number
+  /** 卡时模式：元/卡时（固定卡时；月租时为按 effectiveFrom 折算的展示值） */
   unitPricePerHour?: number
   /** 分成模式：供应商分成比例 %（固定分成） */
   revenueSharePercent?: number
@@ -728,6 +737,11 @@ export interface SupplierPricingHistory {
   cardTypeId: string
   cardTypeName: string
   cooperationMode: CooperationMode
+  billingUnit?: SupplierBillingUnit
+  previousUnitPrice?: number
+  newUnitPrice?: number
+  previousCardsPerMachine?: number
+  newCardsPerMachine?: number
   previousUnitPricePerHour?: number
   newUnitPricePerHour?: number
   previousRevenueSharePercent?: number

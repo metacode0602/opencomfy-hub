@@ -10,6 +10,11 @@ import {
   validateRevenueShareRatioContractTiers,
 } from '@/lib/supplier/revenue-share-ratio-tiers'
 import {
+  DEFAULT_CARDS_PER_MACHINE,
+  normalizeSupplierBillingUnit,
+  type SupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
+import {
   normalizePlatformDateTime,
   parsePlatformDateTime,
 } from '@/lib/platform-pricing/datetime'
@@ -46,13 +51,17 @@ function toEffectiveDateTime(value: string | Date): string {
 
 function validatePricingPayload(input: {
   pricingMode: ContractPricingMode
+  billingUnit?: SupplierBillingUnit
+  unitPrice?: number
   unitPricePerHour?: number
+  cardsPerMachine?: number
   revenueSharePercent?: number
   pricingTiers?: SupplierPricingRecord['pricingTiers']
 }) {
   const isShare = isSharePricingMode(input.pricingMode)
   const isTiered =
     input.pricingMode === 'tiered_card_time' || input.pricingMode === 'tiered_revenue_share'
+  const billingUnit = input.billingUnit ?? 'hour'
 
   if (input.pricingMode === 'tiered_revenue_share') {
     const tiers = input.pricingTiers ?? []
@@ -78,7 +87,19 @@ function validatePricingPayload(input: {
     return
   }
 
-  if (input.unitPricePerHour == null || input.unitPricePerHour <= 0) {
+  if (billingUnit === 'month') {
+    if (input.unitPrice == null || input.unitPrice <= 0) {
+      throw new Error('请填写有效的月租金额')
+    }
+    const cards = input.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE
+    if (cards <= 0 || !Number.isInteger(cards)) {
+      throw new Error('每台卡数须为正整数')
+    }
+    return
+  }
+
+  const hourly = input.unitPrice ?? input.unitPricePerHour
+  if (hourly == null || hourly <= 0) {
     throw new Error('请填写有效的卡时单价')
   }
 }
@@ -148,11 +169,48 @@ export type UnitCostUpsertInput = {
   dataCenterId: string
   gpuCardTypeId: string
   pricingMode: ContractPricingMode
+  billingUnit?: SupplierBillingUnit
+  unitPrice?: number
   unitPricePerHour?: number
+  cardsPerMachine?: number
   revenueSharePercent?: number
   pricingTiers?: SupplierPricingRecord['pricingTiers']
   effectiveFrom: string
   effectiveTo?: string | null
+}
+
+function cardTimeStorage(input: {
+  billingUnit: SupplierBillingUnit
+  unitPrice?: number
+  unitPricePerHour?: number
+  cardsPerMachine?: number
+}): {
+  billingUnit: SupplierBillingUnit
+  unitPrice: string | null
+  unitPricePerHour: string | null
+  cardsPerMachine: number | null
+} {
+  if (input.billingUnit === 'month') {
+    if (input.unitPrice == null) {
+      throw new Error('请填写有效的月租金额')
+    }
+    return {
+      billingUnit: 'month',
+      unitPrice: toMoney(input.unitPrice),
+      unitPricePerHour: null,
+      cardsPerMachine: input.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE,
+    }
+  }
+  const hourly = input.unitPrice ?? input.unitPricePerHour
+  if (hourly == null) {
+    throw new Error('请填写有效的卡时单价')
+  }
+  return {
+    billingUnit: 'hour',
+    unitPrice: toMoney(hourly),
+    unitPricePerHour: toMoney(hourly),
+    cardsPerMachine: null,
+  }
 }
 
 export type UnitCostUpdateInput = UnitCostUpsertInput & {
@@ -274,12 +332,22 @@ export const unitCostsDataAccess = {
     const isTieredShare = input.pricingMode === 'tiered_revenue_share'
     const isShare = isSharePricingMode(input.pricingMode) && !isTieredShare
     const isTiered = input.pricingMode === 'tiered_card_time' || isTieredShare
+    const cardTime =
+      !isShare && !isTiered
+        ? cardTimeStorage({
+            billingUnit: input.billingUnit ?? 'hour',
+            unitPrice: input.unitPrice,
+            unitPricePerHour: input.unitPricePerHour,
+            cardsPerMachine: input.cardsPerMachine,
+          })
+        : null
 
     unitCostsLog('createRecord', 'creating pricing record', {
       supplierId: input.supplierId,
       dataCenterId: input.dataCenterId,
       gpuCardTypeId: input.gpuCardTypeId,
       pricingMode: input.pricingMode,
+      billingUnit: cardTime?.billingUnit,
     })
 
     await db.insert(supplierPricingRecord).values({
@@ -289,10 +357,10 @@ export const unitCostsDataAccess = {
       gpuCardTypeId: input.gpuCardTypeId,
       pricingMode: input.pricingMode,
       configStatus: 'active',
-      unitPricePerHour:
-        !isShare && !isTiered && input.unitPricePerHour != null
-          ? toMoney(input.unitPricePerHour)
-          : null,
+      billingUnit: cardTime?.billingUnit ?? 'hour',
+      unitPrice: cardTime?.unitPrice ?? null,
+      cardsPerMachine: cardTime?.cardsPerMachine ?? null,
+      unitPricePerHour: cardTime?.unitPricePerHour ?? null,
       revenueSharePercent:
         isShare && input.revenueSharePercent != null
           ? String(input.revenueSharePercent)
@@ -324,7 +392,10 @@ export const unitCostsDataAccess = {
 
     validatePricingPayload({
       pricingMode: input.pricingMode,
+      billingUnit: input.billingUnit,
+      unitPrice: input.unitPrice,
       unitPricePerHour: input.unitPricePerHour,
+      cardsPerMachine: input.cardsPerMachine,
       revenueSharePercent: input.revenueSharePercent,
       pricingTiers: input.pricingTiers,
     })
@@ -339,14 +410,23 @@ export const unitCostsDataAccess = {
     const isShare = isSharePricingMode(input.pricingMode) && !isTieredShare
     const isTiered = input.pricingMode === 'tiered_card_time' || isTieredShare
 
-    const newUnitPrice =
-      !isShare && !isTiered && input.unitPricePerHour != null
-        ? input.unitPricePerHour
-        : undefined
+    const cardTime =
+      !isShare && !isTiered
+        ? cardTimeStorage({
+            billingUnit: input.billingUnit ?? normalizeSupplierBillingUnit(existing.billingUnit),
+            unitPrice: input.unitPrice,
+            unitPricePerHour: input.unitPricePerHour,
+            cardsPerMachine: input.cardsPerMachine,
+          })
+        : null
+
     const newShare =
       isShare && input.revenueSharePercent != null ? input.revenueSharePercent : undefined
     const newTiers = isTiered ? (input.pricingTiers ?? null) : null
 
+    const prevBillingUnit = normalizeSupplierBillingUnit(existing.billingUnit)
+    const prevUnitPrice = existing.unitPrice ? Number(existing.unitPrice) : undefined
+    const prevCards = existing.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE
     const prevUnit = existing.unitPricePerHour ? Number(existing.unitPricePerHour) : undefined
     const prevShare = existing.revenueSharePercent
       ? Number(existing.revenueSharePercent)
@@ -354,7 +434,14 @@ export const unitCostsDataAccess = {
     const prevTiers = (existing.pricingTiers as SupplierPricingRecord['pricingTiers']) ?? undefined
 
     const priceChanged =
-      (newUnitPrice != null && newUnitPrice !== prevUnit) ||
+      (cardTime != null &&
+        (cardTime.billingUnit !== prevBillingUnit ||
+          (cardTime.unitPrice != null && Number(cardTime.unitPrice) !== prevUnitPrice) ||
+          (cardTime.billingUnit === 'month' &&
+            (cardTime.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE) !== prevCards))) ||
+      (cardTime?.billingUnit === 'hour' &&
+        cardTime.unitPrice != null &&
+        Number(cardTime.unitPrice) !== prevUnit) ||
       (newShare != null && newShare !== prevShare) ||
       (isTiered &&
         pricingTiersChanged(prevTiers, newTiers ?? undefined, input.pricingMode))
@@ -383,9 +470,14 @@ export const unitCostsDataAccess = {
             dataCenterId: existing.dataCenterId,
             gpuCardTypeId: existing.gpuCardTypeId,
             pricingMode: input.pricingMode,
+            previousBillingUnit: existing.billingUnit,
+            newBillingUnit: cardTime?.billingUnit ?? existing.billingUnit,
+            previousUnitPrice: existing.unitPrice,
+            newUnitPrice: cardTime?.unitPrice ?? null,
+            previousCardsPerMachine: existing.cardsPerMachine,
+            newCardsPerMachine: cardTime?.cardsPerMachine ?? null,
             previousUnitPricePerHour: existing.unitPricePerHour,
-            newUnitPricePerHour:
-              newUnitPrice != null ? toMoney(newUnitPrice) : null,
+            newUnitPricePerHour: cardTime?.unitPricePerHour ?? null,
             previousRevenueSharePercent: existing.revenueSharePercent,
             newRevenueSharePercent:
               newShare != null ? String(newShare) : null,
@@ -402,8 +494,10 @@ export const unitCostsDataAccess = {
           .set({
             pricingMode: input.pricingMode,
             configStatus: 'active',
-            unitPricePerHour:
-              newUnitPrice != null ? toMoney(newUnitPrice) : null,
+            billingUnit: cardTime?.billingUnit ?? existing.billingUnit ?? 'hour',
+            unitPrice: cardTime?.unitPrice ?? null,
+            cardsPerMachine: cardTime?.cardsPerMachine ?? null,
+            unitPricePerHour: cardTime?.unitPricePerHour ?? null,
             revenueSharePercent: newShare != null ? String(newShare) : null,
             pricingTiers: newTiers,
             effectiveFrom,

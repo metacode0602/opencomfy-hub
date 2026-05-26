@@ -26,11 +26,17 @@ import {
   readErrorReportBySlot,
   validateCrossFileImports,
 } from './validate-import'
+import {
+  computeSinglePeriodIncome,
+  previewSinglePeriodIncome,
+} from './compute-single-period-income'
 import { detectPlatformListPriceWindows } from './platform-list-price'
 import {
   listTenantBillWindows,
   syncTenantBillWindowsForPeriod,
 } from './tenant-bill-windows'
+import { customerFullNamesByTenantIds } from './income-customer-enrich'
+import { validateSingleIncome } from './validate-single-income'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
 
@@ -114,6 +120,9 @@ export const financeBillingPeriodsDataAccess = {
       .select()
       .from(platformIncomeMonthly)
       .where(eq(platformIncomeMonthly.billingPeriodId, periodId))
+    const customerByTenant = await customerFullNamesByTenantIds(
+      income.map((r) => r.tenantId),
+    )
     const cost = await db
       .select()
       .from(platformCostMonthly)
@@ -128,7 +137,8 @@ export const financeBillingPeriodsDataAccess = {
         tenant_id: r.tenantId,
         tenant_platform_id: r.tenantPlatformId,
         customer_id: r.customerId,
-        customer_full_name: r.customerFullName,
+        customer_full_name:
+          customerByTenant.get(r.tenantId) ?? r.customerFullName,
         project_id: r.projectId,
         supplementary_consumption: r.supplementaryConsumption,
         balance_consumption: r.balanceConsumption,
@@ -174,7 +184,10 @@ export const financeBillingPeriodsDataAccess = {
   getImportSlotStatuses,
   computeBillingPeriodCost,
   computeBillingPeriodIncome,
+  computeSinglePeriodIncome,
+  previewSinglePeriodIncome,
   listTenantProjectBindings,
+  validateSingleIncome,
 
   async validatePeriod(periodId: string) {
     const period = await this.getById(periodId)
