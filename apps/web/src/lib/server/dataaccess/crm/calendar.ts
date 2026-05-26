@@ -1,12 +1,12 @@
 import { db } from '@/lib/db'
 import type { AccountActivity, ActivityTypeDefinition } from '@/lib/types/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
+// import { ensureCrmSeeded } from './ensure-seeded'
 import { accountActivity, activityTypeDefinition, customer } from '@workspace/db/schema'
 import { and, desc, eq, gte, lte } from 'drizzle-orm'
 
 export const calendarDataAccess = {
   async listActivityTypes(): Promise<ActivityTypeDefinition[]> {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
     const rows = await db.select().from(activityTypeDefinition)
     return rows.map((r) => ({
       id: r.id,
@@ -21,7 +21,7 @@ export const calendarDataAccess = {
   async listActivities(filters?: { from?: string; to?: string }): Promise<
     (AccountActivity & { customerName?: string })[]
   > {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
 
     const conditions = []
     if (filters?.from) {

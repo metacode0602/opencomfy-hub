@@ -16,7 +16,13 @@ export const SLOT_TO_FILE_TYPE = {
 
 export type ImportSlotKey = keyof typeof SLOT_TO_FILE_TYPE
 
-export const PURGE_SCOPES = ['file_type', 'derived', 'full'] as const
+export const PURGE_SCOPES = [
+  'file_type',
+  'derived',
+  'derived_income',
+  'derived_cost',
+  'full',
+] as const
 export type PurgeScope = (typeof PURGE_SCOPES)[number]
 
 export const PERIOD_STATUSES = [

@@ -104,12 +104,12 @@ export const financeRouter = createTRPCRouter({
       }
     }),
 
-    compute: adminProcedure
+    computeIncome: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
           const actorId = await resolveFinanceActorId(ctx.user)
-          return await financeBillingPeriodsDataAccess.computeBillingPeriod({
+          return await financeBillingPeriodsDataAccess.computeBillingPeriodIncome({
             billingPeriodId: input.billingPeriodId,
             actorId,
           })
@@ -118,12 +118,50 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    computeIncome: adminProcedure
+    validateSingleIncome: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.validateSingleIncome(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    previewSingleIncome: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.previewSinglePeriodIncome(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    computeSingleIncome: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .mutation(async ({ input, ctx }) => {
         try {
           const actorId = await resolveFinanceActorId(ctx.user)
-          return await financeBillingPeriodsDataAccess.computeBillingPeriodIncome({
+          return await financeBillingPeriodsDataAccess.computeSinglePeriodIncome({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    computeCost: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.computeBillingPeriodCost({
             billingPeriodId: input.billingPeriodId,
             actorId,
           })

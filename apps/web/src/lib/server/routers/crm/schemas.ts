@@ -136,6 +136,7 @@ export const billingTenantUpdateSchema = z.object({
     isDefault: z.boolean(),
   }),
   customer: z.object({
+    type: z.enum(['B', 'C']),
     contactPerson: z.string(),
     contactPhone: z.string(),
     contactEmail: z.string(),

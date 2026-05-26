@@ -8,6 +8,12 @@ import {
   type ResolvedPricingFields,
 } from '@/lib/finance/cost-pricing-utils'
 import {
+  DEFAULT_CARDS_PER_MACHINE,
+  normalizeSupplierBillingUnit,
+  resolveCardTimeUnitPrice,
+  type SupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
+import {
   billingPeriodImportBatch,
   billingPeriodRawBaremetalOrder,
   billingPeriodRawTenantBill,
@@ -80,6 +86,9 @@ type PricingRecordRow = {
   supplierUnitCostId: string | null
   pricingMode: string
   configStatus: string
+  billingUnit: string | null
+  unitPrice: string | null
+  cardsPerMachine: number | null
   unitPricePerHour: string | null
   revenueSharePercent: string | null
   listPricePerHour: string | null
@@ -123,15 +132,41 @@ function isUnitCostEffectiveAtPeriodEnd(
 function toResolvedFields(input: {
   configStatus: string
   pricingMode: ContractPricingMode
-  unitPricePerHour: string | null
-  revenueSharePercent: string | null
-  listPricePerHour: string | null
+  billingUnit?: string | null
+  unitPrice?: string | null
+  cardsPerMachine?: number | null
+  unitPricePerHour?: string | null
+  revenueSharePercent?: string | null
+  listPricePerHour?: string | null
   pricingTiers: ContractPricingTier[] | null
+  effectiveFrom?: string
+  referenceDate?: string
 }): ResolvedPricingFields & { configStatus: string } {
+  const billingUnit = normalizeSupplierBillingUnit(input.billingUnit)
+  const cardsPerMachine = input.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE
+  const unitPrice = parsePositiveMoney(input.unitPrice)
+  const referenceDate = input.referenceDate ?? input.effectiveFrom ?? ''
+  const unitPricePerHour =
+    input.pricingMode === 'card_time'
+      ? resolveCardTimeUnitPrice(
+          {
+            billingUnit,
+            unitPrice: input.unitPrice,
+            unitPricePerHour: input.unitPricePerHour,
+            cardsPerMachine,
+            effectiveFrom: input.effectiveFrom ?? referenceDate,
+          },
+          referenceDate,
+        )
+      : parsePositiveMoney(input.unitPricePerHour)
+
   return {
     configStatus: input.configStatus,
     pricingMode: input.pricingMode,
-    unitPricePerHour: parsePositiveMoney(input.unitPricePerHour),
+    billingUnit,
+    unitPrice,
+    cardsPerMachine: billingUnit === 'month' ? cardsPerMachine : null,
+    unitPricePerHour,
     revenueSharePercent: parsePositivePercent(input.revenueSharePercent),
     listPricePerHour: parsePositiveMoney(input.listPricePerHour),
     pricingTiers: input.pricingTiers ?? [],
@@ -204,6 +239,9 @@ async function loadAllPricingRecords(): Promise<Map<string, PricingRecordRow[]>>
       supplierUnitCostId: supplierPricingRecord.supplierUnitCostId,
       pricingMode: supplierPricingRecord.pricingMode,
       configStatus: supplierPricingRecord.configStatus,
+      billingUnit: supplierPricingRecord.billingUnit,
+      unitPrice: supplierPricingRecord.unitPrice,
+      cardsPerMachine: supplierPricingRecord.cardsPerMachine,
       unitPricePerHour: supplierPricingRecord.unitPricePerHour,
       revenueSharePercent: supplierPricingRecord.revenueSharePercent,
       listPricePerHour: supplierPricingRecord.listPricePerHour,
@@ -229,18 +267,26 @@ async function loadHistorySnapshot(
 ): Promise<{
   id: string
   pricingMode: ContractPricingMode
+  billingUnit: SupplierBillingUnit
+  unitPrice: string | null
+  cardsPerMachine: number | null
   unitPricePerHour: string | null
   revenueSharePercent: string | null
   listPricePerHour: string | null
+  effectiveFrom: string
 } | null> {
   const endOfDay = `${periodEnd} 23:59:59`
   const rows = await db
     .select({
       id: supplierPricingHistory.id,
       pricingMode: supplierPricingHistory.pricingMode,
+      newBillingUnit: supplierPricingHistory.newBillingUnit,
+      newUnitPrice: supplierPricingHistory.newUnitPrice,
+      newCardsPerMachine: supplierPricingHistory.newCardsPerMachine,
       newUnitPricePerHour: supplierPricingHistory.newUnitPricePerHour,
       newRevenueSharePercent: supplierPricingHistory.newRevenueSharePercent,
       newListPricePerHour: supplierPricingHistory.newListPricePerHour,
+      changedAt: supplierPricingHistory.changedAt,
     })
     .from(supplierPricingHistory)
     .where(
@@ -254,12 +300,17 @@ async function loadHistorySnapshot(
 
   const row = rows[0]
   if (!row) return null
+  const effectiveFrom = row.changedAt.toISOString().slice(0, 19).replace('T', ' ')
   return {
     id: row.id,
     pricingMode: row.pricingMode as ContractPricingMode,
+    billingUnit: normalizeSupplierBillingUnit(row.newBillingUnit),
+    unitPrice: row.newUnitPrice,
+    cardsPerMachine: row.newCardsPerMachine,
     unitPricePerHour: row.newUnitPricePerHour,
     revenueSharePercent: row.newRevenueSharePercent,
     listPricePerHour: row.newListPricePerHour,
+    effectiveFrom,
   }
 }
 
@@ -322,10 +373,15 @@ function snapshotFromRecord(
   const fields = toResolvedFields({
     configStatus: record.configStatus,
     pricingMode: record.pricingMode as ContractPricingMode,
+    billingUnit: record.billingUnit,
+    unitPrice: record.unitPrice,
+    cardsPerMachine: record.cardsPerMachine,
     unitPricePerHour: record.unitPricePerHour,
     revenueSharePercent: record.revenueSharePercent,
     listPricePerHour: record.listPricePerHour,
     pricingTiers: parsePricingTiers(record.pricingTiers),
+    effectiveFrom: record.effectiveFrom,
+    referenceDate: periodEnd,
   })
   if (!isPricingFieldsComplete(fields, { requireListPrice: false })) return null
   return fields
@@ -376,10 +432,15 @@ async function resolvePricingSnapshotForDcCard(input: {
     const fields = toResolvedFields({
       configStatus: 'active',
       pricingMode: history.pricingMode,
+      billingUnit: history.billingUnit,
+      unitPrice: history.unitPrice,
+      cardsPerMachine: history.cardsPerMachine,
       unitPricePerHour: history.unitPricePerHour,
       revenueSharePercent: history.revenueSharePercent,
       listPricePerHour: history.listPricePerHour,
       pricingTiers: parsePricingTiers(record.pricingTiers),
+      effectiveFrom: history.effectiveFrom,
+      referenceDate: periodEnd,
     })
     if (isPricingFieldsComplete(fields, { requireListPrice: false })) {
       const base = {
@@ -438,6 +499,27 @@ export async function loadPricingResolveContext(): Promise<PricingResolveContext
       loadAllPricingRecords(),
     ])
   return { gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard }
+}
+
+/** 按机房×卡型 ID 解析成本定价（与导入前校验 tenant-bill-pricing 同源） */
+export async function resolveUnitCostForDcCard(input: {
+  dataCenterId: string
+  gpuCardTypeId: string
+  asOfDate: string
+  ctx: PricingResolveContext
+}): Promise<ResolvedUnitCost | null> {
+  const records =
+    input.ctx.recordsByDcCard.get(recordKey(input.dataCenterId, input.gpuCardTypeId)) ?? []
+  for (const record of records) {
+    const resolved = await resolvePricingSnapshotForDcCard({
+      record,
+      dataCenterId: input.dataCenterId,
+      gpuCardTypeId: input.gpuCardTypeId,
+      periodEnd: input.asOfDate,
+    })
+    if (resolved) return resolved
+  }
+  return null
 }
 
 export function diagnosePricingPair(
@@ -521,10 +603,15 @@ async function resolveSupplierOnlyForPair(
         const fields = toResolvedFields({
           configStatus: 'active',
           pricingMode: history.pricingMode,
+          billingUnit: history.billingUnit,
+          unitPrice: history.unitPrice,
+          cardsPerMachine: history.cardsPerMachine,
           unitPricePerHour: history.unitPricePerHour,
           revenueSharePercent: history.revenueSharePercent,
           listPricePerHour: history.listPricePerHour,
           pricingTiers: parsePricingTiers(record.pricingTiers),
+          effectiveFrom: history.effectiveFrom,
+          referenceDate: asOfDate,
         })
         if (isPricingFieldsComplete(fields, { requireListPrice: false })) return true
       }

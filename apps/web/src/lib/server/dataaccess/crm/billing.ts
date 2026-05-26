@@ -23,7 +23,6 @@ import {
   toNumber,
 } from '@/lib/server/mappers/crm'
 import { mapBillingTenantRow } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import { projectsDataAccess } from './projects'
 import {
   billingTenant,
@@ -49,7 +48,7 @@ async function tenantIdsForCustomer(customerId: string): Promise<string[]> {
 
 export const billingDataAccess = {
   async listTenantsByCustomer(customerId: string): Promise<PlatformTenant[]> {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(billingTenant)

@@ -1,7 +1,6 @@
 import { db } from '@/lib/db'
 import type { UserStaff } from '@/lib/types/crm'
 import { mapUserStaffRow } from '@/lib/server/mappers/crm'
-import { ensureCrmSeeded } from './ensure-seeded'
 import { accountManagerAssignment, customer, userStaff } from '@workspace/db/schema'
 import { and, count, desc, eq, ilike, inArray, isNull, ne, or } from 'drizzle-orm'
 
@@ -110,7 +109,7 @@ export const staffDataAccess = {
   async list(filters: StaffListFilters = {}): Promise<
     (UserStaff & { assignmentCount: number })[]
   > {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
 
     const conditions = []
     if (filters.status && filters.status !== 'all') {
@@ -155,7 +154,7 @@ export const staffDataAccess = {
   },
 
   async listActive(): Promise<UserStaff[]> {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
     const rows = await db.select().from(userStaff).where(eq(userStaff.status, 'active'))
     return rows.map(mapUserStaffRow)
   },
@@ -181,7 +180,7 @@ export const staffDataAccess = {
   },
 
   async getById(id: string): Promise<(UserStaff & { assignmentCount: number }) | null> {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) return null
 
@@ -220,7 +219,7 @@ export const staffDataAccess = {
   },
 
   async listAssignments(staffId: string) {
-    await ensureCrmSeeded()
+    // await ensureCrmSeeded()
     const rows = await db
       .select()
       .from(accountManagerAssignment)

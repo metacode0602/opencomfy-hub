@@ -44,6 +44,11 @@ import {
   validateRevenueShareRatioTiers,
 } from '@/lib/supplier/revenue-share-ratio-tiers'
 import { RevenueShareRatioTiersEditor } from '@/app/[locale]/(protected)/supplier/components/revenue-share-ratio-tiers-editor'
+import { CardTimePricingFields } from '@/app/[locale]/(protected)/supplier/components/card-time-pricing-fields'
+import {
+  DEFAULT_CARDS_PER_MACHINE,
+  type SupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
 import {
   CardTypeSelect,
   preventCardTypeSelectOutsideDismiss,
@@ -144,7 +149,9 @@ export function CreateCardPricingDialog({
   const [cardTypeId, setCardTypeId] = useState('')
   const [category, setCategory] = useState<PricingCategory>('card_time')
   const [variant, setVariant] = useState<PricingVariant>('fixed')
+  const [billingUnit, setBillingUnit] = useState<SupplierBillingUnit>('hour')
   const [unitPrice, setUnitPrice] = useState('')
+  const [cardsPerMachine, setCardsPerMachine] = useState(String(DEFAULT_CARDS_PER_MACHINE))
   const [sharePercent, setSharePercent] = useState('')
   const [tiers, setTiers] = useState<ContractPricingTier[]>([emptyTier(1), emptyTier(2)])
   const [ratioTiers, setRatioTiers] = useState<RevenueShareRatioTierDraft[]>([
@@ -206,7 +213,9 @@ export function CreateCardPricingDialog({
       setCardTypeId('')
       setCategory('card_time')
       setVariant('fixed')
+      setBillingUnit('hour')
       setUnitPrice('')
+      setCardsPerMachine(String(DEFAULT_CARDS_PER_MACHINE))
       setSharePercent('')
       setTiers([emptyTier(1), emptyTier(2)])
       setRatioTiers([emptyRevenueShareRatioTier(1), emptyRevenueShareRatioTier(2)])
@@ -284,7 +293,10 @@ export function CreateCardPricingDialog({
       return
     }
 
+    let billingUnitValue: SupplierBillingUnit | undefined
+    let unitPriceValue: number | undefined
     let unitPricePerHour: number | undefined
+    let cardsPerMachineValue: number | undefined
     let revenueSharePercent: number | undefined
     let pricingTiers: ContractPricingTier[] | undefined
 
@@ -292,10 +304,23 @@ export function CreateCardPricingDialog({
       if (category === 'card_time') {
         const v = parseFloat(unitPrice)
         if (Number.isNaN(v) || v <= 0) {
-          setSubmitError('请填写有效的卡时单价')
+          setSubmitError(
+            billingUnit === 'month' ? '请填写有效的月租金额' : '请填写有效的卡时单价',
+          )
           return
         }
-        unitPricePerHour = v
+        billingUnitValue = billingUnit
+        unitPriceValue = v
+        if (billingUnit === 'month') {
+          const cards = parseInt(cardsPerMachine, 10) || DEFAULT_CARDS_PER_MACHINE
+          if (cards <= 0 || !Number.isInteger(cards)) {
+            setSubmitError('每台卡数须为正整数')
+            return
+          }
+          cardsPerMachineValue = cards
+        } else {
+          unitPricePerHour = v
+        }
       } else {
         const v = parseFloat(sharePercent)
         if (Number.isNaN(v) || v <= 0 || v > 100) {
@@ -344,7 +369,10 @@ export function CreateCardPricingDialog({
       dataCenterId,
       gpuCardTypeId: cardTypeId,
       pricingMode,
+      billingUnit: billingUnitValue,
+      unitPrice: unitPriceValue,
       unitPricePerHour,
+      cardsPerMachine: cardsPerMachineValue,
       revenueSharePercent,
       pricingTiers,
       effectiveFrom: effectiveFromValue,
@@ -525,20 +553,19 @@ export function CreateCardPricingDialog({
           </div>
 
           {variant === 'fixed' && category === 'card_time' && (
-            <div className="grid gap-2">
-              <Label>卡时单价（元/小时）*</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  className="pl-9"
-                  value={unitPrice}
-                  onChange={(e) => setUnitPrice(e.target.value)}
-                />
-              </div>
-            </div>
+            <CardTimePricingFields
+              billingUnit={billingUnit}
+              onBillingUnitChange={setBillingUnit}
+              unitPrice={unitPrice}
+              onUnitPriceChange={setUnitPrice}
+              cardsPerMachine={cardsPerMachine}
+              onCardsPerMachineChange={setCardsPerMachine}
+              referenceDate={
+                effectiveFrom.trim()
+                  ? fromDatetimeLocalValue(effectiveFrom)
+                  : nowPlatformDateTime()
+              }
+            />
           )}
 
           {variant === 'fixed' && category === 'revenue_share' && (

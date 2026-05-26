@@ -7,6 +7,11 @@ import type {
   SupplierPricingHistory,
   SupplierPricingRecord,
 } from '@/lib/data/types'
+import {
+  DEFAULT_CARDS_PER_MACHINE,
+  formatMonthlyRentPricingLabel,
+  normalizeSupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
 import { summarizeRatioBandTiers } from '@/lib/supplier/revenue-share-ratio-tiers'
 
 export function formatDateTime(value?: string | null) {
@@ -25,7 +30,18 @@ export function getRecordPricingMode(record: SupplierPricingRecord): ContractPri
 export function pricingValueLabel(record: SupplierPricingRecord) {
   const mode = getRecordPricingMode(record)
   if (mode === 'card_time') {
-    return record.unitPricePerHour != null ? `¥${record.unitPricePerHour}/小时` : '—'
+    const billingUnit = normalizeSupplierBillingUnit(record.billingUnit)
+    const unitPrice = record.unitPrice ?? record.unitPricePerHour
+    if (unitPrice == null) return '—'
+    if (billingUnit === 'month') {
+      return formatMonthlyRentPricingLabel({
+        billingUnit: 'month',
+        unitPrice,
+        cardsPerMachine: record.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE,
+        effectiveFrom: record.effectiveFrom,
+      })
+    }
+    return `¥${unitPrice}/小时`
   }
   if (mode === 'revenue_share') {
     return record.revenueSharePercent != null ? `${record.revenueSharePercent}%` : '—'
@@ -39,9 +55,26 @@ export function pricingValueLabel(record: SupplierPricingRecord) {
 }
 
 export function historyChangeLabel(row: SupplierPricingHistory) {
+  const billingUnit = normalizeSupplierBillingUnit(row.billingUnit)
+  if (row.cooperationMode === 'card_time' && billingUnit === 'month') {
+    const prev =
+      row.previousUnitPrice != null ? `¥${row.previousUnitPrice}` : '—'
+    const next = row.newUnitPrice != null ? `¥${row.newUnitPrice}` : '—'
+    return { prev, next, unit: '/月（整租）' }
+  }
   if (row.cooperationMode === 'card_time') {
-    const prev = row.previousUnitPricePerHour != null ? `¥${row.previousUnitPricePerHour}` : '—'
-    const next = row.newUnitPricePerHour != null ? `¥${row.newUnitPricePerHour}` : '—'
+    const prev =
+      row.previousUnitPrice != null
+        ? `¥${row.previousUnitPrice}`
+        : row.previousUnitPricePerHour != null
+          ? `¥${row.previousUnitPricePerHour}`
+          : '—'
+    const next =
+      row.newUnitPrice != null
+        ? `¥${row.newUnitPrice}`
+        : row.newUnitPricePerHour != null
+          ? `¥${row.newUnitPricePerHour}`
+          : '—'
     return { prev, next, unit: '/小时' }
   }
   const prev = row.previousRevenueSharePercent != null ? `${row.previousRevenueSharePercent}%` : '—'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { DollarSign, Percent } from 'lucide-react'
+import { Percent } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -21,9 +21,15 @@ import {
 } from '@/lib/platform-pricing/datetime'
 import { trpc } from '@/lib/trpc/client'
 import type { ContractPricingMode, SupplierPricingRecord } from '@/lib/data/types'
+import {
+  DEFAULT_CARDS_PER_MACHINE,
+  normalizeSupplierBillingUnit,
+  type SupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
 import { getRecordPricingMode } from './unit-costs-utils'
 import { PricingModeBadge } from './pricing-mode-badge'
 import { RevenueShareRatioTiersEditor } from './revenue-share-ratio-tiers-editor'
+import { CardTimePricingFields } from './card-time-pricing-fields'
 import {
   type RevenueShareRatioTierDraft,
   revenueShareRatioTiersFromRecord,
@@ -61,7 +67,9 @@ export function EditPricingDialog({
 }: EditPricingDialogProps) {
   const utils = trpc.useUtils()
 
+  const [billingUnit, setBillingUnit] = useState<SupplierBillingUnit>('hour')
   const [unitPrice, setUnitPrice] = useState('')
+  const [cardsPerMachine, setCardsPerMachine] = useState(String(DEFAULT_CARDS_PER_MACHINE))
   const [sharePercent, setSharePercent] = useState('')
   const [ratioTiers, setRatioTiers] = useState<RevenueShareRatioTierDraft[]>([])
   const [effectiveFrom, setEffectiveFrom] = useState('')
@@ -71,7 +79,17 @@ export function EditPricingDialog({
 
   useEffect(() => {
     if (!open || !record) return
-    setUnitPrice(record.unitPricePerHour?.toString() ?? '')
+    const unit = normalizeSupplierBillingUnit(record.billingUnit)
+    setBillingUnit(unit)
+    if (unit === 'month') {
+      setUnitPrice(record.unitPrice?.toString() ?? '')
+      setCardsPerMachine(String(record.cardsPerMachine ?? DEFAULT_CARDS_PER_MACHINE))
+    } else {
+      setUnitPrice(
+        record.unitPrice?.toString() ?? record.unitPricePerHour?.toString() ?? '',
+      )
+      setCardsPerMachine(String(DEFAULT_CARDS_PER_MACHINE))
+    }
     setSharePercent(record.revenueSharePercent?.toString() ?? '')
     setRatioTiers(revenueShareRatioTiersFromRecord(record))
     setEffectiveFrom(toDatetimeLocalValue(record.effectiveFrom))
@@ -130,16 +148,28 @@ export function EditPricingDialog({
     }
 
     if (isFixedCardTimeMode(pricingMode)) {
-      const newUnitPrice = parseFloat(unitPrice)
-      if (Number.isNaN(newUnitPrice) || newUnitPrice <= 0) {
-        setFormError('请填写有效的卡时单价')
+      const parsed = parseFloat(unitPrice)
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        setFormError(billingUnit === 'month' ? '请填写有效的月租金额' : '请填写有效的卡时单价')
+        return
+      }
+
+      const cards =
+        billingUnit === 'month'
+          ? parseInt(cardsPerMachine, 10) || DEFAULT_CARDS_PER_MACHINE
+          : DEFAULT_CARDS_PER_MACHINE
+
+      if (billingUnit === 'month' && (cards <= 0 || !Number.isInteger(cards))) {
+        setFormError('每台卡数须为正整数')
         return
       }
 
       updateMutation.mutate({
         recordId: record.id,
         pricingMode,
-        unitPricePerHour: newUnitPrice,
+        billingUnit,
+        unitPrice: parsed,
+        cardsPerMachine: billingUnit === 'month' ? cards : undefined,
         effectiveFrom: effectiveFromValue,
         effectiveTo: effectiveToValue,
         reason: reason || undefined,
@@ -174,6 +204,9 @@ export function EditPricingDialog({
   const isTieredCardTime = pricingMode === 'tiered_card_time'
 
   const dialogMaxWidth = isTieredShare ? 'sm:max-w-2xl' : 'sm:max-w-md'
+  const pricingReferenceDate = effectiveFrom.trim()
+    ? fromDatetimeLocalValue(effectiveFrom)
+    : record.effectiveFrom
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -191,18 +224,15 @@ export function EditPricingDialog({
           </div>
 
           {isFixedCardTime ? (
-            <div className="grid gap-2">
-              <Label>卡时单价（元/小时）</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type="number"
-                  className="pl-9"
-                  value={unitPrice}
-                  onChange={(e) => setUnitPrice(e.target.value)}
-                />
-              </div>
-            </div>
+            <CardTimePricingFields
+              billingUnit={billingUnit}
+              onBillingUnitChange={setBillingUnit}
+              unitPrice={unitPrice}
+              onUnitPriceChange={setUnitPrice}
+              cardsPerMachine={cardsPerMachine}
+              onCardsPerMachineChange={setCardsPerMachine}
+              referenceDate={pricingReferenceDate}
+            />
           ) : null}
 
           {isFixedShare ? (

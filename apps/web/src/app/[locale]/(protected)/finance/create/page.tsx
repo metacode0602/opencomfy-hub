@@ -173,12 +173,15 @@ function syncTenantBillSlotsFromValidation(
       return existing
     }
     if (w.parseStatus === "empty") {
+      if (existing?.state.status === "parsing") {
+        return existing
+      }
       return {
         windowId: w.windowId,
         windowStart: w.windowStart,
         windowEnd: w.windowEnd,
-        state: existing?.state ?? {
-          file: null,
+        state: {
+          file: existing?.state.file ?? null,
           status: "empty",
           message: "",
           rowCount: 0,
@@ -289,6 +292,19 @@ function pricingPairFailureDetail(p: {
   return `${p.regionCode} × ${p.gpuModel} — 卡型 ID：${cardTypeId}，机房 ID：${dataCenterId}`
 }
 
+function formatTenantAllocationLabel(issue: {
+  tenantPlatformId: string
+  customerFullName?: string | null
+  tenantName?: string | null
+}): string {
+  const parts = [`租户 ${issue.tenantPlatformId}`]
+  if (issue.customerFullName) parts.push(`客户：${issue.customerFullName}`)
+  if (issue.tenantName && issue.tenantName !== issue.customerFullName) {
+    parts.push(`计费租户：${issue.tenantName}`)
+  }
+  return parts.join("，")
+}
+
 function ImportPreCheckAlerts({
   validation,
   computeError,
@@ -309,6 +325,26 @@ function ImportPreCheckAlerts({
           orderedAt?: string
         }[]
         pendingAllocationCount: number
+        pendingAllocations?: {
+          tenantPlatformId: string
+          tenantId: string
+          tenantName: string | null
+          customerFullName: string | null
+          reason: "missing_project" | "sum_not_100"
+          projects: {
+            projectId: string
+            projectName: string
+            staffName: string | null
+            allocationPercent: string | null
+          }[]
+          missingProjects: {
+            projectId: string
+            projectName: string
+            staffName: string | null
+            allocationPercent: string | null
+          }[]
+          allocationSumPercent: number | null
+        }[]
         crossFileOk: boolean
         periodStatus: string
         priceWindowInfo?: {
@@ -346,7 +382,7 @@ function ImportPreCheckAlerts({
   return (
     <div className="space-y-3" role="alert">
       {computeError && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive whitespace-pre-wrap">
           {computeError}
         </div>
       )}
@@ -362,9 +398,11 @@ function ImportPreCheckAlerts({
           </ul>
         </div>
       )}
-      {validation && !validation.crossFileOk && validation.periodStatus === "import_error" && (
+      {validation && !validation.crossFileOk && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          存在 B 端未知租户或未通过跨文件校验，请修正对应 Excel 后重新上传（可在各上传区下载错误明细）。
+          {validation.periodStatus === "import_error"
+            ? "存在 B 端未知租户或未通过跨文件校验，请修正对应 Excel 后重新上传（可在各上传区下载错误明细）。"
+            : "跨文件校验未通过：请确认客户消费明细、裸金属订单与客户账单详情均已上传成功；若曾上传账单后仍无法计算，请重新上传各时间段客户账单。"}
         </div>
       )}
       {validation && validation.missingPricing.length > 0 && (
@@ -421,9 +459,48 @@ function ImportPreCheckAlerts({
           )}
         </div>
       )}
-      {validation && validation.pendingAllocationCount > 0 && (
+      {validation &&
+        (validation.pendingAllocations?.length ?? validation.pendingAllocationCount) > 0 && (
         <div className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
-          {validation.pendingAllocationCount} 个租户需配置成本分成比例后方可计算。
+          <p className="font-medium">
+            {validation.pendingAllocationCount} 个租户需先配置成本分成比例（各项目合计 100%）后方可计算：
+          </p>
+          <ul className="mt-2 space-y-3 list-none pl-0">
+            {(validation.pendingAllocations ?? []).map((issue) => (
+              <li
+                key={issue.tenantPlatformId}
+                className="rounded border border-amber-500/30 bg-background/60 px-3 py-2"
+              >
+                <p className="font-medium">{formatTenantAllocationLabel(issue)}</p>
+                {issue.reason === "sum_not_100" ? (
+                  <p className="mt-1 text-amber-800 dark:text-amber-100">
+                    已填分成合计 {issue.allocationSumPercent?.toFixed(2) ?? "—"}%，须为 100%。
+                  </p>
+                ) : (
+                  <p className="mt-1 text-amber-800 dark:text-amber-100">
+                    关联 {issue.projects.length} 个项目，{issue.missingProjects.length}{" "}
+                    个未配置分成。
+                  </p>
+                )}
+                <ul className="mt-1 list-inside list-disc text-amber-950/90 dark:text-amber-50/90">
+                  {(issue.reason === "sum_not_100" ? issue.projects : issue.missingProjects).map(
+                    (project) => (
+                      <li key={project.projectId}>
+                        {project.projectName}
+                        {project.staffName ? `（客户经理：${project.staffName}）` : "（未配置客户经理）"}
+                        {project.allocationPercent != null
+                          ? ` — 已配 ${project.allocationPercent}%`
+                          : " — 未配置分成"}
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-amber-800 dark:text-amber-100">
+            请在本账期为各项目填写成本分成比例，或在 CRM 租户详情维护「项目成本分成」预置后重新校验。
+          </p>
         </div>
       )}
     </div>
@@ -806,7 +883,7 @@ export default function FinanceCreateBillingPeriodPage() {
 
   const createPeriod = trpc.finance.periods.create.useMutation()
   const importFile = trpc.finance.periods.importFile.useMutation()
-  const computePeriod = trpc.finance.periods.compute.useMutation()
+  const computeCostPeriod = trpc.finance.periods.computeCost.useMutation()
   const computeIncomePeriod = trpc.finance.periods.computeIncome.useMutation()
   const publishPeriod = trpc.finance.periods.publish.useMutation()
   const saveSupplementary = trpc.finance.periods.saveSupplementary.useMutation()
@@ -905,12 +982,6 @@ export default function FinanceCreateBillingPeriodPage() {
     setTenantBillSlots([])
     setComputeError(null)
   }, [])
-
-  const allParsed =
-    fixedSlots.customer.status === "done" &&
-    fixedSlots.baremetal.status === "done" &&
-    tenantBillSlots.length > 0 &&
-    tenantBillSlots.every((w) => w.state.status === "done")
 
   const ensurePeriod = useCallback(async (): Promise<string> => {
     if (periodId) return periodId
@@ -1183,12 +1254,17 @@ export default function FinanceCreateBillingPeriodPage() {
   const incomeImportsParsed =
     fixedSlots.customer.status === "done" && fixedSlots.baremetal.status === "done"
 
+  const costImportsParsed =
+    tenantBillSlots.length > 0 &&
+    tenantBillSlots.every((w) => w.state.status === "done") &&
+    fixedSlots.baremetal.status === "done"
+
   const canRunCompute =
     isValidPeriodCode(periodCode) &&
     Boolean(periodStart) &&
     Boolean(periodEnd) &&
-    allParsed &&
-    (validation?.canCompute ?? false) &&
+    costImportsParsed &&
+    (validation?.canComputeCost ?? validation?.canCompute ?? false) &&
     !computing &&
     !computingIncome &&
     !persisting &&
@@ -1229,11 +1305,11 @@ export default function FinanceCreateBillingPeriodPage() {
     setComputeError(null)
     try {
       const id = await ensurePeriod()
-      await computePeriod.mutateAsync({ billingPeriodId: id })
+      await computeCostPeriod.mutateAsync({ billingPeriodId: id })
       await utils.finance.periods.getBundle.invalidate({ id })
       await refetchValidation()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "计算失败"
+      const msg = e instanceof Error ? e.message : "计算成本失败"
       setComputeError(msg)
       if (periodId) await refetchValidation()
     } finally {
@@ -1542,7 +1618,10 @@ export default function FinanceCreateBillingPeriodPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <CostGroupedTable rows={draftBundle!.cost} />
+                  <CostGroupedTable
+                    rows={draftBundle!.cost}
+                    periodCode={draftBundle!.period.period_code}
+                  />
                 </CardContent>
               </Card>
 

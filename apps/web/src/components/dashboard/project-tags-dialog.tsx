@@ -58,6 +58,7 @@ export function ProjectTagsDialog({
   const setTagsMutation = trpc.crm.projectTags.setForProject.useMutation({
     onSuccess: () => {
       void utils.crm.projectTags.listByProject.invalidate()
+      void utils.crm.projects.list.invalidate()
       onSaved()
       onOpenChange(false)
     },

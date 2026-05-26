@@ -1,3 +1,8 @@
+export type BillingTenantProjectTag = {
+  id: string
+  name: string
+}
+
 export type BillingTenantListItem = {
   id: string
   customerId: string
@@ -16,6 +21,8 @@ export type BillingTenantListItem = {
   customerName: string
   contactPerson?: string
   contactPhone?: string
+  /** 关联项目上的标签（租户项目导入等） */
+  projectTags: BillingTenantProjectTag[]
 }
 
 export type BillingTenantDetail = BillingTenantListItem & {
@@ -36,6 +43,7 @@ export type BillingTenantUpdateInput = {
     isDefault: boolean
   }
   customer: {
+    type: 'B' | 'C'
     contactPerson: string
     contactPhone: string
     contactEmail: string

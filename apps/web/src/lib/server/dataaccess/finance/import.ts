@@ -10,8 +10,9 @@ import { eq } from 'drizzle-orm'
 import type { ImportFileType } from './constants'
 import { FinanceError } from './errors'
 import {
-  isTenantTotalRow,
-  isTotalRow,
+  isBaremetalOrderTotalRow,
+  isCustomerConsumptionTotalRow,
+  isTenantBillTotalRow,
   normalizeCustomerType,
   parseMoneyCell,
   parseWorkbookDetailed,
@@ -87,7 +88,7 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
   const errors: ImportCellError[] = []
 
   for (const { rowNo, row } of sheet.rows) {
-    if (isTenantTotalRow(row)) continue
+    if (isCustomerConsumptionTotalRow(row)) continue
     const tenantId = pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES])
     if (!tenantId) {
       errors.push({
@@ -143,8 +144,8 @@ function mapBaremetalRows(
   const errors: ImportCellError[] = []
 
   for (const { rowNo, row } of sheet.rows) {
+    if (isBaremetalOrderTotalRow(row)) continue
     const tenantId = pickColumn(row, ['租户ID', 'tenant_id'])
-    if (isTotalRow(tenantId)) continue
     const orderId = pickColumn(row, ['订单ID', 'order_id'])
     const payStatus = pickColumn(row, ['支付状态', 'pay_status']) ?? ''
     const finalAmount = parseMoneyCell(pickColumn(row, ['最终总额', 'final_amount']))
@@ -241,8 +242,9 @@ function mapTenantBillRows(sheet: ParsedWorkbook): {
   const errors: ImportCellError[] = []
 
   for (const { rowNo, row } of sheet.rows) {
+    if (isTenantBillTotalRow(row)) continue
     const tenantId = pickColumn(row, ['租户ID', 'tenant_id'])
-    if (!tenantId || isTotalRow(tenantId)) continue
+    if (!tenantId) continue
     const balanceHours = pickColumn(row, ['余额卡时', 'balance_card_hours'])
     parsed.push({
       rowNo,

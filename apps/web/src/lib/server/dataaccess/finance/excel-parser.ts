@@ -110,19 +110,129 @@ export const TENANT_PLATFORM_ID_ALIASES = [
   'customerId',
 ] as const
 
+const CUSTOMER_CONSUMPTION_LABEL_ALIASES = [
+  ['类型', 'product_type'],
+  ['项目名称', 'project_name'],
+  ['租户类型', 'tenant_type'],
+  ['客户类型', 'customer_type'],
+] as const
+
+const CUSTOMER_CONSUMPTION_AMOUNT_ALIASES = new Set(
+  ['总消费', 'total_consumption', '券消费', 'voucher_consumption', '余额消费', 'balance_consumption'].map(
+    normalizeHeader,
+  ),
+)
+
+const BAREMETAL_ORDER_AMOUNT_ALIASES = new Set(
+  ['订单金额', 'order_amount', '退款金额', 'refund_amount', '最终总额', 'final_amount'].map(
+    normalizeHeader,
+  ),
+)
+
+const TENANT_BILL_AMOUNT_ALIASES = new Set(
+  [
+    '总消费',
+    'total_consumption',
+    '券消费',
+    'voucher_consumption',
+    '余额消费',
+    'balance_consumption',
+    '总卡时',
+    'total_card_hours',
+    '券卡时',
+    'voucher_card_hours',
+    '余额卡时',
+    'balance_card_hours',
+  ].map(normalizeHeader),
+)
+
+function isImportTotalRow(
+  row: SheetRow,
+  options: {
+    idColumnAliases: readonly (readonly string[])[]
+    labelColumnAliases?: readonly (readonly string[])[]
+    amountColumnKeys: Set<string>
+  },
+): boolean {
+  if (isTenantTotalRow(row)) return true
+
+  for (const aliases of options.idColumnAliases) {
+    if (isTotalRow(pickColumn(row, [...aliases]))) return true
+  }
+
+  if (options.labelColumnAliases) {
+    for (const aliases of options.labelColumnAliases) {
+      if (isTotalRow(pickColumn(row, [...aliases]))) return true
+    }
+  }
+
+  for (const [key, value] of Object.entries(row)) {
+    if (value == null || options.amountColumnKeys.has(normalizeHeader(key))) continue
+    if (isTotalRow(String(value))) return true
+  }
+
+  return false
+}
+
 function normalizeTotalMarker(value: string): string {
-  return value.trim().replace(/\s+/g, '').toLowerCase()
+  return value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[：:，,。.；;]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
 }
 
-/** 租户 ID 为「总计 / 合计 / Total」时视为表尾汇总行，不参与导入 */
-export function isTotalRow(tenantId: string | null): boolean {
-  if (!tenantId) return false
-  return TOTAL_ROW_MARKERS.has(normalizeTotalMarker(tenantId))
+/** 单元格值为「总计 / 合计 / Total」时视为汇总标识 */
+export function isTotalRow(value: string | null): boolean {
+  if (!value) return false
+  return TOTAL_ROW_MARKERS.has(normalizeTotalMarker(value))
 }
 
-/** 行内租户/客户 ID 列为汇总标识时跳过（客户消费明细等） */
+/** 行内租户/客户 ID 列为汇总标识时跳过 */
 export function isTenantTotalRow(row: SheetRow): boolean {
   return isTotalRow(pickColumn(row, [...TENANT_PLATFORM_ID_ALIASES]))
+}
+
+/**
+ * 客户消费明细表尾合计行：租户 ID 或其它标识列出现汇总文案时跳过，不参与导入与校验。
+ */
+export function isCustomerConsumptionTotalRow(row: SheetRow): boolean {
+  return isImportTotalRow(row, {
+    idColumnAliases: [TENANT_PLATFORM_ID_ALIASES],
+    labelColumnAliases: CUSTOMER_CONSUMPTION_LABEL_ALIASES,
+    amountColumnKeys: CUSTOMER_CONSUMPTION_AMOUNT_ALIASES,
+  })
+}
+
+/** 裸金属消费订单表尾合计行 */
+export function isBaremetalOrderTotalRow(row: SheetRow): boolean {
+  return isImportTotalRow(row, {
+    idColumnAliases: [
+      ['租户ID', 'tenant_id'],
+      ['订单ID', 'order_id'],
+      ['订单编号', 'order_no'],
+    ],
+    labelColumnAliases: [
+      ['机房名称', 'idc_name'],
+      ['设备型号', 'device_model'],
+      ['支付状态', 'pay_status'],
+      ['设备状态', 'device_status'],
+    ],
+    amountColumnKeys: BAREMETAL_ORDER_AMOUNT_ALIASES,
+  })
+}
+
+/** 客户账单详情表尾合计行 */
+export function isTenantBillTotalRow(row: SheetRow): boolean {
+  return isImportTotalRow(row, {
+    idColumnAliases: [
+      ['租户ID', 'tenant_id'],
+      ['GPU型号', 'gpu_model'],
+      ['区域', 'region', 'region_code'],
+    ],
+    amountColumnKeys: TENANT_BILL_AMOUNT_ALIASES,
+  })
 }
 
 export function parseMoneyCell(raw: string | null): string {

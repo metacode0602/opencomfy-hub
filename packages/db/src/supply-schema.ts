@@ -334,6 +334,10 @@ export const supplierPricingRecord = pgTable(
     configStatus: varchar("config_status", { length: 32 }).notNull().default("active"),
     listPricePerHour: money("list_price_per_hour"),
     unitPricePerHour: money("unit_price_per_hour"),
+    /** hour=卡时价 / month=整租月租（元/台/月） */
+    billingUnit: varchar("billing_unit", { length: 16 }).notNull().default("hour"),
+    unitPrice: money("unit_price"),
+    cardsPerMachine: integer("cards_per_machine").default(8),
     dealToListRatio: priceRatio("deal_to_list_ratio"),
     revenueSharePercent: numeric("revenue_share_percent", { precision: 7, scale: 4 }),
     pricingTiers: jsonb("pricing_tiers"),
@@ -377,6 +381,12 @@ export const supplierPricingHistory = pgTable(
     newListPricePerHour: money("new_list_price_per_hour"),
     previousUnitPricePerHour: money("previous_unit_price_per_hour"),
     newUnitPricePerHour: money("new_unit_price_per_hour"),
+    previousBillingUnit: varchar("previous_billing_unit", { length: 16 }),
+    newBillingUnit: varchar("new_billing_unit", { length: 16 }),
+    previousUnitPrice: money("previous_unit_price"),
+    newUnitPrice: money("new_unit_price"),
+    previousCardsPerMachine: integer("previous_cards_per_machine"),
+    newCardsPerMachine: integer("new_cards_per_machine"),
     previousDealToListRatio: priceRatio("previous_deal_to_list_ratio"),
     newDealToListRatio: priceRatio("new_deal_to_list_ratio"),
     previousRevenueSharePercent: numeric("previous_revenue_share_percent", {

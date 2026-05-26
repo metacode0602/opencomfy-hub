@@ -11,8 +11,16 @@ import type {
   BillingTenantUpdateInput,
   TenantImportResult,
 } from '@/lib/types/billing-tenant'
-import { billingTenant, customer } from '@workspace/db/schema'
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import type { ProjectTagOption } from '@/lib/server/dataaccess/crm/project-tags'
+import {
+  billingTenant,
+  crmProject,
+  customer,
+  projectTag,
+  projectTagAssignment,
+  projectTenant,
+} from '@workspace/db/schema'
+import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 
 export type { BillingTenantDetail, BillingTenantListItem, BillingTenantUpdateInput, TenantImportResult }
 
@@ -53,6 +61,7 @@ function parseOverdueAt(raw: string | null): Date | null {
 function mapListRow(
   t: typeof billingTenant.$inferSelect,
   c: typeof customer.$inferSelect,
+  projectTags: BillingTenantListItem['projectTags'] = [],
 ): BillingTenantListItem {
   return {
     id: t.id,
@@ -70,7 +79,115 @@ function mapListRow(
     customerName: c.name,
     contactPerson: c.contactPerson ?? undefined,
     contactPhone: c.contactPhone ?? undefined,
+    projectTags,
   }
+}
+
+async function loadTenantIdsWithTag(tagId: string): Promise<Set<string>> {
+  const [primaryRows, linkedRows] = await Promise.all([
+    db
+      .select({ tenantId: crmProject.primaryTenantId })
+      .from(crmProject)
+      .innerJoin(projectTagAssignment, eq(projectTagAssignment.projectId, crmProject.id))
+      .where(
+        and(eq(projectTagAssignment.tagId, tagId), sql`${crmProject.primaryTenantId} IS NOT NULL`),
+      ),
+    db
+      .select({ tenantId: projectTenant.tenantId })
+      .from(projectTenant)
+      .innerJoin(projectTagAssignment, eq(projectTagAssignment.projectId, projectTenant.projectId))
+      .where(eq(projectTagAssignment.tagId, tagId)),
+  ])
+
+  const ids = new Set<string>()
+  for (const row of primaryRows) {
+    if (row.tenantId) ids.add(row.tenantId)
+  }
+  for (const row of linkedRows) {
+    ids.add(row.tenantId)
+  }
+  return ids
+}
+
+async function loadProjectTagsByTenantIds(
+  tenantIds: string[],
+): Promise<Map<string, BillingTenantListItem['projectTags']>> {
+  const empty = new Map<string, BillingTenantListItem['projectTags']>()
+  if (tenantIds.length === 0) return empty
+
+  const [primaryProjects, linkedProjects] = await Promise.all([
+    db
+      .select({
+        tenantId: crmProject.primaryTenantId,
+        projectId: crmProject.id,
+      })
+      .from(crmProject)
+      .where(inArray(crmProject.primaryTenantId, tenantIds)),
+    db
+      .select({
+        tenantId: projectTenant.tenantId,
+        projectId: projectTenant.projectId,
+      })
+      .from(projectTenant)
+      .where(inArray(projectTenant.tenantId, tenantIds)),
+  ])
+
+  const tenantToProjects = new Map<string, Set<string>>()
+  for (const row of [...primaryProjects, ...linkedProjects]) {
+    if (!row.tenantId) continue
+    const set = tenantToProjects.get(row.tenantId) ?? new Set<string>()
+    set.add(row.projectId)
+    tenantToProjects.set(row.tenantId, set)
+  }
+
+  const allProjectIds = [
+    ...new Set([...tenantToProjects.values()].flatMap((projectIds) => [...projectIds])),
+  ]
+
+  const projectToTags = new Map<string, ProjectTagOption[]>()
+  if (allProjectIds.length > 0) {
+    const tagRows = await db
+      .select({
+        projectId: projectTagAssignment.projectId,
+        id: projectTag.id,
+        name: projectTag.name,
+        sortOrder: projectTag.sortOrder,
+      })
+      .from(projectTagAssignment)
+      .innerJoin(projectTag, eq(projectTagAssignment.tagId, projectTag.id))
+      .where(inArray(projectTagAssignment.projectId, allProjectIds))
+      .orderBy(asc(projectTag.sortOrder), asc(projectTag.name))
+
+    for (const row of tagRows) {
+      const list = projectToTags.get(row.projectId) ?? []
+      if (!list.some((tag) => tag.id === row.id)) {
+        list.push({ id: row.id, name: row.name })
+      }
+      projectToTags.set(row.projectId, list)
+    }
+  }
+
+  for (const tenantId of tenantIds) {
+    const projectIds = tenantToProjects.get(tenantId)
+    if (!projectIds || projectIds.size === 0) {
+      empty.set(tenantId, [])
+      continue
+    }
+
+    const tagById = new Map<string, ProjectTagOption>()
+    for (const projectId of projectIds) {
+      for (const tag of projectToTags.get(projectId) ?? []) {
+        tagById.set(tag.id, tag)
+      }
+    }
+
+    empty.set(
+      tenantId,
+      [...tagById.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    )
+  }
+
+  return empty
 }
 
 const IMPORT_PLATFORM_ID = ['租户ID', 'tenant_id', 'platform_tenant_id']
@@ -141,26 +258,37 @@ function customerDisplayName(
 }
 
 export const billingTenantsDataAccess = {
-  async list(filters: { search?: string } = {}): Promise<BillingTenantListItem[]> {
+  async list(filters: { search?: string; tagId?: string } = {}): Promise<BillingTenantListItem[]> {
     const q = filters.search?.trim()
+    const tagId = filters.tagId?.trim()
+    const tenantIdsWithTag = tagId ? await loadTenantIdsWithTag(tagId) : null
+    if (tenantIdsWithTag && tenantIdsWithTag.size === 0) return []
+
     const rows = await db
       .select({ tenant: billingTenant, cust: customer })
       .from(billingTenant)
       .innerJoin(customer, eq(customer.id, billingTenant.customerId))
       .where(
-        q
-          ? or(
-              ilike(billingTenant.platformTenantId, `%${q}%`),
-              ilike(billingTenant.name, `%${q}%`),
-              ilike(billingTenant.phone, `%${q}%`),
-              ilike(customer.name, `%${q}%`),
-              ilike(customer.contactPhone, `%${q}%`),
-            )
-          : undefined,
+        and(
+          q
+            ? or(
+                ilike(billingTenant.platformTenantId, `%${q}%`),
+                ilike(billingTenant.name, `%${q}%`),
+                ilike(billingTenant.phone, `%${q}%`),
+                ilike(customer.name, `%${q}%`),
+                ilike(customer.contactPhone, `%${q}%`),
+              )
+            : undefined,
+          tenantIdsWithTag
+            ? inArray(billingTenant.id, [...tenantIdsWithTag])
+            : undefined,
+        ),
       )
       .orderBy(desc(billingTenant.createdAt))
 
-    return rows.map((r) => mapListRow(r.tenant, r.cust))
+    const tagMap = await loadProjectTagsByTenantIds(rows.map((r) => r.tenant.id))
+
+    return rows.map((r) => mapListRow(r.tenant, r.cust, tagMap.get(r.tenant.id) ?? []))
   },
 
   async getById(id: string): Promise<BillingTenantDetail | null> {
@@ -208,6 +336,7 @@ export const billingTenantsDataAccess = {
       await tx
         .update(customer)
         .set({
+          type: input.customer.type,
           contactPerson: input.customer.contactPerson.trim(),
           contactPhone: input.customer.contactPhone.trim(),
           contactEmail: input.customer.contactEmail.trim(),

@@ -5,8 +5,9 @@ import {
   platformIncomeMonthly,
 } from '@workspace/db/schema'
 import { desc, eq } from 'drizzle-orm'
-import { computeBillingPeriod } from './compute'
+import { computeBillingPeriodCost, collectCostTenantPlatformIds } from './compute-cost'
 import { computeBillingPeriodIncome } from './compute-billing-period-income'
+import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { FinanceError } from './errors'
 import { importExcelFile, getImportSlotStatuses } from './import'
 import { financeLog } from './logger'
@@ -25,10 +26,17 @@ import {
   readErrorReportBySlot,
   validateCrossFileImports,
 } from './validate-import'
+import {
+  computeSinglePeriodIncome,
+  previewSinglePeriodIncome,
+} from './compute-single-period-income'
 import { detectPlatformListPriceWindows } from './platform-list-price'
 import {
+  listTenantBillWindows,
   syncTenantBillWindowsForPeriod,
 } from './tenant-bill-windows'
+import { customerFullNamesByTenantIds } from './income-customer-enrich'
+import { validateSingleIncome } from './validate-single-income'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
 
@@ -112,6 +120,9 @@ export const financeBillingPeriodsDataAccess = {
       .select()
       .from(platformIncomeMonthly)
       .where(eq(platformIncomeMonthly.billingPeriodId, periodId))
+    const customerByTenant = await customerFullNamesByTenantIds(
+      income.map((r) => r.tenantId),
+    )
     const cost = await db
       .select()
       .from(platformCostMonthly)
@@ -126,7 +137,8 @@ export const financeBillingPeriodsDataAccess = {
         tenant_id: r.tenantId,
         tenant_platform_id: r.tenantPlatformId,
         customer_id: r.customerId,
-        customer_full_name: r.customerFullName,
+        customer_full_name:
+          customerByTenant.get(r.tenantId) ?? r.customerFullName,
         project_id: r.projectId,
         supplementary_consumption: r.supplementaryConsumption,
         balance_consumption: r.balanceConsumption,
@@ -140,12 +152,18 @@ export const financeBillingPeriodsDataAccess = {
         billing_period_id: r.billingPeriodId,
         supplier_unit_cost_id: r.supplierUnitCostId,
         account_manager: r.accountManager,
+        staff_name: r.staffName,
         staff_id: r.staffId,
+        data_center_id: r.dataCenterId,
+        gpu_card_type_id: r.gpuCardTypeId,
         idc_name: r.idcName,
         idc_code: r.idcCode,
         card_type: r.cardType,
         type: r.type as 'record' | 'sum',
+        total_consumption: r.totalConsumption,
+        voucher_consumption: r.voucherConsumption,
         balance_consumption: r.balanceConsumption,
+        total_card_hours: r.totalCardHours,
         balance_card_hours: r.balanceCardHours,
         voucher_card_hours: r.voucherCardHours,
         confirmed_revenue_excl_tax: r.confirmedRevenueExclTax,
@@ -154,6 +172,8 @@ export const financeBillingPeriodsDataAccess = {
         gross_profit: r.grossProfit,
         deal_unit_price_per_hour: r.dealUnitPricePerHour,
         list_price_per_hour: r.listPricePerHour,
+        pricing_snapshot_id: r.pricingSnapshotId,
+        source_line_ids: r.sourceLineIds,
         created_at: r.createdAt.toISOString(),
         updated_at: r.updatedAt?.toISOString() ?? null,
       })),
@@ -162,14 +182,17 @@ export const financeBillingPeriodsDataAccess = {
 
   importExcelFile,
   getImportSlotStatuses,
-  computeBillingPeriod,
+  computeBillingPeriodCost,
   computeBillingPeriodIncome,
+  computeSinglePeriodIncome,
+  previewSinglePeriodIncome,
   listTenantProjectBindings,
+  validateSingleIncome,
 
   async validatePeriod(periodId: string) {
     const period = await this.getById(periodId)
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-    const windows = await syncTenantBillWindowsForPeriod(periodId)
+    const windows = await listTenantBillWindows(periodId)
     const priceWindowInfo = await detectPlatformListPriceWindows({
       periodStart: period.period_start,
       periodEnd: period.period_end,
@@ -179,20 +202,36 @@ export const financeBillingPeriodsDataAccess = {
     const missingTenantBill = await findMissingTenantBillPricing({ periodId })
     const missingBaremetal = await findMissingBaremetalPlatformListPrice({ periodId })
     const missingPricing = [...missingTenantBill, ...missingBaremetal]
-    const bindings = await listTenantProjectBindings(periodId)
-    const pendingAllocation = bindings.filter(
-      (b) =>
-        b.projects.length >= 2 &&
-        b.projects.some((p) => p.allocationPercent == null),
-    )
     const tenantBillReady =
       windows.length > 0 &&
       slots.tenantBillWindows.length === windows.length &&
       slots.tenantBillWindows.every((w) => w.parseStatus === 'ok')
     const incomeImportsReady =
       slots.customer?.parseStatus === 'ok' && slots.baremetal?.parseStatus === 'ok'
+    const costImportsReady =
+      tenantBillReady && slots.baremetal?.parseStatus === 'ok'
+    const costTenantPlatformIds = await collectCostTenantPlatformIds(periodId)
+    const bindings = await listTenantProjectBindings(periodId)
+    const bindingPlatformIds = bindings
+      .filter((b) => b.projects.length >= 2)
+      .map((b) => b.tenantPlatformId)
+    const allocationCheckPlatformIds = [
+      ...new Set([...costTenantPlatformIds, ...bindingPlatformIds]),
+    ]
+    const pendingAllocations = await getPendingCostAllocationIssues({
+      billingPeriodId: periodId,
+      tenantPlatformIds: allocationCheckPlatformIds,
+      periodEnd: period.period_end,
+    })
+    const canComputeCost =
+      (period.status === 'imported' ||
+        period.status === 'computed' ||
+        period.status === 'draft') &&
+      missingPricing.length === 0 &&
+      pendingAllocations.length === 0 &&
+      costImportsReady
     const canRunBase =
-      cross.ok && missingPricing.length === 0 && pendingAllocation.length === 0
+      cross.ok && missingPricing.length === 0 && pendingAllocations.length === 0
     return {
       periodStatus: period.status,
       slots,
@@ -200,17 +239,17 @@ export const financeBillingPeriodsDataAccess = {
       priceWindowInfo,
       crossFileOk: cross.ok,
       missingPricing,
-      pendingAllocationCount: pendingAllocation.length,
-      canCompute:
-        (period.status === 'imported' || period.status === 'computed') &&
-        canRunBase &&
-        tenantBillReady,
+      pendingAllocations,
+      pendingAllocationCount: pendingAllocations.length,
+      pendingCostAllocationCount: pendingAllocations.length,
+      canCompute: canComputeCost,
+      canComputeCost,
       canComputeIncome:
         (period.status === 'imported' ||
           period.status === 'computed' ||
           period.status === 'draft') &&
         cross.ok &&
-        pendingAllocation.length === 0 &&
+        pendingAllocations.length === 0 &&
         incomeImportsReady,
     }
   },

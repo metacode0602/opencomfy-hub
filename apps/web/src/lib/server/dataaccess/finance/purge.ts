@@ -7,7 +7,6 @@ import {
   billingPeriodTenantBillWindow,
   billingPeriodTenantProjectEnrichment,
   billingTenantCostAllocation,
-  platformCostMonthly,
   platformIncomeMonthly,
 } from '@workspace/db/schema'
 import { and, eq } from 'drizzle-orm'
@@ -18,13 +17,21 @@ import {
   deleteStorageFile,
 } from './import-storage'
 import { financeLog } from './logger'
-import { appendOperationLog, newId } from './operation-log'
+import { appendOperationLog } from './operation-log'
+import { purgeCostDerived } from './purge-cost'
 
 type DbExecutor = Pick<typeof db, 'delete' | 'update'>
 
-async function deleteDerivedForPeriod(tx: DbExecutor, periodId: string): Promise<void> {
+async function deleteIncomeDerivedForPeriod(tx: DbExecutor, periodId: string): Promise<void> {
   await tx.delete(platformIncomeMonthly).where(eq(platformIncomeMonthly.billingPeriodId, periodId))
-  await tx.delete(platformCostMonthly).where(eq(platformCostMonthly.billingPeriodId, periodId))
+  await tx
+    .delete(billingPeriodAggCustomerConsumption)
+    .where(eq(billingPeriodAggCustomerConsumption.billingPeriodId, periodId))
+}
+
+async function deleteDerivedForPeriod(tx: DbExecutor, periodId: string): Promise<void> {
+  await deleteIncomeDerivedForPeriod(tx, periodId)
+  await purgeCostDerived(tx, periodId)
   await tx
     .delete(billingPeriodReconciliationReport)
     .where(eq(billingPeriodReconciliationReport.billingPeriodId, periodId))
@@ -91,6 +98,18 @@ export async function purgeBillingPeriodArtifacts(input: {
       }
       await deleteDerivedForPeriod(tx, periodId)
       await resetPeriodTotals(tx, periodId)
+    } else if (scope === 'derived_income') {
+      await deleteIncomeDerivedForPeriod(tx, periodId)
+      await resetPeriodTotals(tx, periodId)
+    } else if (scope === 'derived_cost') {
+      await purgeCostDerived(tx, periodId)
+      await tx
+        .update(billingPeriod)
+        .set({
+          totalCost: null,
+          totalGrossProfit: null,
+        })
+        .where(eq(billingPeriod.id, periodId))
     } else if (scope === 'derived') {
       await deleteDerivedForPeriod(tx, periodId)
       await tx

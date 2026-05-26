@@ -29,7 +29,12 @@ import {
 } from "drizzle-orm/pg-core"
 
 import { billingTenant, crmProject, customer, userStaff } from "./crm-schema"
-import { supplierUnitCost } from "./supply-schema"
+import {
+  dataCenter,
+  gpuCardType,
+  supplierPricingRecord,
+  supplierUnitCost,
+} from "./supply-schema"
 
 /** 金额 decimal(15,4) */
 const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
@@ -140,31 +145,41 @@ export const platformCostMonthly = pgTable(
       .notNull()
       .references(() => billingPeriod.id, { onDelete: "cascade" }),
     type: varchar("type", { length: 16 }).notNull(), // record | sum
-    staffId: text("staff_id")
-      .notNull()
-      .references(() => userStaff.id, { onDelete: "restrict" }),
-    accountManager: varchar("account_manager", { length: 128 }).notNull(),
-    projectId: text("project_id").references(() => crmProject.id, {
-      onDelete: "set null",
+    staffId: text("staff_id").references(() => userStaff.id, {
+      onDelete: "restrict",
     }),
+    accountManager: varchar("account_manager", { length: 128 }),
     supplierUnitCostId: text("supplier_unit_cost_id").references(
       () => supplierUnitCost.id,
       { onDelete: "set null" },
     ),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, {
+      onDelete: "set null",
+    }),
+    gpuCardTypeId: text("gpu_card_type_id").references(() => gpuCardType.id, {
+      onDelete: "set null",
+    }),
     idcName: varchar("idc_name", { length: 255 }),
     idcCode: varchar("idc_code", { length: 64 }),
     cardType: varchar("card_type", { length: 128 }),
+    totalConsumption: money("total_consumption"),
+    voucherConsumption: money("voucher_consumption"),
     balanceConsumption: money("balance_consumption"),
+    totalCardHours: cardHours("total_card_hours"),
     balanceCardHours: cardHours("balance_card_hours"),
     voucherCardHours: cardHours("voucher_card_hours"),
     confirmedRevenueExclTax: money("confirmed_revenue_excl_tax"),
     soldDurationCostExclTax: money("sold_duration_cost_excl_tax"),
     giftedDurationCostExclTax: money("gifted_duration_cost_excl_tax"),
     grossProfit: money("gross_profit"),
-    /** 多项目拆分行占原 Raw 的比例（审计） */
-    allocationPercent: allocationPercent("allocation_percent"),
-    sourceRawIds: jsonb("source_raw_ids").$type<string[]>(),
-    /** 阶梯分成落档审计（§6.4.2） */
+    /** v3 成本汇总：客户经理姓名快照（读路径不联 staff 表） */
+    staffName: varchar("staff_name", { length: 128 }),
+    pricingSnapshotId: text("pricing_snapshot_id").references(
+      () => billingPeriodCostPricingSnapshot.id,
+      { onDelete: "set null" },
+    ),
+    sourceLineIds: jsonb("source_line_ids").$type<string[]>(),
+    /** 阶梯分成落档审计 */
     listPricePerHour: money("list_price_per_hour"),
     dealUnitPricePerHour: money("deal_unit_price_per_hour"),
     dealToListRatio: dealToListRatio("deal_to_list_ratio"),
@@ -185,6 +200,128 @@ export const platformCostMonthly = pgTable(
     ),
     index("platform_cost_monthly_supplier_unit_cost_id_idx").on(
       table.supplierUnitCostId,
+    ),
+    index("platform_cost_monthly_data_center_id_idx").on(table.dataCenterId),
+    index("platform_cost_monthly_gpu_card_type_id_idx").on(table.gpuCardTypeId),
+    uniqueIndex("platform_cost_monthly_record_uk")
+      .on(table.billingPeriodId, table.staffId, table.dataCenterId, table.gpuCardTypeId)
+      .where(sql`${table.type} = 'record'`),
+    uniqueIndex("platform_cost_monthly_period_sum_uk")
+      .on(table.billingPeriodId)
+      .where(sql`${table.type} = 'sum' AND ${table.staffId} IS NULL`),
+    uniqueIndex("platform_cost_monthly_staff_sum_uk")
+      .on(table.billingPeriodId, table.staffId)
+      .where(sql`${table.type} = 'sum' AND ${table.staffId} IS NOT NULL`),
+  ],
+)
+
+// ---------------------------------------------------------------------------
+// §4.6 成本派生中间层（v3 — source_line + pricing_snapshot）
+// ---------------------------------------------------------------------------
+
+export const billingPeriodCostSourceLine = pgTable(
+  "billing_period_cost_source_line",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 16 }).notNull(), // flex | baremetal
+    sourceRawId: text("source_raw_id").notNull(),
+    tenantId: text("tenant_id").references(() => billingTenant.id, {
+      onDelete: "set null",
+    }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    staffId: text("staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    staffName: varchar("staff_name", { length: 128 }),
+    dataCenterId: text("data_center_id")
+      .notNull()
+      .references(() => dataCenter.id, { onDelete: "restrict" }),
+    dataCenterName: varchar("data_center_name", { length: 255 }),
+    gpuCardTypeId: text("gpu_card_type_id")
+      .notNull()
+      .references(() => gpuCardType.id, { onDelete: "restrict" }),
+    gpuCardTypeName: varchar("gpu_card_type_name", { length: 128 }),
+    totalConsumption: money("total_consumption").notNull().default("0"),
+    voucherConsumption: money("voucher_consumption").notNull().default("0"),
+    balanceConsumption: money("balance_consumption").notNull().default("0"),
+    totalCardHours: cardHours("total_card_hours").notNull().default("0"),
+    voucherCardHours: cardHours("voucher_card_hours").notNull().default("0"),
+    balanceCardHours: cardHours("balance_card_hours").notNull().default("0"),
+    supplierUnitCostId: text("supplier_unit_cost_id").references(
+      () => supplierUnitCost.id,
+      { onDelete: "set null" },
+    ),
+    supplierPricingRecordId: text("supplier_pricing_record_id").references(
+      () => supplierPricingRecord.id,
+      { onDelete: "set null" },
+    ),
+    windowId: text("window_id").references(() => billingPeriodTenantBillWindow.id, {
+      onDelete: "set null",
+    }),
+    sourceMeta: jsonb("source_meta").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_cost_source_line_uk").on(
+      table.billingPeriodId,
+      table.kind,
+      table.sourceRawId,
+      table.staffId,
+    ),
+    index("billing_period_cost_source_line_period_id_idx").on(table.billingPeriodId),
+  ],
+)
+
+export const billingPeriodCostPricingSnapshot = pgTable(
+  "billing_period_cost_pricing_snapshot",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    windowId: text("window_id")
+      .notNull()
+      .references(() => billingPeriodTenantBillWindow.id, { onDelete: "cascade" }),
+    gpuCardTypeId: text("gpu_card_type_id")
+      .notNull()
+      .references(() => gpuCardType.id, { onDelete: "restrict" }),
+    gpuCardTypeName: varchar("gpu_card_type_name", { length: 128 }),
+    dataCenterId: text("data_center_id")
+      .notNull()
+      .references(() => dataCenter.id, { onDelete: "restrict" }),
+    dataCenterName: varchar("data_center_name", { length: 255 }),
+    supplierUnitCostId: text("supplier_unit_cost_id").references(() => supplierUnitCost.id, {
+      onDelete: "set null",
+    }),
+    supplierPricingRecordId: text("supplier_pricing_record_id").references(
+      () => supplierPricingRecord.id,
+      { onDelete: "set null" },
+    ),
+    pricingMode: varchar("pricing_mode", { length: 32 }).notNull(),
+    billingUnit: varchar("billing_unit", { length: 16 }),
+    monthlyRentPerMachine: money("monthly_rent_per_machine"),
+    cardsPerMachine: integer("cards_per_machine"),
+    listPricePerHour: money("list_price_per_hour"),
+    dealUnitPricePerHour: money("deal_unit_price_per_hour"),
+    revenueSharePercent: numeric("revenue_share_percent", { precision: 7, scale: 4 }),
+    pricingTiers: jsonb("pricing_tiers"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_period_cost_pricing_snapshot_uk").on(
+      table.billingPeriodId,
+      table.windowId,
+      table.dataCenterId,
+      table.gpuCardTypeId,
+    ),
+    index("billing_period_cost_pricing_snapshot_period_id_idx").on(
+      table.billingPeriodId,
     ),
   ],
 )
@@ -651,6 +788,8 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   tenantCostAllocations: many(billingTenantCostAllocation),
   incomeRows: many(platformIncomeMonthly),
   costRows: many(platformCostMonthly),
+  costSourceLines: many(billingPeriodCostSourceLine),
+  costPricingSnapshots: many(billingPeriodCostPricingSnapshot),
   reconciliationReport: one(billingPeriodReconciliationReport),
   operationLogs: many(billingPeriodOperationLog),
 }))
@@ -708,16 +847,92 @@ export const platformCostMonthlyRelations = relations(platformCostMonthly, ({ on
     fields: [platformCostMonthly.staffId],
     references: [userStaff.id],
   }),
-  project: one(crmProject, {
-    fields: [platformCostMonthly.projectId],
-    references: [crmProject.id],
+  dataCenter: one(dataCenter, {
+    fields: [platformCostMonthly.dataCenterId],
+    references: [dataCenter.id],
+  }),
+  gpuCardType: one(gpuCardType, {
+    fields: [platformCostMonthly.gpuCardTypeId],
+    references: [gpuCardType.id],
   }),
   supplierUnitCost: one(supplierUnitCost, {
     fields: [platformCostMonthly.supplierUnitCostId],
     references: [supplierUnitCost.id],
   }),
+  pricingSnapshot: one(billingPeriodCostPricingSnapshot, {
+    fields: [platformCostMonthly.pricingSnapshotId],
+    references: [billingPeriodCostPricingSnapshot.id],
+  }),
   voucherCardHoursHistories: many(voucherCardHoursAdjustmentHistory),
 }))
+
+export const billingPeriodCostSourceLineRelations = relations(
+  billingPeriodCostSourceLine,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodCostSourceLine.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    tenant: one(billingTenant, {
+      fields: [billingPeriodCostSourceLine.tenantId],
+      references: [billingTenant.id],
+    }),
+    staff: one(userStaff, {
+      fields: [billingPeriodCostSourceLine.staffId],
+      references: [userStaff.id],
+    }),
+    dataCenter: one(dataCenter, {
+      fields: [billingPeriodCostSourceLine.dataCenterId],
+      references: [dataCenter.id],
+    }),
+    gpuCardType: one(gpuCardType, {
+      fields: [billingPeriodCostSourceLine.gpuCardTypeId],
+      references: [gpuCardType.id],
+    }),
+    supplierUnitCost: one(supplierUnitCost, {
+      fields: [billingPeriodCostSourceLine.supplierUnitCostId],
+      references: [supplierUnitCost.id],
+    }),
+    supplierPricingRecord: one(supplierPricingRecord, {
+      fields: [billingPeriodCostSourceLine.supplierPricingRecordId],
+      references: [supplierPricingRecord.id],
+    }),
+    window: one(billingPeriodTenantBillWindow, {
+      fields: [billingPeriodCostSourceLine.windowId],
+      references: [billingPeriodTenantBillWindow.id],
+    }),
+  }),
+)
+
+export const billingPeriodCostPricingSnapshotRelations = relations(
+  billingPeriodCostPricingSnapshot,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodCostPricingSnapshot.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    window: one(billingPeriodTenantBillWindow, {
+      fields: [billingPeriodCostPricingSnapshot.windowId],
+      references: [billingPeriodTenantBillWindow.id],
+    }),
+    dataCenter: one(dataCenter, {
+      fields: [billingPeriodCostPricingSnapshot.dataCenterId],
+      references: [dataCenter.id],
+    }),
+    gpuCardType: one(gpuCardType, {
+      fields: [billingPeriodCostPricingSnapshot.gpuCardTypeId],
+      references: [gpuCardType.id],
+    }),
+    supplierUnitCost: one(supplierUnitCost, {
+      fields: [billingPeriodCostPricingSnapshot.supplierUnitCostId],
+      references: [supplierUnitCost.id],
+    }),
+    supplierPricingRecord: one(supplierPricingRecord, {
+      fields: [billingPeriodCostPricingSnapshot.supplierPricingRecordId],
+      references: [supplierPricingRecord.id],
+    }),
+  }),
+)
 
 export const billingTenantCostAllocationRelations = relations(
   billingTenantCostAllocation,
@@ -784,6 +999,9 @@ export type BillingPeriodRow = typeof billingPeriod.$inferSelect
 export type NewBillingPeriodRow = typeof billingPeriod.$inferInsert
 export type PlatformIncomeMonthlyRow = typeof platformIncomeMonthly.$inferSelect
 export type PlatformCostMonthlyRow = typeof platformCostMonthly.$inferSelect
+export type BillingPeriodCostSourceLineRow = typeof billingPeriodCostSourceLine.$inferSelect
+export type BillingPeriodCostPricingSnapshotRow =
+  typeof billingPeriodCostPricingSnapshot.$inferSelect
 export type BillingPeriodImportBatchRow = typeof billingPeriodImportBatch.$inferSelect
 export type BillingPeriodTenantBillWindowRow = typeof billingPeriodTenantBillWindow.$inferSelect
 export type BillingPeriodRawCustomerConsumptionRow =

@@ -5,7 +5,7 @@ export function formatMoney(value: string | null | undefined): string {
   if (Number.isNaN(n)) return value
   return n.toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    maximumFractionDigits: 2,
   })
 }
 

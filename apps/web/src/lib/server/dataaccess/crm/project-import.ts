@@ -13,7 +13,6 @@ import {
   splitTags,
 } from '@/lib/crm/project-import-utils'
 import { crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
-import { ensureCrmSeeded } from '@/lib/server/dataaccess/crm/ensure-seeded'
 import type {
   ProjectImportCommitOptions,
   ProjectImportCommitResult,
@@ -120,7 +119,7 @@ async function loadTenantsByPlatformIds(platformIds: string[]) {
 }
 
 async function resolveBusinessLineId(name: string | null): Promise<{ id: string; name: string }> {
-  await ensureCrmSeeded()
+  // await ensureCrmSeeded()
   if (name?.trim()) {
     const byName = await db.query.businessLine.findFirst({
       where: and(eq(businessLine.status, 'active'), ilike(businessLine.name, name.trim())),
@@ -472,7 +471,6 @@ function purgeExpiredPreviewCache() {
 
 export const projectImportDataAccess = {
   async preview(buffer: Buffer, fileName: string): Promise<ProjectImportPreviewResult> {
-    await ensureCrmSeeded()
     purgeExpiredPreviewCache()
 
     const arrayBuffer = buffer.buffer.slice(
@@ -589,7 +587,6 @@ export const projectImportDataAccess = {
     previewToken: string,
     options: ProjectImportCommitOptions,
   ): Promise<ProjectImportCommitResult> {
-    await ensureCrmSeeded()
     const cached = this.getCachedPreview(previewToken)
     if (!cached) {
       throw new Error('预览已过期，请重新上传文件')

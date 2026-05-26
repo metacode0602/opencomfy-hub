@@ -1,10 +1,19 @@
 import type { ContractPricingMode, ContractPricingTier } from '@/lib/data/types'
 import { isSharePricingMode } from '@/lib/data/types'
 import { COST_TAX_DIVISOR } from '@/lib/finance/cost-row-utils'
+import {
+  DEFAULT_CARDS_PER_MACHINE,
+  normalizeSupplierBillingUnit,
+  resolveCardTimeUnitPrice,
+  type SupplierBillingUnit,
+} from '@/lib/supplier/monthly-rent-pricing'
 import { validateRevenueShareRatioContractTiers } from '@/lib/supplier/revenue-share-ratio-tiers'
 
 export type ResolvedPricingFields = {
   pricingMode: ContractPricingMode
+  billingUnit?: SupplierBillingUnit
+  unitPrice?: number | null
+  cardsPerMachine?: number | null
   unitPricePerHour: number | null
   revenueSharePercent: number | null
   listPricePerHour: number | null
@@ -45,6 +54,9 @@ export function isPricingFieldsComplete(
   fields: {
     configStatus: string
     pricingMode: ContractPricingMode
+    billingUnit?: SupplierBillingUnit
+    unitPrice?: number | null
+    cardsPerMachine?: number | null
     unitPricePerHour: number | null
     revenueSharePercent: number | null
     listPricePerHour: number | null
@@ -70,6 +82,10 @@ export function isPricingFieldsComplete(
 
   if (isSharePricingMode(mode)) {
     return fields.revenueSharePercent != null
+  }
+
+  if (normalizeSupplierBillingUnit(fields.billingUnit) === 'month') {
+    return fields.unitPrice != null && fields.unitPricePerHour != null
   }
 
   return fields.unitPricePerHour != null

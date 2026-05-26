@@ -39,7 +39,7 @@ function formatMoneyCell(value: string | null | undefined): number | "" {
 function buildRowCells(row: PlatformIncomeMonthly): (string | number)[] {
   return [
     formatText(row.project_name),
-    formatText(row.customer_full_name ?? row.tenant_name),
+    formatText(row.customer_full_name),
     row.tenant_platform_id,
     formatMoneyCell(row.supplementary_consumption),
     formatMoneyCell(row.balance_consumption),
