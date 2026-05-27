@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { normalizeCardKey, OVERVIEW_POOL_FOOTNOTE } from '@/lib/server/aggregation/overview-aggregation'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
+import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   GlobalAlertLevel,
   GlobalAlertRow,
@@ -199,20 +200,31 @@ export const globalOpsDataAccess = {
         opsStatus: supplierDevice.opsStatus,
         inMaintenance: supplierDevice.inMaintenance,
         cardTypeName: gpuCardType.name,
+        cardTypeCode: gpuCardType.code,
+        cardTypeDeviceRole: gpuCardType.deviceRole,
       })
       .from(supplierDevice)
       .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
 
     const cardFilter = normalized.cardType !== 'all' ? normalizeCardKey(normalized.cardType) : null
 
-    const filteredDevices = deviceRows.filter((d) => {
-      if (normalized.supplierId && normalized.supplierId !== 'all' && d.supplierId !== normalized.supplierId) {
-        return false
-      }
-      if (normalized.dataCenterId && d.dataCenterId !== normalized.dataCenterId) return false
-      if (cardFilter && normalizeCardKey(d.cardTypeName) !== cardFilter) return false
-      return true
-    })
+    const filteredDevices = deviceRows
+      .filter((d) => {
+        if (normalized.supplierId && normalized.supplierId !== 'all' && d.supplierId !== normalized.supplierId) {
+          return false
+        }
+        if (normalized.dataCenterId && d.dataCenterId !== normalized.dataCenterId) return false
+        if (cardFilter && normalizeCardKey(d.cardTypeName) !== cardFilter) return false
+        return true
+      })
+      .map((d) => ({
+        ...d,
+        cardTypeRole: resolveGpuCardTypeRole({
+          name: d.cardTypeName,
+          code: d.cardTypeCode,
+          deviceRole: d.cardTypeDeviceRole,
+        }),
+      }))
 
     const poolBindingRows = await db
       .select({
@@ -250,12 +262,12 @@ export const globalOpsDataAccess = {
       if (f.supplierDeviceId) abnormalDeviceIds.add(f.supplierDeviceId)
     }
 
-    const pendingAccessDcIds = new Set<string>()
-    for (const d of filteredDevices) {
-      if (d.lifecycleStatus === '待接入' && d.dataCenterId) {
-        pendingAccessDcIds.add(d.dataCenterId)
-      }
-    }
+    const pendingAccessDcIds = new Set(stats.pendingAccessDataCenterIds ?? [])
+    const pendingAccessDcCount = normalized.dataCenterId
+      ? pendingAccessDcIds.has(normalized.dataCenterId)
+        ? 1
+        : 0
+      : pendingAccessDcIds.size
 
     const dualPoolGpu = stats.supplierRows.reduce((s, r) => s + r.dualPoolGpu, 0)
     const elasticGpu = stats.supplierRows.reduce((s, r) => s + r.elasticServiceGpu, 0)
@@ -312,12 +324,12 @@ export const globalOpsDataAccess = {
     for (const d of filteredDevices) {
       if (!d.dataCenterId) continue
       const row = ensureCluster(d.dataCenterId)
-      row.totalGpu += d.gpuCount
+      row.totalGpu += metricGpuCount(d)
       const ct = d.cardTypeName ?? '未知'
-      row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + d.gpuCount)
-      if (d.lifecycleStatus === '在线') row.onlineGpu += d.gpuCount
+      row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + metricGpuCount(d))
+      if (d.lifecycleStatus === '在线') row.onlineGpu += metricGpuCount(d)
       if (d.lifecycleStatus === '待接入' || d.lifecycleStatus === '接入中') {
-        row.pendingGpu += d.gpuCount
+        row.pendingGpu += metricGpuCount(d)
       }
       if (abnormalDeviceIds.has(d.id)) row.abnormalDevices += 1
     }
@@ -432,7 +444,7 @@ export const globalOpsDataAccess = {
         filters: normalized,
         view: 'snapshot',
       },
-      kpis: buildKpis(stats, abnormalDeviceIds.size, pendingAccessDcIds.size),
+      kpis: buildKpis(stats, abnormalDeviceIds.size, pendingAccessDcCount),
       lifecycleFunnel: stats.lifecycleFunnel,
       resourcePools: {
         displayUnit: 'gpu_cards',

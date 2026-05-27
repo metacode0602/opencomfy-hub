@@ -544,6 +544,8 @@ export type GPUCardTypeManufacturer = 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'O
 
 export type GPUCardTypeStatus = 'active' | 'disabled'
 
+export type GPUCardTypeRole = 'compute' | 'infra'
+
 export interface GPUCardType {
   id: string
   /** 业务编码，落库 gpu_card_type.code */
@@ -553,6 +555,8 @@ export interface GPUCardType {
   memoryGB: number
   tdpWatts?: number
   computeCapability?: string
+  /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+  deviceRole?: GPUCardTypeRole
   status: GPUCardTypeStatus
   createdAt?: string
   updatedAt?: string
@@ -567,6 +571,8 @@ export interface DataCenterDevice {
   supplierShortName?: string
   cardTypeId: string
   cardTypeName: string
+  /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+  cardTypeRole?: GPUCardTypeRole
   quantity: number
   onlineQuantity: number
   // 卡时模式成本

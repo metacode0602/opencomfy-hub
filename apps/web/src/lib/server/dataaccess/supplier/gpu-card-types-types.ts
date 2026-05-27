@@ -5,6 +5,7 @@ export type GpuCardTypeUpsertInput = {
   memoryGB: number
   tdpWatts?: number
   computeCapability?: string
+  deviceRole?: 'compute' | 'infra'
 }
 
 export type GpuCardTypeUpdateInput = Omit<GpuCardTypeUpsertInput, 'code'>

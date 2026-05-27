@@ -243,7 +243,9 @@ export function OnboardingBatchesContent({
                   <TableCell>
                     <div>{b.supplierShortName}</div>
                     <div className="text-xs text-muted-foreground">
+                      <Link href={`/supplier/datacenters/${b.dataCenterId}`} className="text-primary hover:underline">
                       {b.idcCode} · {b.dataCenterName}
+                      </Link>
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={formatPlanSummary(b.plannedLinesJson as Parameters<typeof formatPlanSummary>[0])}>

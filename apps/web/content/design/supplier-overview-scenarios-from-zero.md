@@ -6,7 +6,7 @@
 
 **文档性质**：按 **端到端作业步骤** 说明三类计划创建后，**资源总览**（`/supplier/overview`）各模块数据如何变化；示例用量便于对照，可按实际台数等比缩放。
 
-**版本**：v1.0（2026-05-27）
+**版本**：v1.1（2026-05-27）— 增加 **计划管道叠加** 口径（Snapshot）；`planned_gpu_count` 持久化；Period 暂不叠加
 
 ---
 
@@ -32,7 +32,7 @@
 | ------------ | -------------------------- | --------- | ------------------------------- |
 | **顶部 KPI**   | 总量 `total`                 | 0 卡 · 0 台 | 无物理机                            |
 |              | 在线 `online`                | 0 · 0     |                                 |
-|              | 待接入 `pendingAccess`        | 0 · 0     | `lifecycle_status=待接入`          |
+|              | 待接入 `pendingAccess`        | 0 · 0     | 实体 `lifecycle=待接入` + 计划缺口（见 §2.1） |
 |              | 接入中 `onboarding`           | 0 · 0     | `lifecycle_status=接入中`          |
 |              | 维护 `maintenance`           | 0 · 0     |                                 |
 |              | 可售 `sellable`              | 0 · 0     |                                 |
@@ -47,7 +47,7 @@
 | **故障 SLA**   | `faultOpenCount` 等         | 0         | 与三场景无关，默认 0                     |
 
 
-> **规律**：资源总览的 **GPU 台数类 KPI 全部来自 `supplier_device` + `supplier_gpu_inventory`**；**仅创建商务计划、尚未导入主数据时，总览数字保持 T0，只有「进行中批次」会出现条目。**
+> **规律（v1.1）**：**总量 / 在线 / 可售 / 库存** 仍来自 `supplier_device` + `supplier_gpu_inventory`；**待接入 KPI 与漏斗首段** 在 Snapshot 下叠加 **进行中批次的计划缺口**（§2.1）。**仅创建计划、尚未导入主数据时**，总量仍为 0，但 **待接入 / 漏斗待接入 /（新机房时）待接入机房** 可上升。
 
 ---
 
@@ -60,12 +60,12 @@
 | --------------------- | ------------------------------------------------------------------- | -------------------------------------------------- |
 | 总量 `total.gpuCount`   | `supplier_gpu_inventory.quantity` 求和                                | 主数据导入后才有                                           |
 | 在线 `online`           | `supplier_device.lifecycle_status = '在线'`                           | 按设备 `gpu_count` 累加                                 |
-| 待接入 `pendingAccess`   | `lifecycle_status = '待接入'`                                          | 典型 `ops_status=预留闲置中`                              |
+| 待接入 `pendingAccess`   | **实体** `lifecycle = '待接入'` **+ 计划缺口**（§2.1）                      | 典型实体 `ops=预留闲置中`；计划侧来自 `onboarding_batch`      |
 | 接入中 `onboarding`      | `lifecycle_status = '接入中'`                                          | 如 `网关节点上架中`、裸金属上架中等                                |
 | 可售 `sellable`         | 在线 GPU − 内部测试 − 故障扣减 − `其他部门使用中` 等                                  | 见 `overview.ts`                                    |
 | 下架中 `retiring`        | `lifecycle_status = '下线中'`                                          | 下架变更挂接后                                            |
 | 进行中批次 `activeBatches` | `batch_kind ∈ {online, order_access}` 且 `batch_status ∉ {已完成, 已取消}` | `**device_retire` 不计入**                            |
-| 生命周期漏斗                | 按 `lifecycle_status` 分桶                                             | 顺序：待接入→接入中→在线→维护中→下线中                              |
+| 生命周期漏斗                | **待接入段** = 实体 + 计划缺口；其余段仅实体 `lifecycle_status`              | 顺序：待接入→接入中→在线→维护中→下线中                              |
 | 运维流水线                 | 按 `ops_status` 分桶                                                   | 如「网关直连裸金属上架中」→ 裸金属池·直连上架中                          |
 | 库存明细行                 | `supplier_gpu_inventory` + 设备池绑定推算                                  | `quantity` / `onlineQuantity` / `sellableQuantity` |
 | 批次摘要 `batchSummaries` | 同上 activeBatches 条件                                                 | 展示 `touched/online/planned`                        |
@@ -79,7 +79,85 @@
 | `planned_device_count` | 计划台数                       |
 | `touched_device_count` | 变更表已挂接台数                   |
 | `online_device_count`  | 已挂接且 `lifecycle_status=在线` |
+| `planned_gpu_count`    | 创建/更新批次时持久化：计划 GPU 卡数（§2.1.3）   |
 
+
+### 2.1 计划管道叠加（Snapshot，v1.1 已定 / 部分待确认）
+
+**背景**：商务创建上架/订单接入批次后，在运维导入主数据前，运营希望在总览/大盘看到 **「计划尚未入库的待接入量」**，并与实体设备态 **不重复计数**。
+
+**与方案 A 的关系**：`开始执行工单` / `工单执行结束` **仍只改** `batch_status`；**不**为计划单独写入 `supplier_device`。计划量仅在 **读模型（聚合层）** 叠加，**不**提前改写设备 `lifecycle_status`。
+
+#### 2.1.1 待接入 KPI 与漏斗「待接入」段
+
+```
+待接入台数 = COUNT(实体设备 lifecycle = '待接入')
+           + SUM(进行中批次 pipeline_gap_devices)
+
+待接入卡数 = SUM(上述实体的 gpu_count)
+           + SUM(进行中批次 pipeline_gap_devices 对应 planned_gpu 缺口)
+```
+
+其中：
+
+```
+pipeline_gap_devices = max(0, planned_device_count − touched_device_count)
+pipeline_gap_gpu     = max(0, planned_gpu_count − touched_pipeline_gpu)
+```
+
+- **`touched_pipeline_gpu`**：已挂接（`touched_device_count`）设备对应的 GPU 卡数之和；实现上与 `touched` 台数按批次内已 link 设备的 `gpu_count` 累加，无 link 时为 0。
+- **防双计**：已挂接且仍为 `待接入` 的设备计入 **实体侧**；同一台不再计入 `pipeline_gap`。
+- **进行中批次**：`batch_kind` 范围见 **§2.1.2（待确认）**；且 `batch_status ∉ {已完成, 已取消}`。
+- **接入中 / 在线 / 维护中 / 下线中**：**仅**统计实体 `lifecycle_status`（变更表导入后自然变化），**不**叠加计划量。
+
+#### 2.1.2 哪些 `batch_kind` 计入计划缺口 — **已定 Q1-B**
+
+`online`（设备上架）与 `order_access`（订单接入）**均**计入计划缺口，与 `activeBatches` / `batchSummaries` 范围一致。
+
+| `batch_kind` | 计入计划待接入 |
+|--------------|----------------|
+| `online` | ✅ |
+| `order_access` | ✅ |
+| `device_retire` 等 | ❌ |
+
+#### 2.1.3 `planned_gpu_count`（方案 A，已定）
+
+- **写入时机**：创建（或修订）商务批次、`normalizePlanLines` 完成后，与 `planned_device_count` 一并持久化到 `onboarding_batch.planned_gpu_count`。
+- **计算公式**：
+
+```
+planned_gpu_count = Σ(planLine.plannedQuantity × default_gpu_per_device)
+```
+
+- **`default_gpu_per_device`**：优先取该供应商×机房×卡型 **已有设备** `gpu_count` 的众数；无历史设备时 **默认 8**（与主数据导入缺省一致）。
+- **修订计划行**时须同步重算 `planned_device_count` 与 `planned_gpu_count`。
+
+#### 2.1.4 待接入机房 KPI（`idc_pending_access`，已定）
+
+**仅 Snapshot**；Global 大盘与 `/supplier/overview` 共用聚合。
+
+```
+待接入机房数 = | DISTINCT data_center_id WHERE (
+  存在实体设备 lifecycle = '待接入'
+  OR (
+    存在进行中批次
+    AND batch_kind = 'online'
+    AND online_reason = 'new_idc'   -- 严格枚举，不用中文标签匹配
+  )
+) |
+```
+
+- **`online_reason = 'new_idc'`** 才因 **纯计划** 计入机房；`capacity_expansion` 等 **不**因批次 alone 增加机房数（若该机房已有实体待接入设备，仍按实体侧计入）。
+- 同一机房多条 `new_idc` 批次：**去重计 1**。
+- 批次终态且无实体待接入设备 → 从 KPI 移除。
+
+#### 2.1.5 Period 分析（已定：暂不叠加）
+
+按日/按小时 **Period** 模式的 `device_pending_access`、漏斗「本期吞吐」**暂不**纳入计划管道；仍仅 replay 实体 `device_lifecycle_event` / 变更推导。创建批次 **不会** 在 Period 视图中产生「本期进入待接入」吞吐。
+
+#### 2.1.6 UI（已定：本期不改）
+
+不在卡片上拆分「实体 + 计划」子文案；对外仍展示合并后的 `{gpuCount} 卡 · {deviceCount} 台`。
 
 ---
 
@@ -112,7 +190,7 @@
 
 | 步骤      | `onboarding_batch`（业务）                                                     | `supplier_device`（4 台）                 | `supplier_gpu_inventory`                             | `device_link` |
 | ------- | -------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------- | ------------- |
-| **S1**  | `batch_status=接入中`，`import_status=none`，`planned=4`，`touched=0`，`online=0` | —                                      | —                                                    | —             |
+| **S1**  | `batch_status=接入中`，`import_status=none`，`planned=4`，`planned_gpu=32`，`touched=0`，`online=0` | —                                      | —                                                    | —             |
 | **S3**  | 不变                                                                         | **新增 4 行**：`lifecycle=待接入`，`ops=预留闲置中` | **新增 1 行**：`quantity=32`，`online=0`，`status=offline` | —             |
 | **S4**  | `touched=4`，`online=0`                                                     | 仍为 `待接入`                               | `quantity=32`，`online=0`                             | **4 条** link  |
 | **S5a** | `touched=4`，`online=0`                                                     | 4 台 → `接入中`（如 `ops=网关节点上架中`）           | `online=0`                                           | 4 条           |
@@ -123,10 +201,10 @@
 ### 3.3 各步骤 — 资源总览状态
 
 
-| 步骤      | 总量       | 待接入      | 接入中      | 在线       | 可售        | 进行中批次 | 漏斗 / 库存 / 批次摘要                                   |
+| 步骤      | 总量       | 待接入      | 接入中      | 在线       | 可售        | 进行中批次 | 漏斗 / 库存 / 批次摘要 / 待接入机房                                   |
 | ------- | -------- | -------- | -------- | -------- | --------- | ----- | ------------------------------------------------ |
 | **T0**  | 0        | 0        | 0        | 0        | 0         | 0     | 全空                                               |
-| **S1**  | 0        | 0        | 0        | 0        | 0         | **1** | `batchSummaries`：**1 条**，`0/0/4`；其余仍空            |
+| **S1**  | 0        | **32·4** | 0        | 0        | 0         | **1** | 漏斗 **待接入 32·4**（计划）；`batchSummaries` **1 条** `0/0/4`；**待接入机房 +1**（`new_idc`） |
 | **S3**  | **32·4** | **32·4** | 0        | 0        | 0         | 1     | 漏斗 **待接入 32 卡**；`inventoryRows` **1 行** `32/0/0` |
 | **S4**  | 32·4     | 32·4     | 0        | 0        | 0         | 1     | 同上；批次摘要 `**4/0/4`**（已关联未上线）                      |
 | **S5a** | 32·4     | 0        | **32·4** | 0        | 0         | 1     | 漏斗 **接入中 32 卡**；运维流水线 **网关上架** +32 卡             |
@@ -141,8 +219,8 @@
 ```mermaid
 flowchart LR
   subgraph overview [资源总览 KPI 主路径]
-    A[T0 全零] -->|S1 仅计划| B[activeBatches=1]
-    B -->|S3 主数据| C[total↑ 待接入↑]
+    A[T0 全零] -->|S1 计划| B[待接入↑ 待接入机房↑]
+    B -->|S3 主数据| C[total↑ 待接入持平]
     C -->|S4 挂接| D[批次 touched↑]
     D -->|S5a 施工| E[接入中↑]
     E -->|S5b 上线| F[在线↑ 可售↑]
@@ -175,7 +253,7 @@ flowchart LR
 
 | 步骤       | 业务批次（新）                     | `supplier_device` 累计 | `supplier_gpu_inventory`（H800） | 新批次进度               |
 | -------- | --------------------------- | -------------------- | ------------------------------ | ------------------- |
-| **S1'**  | 新批次 `planned=2`，`touched=0` | 仍为 4 台在线             | `32/32` 不变                     | 旧批次已完成，不在 active 列表 |
+| **S1'**  | 新批次 `planned=2`，`planned_gpu=16`，`touched=0` | 仍为 4 台在线             | `32/32` 不变                     | 旧批次已完成，不在 active 列表 |
 | **S3'**  | —                           | **+2 行** 待接入，共 6 台   | `**48/32`**（+16 总量，在线暂不变）      | —                   |
 | **S4'**  | `touched=2`                 | 4 在线 + 2 待接入         | 48/32                          | 2/0/2               |
 | **S5b'** | `online=2`                  | 6 台在线                | `**48/48`**                    | 2/2/2               |
@@ -188,7 +266,7 @@ flowchart LR
 | 步骤       | 总量       | 待接入      | 接入中      | 在线       | 可售        | 进行中批次 | 要点                            |
 | -------- | -------- | -------- | -------- | -------- | --------- | ----- | ----------------------------- |
 | **起点**   | 32·4     | 0        | 0        | 32·4     | ≈32·4     | 0     | 场景一结束                         |
-| **S1'**  | 32·4     | 0        | 0        | 32·4     | ≈32·4     | **1** | **总量不变**；仅多 1 条批次摘要 `0/0/2`   |
+| **S1'**  | 32·4     | **16·2** | 0        | 32·4     | ≈32·4     | **1** | **总量不变**；待接入 **+16·2**（计划）；**待接入机房不变**（`capacity_expansion`）；批次摘要 `0/0/2` |
 | **S3'**  | **48·6** | **16·2** | 0        | 32·4     | ≈32·4     | 1     | 总量 +16 卡；**待接入 +16**；在线/可售暂不变 |
 | **S4'**  | 48·6     | 16·2     | 0        | 32·4     | ≈32·4     | 1     | 批次 `2/0/2`                    |
 | **S5a'** | 48·6     | 0        | **16·2** | 32·4     | ≈32·4     | 1     | 接入中 +16；在线仍 32                |
@@ -294,7 +372,9 @@ flowchart LR
 ### 7.1 仅创建计划（S1 / S1' / R1）
 
 - `activeBatches` 是否 +1（**仅上架/订单接入**）
-- `batchSummaries` 是否出现对应批次，`planned` 是否正确
+- `batchSummaries` 是否出现对应批次，`planned` / `planned_gpu_count` 是否正确
+- **待接入 KPI 与漏斗首段** 是否上升至 **计划台数/卡数**（`planned − touched`；见 §2.1）
+- **`online_reason = new_idc`** 时，Global **待接入机房** 是否 +1（§2.1.4）
 - **总量 KPI 是否仍为 0**（若 >0 说明主数据已提前导入）
 - 下架场景：**总览批次区无条目属正常**，去机房详情看下架批次表
 
@@ -324,7 +404,8 @@ flowchart LR
 
 | 现象                          | 原因                               | 处理                                     |
 | --------------------------- | -------------------------------- | -------------------------------------- |
-| 创建了上架计划，总览全是 0              | 正常；尚无 `supplier_device`          | 催运维导主数据                                |
+| 创建了上架计划，总览全是 0              | **v1.0 行为**；v1.1 起待接入/漏斗应随计划上升 | 核对 §2.1；若仍全 0 查聚合是否已落地          |
+| 创建扩容计划，待接入机房没增加              | **正常**；仅 `new_idc` 因计划计入机房        | 扩容看 **待接入设备** KPI，不看机房数           |
 | 主数据已导，批次 `touched=0`        | 变更表未导或 **工单号不一致**                | 核对 `work_order_no` ↔ Excel `ticket_no` |
 | 批次 `touched=4` 但 `online=0` | 设备仍 **待接入/接入中**                  | 继续导变更直至 `加入集群` 等                       |
 | 总量增加了，在线没增加                 | 场景二 S3' 典型剪刀差                    | 等待变更表驱动上线                              |

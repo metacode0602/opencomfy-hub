@@ -45,12 +45,16 @@ import { SupplierContractsPanel } from '@/components/dashboard/supplier-contract
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { SupplierBillsPanel } from '@/components/dashboard/supplier-bills-panel'
 import {
-  SupplierActivityTimelinePanel,
   SupplierOnboardingBatchesPanel,
 } from '@/components/dashboard/supplier-activity-timeline-panel'
+import { SupplierActivityPanel } from '@/components/dashboard/supplier-activity-panel'
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
 import { EditSupplierDialog } from '@/components/dashboard/supplier-form-dialog'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
+import {
+  inventoryGpuQuantity,
+  resolveGpuCardTypeRole,
+} from '@/lib/supplier/gpu-card-type-metrics'
 import { toast } from 'sonner'
 interface SupplierDetailContentProps {
   supplier: Supplier
@@ -113,8 +117,26 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
     supplierId: supplier.id,
   })
 
-  const totalOnlineDevices = devices.reduce((sum, d) => sum + d.onlineQuantity, 0)
-  const totalDevices = devices.reduce((sum, d) => sum + d.quantity, 0)
+  const totalOnlineGpuCards = devices.reduce(
+    (sum, d) => sum + inventoryGpuQuantity(d.cardTypeRole ?? resolveGpuCardTypeRole({ name: d.cardTypeName }), d.onlineQuantity),
+    0,
+  )
+  const totalGpuCards = devices.reduce(
+    (sum, d) => sum + inventoryGpuQuantity(d.cardTypeRole ?? resolveGpuCardTypeRole({ name: d.cardTypeName }), d.quantity),
+    0,
+  )
+  const totalInfraDevices = devices.reduce(
+    (sum, d) =>
+      sum + ((d.cardTypeRole ?? resolveGpuCardTypeRole({ name: d.cardTypeName })) === 'infra' ? d.quantity : 0),
+    0,
+  )
+  const totalOnlineInfraDevices = devices.reduce(
+    (sum, d) =>
+      sum + ((d.cardTypeRole ?? resolveGpuCardTypeRole({ name: d.cardTypeName })) === 'infra' ? d.onlineQuantity : 0),
+    0,
+  )
+  const totalOnlineDevices = totalOnlineGpuCards + totalOnlineInfraDevices
+  const totalDevices = totalGpuCards + totalInfraDevices
   const maintenanceResourceGroups = devices.filter((d) => d.status === 'maintenance').length
   const internalTestResourceGroups = devices.filter((d) => d.isInternalTest).length
   const onlineDataCenters = dataCenters.filter((dc) => dc.status === 'online').length
@@ -125,7 +147,9 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
     () =>
       devices.reduce(
         (acc, device) => {
-          const existing = acc.find((d) => d.cardTypeName === device.cardTypeName)
+          const cardTypeRole =
+            device.cardTypeRole ?? resolveGpuCardTypeRole({ name: device.cardTypeName })
+          const existing = acc.find((d) => d.cardTypeId === device.cardTypeId)
           if (existing) {
             existing.quantity += device.quantity
             existing.onlineQuantity += device.onlineQuantity
@@ -133,13 +157,20 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
             acc.push({
               cardTypeName: device.cardTypeName,
               cardTypeId: device.cardTypeId,
+              cardTypeRole,
               quantity: device.quantity,
               onlineQuantity: device.onlineQuantity,
             })
           }
           return acc
         },
-        [] as { cardTypeName: string; cardTypeId: string; quantity: number; onlineQuantity: number }[],
+        [] as {
+          cardTypeName: string
+          cardTypeId: string
+          cardTypeRole: ReturnType<typeof resolveGpuCardTypeRole>
+          quantity: number
+          onlineQuantity: number
+        }[],
       ),
     [devices],
   )
@@ -452,17 +483,23 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-foreground">{device.cardTypeName}</span>
                       <span className="text-sm text-muted-foreground">
-                        {device.onlineQuantity}/{device.quantity}
+                        {device.cardTypeRole === 'infra'
+                          ? `${device.onlineQuantity}/${device.quantity} 台`
+                          : `${device.onlineQuantity}/${device.quantity}`}
                       </span>
                     </div>
-                    <Progress
-                      value={
-                        device.quantity > 0
-                          ? (device.onlineQuantity / device.quantity) * 100
-                          : 0
-                      }
-                      className="h-2"
-                    />
+                    {device.cardTypeRole === 'infra' ? (
+                      <p className="text-xs text-muted-foreground">基础设施节点，不计入 GPU 卡数</p>
+                    ) : (
+                      <Progress
+                        value={
+                          device.quantity > 0
+                            ? (device.onlineQuantity / device.quantity) * 100
+                            : 0
+                        }
+                        className="h-2"
+                      />
+                    )}
                   </div>
                 ))}
               </CardContent>
@@ -596,7 +633,7 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
         </TabsContent>
 
         <TabsContent value="timeline" className="space-y-4">
-          <SupplierActivityTimelinePanel supplierId={domainSupplierId} />
+          <SupplierActivityPanel supplierId={domainSupplierId} />
         </TabsContent>
       </Tabs>
     </div>

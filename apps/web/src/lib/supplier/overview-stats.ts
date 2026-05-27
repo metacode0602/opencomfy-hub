@@ -8,6 +8,7 @@ import type {
   SupplierDevice,
 } from '@/lib/types/supplier-domain'
 import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
+import { metricGpuCount } from '@/lib/supplier/gpu-card-type-metrics'
 
 export type OverviewFilters = {
   region: string
@@ -116,9 +117,17 @@ function isHoldActive(hold: InternalTestHold, at = Date.now()): boolean {
   return true
 }
 
+import {
+  metricGpuCount,
+  resolveDeviceGpuCount,
+  resolveGpuCardTypeRole,
+} from '@/lib/supplier/gpu-card-type-metrics'
+
 function deviceGpuCount(device: SupplierDevice): number {
-  const n = Number(device.gpu_count)
-  return Number.isFinite(n) && n > 0 ? n : 8
+  return metricGpuCount({
+    gpuCount: Number(device.gpu_count),
+    cardTypeName: device.card_type,
+  })
 }
 
 function regionForInventoryRow(row: DataCenterDevice): string {

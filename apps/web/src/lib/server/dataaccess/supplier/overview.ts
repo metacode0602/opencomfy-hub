@@ -1,22 +1,28 @@
 import { db } from '@/lib/db'
 import {
+  aggregatePipelinePending,
+  batchMatchesCardFilter,
   BARE_METAL_DIRECT_OPS,
   BARE_METAL_PROXY_OPS,
   buildLifecycleFunnel,
   CLOSED_FAULT_STATUSES,
+  computePendingAccessDataCenterIds,
   GATEWAY_ONBOARDING_OPS,
   isHoldActive,
   kpiFromDevices,
   LIFECYCLE_ORDER,
+  mergeKpiMetric,
   NON_SCHEDULABLE_OPS,
   normalizeCardKey,
   normalizeLifecycleStage,
   OFFLINE_DELIVERY_OPS,
   OTHER_DEPT_OPS,
   parseGpuScopeCount,
+  type PipelineBatchInput,
   regionFromDc,
   RESERVED_IDLE_OPS,
   TERMINAL_BATCH_STATUSES,
+  toPipelineBatchInput,
   type OverviewDeviceRow,
 } from '@/lib/server/aggregation/overview-aggregation'
 import {
@@ -25,6 +31,11 @@ import {
   resolveDevicePoolMemberships,
   type ResourcePoolBindingLike,
 } from '@/lib/supplier/device-pool-membership'
+import {
+  inventoryGpuQuantity,
+  metricGpuCount,
+  resolveGpuCardTypeRole,
+} from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   OverviewFilterOptionsResult,
   OverviewFiltersInput,
@@ -37,6 +48,7 @@ import {
   gpuCardType,
   internalTestHold,
   onboardingBatch,
+  onboardingBatchDeviceLink,
   resourcePoolBinding,
   supplier,
   supplierDevice,
@@ -45,6 +57,16 @@ import {
 import { and, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 
 type DeviceRow = OverviewDeviceRow
+
+function batchMatchesRegionFilter(
+  batchIdcRegion: string | null,
+  batchDataCenterName: string,
+  filterRegion: string,
+): boolean {
+  if (filterRegion === 'all') return true
+  const batchRegion = regionFromDc(batchIdcRegion, batchDataCenterName)
+  return batchRegion === filterRegion
+}
 
 function bindingsForDevice(
   deviceId: string,
@@ -79,6 +101,7 @@ type InventoryRow = {
   region: string
   cardTypeName: string
   cardTypeKey: string
+  cardTypeRole: import('@/lib/supplier/gpu-card-type-metrics').GpuCardTypeRole
   quantity: number
   onlineQuantity: number
   status: string
@@ -185,6 +208,8 @@ export const supplierOverviewDataAccess = {
           dataCenterName: dataCenter.name,
           region: dataCenter.location,
           cardTypeName: gpuCardType.name,
+          cardTypeCode: gpuCardType.code,
+          cardTypeDeviceRole: gpuCardType.deviceRole,
           quantity: supplierGpuInventory.quantity,
           onlineQuantity: supplierGpuInventory.onlineQuantity,
           status: supplierGpuInventory.status,
@@ -205,6 +230,11 @@ export const supplierOverviewDataAccess = {
         region: regionFromDc(r.region, r.dataCenterName),
         cardTypeName: r.cardTypeName,
         cardTypeKey: normalizeCardKey(r.cardTypeName),
+        cardTypeRole: resolveGpuCardTypeRole({
+          name: r.cardTypeName,
+          code: r.cardTypeCode,
+          deviceRole: r.cardTypeDeviceRole,
+        }),
         quantity: r.quantity,
         onlineQuantity: r.onlineQuantity,
         status: r.status,
@@ -231,6 +261,8 @@ export const supplierOverviewDataAccess = {
           inMaintenance: supplierDevice.inMaintenance,
           idcRegion: supplierDevice.idcRegion,
           cardTypeName: gpuCardType.name,
+          cardTypeCode: gpuCardType.code,
+          cardTypeDeviceRole: gpuCardType.deviceRole,
         })
         .from(supplierDevice)
         .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
@@ -245,17 +277,35 @@ export const supplierOverviewDataAccess = {
 
       const poolFilterCode = filters.poolCode !== 'all' ? filters.poolCode : undefined
 
-      const filteredDevices: DeviceRow[] = deviceRows.filter((d) => {
-        const region = d.idcRegion ?? '其他'
-        const cardKey = normalizeCardKey(d.cardTypeName)
-        if (!matchesFilters(filters, { supplierId: d.supplierId, region, cardTypeKey: cardKey })) {
-          return false
-        }
-        if (poolFilterCode && !deviceMatchesPoolFilter(d, poolFilterCode, poolBindingRows)) {
-          return false
-        }
-        return true
-      })
+      const filteredDevices: DeviceRow[] = deviceRows
+        .filter((d) => {
+          const region = d.idcRegion ?? '其他'
+          const cardKey = normalizeCardKey(d.cardTypeName)
+          if (!matchesFilters(filters, { supplierId: d.supplierId, region, cardTypeKey: cardKey })) {
+            return false
+          }
+          if (poolFilterCode && !deviceMatchesPoolFilter(d, poolFilterCode, poolBindingRows)) {
+            return false
+          }
+          return true
+        })
+        .map((d) => ({
+          id: d.id,
+          supplierId: d.supplierId,
+          dataCenterId: d.dataCenterId,
+          gpuCount: d.gpuCount,
+          lifecycleStatus: d.lifecycleStatus,
+          opsStatus: d.opsStatus,
+          inMaintenance: d.inMaintenance,
+          idcRegion: d.idcRegion,
+          cardTypeName: d.cardTypeName,
+          cardTypeCode: d.cardTypeCode,
+          cardTypeRole: resolveGpuCardTypeRole({
+            name: d.cardTypeName,
+            code: d.cardTypeCode,
+            deviceRole: d.cardTypeDeviceRole,
+          }),
+        }))
 
       const deviceById = new Map(filteredDevices.map((d) => [d.id, d]))
 
@@ -295,11 +345,8 @@ export const supplierOverviewDataAccess = {
       if (filters.supplierId !== 'all') {
         batchConditions.push(eq(onboardingBatch.supplierId, filters.supplierId))
       }
-      if (filters.region !== 'all') {
-        batchConditions.push(eq(onboardingBatch.idcRegion, filters.region))
-      }
 
-      const activeBatches = await db
+      const activeBatchesRaw = await db
         .select({
           id: onboardingBatch.id,
           batchCode: onboardingBatch.batchCode,
@@ -307,32 +354,98 @@ export const supplierOverviewDataAccess = {
           supplierId: onboardingBatch.supplierId,
           supplierShortName: onboardingBatch.supplierShortName,
           supplierName: onboardingBatch.supplierName,
+          dataCenterId: onboardingBatch.dataCenterId,
           dataCenterName: onboardingBatch.dataCenterName,
           importStatus: onboardingBatch.importStatus,
           batchStatus: onboardingBatch.batchStatus,
+          onlineReason: onboardingBatch.onlineReason,
           plannedDeviceCount: onboardingBatch.plannedDeviceCount,
+          plannedLinesJson: onboardingBatch.plannedLinesJson,
           touchedDeviceCount: onboardingBatch.touchedDeviceCount,
           onlineDeviceCount: onboardingBatch.onlineDeviceCount,
           plannedReadyAt: onboardingBatch.plannedReadyAt,
           workOrderNo: onboardingBatch.workOrderNo,
+          idcRegion: onboardingBatch.idcRegion,
         })
         .from(onboardingBatch)
         .where(and(...batchConditions))
         .orderBy(desc(onboardingBatch.plannedReadyAt))
         .limit(20)
 
+      const activeBatches = activeBatchesRaw.filter((b) =>
+        batchMatchesRegionFilter(b.idcRegion, b.dataCenterName, filters.region),
+      )
+
+      const touchedGpuByBatchId = new Map<string, number>()
+      if (activeBatches.length > 0) {
+        const batchIds = activeBatches.map((b) => b.id)
+        const linkGpuRows = await db
+          .select({
+            batchId: onboardingBatchDeviceLink.businessOnboardingBatchId,
+            gpuCount: supplierDevice.gpuCount,
+            cardTypeName: gpuCardType.name,
+            cardTypeCode: gpuCardType.code,
+            cardTypeDeviceRole: gpuCardType.deviceRole,
+          })
+          .from(onboardingBatchDeviceLink)
+          .innerJoin(
+            supplierDevice,
+            eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
+          )
+          .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+          .where(inArray(onboardingBatchDeviceLink.businessOnboardingBatchId, batchIds))
+
+        for (const row of linkGpuRows) {
+          if (!row.batchId) continue
+          const gpu = metricGpuCount({
+            gpuCount: row.gpuCount,
+            cardTypeName: row.cardTypeName,
+            cardTypeCode: row.cardTypeCode,
+            cardTypeRole: resolveGpuCardTypeRole({
+              name: row.cardTypeName,
+              code: row.cardTypeCode,
+              deviceRole: row.cardTypeDeviceRole,
+            }),
+          })
+          touchedGpuByBatchId.set(
+            row.batchId,
+            (touchedGpuByBatchId.get(row.batchId) ?? 0) + gpu,
+          )
+        }
+      }
+
+      const cardFilterKey =
+        filters.cardType !== 'all' ? normalizeCardKey(filters.cardType) : null
+      const pipelineBatchInputs: PipelineBatchInput[] = activeBatches
+        .map((batch) =>
+          toPipelineBatchInput(batch, touchedGpuByBatchId.get(batch.id) ?? 0),
+        )
+        .filter((batch) =>
+          cardFilterKey ? batchMatchesCardFilter(batch, cardFilterKey) : true,
+        )
+      const pipelinePending = aggregatePipelinePending(pipelineBatchInputs)
+      const pendingAccessDataCenterIds = computePendingAccessDataCenterIds(
+        filteredDevices,
+        pipelineBatchInputs,
+      )
+
       const inventoryDtoRows = filteredInventory.map((row) => {
-        const internalTestGpu = row.isInternalTest
-          ? row.internalTestScope
-            ? parseGpuScopeCount(row.internalTestScope, row.onlineQuantity)
-            : Math.min(row.onlineQuantity, 8)
-          : 0
+        const isInfra = row.cardTypeRole === 'infra'
+        const internalTestGpu = isInfra
+          ? 0
+          : row.isInternalTest
+            ? row.internalTestScope
+              ? parseGpuScopeCount(row.internalTestScope, row.onlineQuantity)
+              : Math.min(row.onlineQuantity, 8)
+            : 0
 
         let holdTestGpu = 0
-        for (const hold of holds) {
-          if (!isHoldActive(hold.holdFrom, hold.holdUntil)) continue
-          if (hold.inventoryId === row.id) {
-            holdTestGpu += parseGpuScopeCount(hold.scope, 8)
+        if (!isInfra) {
+          for (const hold of holds) {
+            if (!isHoldActive(hold.holdFrom, hold.holdUntil)) continue
+            if (hold.inventoryId === row.id) {
+              holdTestGpu += parseGpuScopeCount(hold.scope, 8)
+            }
           }
         }
 
@@ -350,7 +463,7 @@ export const supplierOverviewDataAccess = {
             if (normalizeCardKey(dev.cardTypeName) !== row.cardTypeKey) continue
             if (dev.dataCenterId !== row.dataCenterId) continue
             if (dev.lifecycleStatus === '在线') {
-              faultDownGpu += dev.gpuCount
+              faultDownGpu += metricGpuCount(dev)
             }
           }
         }
@@ -373,15 +486,15 @@ export const supplierOverviewDataAccess = {
             if (bind.poolCode) poolCodes.add(bind.poolCode)
           }
           const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
-          if (memberships.has('bare_metal')) bareMetalPoolGpu += d.gpuCount
-          if (memberships.has('elastic_service')) elasticServiceGpu += d.gpuCount
-          if (isDualPool(memberships)) dualPoolGpu += d.gpuCount
+          const deviceGpu = metricGpuCount(d)
+          if (memberships.has('bare_metal')) bareMetalPoolGpu += deviceGpu
+          if (memberships.has('elastic_service')) elasticServiceGpu += deviceGpu
+          if (isDualPool(memberships)) dualPoolGpu += deviceGpu
         }
 
-        const sellableQuantity = Math.max(
-          0,
-          row.onlineQuantity - totalInternalTest - faultDownGpu,
-        )
+        const sellableQuantity = isInfra
+          ? 0
+          : Math.max(0, row.onlineQuantity - totalInternalTest - faultDownGpu)
 
         return {
           id: row.id,
@@ -391,6 +504,7 @@ export const supplierOverviewDataAccess = {
           dataCenterName: row.dataCenterName,
           region: row.region,
           cardTypeName: row.cardTypeName,
+          cardTypeRole: row.cardTypeRole,
           quantity: row.quantity,
           onlineQuantity: row.onlineQuantity,
           maintenanceQuantity,
@@ -452,8 +566,8 @@ export const supplierOverviewDataAccess = {
       for (const inv of inventoryDtoRows) {
         const row = ensureSupplierRow(inv.supplierId, inv.supplierName)
         row.regions.add(inv.region)
-        row.totalGpu += inv.quantity
-        row.onlineGpu += inv.onlineQuantity
+        row.totalGpu += inventoryGpuQuantity(inv.cardTypeRole, inv.quantity)
+        row.onlineGpu += inventoryGpuQuantity(inv.cardTypeRole, inv.onlineQuantity)
         row.sellableGpu += inv.sellableQuantity
         row.maintenanceGpu += inv.maintenanceQuantity
         row.internalTestGpu += inv.internalTestGpu
@@ -466,7 +580,7 @@ export const supplierOverviewDataAccess = {
         const row = ensureSupplierRow(d.supplierId, supplierName)
         if (d.idcRegion) row.regions.add(d.idcRegion)
 
-        const gpu = d.gpuCount
+        const gpu = metricGpuCount(d)
 
         if (d.lifecycleStatus === '待接入') row.pendingAccessGpu += gpu
         if (d.lifecycleStatus === '接入中') row.onboardingGpu += gpu
@@ -527,7 +641,7 @@ export const supplierOverviewDataAccess = {
         }))
         .sort((a, b) => b.sellableGpu - a.sellableGpu)
 
-      const lifecycleFunnel = buildLifecycleFunnel(filteredDevices)
+      const lifecycleFunnel = buildLifecycleFunnel(filteredDevices, pipelinePending)
 
       const opsGroups: Record<string, { gpu: number; devices: number }> = {
         '裸金属池 · 直连上架中': { gpu: 0, devices: 0 },
@@ -558,7 +672,7 @@ export const supplierOverviewDataAccess = {
           group = '网关上架'
         }
         const bucket = opsGroups[group]!
-        bucket.gpu += d.gpuCount
+        bucket.gpu += metricGpuCount(d)
         bucket.devices += 1
       }
 
@@ -568,14 +682,17 @@ export const supplierOverviewDataAccess = {
         deviceCount: v.devices,
       }))
 
-      const totalGpu = inventoryDtoRows.reduce((s, r) => s + r.quantity, 0)
+      const totalGpu = inventoryDtoRows.reduce(
+        (s, r) => s + inventoryGpuQuantity(r.cardTypeRole, r.quantity),
+        0,
+      )
       const sellableGpuRaw = inventoryDtoRows.reduce((s, r) => s + r.sellableQuantity, 0)
       const internalTestGpu = inventoryDtoRows.reduce((s, r) => s + r.internalTestGpu, 0)
 
       let otherDeptGpu = 0
       for (const d of filteredDevices) {
         if (OTHER_DEPT_OPS.includes(d.opsStatus as (typeof OTHER_DEPT_OPS)[number])) {
-          otherDeptGpu += d.gpuCount
+          otherDeptGpu += metricGpuCount(d)
         }
       }
 
@@ -595,7 +712,10 @@ export const supplierOverviewDataAccess = {
           gpuCount: totalGpu,
         },
         online: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线'),
-        pendingAccess: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
+        pendingAccess: mergeKpiMetric(
+          kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
+          pipelinePending,
+        ),
         onboarding: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '接入中'),
         maintenance: kpiFromDevices(
           filteredDevices,
@@ -693,6 +813,7 @@ export const supplierOverviewDataAccess = {
         inventoryRows: inventoryDtoRows,
         batchSummaries,
         faultSla,
+        pendingAccessDataCenterIds,
       }
 
       supplierLog('overview', 'getStats done', {

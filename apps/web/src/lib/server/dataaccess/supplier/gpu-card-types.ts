@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type { GPUCardType } from '@/lib/data/types'
 import { mapGpuCardTypeRow } from '@/lib/server/mappers/supply'
 import { supplierLog } from '@/lib/server/dataaccess/supplier/logger'
@@ -123,6 +124,9 @@ export const gpuCardTypesDataAccess = {
     }
 
     const id = newId()
+    const deviceRole =
+      input.deviceRole ??
+      resolveGpuCardTypeRole({ name, code })
     const [row] = await db
       .insert(gpuCardType)
       .values({
@@ -133,6 +137,7 @@ export const gpuCardTypesDataAccess = {
         memoryGb: input.memoryGB,
         tdpWatts: input.tdpWatts ?? null,
         computeCapability: input.computeCapability?.trim() || null,
+        deviceRole,
         status: 'active',
       })
       .returning()
@@ -162,6 +167,9 @@ export const gpuCardTypesDataAccess = {
       throw new Error('卡型名称已存在')
     }
 
+    const deviceRole =
+      input.deviceRole ??
+      resolveGpuCardTypeRole({ name, code: existing.code, deviceRole: existing.deviceRole })
     const [row] = await db
       .update(gpuCardType)
       .set({
@@ -170,6 +178,7 @@ export const gpuCardTypesDataAccess = {
         memoryGb: input.memoryGB,
         tdpWatts: input.tdpWatts ?? null,
         computeCapability: input.computeCapability?.trim() || null,
+        deviceRole,
       })
       .where(eq(gpuCardType.id, id))
       .returning()

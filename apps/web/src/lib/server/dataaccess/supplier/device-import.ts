@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   DeviceChangelogParsedRow,
   DeviceInventoryParsedRow,
@@ -432,11 +433,18 @@ export const deviceImportDataAccess = {
 
         for (const device of newDevices) {
           const row = findImportRowForDevice(device, okRows)
-          const gpuCardTypeId =
-            row != null ? gpuValidation.rowResolutions.get(row.row_no)?.gpuCardTypeId : undefined
-          if (!gpuCardTypeId) {
+          const resolution = row != null ? gpuValidation.rowResolutions.get(row.row_no) : undefined
+          if (!resolution) {
             throw new Error(`第 ${row?.row_no ?? '?'} 行显卡型号未解析，无法入库`)
           }
+          const gpuCardTypeId = resolution.gpuCardTypeId
+          const gpuCount = resolveDeviceGpuCount(
+            device.gpu_count,
+            resolveGpuCardTypeRole({
+              name: resolution.gpuCardTypeName,
+              code: resolution.gpuCardTypeCode,
+            }),
+          )
           const existing = findDeviceByImportKeys(devicesInImportPool, {
             sn: device.sn,
             asset_no: device.asset_no,
@@ -457,7 +465,7 @@ export const deviceImportDataAccess = {
                 externalDeviceId: device.external_device_id,
                 idcCode: device.idc_code,
                 idcRegion: device.idc_region || null,
-                gpuCount: Number(device.gpu_count) || 8,
+                gpuCount,
                 internalIp: device.internal_ip || null,
                 opsStatus: device.ops_status ?? '预留闲置中',
                 lifecycleStatus: device.lifecycle_status,
@@ -534,7 +542,7 @@ export const deviceImportDataAccess = {
             sn: device.sn,
             idcCode: device.idc_code,
             idcRegion: device.idc_region || null,
-            gpuCount: Number(device.gpu_count) || 8,
+            gpuCount,
             externalIp: device.external_ip || null,
             internalIp: device.internal_ip || null,
             opsStatus: device.ops_status ?? '预留闲置中',

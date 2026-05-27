@@ -378,6 +378,14 @@ export type ResourcePoolBinding = {
   is_exclusive_pool: boolean
 }
 
+export type SupplierActivityAttachment = {
+  id: string
+  name: string
+  size: number
+  type: string
+  url: string
+}
+
 export type SupplierActivity = {
   id: string
   supplier_id: string
@@ -385,10 +393,12 @@ export type SupplierActivity = {
   title: string
   description: string | null
   author_name: string
+  author_staff_id?: string | null
   author_role: "business" | "ops" | "system"
   ref_domain: string | null
   ref_id: string | null
   occurred_at: string
+  attachments?: SupplierActivityAttachment[]
 }
 
 export type LifecycleStateDefinition = {

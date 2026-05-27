@@ -16,6 +16,8 @@ import type {
   OnboardingParsedRow,
 } from '@/lib/types/supplier-domain'
 import { ONBOARDING_LIFECYCLES } from '@/lib/server/dataaccess/supplier/batch-progress'
+import { DEFAULT_GPU_PER_DEVICE } from '@/lib/server/aggregation/overview-aggregation'
+import { isInfraCardType, resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import {
   accessConditionSheet,
@@ -159,6 +161,63 @@ function sumPlannedQuantity(lines: OnboardingBatchPlannedLineJson[]) {
   return lines.reduce((sum, line) => sum + line.plannedQuantity, 0)
 }
 
+async function resolveDefaultGpuPerDevice(
+  supplierId: string,
+  dataCenterId: string,
+  gpuCardTypeId: string,
+): Promise<number> {
+  const card = await db.query.gpuCardType.findFirst({
+    where: eq(gpuCardType.id, gpuCardTypeId),
+    columns: { id: true, name: true, code: true, deviceRole: true },
+  })
+  if (card && isInfraCardType(card)) return 0
+
+  const rows = await db
+    .select({ gpuCount: supplierDevice.gpuCount })
+    .from(supplierDevice)
+    .where(
+      and(
+        eq(supplierDevice.supplierId, supplierId),
+        eq(supplierDevice.dataCenterId, dataCenterId),
+        eq(supplierDevice.gpuCardTypeId, gpuCardTypeId),
+      ),
+    )
+
+  if (rows.length === 0) return DEFAULT_GPU_PER_DEVICE
+
+  const freq = new Map<number, number>()
+  for (const row of rows) {
+    freq.set(row.gpuCount, (freq.get(row.gpuCount) ?? 0) + 1)
+  }
+
+  let mode = DEFAULT_GPU_PER_DEVICE
+  let maxFreq = 0
+  for (const [gpuCount, count] of freq) {
+    if (count > maxFreq) {
+      maxFreq = count
+      mode = gpuCount
+    }
+  }
+  return mode
+}
+
+async function computePlannedGpuCount(
+  supplierId: string,
+  dataCenterId: string,
+  lines: OnboardingBatchPlannedLineJson[],
+): Promise<number> {
+  let total = 0
+  for (const line of lines) {
+    const gpuPerDevice = await resolveDefaultGpuPerDevice(
+      supplierId,
+      dataCenterId,
+      line.gpuCardTypeId,
+    )
+    total += line.plannedQuantity * gpuPerDevice
+  }
+  return total
+}
+
 async function getBusinessBatch(batchId: string, batchKind?: 'online' | 'order_access') {
   const conditions = [eq(onboardingBatch.id, batchId)]
   if (batchKind) {
@@ -191,6 +250,11 @@ export const onboardingBatchDataAccess = {
     const gpuCache = new Map<string, string>()
     const plannedLines = await normalizePlanLines(input.planLines, gpuCache)
     const plannedDeviceCount = sumPlannedQuantity(plannedLines)
+    const plannedGpuCount = await computePlannedGpuCount(
+      input.supplierId,
+      input.dataCenterId,
+      plannedLines,
+    )
 
     const batchId = newId()
     const batchCode = generateBatchCode(input.batchKind)
@@ -233,6 +297,7 @@ export const onboardingBatchDataAccess = {
         plannedReadyAt: input.plannedReadyAt ? new Date(input.plannedReadyAt) : null,
         plannedLinesJson: plannedLines,
         plannedDeviceCount,
+        plannedGpuCount,
         listUploadMode,
         workOrderNo,
         onlineReason: input.batchKind === 'online' ? (input.onlineReason?.trim() ?? null) : null,
@@ -561,6 +626,15 @@ export const onboardingBatchDataAccess = {
     }
 
     const defaultCooperation = (defaultLine.cooperationType ?? 'idle_time') as DeviceCooperationType
+    const defaultCard = await db.query.gpuCardType.findFirst({
+      where: eq(gpuCardType.id, defaultLine.gpuCardTypeId),
+      columns: { name: true, code: true, deviceRole: true },
+    })
+    const defaultCardRole = resolveGpuCardTypeRole({
+      name: defaultCard?.name ?? '',
+      code: defaultCard?.code,
+      deviceRole: defaultCard?.deviceRole,
+    })
     const now = new Date()
     let inserted = 0
 
@@ -584,7 +658,7 @@ export const onboardingBatchDataAccess = {
             sn,
             idcCode: batch.idcCode,
             idcRegion: batch.idcRegion,
-            gpuCount: row.gpu_count ?? 8,
+            gpuCount: resolveDeviceGpuCount(row.gpu_count, defaultCardRole),
             externalIp: row.public_ip || null,
             internalIp: row.private_ip || null,
             opsStatus: '网关直连裸金属上架中',

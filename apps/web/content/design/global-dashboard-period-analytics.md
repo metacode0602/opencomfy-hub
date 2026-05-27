@@ -520,7 +520,7 @@ GPU 总卡数、在线设备、弹性资源池、裸金属池、内部占用、�
 
 | 阶段 | Snapshot 副指标 | Daily/Hourly 副指标 |
 |------|-----------------|---------------------|
-| 待接入 / 接入中 / 在线 / 维护中 / 下线中 | 平均停留 | 本期吞吐 + 「期末」标记 |
+| 待接入 / 接入中 / 在线 / 维护中 / 下线中 | Snapshot：待接入段含计划缺口；Period：本期吞吐 **仅实体** + 「期末」标记 |
 
 标题/副标题由 `getCardCopy(query)` 驱动。
 
@@ -564,7 +564,7 @@ P2b 待办：接入 `query`，按 `occurred_at` / 期末截面过滤；`compare=
 | `device_online` | 在线台数 | 期末在线 / 可选日均 |
 | `pool_elastic` / `pool_bare_metal` | 池 GPU | 期末 + 划入/划出 |
 | `device_abnormal` | 当前异常 | 期内暴露数 |
-| `device_pending_access` | 待接入 | 期末积压 + 本期进入 |
+| `device_pending_access` | 待接入 | Period：**仅**期末实体积压 + 本期进入（**不含**批次计划缺口；见 `supplier-overview-scenarios-from-zero.md` §2.1.5） |
 
 `trend[]`：`{ time: string; value: number; label: string }[]`，与前端 sparkline 对齐。
 
@@ -768,3 +768,4 @@ Mock 当前为规模比例缩放，非回放计算。真实值由 `device_*_snap
 | v2.0 | 2026-05-27 | 合并前端 P2a 实现：三档 view、URL 契约、Mock 联动、KPI tooltip、资源池卡型×台时×卡时、CRM 五段生命周期；补充 Mock 局限与后端分期 |
 | v2.1 | 2026-05-27 | **§3.4 权威口径**：Snapshot 饼图/外围按期末在线 GPU 卡数；Period 按区间卡时；明确台时/卡时公式、UI 映射与示例；同步 §5.6、§6.3、§7.3、§8.3、§10 |
 | v2.2 | 2026-05-27 | **§2.5 方案 A**：工单起止仅驱动 batch_status；lifecycle 仍由运维变更推导；ETL 边界事件分类；同步 §6.2、§9、§10.2 |
+| v2.3 | 2026-05-27 | **计划管道**：Snapshot 待接入 KPI/漏斗叠加批次计划缺口；`planned_gpu_count`；`new_idc` 待接入机房；Period **暂不**叠加（§2.1.5 场景文档） |

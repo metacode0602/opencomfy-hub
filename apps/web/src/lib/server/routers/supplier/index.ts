@@ -42,7 +42,7 @@ import {
   onboardingBatchListSchema,
   onboardingBatchParseListSchema,
 } from '@/lib/server/routers/supplier/onboarding-batch-schemas'
-import { supplierActivityListSchema } from '@/lib/server/routers/supplier/supplier-activity-schemas'
+import { supplierActivityListSchema, supplierActivityCreateSchema } from '@/lib/server/routers/supplier/supplier-activity-schemas'
 import {
   gpuCardTypeListSchema,
   gpuCardTypeUpdateSchema,
@@ -182,6 +182,25 @@ export const supplierRouter = createTRPCRouter({
         return await supplierActivityDataAccess.listBySupplierId(input)
       } catch (e) {
         mapImportError(e)
+      }
+    }),
+
+  createSupplierActivity: protectedProcedure
+    .input(supplierActivityCreateSchema)
+    .mutation(async ({ input, ctx }) => {
+      try {
+        await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        return await supplierActivityDataAccess.createComment({
+          supplierId: input.supplierId,
+          comment: input.comment,
+          files: input.files,
+          user: ctx.user,
+        })
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '发布动态失败' })
       }
     }),
 

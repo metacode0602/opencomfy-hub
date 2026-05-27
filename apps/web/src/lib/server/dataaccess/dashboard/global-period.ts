@@ -7,6 +7,7 @@ import {
 } from '@/lib/server/aggregation/overview-aggregation'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { isDualPool, resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
+import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   GlobalDashboardFilters,
   GlobalDashboardPeriod,
@@ -47,6 +48,8 @@ type DeviceBase = {
   opsStatus: string
   inMaintenance: boolean
   cardTypeName: string
+  cardTypeCode?: string | null
+  cardTypeRole?: import('@/lib/supplier/gpu-card-type-metrics').GpuCardTypeRole
   cardTypeKey: string
 }
 
@@ -140,55 +143,56 @@ function aggregateAt(
   for (const d of devices) {
     const s = states.get(d.id)
     if (!s) continue
+    const gpu = metricGpuCount(d)
     agg.totalDevices += 1
-    agg.totalGpu += d.gpuCount
+    agg.totalGpu += gpu
 
     const bindings = bindingsByDevice.get(d.id) ?? []
     const memberships = resolveDevicePoolMemberships(s.opsStatus, bindings)
 
     if (LIFECYCLE_ORDER.includes(s.lifecycleStatus as (typeof LIFECYCLE_ORDER)[number])) {
       const bucket = agg.lifecycle[s.lifecycleStatus]!
-      bucket.gpu += d.gpuCount
+      bucket.gpu += gpu
       bucket.devices += 1
     }
 
     if (s.lifecycleStatus === '待接入') {
-      agg.pendingAccess.gpu += d.gpuCount
+      agg.pendingAccess.gpu += gpu
       agg.pendingAccess.devices += 1
       if (d.dataCenterId) agg.pendingAccessDcIds.add(d.dataCenterId)
     }
     if (s.lifecycleStatus === '接入中') {
-      agg.onboarding.gpu += d.gpuCount
+      agg.onboarding.gpu += gpu
       agg.onboarding.devices += 1
     }
     if (s.lifecycleStatus === '维护中' || s.inMaintenance) {
-      agg.maintenance.gpu += d.gpuCount
+      agg.maintenance.gpu += gpu
       agg.maintenance.devices += 1
     }
     if (s.lifecycleStatus === '下线中') {
-      agg.retiring.gpu += d.gpuCount
+      agg.retiring.gpu += gpu
       agg.retiring.devices += 1
     }
     if (isOnlineState(s)) {
-      agg.online.gpu += d.gpuCount
+      agg.online.gpu += gpu
       agg.online.devices += 1
     }
 
     if (memberships.has('elastic_service')) {
-      agg.elasticGpu += d.gpuCount
+      agg.elasticGpu += gpu
       if (isOnlineState(s)) {
-        agg.poolCardHours.elastic += d.gpuCount * bucketHours
+        agg.poolCardHours.elastic += gpu * bucketHours
         agg.poolCardHours.machineHoursElastic += bucketHours
       }
     }
     if (memberships.has('bare_metal')) {
-      agg.bareMetalGpu += d.gpuCount
+      agg.bareMetalGpu += gpu
       if (isOnlineState(s)) {
-        agg.poolCardHours.bareMetal += d.gpuCount * bucketHours
+        agg.poolCardHours.bareMetal += gpu * bucketHours
         agg.poolCardHours.machineHoursBare += bucketHours
       }
     }
-    if (isDualPool(memberships)) agg.dualPoolGpu += d.gpuCount
+    if (isDualPool(memberships)) agg.dualPoolGpu += gpu
 
     if (isOnlineState(s) && (memberships.has('elastic_service') || memberships.has('bare_metal'))) {
       const bd = agg.poolBreakdown.get(d.cardTypeName) ?? {
@@ -198,14 +202,14 @@ function aggregateAt(
         cardHours: 0,
       }
       if (memberships.has('elastic_service')) {
-        bd.elastic += d.gpuCount
-        bd.cardHours += d.gpuCount * bucketHours
+        bd.elastic += gpu
+        bd.cardHours += gpu * bucketHours
         bd.machineHours += bucketHours
       }
       if (memberships.has('bare_metal')) {
-        bd.bareMetal += d.gpuCount
+        bd.bareMetal += gpu
         if (!memberships.has('elastic_service')) {
-          bd.cardHours += d.gpuCount * bucketHours
+          bd.cardHours += gpu * bucketHours
           bd.machineHours += bucketHours
         }
       }
@@ -378,6 +382,8 @@ async function loadReplayContext(filters: GlobalDashboardFilters) {
       opsStatus: supplierDevice.opsStatus,
       inMaintenance: supplierDevice.inMaintenance,
       cardTypeName: gpuCardType.name,
+      cardTypeCode: gpuCardType.code,
+      cardTypeDeviceRole: gpuCardType.deviceRole,
     })
     .from(supplierDevice)
     .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
@@ -386,6 +392,11 @@ async function loadReplayContext(filters: GlobalDashboardFilters) {
     .map((d) => ({
       ...d,
       cardTypeKey: normalizeCardKey(d.cardTypeName),
+      cardTypeRole: resolveGpuCardTypeRole({
+        name: d.cardTypeName,
+        code: d.cardTypeCode,
+        deviceRole: d.cardTypeDeviceRole,
+      }),
     }))
     .filter((d) => matchesDeviceFilters(d, filters))
 

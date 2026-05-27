@@ -3,10 +3,19 @@
  * supplier.overview.getStats 与 dashboard.globalOps.getSnapshot 共用。
  */
 
+import {
+  metricGpuCount,
+  inventoryGpuQuantity,
+  resolveGpuCardTypeRole,
+} from '@/lib/supplier/gpu-card-type-metrics'
+import type { GpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type { OverviewKpiMetric, LifecycleFunnelStageDto } from '@/lib/types/supplier-overview-api'
 
 export const CLOSED_FAULT_STATUSES = ['已关闭', 'closed'] as const
 export const TERMINAL_BATCH_STATUSES = ['已完成', '已取消'] as const
+
+/** 计划管道叠加：进行中商务接入批次（Q1-B：online + order_access） */
+export const PIPELINE_BATCH_KINDS = ['online', 'order_access'] as const
 
 export const LIFECYCLE_ORDER = ['待接入', '接入中', '在线', '维护中', '下线中'] as const
 
@@ -17,6 +26,8 @@ export const GATEWAY_ONBOARDING_OPS = ['网关节点上架中'] as const
 export const NON_SCHEDULABLE_OPS = ['不可调度节点运行中'] as const
 export const RESERVED_IDLE_OPS = ['预留闲置中'] as const
 export const OTHER_DEPT_OPS = ['其他部门使用中'] as const
+
+export const DEFAULT_GPU_PER_DEVICE = 8
 
 /** §5.4.6 表底口径说明 */
 export const OVERVIEW_POOL_FOOTNOTE =
@@ -32,6 +43,103 @@ export type OverviewDeviceRow = {
   inMaintenance: boolean
   idcRegion: string | null
   cardTypeName: string
+  cardTypeCode?: string | null
+  cardTypeRole?: GpuCardTypeRole
+}
+
+export type PipelineBatchInput = {
+  id: string
+  dataCenterId: string
+  batchKind: string
+  onlineReason: string | null
+  plannedDeviceCount: number
+  plannedGpuCount: number
+  touchedDeviceCount: number
+  touchedPipelineGpu: number
+  plannedLineCardKeys?: string[]
+}
+
+export type PipelinePendingGap = {
+  deviceCount: number
+  gpuCount: number
+}
+
+export type PlanLineEntry = {
+  gpuCardTypeCode: string
+  plannedQuantity: number
+}
+
+export function parsePlanLineEntries(plannedLinesJson: unknown): PlanLineEntry[] {
+  const raw = (plannedLinesJson as Array<Record<string, unknown>> | null) ?? []
+  const entries: PlanLineEntry[] = []
+  for (const line of raw) {
+    const code =
+      (typeof line.gpuCardTypeCode === 'string' && line.gpuCardTypeCode) ||
+      (typeof line.gpu_card_type_code === 'string' && line.gpu_card_type_code) ||
+      ''
+    const qtyRaw = line.plannedQuantity ?? line.planned_quantity
+    const plannedQuantity =
+      typeof qtyRaw === 'number' ? qtyRaw : Number(qtyRaw ?? 0)
+    if (!Number.isFinite(plannedQuantity) || plannedQuantity <= 0) continue
+    entries.push({ gpuCardTypeCode: code, plannedQuantity })
+  }
+  return entries
+}
+
+export function plannedGpuFromPlanLinesJson(
+  plannedLinesJson: unknown,
+  plannedDeviceCount: number,
+  gpuPerDevice = DEFAULT_GPU_PER_DEVICE,
+): number {
+  const lines = parsePlanLineEntries(plannedLinesJson)
+  if (lines.length === 0) {
+    return Math.max(0, plannedDeviceCount) * gpuPerDevice
+  }
+  return lines.reduce((sum, line) => sum + line.plannedQuantity * gpuPerDevice, 0)
+}
+
+export function planLineCardKeysFromJson(plannedLinesJson: unknown): string[] {
+  return parsePlanLineEntries(plannedLinesJson)
+    .map((line) => normalizeCardKey(line.gpuCardTypeCode))
+    .filter((key) => key.length > 0)
+}
+
+export function resolveBatchPlannedGpuCount(batch: {
+  plannedDeviceCount: number
+  plannedGpuCount?: number | null
+  plannedLinesJson: unknown
+}): number {
+  if (batch.plannedGpuCount != null && batch.plannedGpuCount > 0) {
+    return batch.plannedGpuCount
+  }
+  return plannedGpuFromPlanLinesJson(batch.plannedLinesJson, batch.plannedDeviceCount)
+}
+
+export function toPipelineBatchInput(
+  batch: {
+    id: string
+    dataCenterId: string
+    batchKind: string
+    onlineReason: string | null
+    plannedDeviceCount: number
+    plannedGpuCount?: number | null
+    touchedDeviceCount: number | null
+    plannedLinesJson: unknown
+  },
+  touchedPipelineGpu: number,
+): PipelineBatchInput {
+  const plannedGpuCount = resolveBatchPlannedGpuCount(batch)
+  return {
+    id: batch.id,
+    dataCenterId: batch.dataCenterId,
+    batchKind: batch.batchKind,
+    onlineReason: batch.onlineReason,
+    plannedDeviceCount: batch.plannedDeviceCount,
+    plannedGpuCount,
+    touchedDeviceCount: batch.touchedDeviceCount ?? 0,
+    touchedPipelineGpu,
+    plannedLineCardKeys: planLineCardKeysFromJson(batch.plannedLinesJson),
+  }
 }
 
 export function normalizeCardKey(name: string | null | undefined): string {
@@ -75,7 +183,7 @@ export function kpiFromDevices(
   const matched = devices.filter(pred)
   return {
     deviceCount: matched.length,
-    gpuCount: matched.reduce((sum, d) => sum + d.gpuCount, 0),
+    gpuCount: matched.reduce((sum, d) => sum + metricGpuCount(d), 0),
   }
 }
 
@@ -86,7 +194,75 @@ export function normalizeLifecycleStage(status: string): (typeof LIFECYCLE_ORDER
   return '待接入'
 }
 
-export function buildLifecycleFunnel(devices: OverviewDeviceRow[]): LifecycleFunnelStageDto[] {
+export function effectivePlannedGpuCount(batch: {
+  plannedGpuCount: number
+  plannedDeviceCount: number
+  plannedLinesJson?: unknown
+}): number {
+  if (batch.plannedGpuCount > 0) return batch.plannedGpuCount
+  if (batch.plannedLinesJson != null) {
+    return plannedGpuFromPlanLinesJson(batch.plannedLinesJson, batch.plannedDeviceCount)
+  }
+  return batch.plannedDeviceCount * DEFAULT_GPU_PER_DEVICE
+}
+
+export function computePipelinePendingGap(batch: PipelineBatchInput): PipelinePendingGap {
+  const plannedGpu = effectivePlannedGpuCount(batch)
+  return {
+    deviceCount: Math.max(0, batch.plannedDeviceCount - batch.touchedDeviceCount),
+    gpuCount: Math.max(0, plannedGpu - batch.touchedPipelineGpu),
+  }
+}
+
+export function aggregatePipelinePending(batches: PipelineBatchInput[]): PipelinePendingGap {
+  return batches.reduce(
+    (acc, batch) => {
+      const gap = computePipelinePendingGap(batch)
+      acc.deviceCount += gap.deviceCount
+      acc.gpuCount += gap.gpuCount
+      return acc
+    },
+    { deviceCount: 0, gpuCount: 0 },
+  )
+}
+
+export function mergeKpiMetric(
+  entity: OverviewKpiMetric,
+  pipeline: PipelinePendingGap,
+): OverviewKpiMetric {
+  return {
+    deviceCount: entity.deviceCount + pipeline.deviceCount,
+    gpuCount: entity.gpuCount + pipeline.gpuCount,
+  }
+}
+
+export function batchMatchesCardFilter(batch: PipelineBatchInput, cardTypeKey: string): boolean {
+  if (!batch.plannedLineCardKeys?.length) return false
+  return batch.plannedLineCardKeys.some((key) => key === cardTypeKey)
+}
+
+export function computePendingAccessDataCenterIds(
+  devices: OverviewDeviceRow[],
+  batches: PipelineBatchInput[],
+): string[] {
+  const ids = new Set<string>()
+  for (const d of devices) {
+    if (d.lifecycleStatus === '待接入' && d.dataCenterId) {
+      ids.add(d.dataCenterId)
+    }
+  }
+  for (const batch of batches) {
+    if (batch.batchKind === 'online' && batch.onlineReason === 'new_idc') {
+      ids.add(batch.dataCenterId)
+    }
+  }
+  return Array.from(ids)
+}
+
+export function buildLifecycleFunnel(
+  devices: OverviewDeviceRow[],
+  pipelinePending?: PipelinePendingGap,
+): LifecycleFunnelStageDto[] {
   const lifecycleBuckets: Record<string, { gpu: number; devices: number }> = {}
   for (const stage of LIFECYCLE_ORDER) {
     lifecycleBuckets[stage] = { gpu: 0, devices: 0 }
@@ -94,8 +270,14 @@ export function buildLifecycleFunnel(devices: OverviewDeviceRow[]): LifecycleFun
   for (const d of devices) {
     const key = normalizeLifecycleStage(d.lifecycleStatus)
     const bucket = lifecycleBuckets[key]!
-    bucket.gpu += d.gpuCount
+    bucket.gpu += metricGpuCount(d)
     bucket.devices += 1
+  }
+
+  if (pipelinePending && (pipelinePending.deviceCount > 0 || pipelinePending.gpuCount > 0)) {
+    const pendingBucket = lifecycleBuckets['待接入']!
+    pendingBucket.gpu += pipelinePending.gpuCount
+    pendingBucket.devices += pipelinePending.deviceCount
   }
 
   return LIFECYCLE_ORDER.map((stage) => ({

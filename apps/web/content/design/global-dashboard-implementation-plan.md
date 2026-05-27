@@ -111,8 +111,8 @@ type OverviewKpiMetric = {
 | 裸金属池 | `pool_bare_metal` | §3.4.5：`memberships.has('bare_metal')` | 卡 | `Σ bareMetalPoolGpu` |
 | 内部占用 | `internal_test` | L1 测试标记 + `internal_test_hold` 叠加 | 卡 | `kpis.internalTestGpu` |
 | 异常设备 | `device_abnormal` | 未关闭 `fault_incident` 关联设备去重台数；辅：`faultOpenCount` | 台 | `kpis.faultOpenCount` + 设备维度 |
-| 待上架设备 | `device_pending_shelving` | **`lifecycle_status = '待接入'`**（非 IDC「待上架」） | 卡 · 台 | `kpis.pendingAccess` |
-| 待上架机房 | `idc_pending_access` | 存在 `待接入` 设备的 `data_center` / `idc_region` 去重数 | 个 | 由设备聚合 |
+| 待上架设备 | `device_pending_shelving` | Snapshot：**实体** `lifecycle_status='待接入'` **+ 进行中批次计划缺口**（§2.1 `supplier-overview-scenarios-from-zero.md`） | 卡 · 台 | `kpis.pendingAccess` |
+| 待上架机房 | `idc_pending_access` | Snapshot：实体待接入机房 **∪** `online_reason='new_idc'` 的进行中 `online` 批次机房（**严格枚举**） | 个 | 与 overview 聚合一致 |
 
 **口径对齐说明（重要）**：
 
@@ -144,7 +144,7 @@ type OverviewKpiMetric = {
 
 | 阶段 | 聚合 | warn 条件 |
 |------|------|-----------|
-| 待接入 | `lifecycle_status = '待接入'` | `deviceCount > 0` |
+| 待接入 | 实体 `lifecycle_status = '待接入'` **+ Snapshot 计划缺口** | `deviceCount > 0` |
 | 接入中 | `lifecycle_status = '接入中'` | 同上 |
 | 在线 | `lifecycle_status = '在线'` | — |
 | 维护中 | `lifecycle_status = '维护中'` 或 `in_maintenance=true` | — |

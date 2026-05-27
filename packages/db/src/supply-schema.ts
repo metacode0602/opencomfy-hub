@@ -112,6 +112,8 @@ export const gpuCardType = pgTable(
     memoryGb: integer("memory_gb"), // 内存容量（GB）
     tdpWatts: integer("tdp_watts"), // 功耗（瓦）
     computeCapability: varchar("compute_capability", { length: 64 }), // 计算能力
+    /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+    deviceRole: varchar("device_role", { length: 16 }).notNull().default("compute"),
     status: varchar("status", { length: 32 }).notNull(), // 状态
     ...supplyTimestamps,
   },
@@ -465,6 +467,8 @@ export const onboardingBatch = pgTable(
     /** 上架计划明细（卡型 + 合作类型 + 数量） */
     plannedLinesJson: jsonb("planned_lines_json").notNull().default([]),
     plannedDeviceCount: integer("planned_device_count").notNull().default(0),
+    /** 计划 GPU 卡数（创建/修订批次时按 plan_lines × 默认卡/台 持久化） */
+    plannedGpuCount: integer("planned_gpu_count").notNull().default(0),
     listUploadMode: varchar("list_upload_mode", { length: 32 }).notNull().default("none"),
     /** 飞书审批工单号（商务手动录入）；业务批次必填，supplier 内唯一 */
     workOrderNo: varchar("work_order_no", { length: 64 }),

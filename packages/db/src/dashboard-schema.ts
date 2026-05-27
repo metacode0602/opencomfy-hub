@@ -136,8 +136,8 @@ export const DASHBOARD_POOL_CODE_META: Record<
  * | pool_bare_metal | 裸金属池 | 卡 | memberships 含 bare_metal | 期末 + 划入/划出 |
  * | internal_test | 内部占用 | 卡 | 测试标记 + internal_test_hold | 期末占用 |
  * | device_abnormal | 异常设备 | 台 | 未关闭 fault_incident 去重 | 期内暴露数 |
- * | device_pending_access | 待接入设备 | 台/卡 | lifecycle_status=待接入 | 期末积压 + 本期进入 |
- * | idc_pending_access | 待接入机房 | 个 | 含待接入设备的机房去重数 | 期末待接入机房数 |
+ * | device_pending_access | 待接入设备 | 台/卡 | 实体 lifecycle=待接入 + 进行中批次计划缺口（§2.1 supplier-overview-scenarios） | 期末实体积压 + 本期进入（**不含**计划缺口） |
+ * | idc_pending_access | 待接入机房 | 个 | 实体待接入机房 ∪ new_idc 进行中批次机房（严格 online_reason） | 期末实体待接入机房数（**不含**计划） |
  */
 export const DASHBOARD_KPI_METRIC_KEYS = [
   "gpu_total",
@@ -190,12 +190,14 @@ export const DASHBOARD_KPI_METRIC_META: Record<
   device_pending_access: {
     label: "待接入设备",
     unit: "台",
-    description: "lifecycle_status=待接入（Mock 文案「待上架设备」）",
+    description:
+      "Snapshot：COUNT(lifecycle=待接入) + SUM(max(0, planned_device_count−touched))；GPU 含 planned_gpu_count 缺口。Period 暂不叠加计划。",
   },
   idc_pending_access: {
     label: "待接入机房",
     unit: "个",
-    description: "存在待接入设备的 data_center / idc_region 去重计数",
+    description:
+      "DISTINCT data_center：有机房实体待接入设备，或进行中 online 批次且 online_reason=new_idc。Period 暂不叠加计划。",
   },
 }
 
@@ -208,7 +210,7 @@ export const DASHBOARD_KPI_METRIC_META: Record<
  *
  * | stage_code | 中文阶段 | lifecycle_status | Snapshot 副指标 | Period 副指标 |
  * |------------|----------|------------------|-----------------|---------------|
- * | pending_access | 待接入 | 待接入 | 平均停留 | 本期吞吐 + 期末 |
+ * | pending_access | 待接入 | 待接入 | 实体 + 计划缺口（Snapshot） | 本期吞吐（仅实体）+ 期末 |
  * | onboarding | 接入中 | 接入中 | 平均停留 | 本期吞吐 + 期末 |
  * | online | 在线 | 在线 | 平均停留 | 本期吞吐 + 期末 |
  * | maintenance | 维护中 | 维护中 / in_maintenance | 平均停留 | 本期吞吐 + 期末 |

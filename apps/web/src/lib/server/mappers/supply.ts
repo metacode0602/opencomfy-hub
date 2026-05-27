@@ -17,6 +17,7 @@ import type {
   SupplierPricingRecord,
 } from '@/lib/data/types'
 import type { SupplierActivity } from '@/lib/types/supplier-domain'
+import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import {
   DEFAULT_CARDS_PER_MACHINE,
   normalizeSupplierBillingUnit,
@@ -149,7 +150,13 @@ export function mapDataCenterRow(
 
 export function mapGpuInventoryRow(
   row: SupplierGpuInventoryRow,
-  names: { dataCenterName: string; cardTypeName: string; supplierShortName?: string },
+  names: {
+    dataCenterName: string
+    cardTypeName: string
+    cardTypeCode?: string
+    cardTypeDeviceRole?: string | null
+    supplierShortName?: string
+  },
 ): DataCenterDevice {
   return {
     id: row.id,
@@ -159,6 +166,11 @@ export function mapGpuInventoryRow(
     supplierShortName: names.supplierShortName,
     cardTypeId: row.gpuCardTypeId,
     cardTypeName: names.cardTypeName,
+    cardTypeRole: resolveGpuCardTypeRole({
+      name: names.cardTypeName,
+      code: names.cardTypeCode,
+      deviceRole: names.cardTypeDeviceRole,
+    }),
     quantity: row.quantity,
     onlineQuantity: row.onlineQuantity,
     cardTimeCostPerHour: row.cardTimeCostPerHour ? toNumber(row.cardTimeCostPerHour) : undefined,
@@ -338,6 +350,11 @@ export function mapGpuCardTypeRow(row: GpuCardTypeRow): GPUCardType {
     memoryGB: row.memoryGb ?? 0,
     tdpWatts: row.tdpWatts ?? undefined,
     computeCapability: row.computeCapability ?? undefined,
+    deviceRole: resolveGpuCardTypeRole({
+      name: row.name,
+      code: row.code,
+      deviceRole: row.deviceRole,
+    }),
     status: row.status as GPUCardType['status'],
     createdAt: toIsoDate(row.createdAt),
     updatedAt: toIsoDate(row.updatedAt),
@@ -421,6 +438,7 @@ export function mapSupplierActivityRow(row: SupplierActivityRow): SupplierActivi
     title: row.title,
     description: row.description,
     author_name: row.authorName ?? '运营',
+    author_staff_id: row.authorStaffId,
     author_role: normalizeAuthorRole(row.authorRole),
     ref_domain: row.refDomain,
     ref_id: row.refId,
