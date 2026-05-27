@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { Area, AreaChart, XAxis } from "recharts"
 import {
   ArrowDown,
@@ -14,128 +15,72 @@ import {
 } from "lucide-react"
 
 import { Card, CardContent, CardHeader } from "@workspace/ui/components/card"
-import { ChartContainer, type ChartConfig } from "@workspace/ui/components/chart"
+import {
+  ChartContainer,
+  ChartTooltip,
+  type ChartConfig,
+} from "@workspace/ui/components/chart"
 import { cn } from "@workspace/ui/lib/utils"
+
+import { DashboardCardError, DashboardCardLoading } from "../_lib/dashboard-card-states"
+import { useGlobalDashboard } from "../_lib/global-dashboard-context"
+import { formatKpiValue } from "../_lib/format-kpi"
+
+const KPI_ICONS = [Cpu, Server, Layers, HardDrive, Warehouse, Package, ArrowDown, TrendingDown]
 
 const sparklineConfig = {
   v: {
-    label: "趋势",
+    label: "数值",
     theme: { light: "var(--chart-1)", dark: "var(--chart-1)" },
   },
 } satisfies ChartConfig
 
-const sparklineWarningConfig = {
-  v: {
-    label: "趋势",
-    theme: { light: "var(--chart-4)", dark: "var(--chart-4)" },
-  },
-} satisfies ChartConfig
-
-const KPI_ITEMS = [
-  {
-    title: "GPU 总卡数",
-    value: "4,280",
-    unit: "卡",
-    delta: "+3.2%",
-    up: true,
-    icon: Cpu,
-    warning: false,
-  },
-  {
-    title: "在线设备",
-    value: "1,280",
-    unit: "台",
-    delta: "+1.1%",
-    up: true,
-    icon: Server,
-    warning: false,
-  },
-  {
-    title: "弹性资源池",
-    value: "780",
-    unit: "卡",
-    delta: "+0.8%",
-    up: true,
-    icon: Layers,
-    warning: false,
-  },
-  {
-    title: "裸金属池",
-    value: "220",
-    unit: "卡",
-    delta: "-0.4%",
-    up: false,
-    icon: HardDrive,
-    warning: false,
-  },
-  {
-    title: "内部内部占用",
-    value: "180",
-    unit: "台",
-    delta: "+2.0%",
-    up: true,
-    icon: Warehouse,
-    warning: false,
-  },
-  {
-    title: "异常设备",
-    value: "12",
-    unit: "台",
-    delta: "+2",
-    up: false,
-    icon: Package,
-    warning: true,
-    valueClass: "text-destructive",
-  },
-  {
-    title: "待上架设备",
-    value: "9",
-    unit: "台",
-    delta: "-1",
-    up: true,
-    icon: ArrowDown,
-    warning: true,
-    valueClass: "text-chart-4",
-  },
-  {
-    title: "待上架机房",
-    value: "5",
-    unit: "个",
-    delta: "0",
-    up: true,
-    icon: TrendingDown,
-    warning: true,
-    valueClass: "text-destructive",
-  },
-] as const
-
-function miniSpark(up: boolean) {
-  const base = up ? 40 : 55
-  return Array.from({ length: 8 }, (_, i) => ({
-    i: String(i),
-    v: base + (up ? i * 3 : -i * 2) + (i % 2) * 2,
-  }))
-}
-
 function KpiSparkline({
   data,
   warning,
+  unit,
 }: {
-  data: { i: string; v: number }[]
+  data: Array<{ i: string; v: number; label: string }>
   warning?: boolean
+  unit: string
 }) {
-  const cfg = warning ? sparklineWarningConfig : sparklineConfig
+  if (data.length < 2) return null
+
   return (
-    <ChartContainer config={cfg} className="h-10 w-full [&>div]:aspect-auto">
-      <AreaChart data={data} margin={{ left: 0, right: 0, top: 2, bottom: 0 }}>
+    <ChartContainer
+      config={sparklineConfig}
+      className="h-10 w-full overflow-visible [&>div]:aspect-auto"
+    >
+      <AreaChart data={data} margin={{ left: 2, right: 2, top: 4, bottom: 0 }}>
         <XAxis dataKey="i" hide />
+        <ChartTooltip
+          cursor={{ stroke: "var(--border)", strokeWidth: 1, strokeDasharray: "3 3" }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null
+            const point = payload[0]?.payload as { label: string; v: number } | undefined
+            if (!point) return null
+            return (
+              <div className="grid min-w-[9rem] gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
+                <div className="font-medium text-foreground">{point.label}</div>
+                <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                  <span>数值</span>
+                  <span className="font-mono font-medium tabular-nums text-foreground">
+                    {Number(point.v).toLocaleString()} {unit}
+                  </span>
+                </div>
+              </div>
+            )
+          }}
+        />
         <Area
           dataKey="v"
           type="monotone"
-          fill="var(--color-v)"
+          fill={warning ? "var(--chart-4)" : "var(--color-v)"}
           fillOpacity={0.25}
-          stroke="var(--color-v)"
+          stroke={warning ? "var(--chart-4)" : "var(--color-v)"}
           strokeWidth={1.5}
+          dot={{ r: 2, strokeWidth: 0 }}
+          activeDot={{ r: 3.5, strokeWidth: 1.5, stroke: "var(--background)" }}
         />
       </AreaChart>
     </ChartContainer>
@@ -143,65 +88,97 @@ function KpiSparkline({
 }
 
 export function GlobalKpiSection() {
+  const { data, isLoading, isError, isSnapshot } = useGlobalDashboard()
+
+  if (isLoading) {
+    return <DashboardCardLoading label="加载 KPI…" />
+  }
+
+  if (isError || !data) {
+    return <DashboardCardError message="KPI 加载失败，请刷新页面重试" />
+  }
+
+  const footnote = isSnapshot
+    ? `数据截至 ${new Date(data.meta.asOf).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}。${data.resourcePools.footnote}`
+    : `区间 ${new Date(data.meta.periodStart!).toLocaleDateString("zh-CN")} ~ ${new Date(data.meta.periodEnd!).toLocaleDateString("zh-CN")} · 主值为期末存量，副值为区间净增`
+
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-      {KPI_ITEMS.map((kpi) => {
-        const Icon = kpi.icon
-        const spark = miniSpark(kpi.up)
-        return (
-          <Card
-            key={kpi.title}
-            className={cn("border-border/80 shadow-sm", kpi.warning && "border-chart-4/30")}
-          >
-            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2 pt-4">
-              <Icon
-                className={cn(
-                  "size-4",
-                  kpi.warning ? "text-chart-4" : "text-muted-foreground"
-                )}
-              />
-              <div>
+    <div className="space-y-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        {data.kpis.map((kpi, idx) => {
+          const Icon = KPI_ICONS[idx] ?? Cpu
+          const sparkline =
+            kpi.trend?.map((p, i) => ({ i: String(i), v: p.value, label: p.label })) ?? []
+          const deltaLabel = isSnapshot
+            ? "与资源总览同口径"
+            : (kpi.netChangeLabel ?? "净增 —")
+          const deltaUp = kpi.netChangeUp ?? true
+
+          const inner = (
+            <Card
+              className={cn(
+                "border-border/80 shadow-sm transition-colors",
+                kpi.warning && "border-chart-4/30",
+                kpi.href && "hover:bg-muted/30",
+              )}
+            >
+              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2 pt-4">
+                <Icon
+                  className={cn(
+                    "size-4",
+                    kpi.warning ? "text-chart-4" : "text-muted-foreground",
+                  )}
+                />
                 <p className="text-xs text-muted-foreground">{kpi.title}</p>
-              </div>
-            </CardHeader>
-            <CardContent className="pb-3">
-              <div className="mt-1 flex items-baseline gap-1">
-                <span
+              </CardHeader>
+              <CardContent className="pb-3">
+                <div
                   className={cn(
                     "text-2xl font-semibold tabular-nums",
-                    "valueClass" in kpi ? kpi.valueClass : undefined
+                    kpi.warning && "text-chart-4",
                   )}
                 >
-                  {kpi.value}
-                </span>
-                <span className="text-xs text-muted-foreground">{kpi.unit}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <span
-                  className={cn(
-                    "flex items-center gap-0.5 text-xs font-medium",
-                    kpi.delta.startsWith("+") || kpi.delta === "0"
-                      ? kpi.warning && !kpi.up
-                        ? "text-destructive"
-                        : "text-emerald-600 dark:text-emerald-400"
-                      : "text-destructive"
-                  )}
-                >
-                  {kpi.up ? (
-                    <TrendingUp className="size-3" />
-                  ) : (
-                    <TrendingDown className="size-3" />
-                  )}
-                  {kpi.delta}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <KpiSparkline data={spark} warning={kpi.warning} />
+                  {formatKpiValue(kpi, isSnapshot)}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )
-      })}
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span
+                    className={cn(
+                      "flex flex-col gap-0 text-xs font-medium",
+                      deltaUp ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+                    )}
+                  >
+                    <span className="flex items-center gap-0.5">
+                      {deltaUp ? (
+                        <TrendingUp className="size-3" />
+                      ) : (
+                        <TrendingDown className="size-3" />
+                      )}
+                      {deltaLabel}
+                    </span>
+                  </span>
+                  {sparkline.length >= 2 && (
+                    <div className="min-w-0 flex-1">
+                      <KpiSparkline
+                        data={sparkline}
+                        warning={kpi.warning}
+                        unit={kpi.unit.includes("卡") ? "卡" : kpi.unit}
+                      />
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )
+          return kpi.href ? (
+            <Link key={kpi.key} href={kpi.href} className="block">
+              {inner}
+            </Link>
+          ) : (
+            <div key={kpi.key}>{inner}</div>
+          )
+        })}
+      </div>
+      <p className="text-[11px] text-muted-foreground">{footnote}</p>
     </div>
   )
 }

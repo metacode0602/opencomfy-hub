@@ -1,5 +1,25 @@
 import { db } from '@/lib/db'
 import {
+  BARE_METAL_DIRECT_OPS,
+  BARE_METAL_PROXY_OPS,
+  buildLifecycleFunnel,
+  CLOSED_FAULT_STATUSES,
+  GATEWAY_ONBOARDING_OPS,
+  isHoldActive,
+  kpiFromDevices,
+  LIFECYCLE_ORDER,
+  NON_SCHEDULABLE_OPS,
+  normalizeCardKey,
+  normalizeLifecycleStage,
+  OFFLINE_DELIVERY_OPS,
+  OTHER_DEPT_OPS,
+  parseGpuScopeCount,
+  regionFromDc,
+  RESERVED_IDLE_OPS,
+  TERMINAL_BATCH_STATUSES,
+  type OverviewDeviceRow,
+} from '@/lib/server/aggregation/overview-aggregation'
+import {
   isDualPool,
   poolKindForFilterPoolCode,
   resolveDevicePoolMemberships,
@@ -8,7 +28,6 @@ import {
 import type {
   OverviewFilterOptionsResult,
   OverviewFiltersInput,
-  OverviewKpiMetric,
   OverviewStatsResult,
 } from '@/lib/types/supplier-overview-api'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
@@ -25,81 +44,7 @@ import {
 } from '@workspace/db/schema'
 import { and, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 
-const CLOSED_FAULT_STATUSES = ['已关闭', 'closed']
-const TERMINAL_BATCH_STATUSES = ['已完成', '已取消']
-const LIFECYCLE_ORDER = ['待接入', '接入中', '在线', '维护中', '下线中'] as const
-
-const BARE_METAL_DIRECT_OPS = ['网关直连裸金属上架中'] as const
-const BARE_METAL_PROXY_OPS = ['网关代理裸金属上架中'] as const
-const OFFLINE_DELIVERY_OPS = ['线下裸金属交付中'] as const
-const GATEWAY_ONBOARDING_OPS = ['网关节点上架中'] as const
-const NON_SCHEDULABLE_OPS = ['不可调度节点运行中'] as const
-const RESERVED_IDLE_OPS = ['预留闲置中'] as const
-const OTHER_DEPT_OPS = ['其他部门使用中'] as const
-
-function normalizeCardKey(name: string | null | undefined): string {
-  return (name ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-function regionFromDc(location: string | null, dcName: string): string {
-  if (location?.trim()) return location.trim()
-  if (dcName.includes('北京')) return '北京'
-  if (dcName.includes('上海')) return '上海'
-  if (dcName.includes('深圳') || dcName.includes('广州')) return '华南'
-  if (dcName.includes('内蒙古')) return '内蒙古'
-  return '其他'
-}
-
-function parseGpuScopeCount(scope: string | null, fallback = 4): number {
-  if (!scope) return fallback
-  const range = scope.match(/gpu\s*(\d+)\s*-\s*gpu\s*(\d+)/i)
-  if (range) {
-    const start = Number(range[1])
-    const end = Number(range[2])
-    return Math.max(0, end - start + 1)
-  }
-  const single = scope.match(/gpu\s*(\d+)/i)
-  if (single) return 1
-  return fallback
-}
-
-function isHoldActive(holdFrom: Date, holdUntil: Date | null, at = Date.now()): boolean {
-  const from = holdFrom.getTime()
-  const until = holdUntil?.getTime() ?? null
-  if (at < from) return false
-  if (until != null && at > until) return false
-  return true
-}
-
-type DeviceRow = {
-  id: string
-  supplierId: string
-  dataCenterId: string | null
-  gpuCount: number
-  lifecycleStatus: string
-  opsStatus: string
-  inMaintenance: boolean
-  idcRegion: string | null
-  cardTypeName: string
-}
-
-function kpiFromDevices(
-  devices: DeviceRow[],
-  pred: (d: DeviceRow) => boolean,
-): OverviewKpiMetric {
-  const matched = devices.filter(pred)
-  return {
-    deviceCount: matched.length,
-    gpuCount: matched.reduce((sum, d) => sum + d.gpuCount, 0),
-  }
-}
-
-function normalizeLifecycleStage(status: string): (typeof LIFECYCLE_ORDER)[number] {
-  if ((LIFECYCLE_ORDER as readonly string[]).includes(status)) {
-    return status as (typeof LIFECYCLE_ORDER)[number]
-  }
-  return '待接入'
-}
+type DeviceRow = OverviewDeviceRow
 
 function bindingsForDevice(
   deviceId: string,
@@ -339,13 +284,13 @@ export const supplierOverviewDataAccess = {
         .where(
           or(
             isNull(faultIncident.closedAt),
-            notInArray(faultIncident.incidentStatus, CLOSED_FAULT_STATUSES),
+            notInArray(faultIncident.incidentStatus, [...CLOSED_FAULT_STATUSES]),
           ),
         )
 
       const batchConditions = [
         inArray(onboardingBatch.batchKind, ['online', 'order_access']),
-        notInArray(onboardingBatch.batchStatus, TERMINAL_BATCH_STATUSES),
+        notInArray(onboardingBatch.batchStatus, [...TERMINAL_BATCH_STATUSES]),
       ]
       if (filters.supplierId !== 'all') {
         batchConditions.push(eq(onboardingBatch.supplierId, filters.supplierId))
@@ -582,25 +527,7 @@ export const supplierOverviewDataAccess = {
         }))
         .sort((a, b) => b.sellableGpu - a.sellableGpu)
 
-      const lifecycleBuckets: Record<string, { gpu: number; devices: number }> = {}
-      for (const stage of LIFECYCLE_ORDER) {
-        lifecycleBuckets[stage] = { gpu: 0, devices: 0 }
-      }
-      for (const d of filteredDevices) {
-        const key = normalizeLifecycleStage(d.lifecycleStatus)
-        const bucket = lifecycleBuckets[key]!
-        bucket.gpu += d.gpuCount
-        bucket.devices += 1
-      }
-
-      const lifecycleFunnel = LIFECYCLE_ORDER.map((stage) => ({
-        stage,
-        gpuCount: lifecycleBuckets[stage]?.gpu ?? 0,
-        deviceCount: lifecycleBuckets[stage]?.devices ?? 0,
-        warn:
-          (stage === '待接入' || stage === '接入中') &&
-          (lifecycleBuckets[stage]?.devices ?? 0) > 0,
-      }))
+      const lifecycleFunnel = buildLifecycleFunnel(filteredDevices)
 
       const opsGroups: Record<string, { gpu: number; devices: number }> = {
         '裸金属池 · 直连上架中': { gpu: 0, devices: 0 },

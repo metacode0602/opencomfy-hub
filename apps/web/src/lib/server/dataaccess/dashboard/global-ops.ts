@@ -1,0 +1,471 @@
+import { db } from '@/lib/db'
+import { normalizeCardKey, OVERVIEW_POOL_FOOTNOTE } from '@/lib/server/aggregation/overview-aggregation'
+import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
+import { resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
+import type {
+  GlobalAlertLevel,
+  GlobalAlertRow,
+  GlobalDashboardFilterOptions,
+  GlobalDashboardFilters,
+  GlobalDashboardPeriod,
+  GlobalDashboardSnapshot,
+  GlobalDiscrepancyRow,
+  GlobalDiscrepancyStatus,
+  GlobalKpiItem,
+  GlobalPeriodInput,
+  GlobalTodoRow,
+} from '@/lib/types/global-dashboard-api'
+import { computeGlobalPeriod } from '@/lib/server/dataaccess/dashboard/global-period'
+import type { OverviewFiltersInput } from '@/lib/types/supplier-overview-api'
+import {
+  dataCenter,
+  faultIncident,
+  gpuCardType,
+  resourcePoolBinding,
+  supplier,
+  supplierDevice,
+} from '@workspace/db/schema'
+import { desc, eq, isNull, notInArray, or } from 'drizzle-orm'
+
+function toOverviewFilters(filters: GlobalDashboardFilters): OverviewFiltersInput {
+  return {
+    region: filters.region ?? 'all',
+    supplierId: filters.supplierId ?? 'all',
+    cardType: filters.cardType ?? 'all',
+    poolCode: 'all',
+  }
+}
+
+function severityToLevel(severity: string | null): GlobalAlertLevel {
+  if (severity === 'P1') return '严重'
+  if (severity === 'P2') return '警告'
+  return '提示'
+}
+
+function incidentToState(status: string | null): string {
+  if (!status) return '未恢复'
+  if (status === '处理中' || status === 'investigating') return '处理中'
+  if (status === '已关闭' || status === 'closed') return '已恢复'
+  return '未恢复'
+}
+
+function formatTimeHm(d: Date): string {
+  return d.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Shanghai',
+  })
+}
+
+function relativeDueLabel(plannedReadyAt: Date | null, now = Date.now()): string {
+  if (!plannedReadyAt) return '—'
+  const diffMs = plannedReadyAt.getTime() - now
+  const absH = Math.floor(Math.abs(diffMs) / (60 * 60 * 1000))
+  const absM = Math.floor((Math.abs(diffMs) % (60 * 60 * 1000)) / (60 * 1000))
+  if (diffMs < 0) return `超期 ${absH}h ${absM}m`
+  if (diffMs < 24 * 60 * 60 * 1000) return `剩余 ${absH}h ${absM}m`
+  return plannedReadyAt.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Shanghai',
+  })
+}
+
+function discrepancyStatus(
+  gap: number,
+  plannedReadyAt: Date | null,
+  now = Date.now(),
+): GlobalDiscrepancyStatus {
+  if (gap <= 0) return 'ok'
+  if (plannedReadyAt && plannedReadyAt.getTime() < now) return 'abnormal'
+  return 'pending'
+}
+
+function poolBreakdownSnapshot(
+  inventoryRows: Array<{ cardTypeName: string; elasticServiceGpu: number; bareMetalPoolGpu: number }>,
+  field: 'elasticServiceGpu' | 'bareMetalPoolGpu',
+) {
+  const map = new Map<string, number>()
+  for (const row of inventoryRows) {
+    const gpu = field === 'elasticServiceGpu' ? row.elasticServiceGpu : row.bareMetalPoolGpu
+    if (gpu <= 0) continue
+    map.set(row.cardTypeName, (map.get(row.cardTypeName) ?? 0) + gpu)
+  }
+  return Array.from(map.entries()).map(([cardType, onlineGpuCards]) => ({
+    cardType,
+    onlineGpuCards,
+  }))
+}
+
+function buildKpis(
+  stats: Awaited<ReturnType<typeof supplierOverviewDataAccess.getStats>>,
+  abnormalDeviceCount: number,
+  pendingAccessDcCount: number,
+): GlobalKpiItem[] {
+  const { kpis, supplierRows } = stats
+  const poolElastic = supplierRows.reduce((s, r) => s + r.elasticServiceGpu, 0)
+  const poolBareMetal = supplierRows.reduce((s, r) => s + r.bareMetalPoolGpu, 0)
+
+  return [
+    {
+      key: 'gpu_total',
+      title: 'GPU 总卡数',
+      unit: '卡',
+      metric: kpis.total,
+      href: '/supplier/overview',
+    },
+    {
+      key: 'device_online',
+      title: '在线设备',
+      unit: '卡 · 台',
+      metric: kpis.online,
+      href: '/supplier/overview',
+    },
+    {
+      key: 'pool_elastic',
+      title: '弹性资源池',
+      unit: '卡',
+      metric: { gpuCount: poolElastic, deviceCount: 0 },
+    },
+    {
+      key: 'pool_bare_metal',
+      title: '裸金属池',
+      unit: '卡',
+      metric: { gpuCount: poolBareMetal, deviceCount: 0 },
+    },
+    {
+      key: 'internal_test',
+      title: '内部占用',
+      unit: '卡',
+      metric: { gpuCount: kpis.internalTestGpu, deviceCount: 0 },
+    },
+    {
+      key: 'device_abnormal',
+      title: '异常设备',
+      unit: '台',
+      metric: { gpuCount: 0, deviceCount: abnormalDeviceCount },
+      warning: abnormalDeviceCount > 0,
+    },
+    {
+      key: 'device_pending_access',
+      title: '待接入设备',
+      unit: '卡 · 台',
+      metric: kpis.pendingAccess,
+      warning: kpis.pendingAccess.deviceCount > 0,
+      href: '/supplier/overview',
+    },
+    {
+      key: 'idc_pending_access',
+      title: '待接入机房',
+      unit: '个',
+      metric: { gpuCount: 0, deviceCount: pendingAccessDcCount },
+      warning: pendingAccessDcCount > 0,
+    },
+  ]
+}
+
+export const globalOpsDataAccess = {
+  async getFilterOptions(): Promise<GlobalDashboardFilterOptions> {
+    const opts = await supplierOverviewDataAccess.getFilterOptions()
+    return {
+      cardTypes: opts.cardTypes,
+      regions: opts.regions,
+    }
+  },
+
+  async getSnapshot(filters: GlobalDashboardFilters = {}): Promise<GlobalDashboardSnapshot> {
+    const normalized: GlobalDashboardFilters = {
+      region: filters.region ?? 'all',
+      cardType: filters.cardType ?? 'all',
+      dataCenterId: filters.dataCenterId,
+      supplierId: filters.supplierId,
+    }
+
+    const overviewFilters = toOverviewFilters(normalized)
+    const stats = await supplierOverviewDataAccess.getStats(overviewFilters)
+    const now = new Date()
+
+    const deviceRows = await db
+      .select({
+        id: supplierDevice.id,
+        supplierId: supplierDevice.supplierId,
+        dataCenterId: supplierDevice.dataCenterId,
+        gpuCount: supplierDevice.gpuCount,
+        lifecycleStatus: supplierDevice.lifecycleStatus,
+        opsStatus: supplierDevice.opsStatus,
+        inMaintenance: supplierDevice.inMaintenance,
+        cardTypeName: gpuCardType.name,
+      })
+      .from(supplierDevice)
+      .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+
+    const cardFilter = normalized.cardType !== 'all' ? normalizeCardKey(normalized.cardType) : null
+
+    const filteredDevices = deviceRows.filter((d) => {
+      if (normalized.supplierId && normalized.supplierId !== 'all' && d.supplierId !== normalized.supplierId) {
+        return false
+      }
+      if (normalized.dataCenterId && d.dataCenterId !== normalized.dataCenterId) return false
+      if (cardFilter && normalizeCardKey(d.cardTypeName) !== cardFilter) return false
+      return true
+    })
+
+    const poolBindingRows = await db
+      .select({
+        deviceId: resourcePoolBinding.supplierDeviceId,
+        poolCode: resourcePoolBinding.poolCode,
+        workloadProfile: resourcePoolBinding.workloadProfile,
+      })
+      .from(resourcePoolBinding)
+
+    const openFaults = await db
+      .select({
+        id: faultIncident.id,
+        supplierId: faultIncident.supplierId,
+        supplierDeviceId: faultIncident.supplierDeviceId,
+        severity: faultIncident.severity,
+        faultType: faultIncident.faultType,
+        incidentStatus: faultIncident.incidentStatus,
+        openedAt: faultIncident.openedAt,
+        supplierName: supplier.shortName,
+        supplierFullName: supplier.name,
+      })
+      .from(faultIncident)
+      .leftJoin(supplier, eq(faultIncident.supplierId, supplier.id))
+      .where(
+        or(
+          isNull(faultIncident.closedAt),
+          notInArray(faultIncident.incidentStatus, ['已关闭', 'closed']),
+        ),
+      )
+      .orderBy(desc(faultIncident.openedAt))
+      .limit(20)
+
+    const abnormalDeviceIds = new Set<string>()
+    for (const f of openFaults) {
+      if (f.supplierDeviceId) abnormalDeviceIds.add(f.supplierDeviceId)
+    }
+
+    const pendingAccessDcIds = new Set<string>()
+    for (const d of filteredDevices) {
+      if (d.lifecycleStatus === '待接入' && d.dataCenterId) {
+        pendingAccessDcIds.add(d.dataCenterId)
+      }
+    }
+
+    const dualPoolGpu = stats.supplierRows.reduce((s, r) => s + r.dualPoolGpu, 0)
+    const elasticGpu = stats.supplierRows.reduce((s, r) => s + r.elasticServiceGpu, 0)
+    const bareMetalGpu = stats.supplierRows.reduce((s, r) => s + r.bareMetalPoolGpu, 0)
+    const poolOccupancyGpu = elasticGpu + bareMetalGpu
+
+    let elasticDevices = 0
+    let bareMetalDevices = 0
+    for (const d of filteredDevices) {
+      const bindings = poolBindingRows
+        .filter((b) => b.deviceId === d.id)
+        .map((b) => ({ poolCode: b.poolCode, workloadProfile: b.workloadProfile }))
+      const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+      if (memberships.has('elastic_service')) elasticDevices += 1
+      if (memberships.has('bare_metal')) bareMetalDevices += 1
+    }
+
+    const dcRows = await db
+      .select({
+        id: dataCenter.id,
+        name: dataCenter.name,
+      })
+      .from(dataCenter)
+
+    const dcNameById = new Map(dcRows.map((r) => [r.id, r.name]))
+
+    type ClusterAgg = {
+      dataCenterId: string
+      name: string
+      totalGpu: number
+      onlineGpu: number
+      abnormalDevices: number
+      pendingGpu: number
+      cardTypeCounts: Map<string, number>
+    }
+
+    const clusterAgg = new Map<string, ClusterAgg>()
+    const ensureCluster = (dcId: string): ClusterAgg => {
+      const existing = clusterAgg.get(dcId)
+      if (existing) return existing
+      const row: ClusterAgg = {
+        dataCenterId: dcId,
+        name: dcNameById.get(dcId) ?? dcId,
+        totalGpu: 0,
+        onlineGpu: 0,
+        abnormalDevices: 0,
+        pendingGpu: 0,
+        cardTypeCounts: new Map(),
+      }
+      clusterAgg.set(dcId, row)
+      return row
+    }
+
+    for (const d of filteredDevices) {
+      if (!d.dataCenterId) continue
+      const row = ensureCluster(d.dataCenterId)
+      row.totalGpu += d.gpuCount
+      const ct = d.cardTypeName ?? '未知'
+      row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + d.gpuCount)
+      if (d.lifecycleStatus === '在线') row.onlineGpu += d.gpuCount
+      if (d.lifecycleStatus === '待接入' || d.lifecycleStatus === '接入中') {
+        row.pendingGpu += d.gpuCount
+      }
+      if (abnormalDeviceIds.has(d.id)) row.abnormalDevices += 1
+    }
+
+    const clusters = Array.from(clusterAgg.values())
+      .map((c) => {
+        let primaryCardType: string | null = null
+        let max = 0
+        for (const [name, gpu] of c.cardTypeCounts) {
+          if (gpu > max) {
+            max = gpu
+            primaryCardType = name
+          }
+        }
+        const onlineRate =
+          c.totalGpu > 0 ? Math.round((c.onlineGpu / c.totalGpu) * 100) : 0
+        return {
+          dataCenterId: c.dataCenterId,
+          name: c.name,
+          primaryCardType,
+          totalGpu: c.totalGpu,
+          onlineGpu: c.onlineGpu,
+          abnormalDevices: c.abnormalDevices,
+          pendingAccessGpu: c.pendingGpu,
+          onlineRate,
+          netOk: true,
+          owner: null,
+        }
+      })
+      .sort((a, b) => b.onlineGpu - a.onlineGpu)
+      .slice(0, 8)
+
+    const discrepancies: GlobalDiscrepancyRow[] = stats.batchSummaries.map((b) => {
+      const gap = Math.max(0, b.plannedDeviceCount - b.onlineDeviceCount)
+      const plannedAt = b.plannedReadyAt ? new Date(b.plannedReadyAt) : null
+      const status = discrepancyStatus(gap, plannedAt, now.getTime())
+      return {
+        batchId: b.id,
+        supplierName: b.supplierName,
+        dataCenterName: b.dataCenterName,
+        plannedDeviceCount: b.plannedDeviceCount,
+        touchedDeviceCount: b.touchedDeviceCount,
+        onlineDeviceCount: b.onlineDeviceCount,
+        gapLabel: gap > 0 ? `计划 − 在线 = ${gap}` : '一致',
+        status,
+      }
+    })
+
+    const alerts: GlobalAlertRow[] = openFaults.map((f) => {
+      const supplierLabel = f.supplierName ?? f.supplierFullName ?? '未知供应商'
+      return {
+        id: f.id,
+        time: formatTimeHm(f.openedAt),
+        level: severityToLevel(f.severity),
+        type: 'fault' as const,
+        title: `${f.faultType ?? '故障'} · ${supplierLabel}`,
+        detail: `状态 ${f.incidentStatus ?? '—'}`,
+        state: incidentToState(f.incidentStatus),
+      }
+    })
+
+    const todos: GlobalTodoRow[] = []
+
+    for (const b of stats.batchSummaries) {
+      const gap = Math.max(0, b.plannedDeviceCount - b.onlineDeviceCount)
+      if (gap <= 0) continue
+      const plannedAt = b.plannedReadyAt ? new Date(b.plannedReadyAt) : null
+      const msToDue = plannedAt ? plannedAt.getTime() - now.getTime() : null
+      const urgent =
+        plannedAt != null &&
+        (plannedAt.getTime() < now.getTime() || (msToDue != null && msToDue < 24 * 60 * 60 * 1000))
+      if (!urgent) continue
+      todos.push({
+        id: `batch-${b.id}`,
+        title: `接入缺口 · ${b.supplierName} / ${b.dataCenterName}`,
+        priority: 'P2',
+        assignee: null,
+        due: relativeDueLabel(plannedAt, now.getTime()),
+        overdue: plannedAt != null && plannedAt.getTime() < now.getTime(),
+        href: `/supplier/onboarding-batches/${b.id}`,
+      })
+    }
+
+    for (const f of openFaults.filter((x) => x.severity === 'P1' || x.severity === 'P2').slice(0, 5)) {
+      todos.push({
+        id: `fault-${f.id}`,
+        title: `故障处理 · ${f.faultType ?? '故障'}`,
+        priority: f.severity ?? 'P2',
+        assignee: null,
+        due: relativeDueLabel(f.openedAt, now.getTime()),
+        overdue: false,
+        href: '/supplier/overview',
+      })
+    }
+
+    for (const d of discrepancies.filter((r) => r.status === 'abnormal').slice(0, 3)) {
+      todos.push({
+        id: `disc-${d.batchId}`,
+        title: `差异核对 · ${d.supplierName}`,
+        priority: 'P2',
+        assignee: null,
+        due: '需立即核对',
+        overdue: true,
+        href: `/supplier/onboarding-batches/${d.batchId}`,
+      })
+    }
+
+    return {
+      meta: {
+        asOf: now.toISOString(),
+        timezone: 'Asia/Shanghai',
+        filters: normalized,
+        view: 'snapshot',
+      },
+      kpis: buildKpis(stats, abnormalDeviceIds.size, pendingAccessDcIds.size),
+      lifecycleFunnel: stats.lifecycleFunnel,
+      resourcePools: {
+        displayUnit: 'gpu_cards',
+        slices: [
+          {
+            key: 'elastic_service',
+            label: '弹性用量池',
+            gpuCount: elasticGpu,
+            deviceCount: elasticDevices,
+            breakdownSnapshot: poolBreakdownSnapshot(stats.inventoryRows, 'elasticServiceGpu'),
+          },
+          {
+            key: 'bare_metal',
+            label: '裸金属池',
+            gpuCount: bareMetalGpu,
+            deviceCount: bareMetalDevices,
+            breakdownSnapshot: poolBreakdownSnapshot(stats.inventoryRows, 'bareMetalPoolGpu'),
+          },
+        ],
+        dualPoolGpu,
+        poolOccupancyGpu,
+        centerPrimary: `${poolOccupancyGpu.toLocaleString()} 卡`,
+        centerSecondary: `双池重叠 ${dualPoolGpu.toLocaleString()} 卡`,
+        footnote: OVERVIEW_POOL_FOOTNOTE,
+      },
+      clusters,
+      discrepancies,
+      alerts,
+      todos: todos.slice(0, 10),
+    }
+  },
+
+  async getPeriod(input: GlobalPeriodInput): Promise<GlobalDashboardPeriod> {
+    return computeGlobalPeriod(input)
+  },
+}
