@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
@@ -122,23 +122,27 @@ function validatePlanLines(lines: PlanLineDraft[]): {
   return { ok: true, total, normalized }
 }
 
-function formatPlanSummary(lines: OnboardingBatchPlanLine[]) {
-  return lines
-    .map(
-      (l) =>
-        `${l.gpu_card_type_code} · ${DEVICE_COOPERATION_TYPE_LABELS[l.cooperation_type]} × ${l.planned_quantity}`,
-    )
-    .join('；')
-}
 
 export function OnboardingBatchWizardDialog({
   routeKind,
   open,
   onOpenChange,
+  defaultSupplierId,
+  defaultDataCenterId,
+  supplierName,
+  dataCenterName,
+  lockContext = false,
+  onSuccess,
 }: {
   routeKind: Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
   open: boolean
   onOpenChange: (open: boolean) => void
+  defaultSupplierId?: string
+  defaultDataCenterId?: string
+  supplierName?: string
+  dataCenterName?: string
+  lockContext?: boolean
+  onSuccess?: () => void
 }) {
   const utils = trpc.useUtils()
   const ui = OPS_KIND_UI[routeKind]
@@ -221,6 +225,14 @@ export function OnboardingBatchWizardDialog({
     setPlanLines((prev) => (prev.length <= 1 ? prev : prev.filter((line) => line.key !== key)))
   }
 
+  useEffect(() => {
+    if (!open) return
+    if (lockContext && defaultSupplierId) {
+      setSupplierId(defaultSupplierId)
+      setDataCenterId(defaultDataCenterId ?? '')
+    }
+  }, [open, lockContext, defaultSupplierId, defaultDataCenterId])
+
   const resetWizard = () => {
     setWizardStep('meta')
     setSupplierId('')
@@ -298,6 +310,7 @@ export function OnboardingBatchWizardDialog({
     toast.success(
       `已创建批次 ${result.batchCode}，计划上架 ${result.plannedDeviceCount} 台（工单 ${result.workOrderNo}）`,
     )
+    onSuccess?.()
     handleOpenChange(false)
   }
 
@@ -345,6 +358,7 @@ export function OnboardingBatchWizardDialog({
       const result = await commitListMutation.mutateAsync({ batchId })
       invalidateList()
       toast.success(`已入库 ${result.committedCount} 台设备`)
+      onSuccess?.()
       handleOpenChange(false)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '入库失败')
@@ -364,52 +378,71 @@ export function OnboardingBatchWizardDialog({
         <DialogHeader>
           <DialogTitle>{ui.dialogTitle}</DialogTitle>
           <DialogDescription>
-            {isOrderAccess
-              ? '填写订单信息与上架计划 → 可选上传清单 → 确认'
-              : '选择供应商与机房，填写上架计划 → 可选上传清单 → 确认'}
+            {lockContext && dataCenterName
+              ? isOrderAccess
+                ? `为机房「${dataCenterName}」填写订单信息与上架计划 → 可选上传清单 → 确认`
+                : `为机房「${dataCenterName}」填写上架计划 → 可选上传清单 → 确认`
+              : isOrderAccess
+                ? '填写订单信息与上架计划 → 可选上传清单 → 确认'
+                : '选择供应商与机房，填写上架计划 → 可选上传清单 → 确认'}
           </DialogDescription>
         </DialogHeader>
 
         {wizardStep === 'meta' && (
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>供应商</Label>
-                <Select
-                  value={supplierId}
-                  onValueChange={(v) => {
-                    setSupplierId(v)
-                    setDataCenterId('')
-                    setContractId('')
-                  }}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择供应商" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.shortName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>机房</Label>
-                <Select
-                  value={dataCenterId}
-                  onValueChange={setDataCenterId}
-                  disabled={!supplierId}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="选择机房" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dataCenters.map((dc) => (
-                      <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {lockContext && defaultSupplierId && defaultDataCenterId ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>供应商</Label>
+                    <p className="text-sm text-foreground">{supplierName ?? '—'}</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>机房</Label>
+                    <p className="text-sm text-foreground">{dataCenterName ?? '—'}</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>供应商</Label>
+                    <Select
+                      value={supplierId}
+                      onValueChange={(v) => {
+                        setSupplierId(v)
+                        setDataCenterId('')
+                        setContractId('')
+                      }}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择供应商" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {suppliers.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.shortName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>机房</Label>
+                    <Select
+                      value={dataCenterId}
+                      onValueChange={setDataCenterId}
+                      disabled={!supplierId}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择机房" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {dataCenters.map((dc) => (
+                          <SelectItem key={dc.id} value={dc.id}>{dc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </>
+              )}
               <div className="space-y-2">
                 <Label>商务合同（可选）</Label>
                 <Select

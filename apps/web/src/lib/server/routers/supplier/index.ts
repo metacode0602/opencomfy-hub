@@ -35,6 +35,7 @@ import {
   datacenterRetireRequestSchema,
 } from '@/lib/server/routers/supplier/datacenter-device-retire-schemas'
 import { datacenterDeviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-device-retire'
+import { internalTestHoldDataAccess } from '@/lib/server/dataaccess/supplier/internal-test-hold'
 import {
   onboardingBatchCommitListSchema,
   onboardingBatchCreateSchema,
@@ -54,6 +55,13 @@ import {
   platformPriceUpdateSchema,
   platformPriceUpsertSchema,
 } from '@/lib/server/routers/supplier/platform-pricing-schemas'
+import {
+  internalTestHoldCreateSchema,
+  internalTestHoldEndSchema,
+  internalTestHoldLinkDevicesSchema,
+  internalTestHoldListSchema,
+  internalTestHoldUnlinkDeviceSchema,
+} from '@/lib/server/routers/supplier/internal-test-hold-schemas'
 import { overviewFiltersSchema } from '@/lib/server/routers/supplier/overview-schemas'
 import { supplierListSchema, supplierCreateSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
 import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter-create-schemas'
@@ -132,6 +140,8 @@ function mapImportError(error: unknown): never {
       message.includes('未填写') ||
       message.includes('卡型') ||
       message.includes('上架计划') ||
+      message.includes('内部占用') ||
+      message.includes('IP') ||
       message.includes('合作类型') ||
       message.includes('机房不一致') ||
       message.includes('工单号指向') ||
@@ -699,6 +709,71 @@ export const supplierRouter = createTRPCRouter({
         mapImportError(e)
       }
     }),
+  }),
+
+  internalTestHold: createTRPCRouter({
+    list: protectedProcedure.input(internalTestHoldListSchema).query(async ({ input }) => {
+      try {
+        return await internalTestHoldDataAccess.list(input ?? {})
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    getById: protectedProcedure
+      .input(z.object({ holdId: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const hold = await internalTestHoldDataAccess.getById(input.holdId)
+          if (!hold) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '内部占用记录不存在' })
+          }
+          return hold
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    create: adminProcedure.input(internalTestHoldCreateSchema).mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await internalTestHoldDataAccess.create({
+          ...input,
+          operatorStaffId: staffId,
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    end: adminProcedure.input(internalTestHoldEndSchema).mutation(async ({ input }) => {
+      try {
+        return await internalTestHoldDataAccess.endHold(input.holdId)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    linkDevices: adminProcedure
+      .input(internalTestHoldLinkDevicesSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await internalTestHoldDataAccess.linkDevices(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    unlinkDevice: adminProcedure
+      .input(internalTestHoldUnlinkDeviceSchema)
+      .mutation(async ({ input }) => {
+        try {
+          await internalTestHoldDataAccess.unlinkDevice(input.holdId, input.linkId)
+          return { ok: true as const }
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
   }),
 
   import: createTRPCRouter({

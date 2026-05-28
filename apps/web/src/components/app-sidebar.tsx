@@ -116,11 +116,11 @@ const data = {
       url: "/crm/workbench",
       icon: <LayoutDashboard className="size-4" />,
     },
-    {
-      title: "数据看板",
-      url: "/crm/analytics",
-      icon: <BarChart3 className="size-4" />,
-    },
+    // {
+    //   title: "数据看板",
+    //   url: "/crm/analytics",
+    //   icon: <BarChart3 className="size-4" />,
+    // },
     {
       title: "客户管理",
       url: "/crm/customers",
@@ -141,16 +141,16 @@ const data = {
       url: "/crm/staff",
       icon: <Users className="size-4" />,
     },
-    {
-      title: "合同",
-      url: "/crm/contracts",
-      icon: <FileText className="size-4" />,
-    },
-    {
-      title: "日历",
-      url: "/crm/calendar",
-      icon: <CalendarDays className="size-4" />,
-    }
+    // {
+    //   title: "合同",
+    //   url: "/crm/contracts",
+    //   icon: <FileText className="size-4" />,
+    // },
+    // {
+    //   title: "日历",
+    //   url: "/crm/calendar",
+    //   icon: <CalendarDays className="size-4" />,
+    // }
   ],
   navMarketplace: [
     {

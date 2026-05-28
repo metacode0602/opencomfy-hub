@@ -49,6 +49,7 @@ import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-det
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-device-retire-dialog'
+import { DatacenterOnboardingDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-onboarding-dialog'
 import { EditDatacenterDialog } from '@/components/dashboard/edit-datacenter-dialog'
 import { toast } from 'sonner'
 
@@ -85,6 +86,7 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
 
 export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string }) {
   const [retireDialogOpen, setRetireDialogOpen] = useState(false)
+  const [onboardingDialogOpen, setOnboardingDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [statusConfirmTarget, setStatusConfirmTarget] = useState<'online' | 'offline' | null>(null)
   const utils = trpc.useUtils()
@@ -111,6 +113,8 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
     void utils.supplier.listPhysicalDevices.invalidate()
     void utils.supplier.getPhysicalDeviceStats.invalidate()
     void utils.supplier.deviceRetire.listBatches.invalidate({ dataCenterId })
+    void utils.supplier.onboardingBatch.list.invalidate()
+    void utils.supplier.internalTestHold.list.invalidate()
     if (supplierId) {
       void utils.supplier.deviceImport.getContext.invalidate({ supplierId })
       void utils.supplier.listDataCenters.invalidate({ supplierId })
@@ -245,6 +249,9 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
               {nextStatus === 'online' ? '设为在线' : '设为离线'}
             </Button>
           )}
+          <Button variant="outline" onClick={() => setOnboardingDialogOpen(true)}>
+            设备上架 / 接入
+          </Button>
           <Button onClick={() => setRetireDialogOpen(true)}>设备下架 / 裁撤</Button>
         </div>
       </div>
@@ -293,6 +300,16 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
       <DatacenterDeviceRetireDialog
         open={retireDialogOpen}
         onOpenChange={setRetireDialogOpen}
+        dataCenterId={dataCenter.id}
+        dataCenterName={dataCenter.name}
+        onSuccess={invalidateAfterImport}
+      />
+
+      <DatacenterOnboardingDialog
+        open={onboardingDialogOpen}
+        onOpenChange={setOnboardingDialogOpen}
+        supplierId={dataCenter.supplierId}
+        supplierName={dataCenter.supplierName}
         dataCenterId={dataCenter.id}
         dataCenterName={dataCenter.name}
         onSuccess={invalidateAfterImport}

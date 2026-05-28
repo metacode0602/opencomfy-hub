@@ -875,6 +875,18 @@ export const internalTestHold = pgTable(
   "internal_test_hold",
   {
     id: text("id").primaryKey(),
+    /** 台账登记：供应商 / 机房 */
+    supplierId: text("supplier_id").references(() => supplier.id, { onDelete: "restrict" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, { onDelete: "restrict" }),
+    workOrderNo: varchar("work_order_no", { length: 64 }),
+    userName: varchar("user_name", { length: 128 }),
+    department: varchar("department", { length: 32 }),
+    settlementMode: varchar("settlement_mode", { length: 32 }),
+    gpuCardTypeId: text("gpu_card_type_id").references(() => gpuCardType.id, {
+      onDelete: "restrict",
+    }),
+    unitCount: integer("unit_count"),
+    remark: text("remark"),
     supplierDeviceId: text("supplier_device_id").references(() => supplierDevice.id, {
       onDelete: "cascade",
     }),
@@ -882,14 +894,40 @@ export const internalTestHold = pgTable(
       () => supplierGpuInventory.id,
       { onDelete: "cascade" },
     ),
-    scope: varchar("scope", { length: 255 }).notNull(),
+    scope: varchar("scope", { length: 255 }).notNull().default("planned"),
     holdFrom: timestamp("hold_from", { withTimezone: true }).notNull(),
     holdUntil: timestamp("hold_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("internal_test_hold_supplier_device_id_idx").on(table.supplierDeviceId),
     index("internal_test_hold_inventory_id_idx").on(table.supplierGpuInventoryId),
+    index("internal_test_hold_supplier_id_idx").on(table.supplierId),
+    index("internal_test_hold_data_center_id_idx").on(table.dataCenterId),
+    index("internal_test_hold_work_order_no_idx").on(table.workOrderNo),
+  ],
+)
+
+/** 内部占用台账 ↔ 已录入物理机 */
+export const internalTestHoldDeviceLink = pgTable(
+  "internal_test_hold_device_link",
+  {
+    id: text("id").primaryKey(),
+    holdId: text("hold_id")
+      .notNull()
+      .references(() => internalTestHold.id, { onDelete: "cascade" }),
+    supplierDeviceId: text("supplier_device_id")
+      .notNull()
+      .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    port: varchar("port", { length: 16 }).notNull().default("22"),
+    loginUsername: varchar("login_username", { length: 128 }).notNull(),
+    loginPassword: text("login_password").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("internal_test_hold_device_link_uk").on(table.holdId, table.supplierDeviceId),
+    index("internal_test_hold_device_link_hold_id_idx").on(table.holdId),
   ],
 )
 
@@ -1301,3 +1339,5 @@ export type LifecycleStateDefinitionRow = typeof lifecycleStateDefinition.$infer
 export type SupplierOpsUploadBatchRow = typeof supplierOpsUploadBatch.$inferSelect
 export type SupplierUnitCostRow = typeof supplierUnitCost.$inferSelect
 export type SupplierGpuInventoryRow = typeof supplierGpuInventory.$inferSelect
+export type InternalTestHoldRow = typeof internalTestHold.$inferSelect
+export type InternalTestHoldDeviceLinkRow = typeof internalTestHoldDeviceLink.$inferSelect

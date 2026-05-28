@@ -1,31 +1,32 @@
 import XLSX from "xlsx-js-style"
-import type { InternalTestHold, InternalTestHoldDevice } from "@/lib/types/supplier-domain"
+import type { InternalTestHoldDetailDevice } from '@/lib/types/internal-test-hold-api'
 
 /** 与设备上架 CSV 模板对齐的导出表头 */
 export const TEST_HOLD_DEVICE_EXPORT_HEADERS = [
-  "公网IP",
-  "内网IP",
-  "root账号",
-  "密码",
-  "SN",
-  "端口",
+  '公网IP',
+  '内网IP',
+  'root账号',
+  '密码',
+  'SN',
+  '端口',
 ] as const
 
 export function downloadTestHoldDevicesExcel(params: {
-  hold: InternalTestHold
-  devices: InternalTestHoldDevice[]
+  holdId: string
+  userName: string
+  devices: InternalTestHoldDetailDevice[]
 }) {
-  const { hold, devices } = params
+  const { holdId, userName, devices } = params
   if (devices.length === 0) return false
 
   const wsData: string[][] = [
     [...TEST_HOLD_DEVICE_EXPORT_HEADERS],
     ...devices.map((d) => [
-      d.external_ip,
-      d.internal_ip,
-      d.root_account,
-      d.root_password,
-      d.sn ?? "",
+      d.externalIp ?? '',
+      d.internalIp ?? '',
+      d.rootAccount,
+      d.rootPasswordMasked,
+      d.sn ?? '',
       d.port,
     ]),
   ]
@@ -42,7 +43,7 @@ export function downloadTestHoldDevicesExcel(params: {
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, "设备上架")
-  const slug = hold.user_name.replace(/\s+/g, "")
-  XLSX.writeFile(wb, `测试占用-${hold.id}-${slug}-设备上架.xlsx`)
+  const slug = userName.replace(/\s+/g, '')
+  XLSX.writeFile(wb, `测试占用-${holdId}-${slug}-设备上架.xlsx`)
   return true
 }

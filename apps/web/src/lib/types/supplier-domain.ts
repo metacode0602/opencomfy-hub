@@ -358,6 +358,8 @@ export type InternalTestHold = {
   id: string
   supplier_id: string
   data_center_id: string
+  /** 飞书审批工单号 */
+  work_order_no: string
   user_name: string
   department: InternalTestHoldDepartment
   card_type: string
