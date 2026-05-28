@@ -116,15 +116,13 @@ function buildKpis(
       key: 'gpu_total',
       title: 'GPU 总卡数',
       unit: '卡',
-      metric: kpis.total,
-      href: '/supplier/overview',
+      metric: kpis.total
     },
     {
       key: 'device_online',
       title: '在线设备',
       unit: '卡 · 台',
-      metric: kpis.online,
-      href: '/supplier/overview',
+      metric: kpis.online
     },
     {
       key: 'pool_elastic',
@@ -157,7 +155,6 @@ function buildKpis(
       unit: '卡 · 台',
       metric: kpis.pendingAccess,
       warning: kpis.pendingAccess.deviceCount > 0,
-      href: '/supplier/overview',
     },
     {
       key: 'idc_pending_access',
@@ -300,7 +297,9 @@ export const globalOpsDataAccess = {
       totalGpu: number
       onlineGpu: number
       abnormalDevices: number
-      pendingGpu: number
+      pendingAccessGpu: number
+      onboardingGpu: number
+      retiringGpu: number
       cardTypeCounts: Map<string, number>
     }
 
@@ -314,7 +313,9 @@ export const globalOpsDataAccess = {
         totalGpu: 0,
         onlineGpu: 0,
         abnormalDevices: 0,
-        pendingGpu: 0,
+        pendingAccessGpu: 0,
+        onboardingGpu: 0,
+        retiringGpu: 0,
         cardTypeCounts: new Map(),
       }
       clusterAgg.set(dcId, row)
@@ -324,17 +325,38 @@ export const globalOpsDataAccess = {
     for (const d of filteredDevices) {
       if (!d.dataCenterId) continue
       const row = ensureCluster(d.dataCenterId)
-      row.totalGpu += metricGpuCount(d)
+      const gpu = metricGpuCount(d)
+      row.totalGpu += gpu
       const ct = d.cardTypeName ?? '未知'
-      row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + metricGpuCount(d))
-      if (d.lifecycleStatus === '在线') row.onlineGpu += metricGpuCount(d)
-      if (d.lifecycleStatus === '待接入' || d.lifecycleStatus === '接入中') {
-        row.pendingGpu += metricGpuCount(d)
-      }
+      row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + gpu)
+      if (d.lifecycleStatus === '在线') row.onlineGpu += gpu
+      if (d.lifecycleStatus === '待接入') row.pendingAccessGpu += gpu
+      if (d.lifecycleStatus === '接入中') row.onboardingGpu += gpu
+      if (d.lifecycleStatus === '下线中') row.retiringGpu += gpu
       if (abnormalDeviceIds.has(d.id)) row.abnormalDevices += 1
     }
 
+    for (const dcId of stats.pendingAccessDataCenterIds ?? []) {
+      ensureCluster(dcId)
+    }
+    for (const [dcId, gap] of Object.entries(stats.pipelinePendingByDataCenter ?? {})) {
+      if (gap.gpuCount <= 0 && gap.deviceCount <= 0) continue
+      const row = ensureCluster(dcId)
+      row.pendingAccessGpu += gap.gpuCount
+    }
+
     const clusters = Array.from(clusterAgg.values())
+      .filter((c) => {
+        if (
+          c.totalGpu <= 0 &&
+          c.pendingAccessGpu <= 0 &&
+          c.onboardingGpu <= 0 &&
+          c.retiringGpu <= 0
+        ) {
+          return false
+        }
+        return true
+      })
       .map((c) => {
         let primaryCardType: string | null = null
         let max = 0
@@ -353,7 +375,9 @@ export const globalOpsDataAccess = {
           totalGpu: c.totalGpu,
           onlineGpu: c.onlineGpu,
           abnormalDevices: c.abnormalDevices,
-          pendingAccessGpu: c.pendingGpu,
+          pendingAccessGpu: c.pendingAccessGpu,
+          onboardingGpu: c.onboardingGpu,
+          retiringGpu: c.retiringGpu,
           onlineRate,
           netOk: true,
           owner: null,

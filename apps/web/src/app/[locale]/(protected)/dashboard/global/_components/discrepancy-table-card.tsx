@@ -39,7 +39,7 @@ export function DiscrepancyTableCard() {
       <CardHeader>
         <CardTitle className="text-base">资源差异校验中心</CardTitle>
         <CardDescription>
-          进行中接入批次：计划 / 触达 / 在线（批次在线 ≠ 供应商表在线 GPU）
+          进行中接入批次：计划 / 接收 / 在线（批次在线 ≠ 供应商表在线 GPU）
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -53,7 +53,7 @@ export function DiscrepancyTableCard() {
               <TableRow>
                 <TableHead>对象</TableHead>
                 <TableHead className="text-right">计划</TableHead>
-                <TableHead className="text-right">触达</TableHead>
+                <TableHead className="text-right">接收</TableHead>
                 <TableHead className="text-right">在线</TableHead>
                 <TableHead>差异</TableHead>
                 <TableHead>状态</TableHead>

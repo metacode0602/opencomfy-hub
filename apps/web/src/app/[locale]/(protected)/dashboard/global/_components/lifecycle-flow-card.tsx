@@ -49,8 +49,7 @@ export function LifecycleFlowCard() {
                     <ArrowDown className="size-3" />
                   </div>
                 )}
-                <Link
-                  href="/supplier/overview"
+                <div
                   className={cn(
                     "flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 py-2 transition-colors hover:bg-muted/40",
                     row.warn && "border-destructive/40 bg-destructive/5",
@@ -80,7 +79,7 @@ export function LifecycleFlowCard() {
                       </div>
                     )}
                   </div>
-                </Link>
+                </div>
               </React.Fragment>
             )
           })

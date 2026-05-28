@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import {
   aggregatePipelinePending,
+  aggregatePipelinePendingByDataCenter,
   batchMatchesCardFilter,
   BARE_METAL_DIRECT_OPS,
   BARE_METAL_PROXY_OPS,
@@ -424,6 +425,9 @@ export const supplierOverviewDataAccess = {
           cardFilterKey ? batchMatchesCardFilter(batch, cardFilterKey) : true,
         )
       const pipelinePending = aggregatePipelinePending(pipelineBatchInputs)
+      const pipelinePendingByDataCenter = Object.fromEntries(
+        aggregatePipelinePendingByDataCenter(pipelineBatchInputs),
+      )
       const pendingAccessDataCenterIds = computePendingAccessDataCenterIds(
         filteredDevices,
         pipelineBatchInputs,
@@ -814,6 +818,7 @@ export const supplierOverviewDataAccess = {
         batchSummaries,
         faultSla,
         pendingAccessDataCenterIds,
+        pipelinePendingByDataCenter,
       }
 
       supplierLog('overview', 'getStats done', {

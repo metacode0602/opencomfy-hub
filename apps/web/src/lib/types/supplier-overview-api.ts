@@ -114,6 +114,11 @@ export type FaultSlaSummaryDto = {
   }>
 }
 
+export type PipelinePendingByDataCenter = Record<
+  string,
+  { deviceCount: number; gpuCount: number }
+>
+
 export type OverviewStatsResult = {
   kpis: OverviewKpisDto
   lifecycleFunnel: LifecycleFunnelStageDto[]
@@ -124,6 +129,8 @@ export type OverviewStatsResult = {
   faultSla: FaultSlaSummaryDto
   /** Snapshot：实体待接入机房 ∪ new_idc 进行中批次机房 */
   pendingAccessDataCenterIds: string[]
+  /** 进行中上架/订单接入批次按机房的计划管道缺口（计划 − 已触达） */
+  pipelinePendingByDataCenter: PipelinePendingByDataCenter
 }
 
 export type OverviewFilterOptionsResult = {

@@ -80,7 +80,12 @@ export type GlobalClusterStatusRow = {
   totalGpu: number
   onlineGpu: number
   abnormalDevices: number
+  /** lifecycle = 待接入，含进行中批次管道缺口 */
   pendingAccessGpu: number
+  /** lifecycle = 接入中 */
+  onboardingGpu: number
+  /** lifecycle = 下线中 */
+  retiringGpu: number
   onlineRate: number
   netOk: boolean
   owner: string | null

@@ -117,12 +117,6 @@ function isHoldActive(hold: InternalTestHold, at = Date.now()): boolean {
   return true
 }
 
-import {
-  metricGpuCount,
-  resolveDeviceGpuCount,
-  resolveGpuCardTypeRole,
-} from '@/lib/supplier/gpu-card-type-metrics'
-
 function deviceGpuCount(device: SupplierDevice): number {
   return metricGpuCount({
     gpuCount: Number(device.gpu_count),

@@ -363,7 +363,7 @@ function buildPeriodKpis(
             : { gpuCount: row.endGpu, deviceCount: row.endDevices },
       warning: row.warning,
       href: row.href,
-      periodPrimary: `${periodPrimary} 期末`,
+      periodPrimary: `${periodPrimary}`,
       netChangeLabel: `净增 ${netFmt.label}`,
       netChangeUp: netFmt.up,
       trend: trends[row.key] ?? [],

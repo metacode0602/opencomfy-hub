@@ -30,6 +30,7 @@ import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
 import type { OnboardingParsedRow } from '@/lib/types/supplier-domain'
 import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import {
   batchKindFromRoute,
   IMPORT_STATUS_LABELS,
@@ -105,6 +106,7 @@ export function OnboardingBatchDetailContent({
       toast.success(`已入库 ${result.committedCount} 台设备`)
       void utils.supplier.onboardingBatch.getDetailPage.invalidate({ batchId })
       void utils.supplier.onboardingBatch.list.invalidate()
+      invalidateGlobalDashboard(utils)
     },
     onError: (e) => toast.error(e.message),
   })

@@ -45,6 +45,7 @@ import {
   type OnboardingParsedRow,
 } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { batchKindFromRoute } from '@/lib/supplier/onboarding-batch-utils'
 
 type WizardStep = 'meta' | 'upload' | 'preview'
@@ -247,6 +248,7 @@ export function OnboardingBatchWizardDialog({
 
   const invalidateList = () => {
     void utils.supplier.onboardingBatch.list.invalidate({ batchKind })
+    invalidateGlobalDashboard(utils)
   }
 
   const buildCreateInput = () => {

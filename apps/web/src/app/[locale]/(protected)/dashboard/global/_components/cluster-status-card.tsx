@@ -52,11 +52,13 @@ export function ClusterStatusCard() {
                     )}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                <div className="grid grid-cols-3 gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground sm:grid-cols-6">
                   <span>总量 {c.totalGpu} 卡</span>
                   <span>在线 {c.onlineGpu} 卡</span>
                   <span className="text-destructive">异常 {c.abnormalDevices} 台</span>
-                  <span className="text-chart-4">接入未完成 {c.pendingAccessGpu} 卡</span>
+                  <span className="text-chart-4">待接入 {c.pendingAccessGpu} 卡</span>
+                  <span className="text-chart-4">接入中 {c.onboardingGpu} 卡</span>
+                  <span className="text-chart-4">下架中 {c.retiringGpu} 卡</span>
                 </div>
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] text-muted-foreground">

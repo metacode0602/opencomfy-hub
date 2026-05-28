@@ -226,6 +226,21 @@ export function aggregatePipelinePending(batches: PipelineBatchInput[]): Pipelin
   )
 }
 
+export function aggregatePipelinePendingByDataCenter(
+  batches: PipelineBatchInput[],
+): Map<string, PipelinePendingGap> {
+  const map = new Map<string, PipelinePendingGap>()
+  for (const batch of batches) {
+    const gap = computePipelinePendingGap(batch)
+    if (gap.deviceCount <= 0 && gap.gpuCount <= 0) continue
+    const existing = map.get(batch.dataCenterId) ?? { deviceCount: 0, gpuCount: 0 }
+    existing.deviceCount += gap.deviceCount
+    existing.gpuCount += gap.gpuCount
+    map.set(batch.dataCenterId, existing)
+  }
+  return map
+}
+
 export function mergeKpiMetric(
   entity: OverviewKpiMetric,
   pipeline: PipelinePendingGap,

@@ -35,6 +35,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@workspace/ui/components/alert'
 import { Checkbox } from '@workspace/ui/components/checkbox'
 import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import {
   DEVICE_COOPERATION_TYPE_LABELS,
   type DeviceCooperationType,
@@ -135,6 +136,7 @@ export function DatacenterDeviceRetireDialog({
   dataCenterName: string
   onSuccess?: () => void
 }) {
+  const utils = trpc.useUtils()
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadFileRef = useRef<File | null>(null)
 
@@ -349,6 +351,7 @@ export function DatacenterDeviceRetireDialog({
       setWizardStep('done')
       toast.success(`${result.scenarioLabel}批次 ${result.batchCodes[0]} 已创建`)
       onSuccess?.()
+      invalidateGlobalDashboard(utils)
     } catch (e) {
       toast.error(getErrorMessage(e))
     } finally {

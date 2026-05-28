@@ -71,7 +71,7 @@
 
 `lifecycle_state_definition.domain = device_change_action`；`supplier_device_change_log.change_action` 存原文。
 
-**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`上架网关直连裸金属`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
+**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`网关直连裸金属上架中`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
 
 `payload.default_ops_status` / **`default_pool_bindings`** 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status` 并同步 `resource_pool_binding`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
 

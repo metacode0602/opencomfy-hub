@@ -597,7 +597,7 @@ export function SupplierOverviewContent() {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {batch.workOrderNo ? `工单 ${batch.workOrderNo} · ` : ''}
-                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 触达{' '}
+                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 接收{' '}
                         {batch.touchedDeviceCount}/{batch.plannedDeviceCount} · 在线{' '}
                         {batch.onlineDeviceCount} · 计划就绪 {formatDt(batch.plannedReadyAt)}
                       </p>

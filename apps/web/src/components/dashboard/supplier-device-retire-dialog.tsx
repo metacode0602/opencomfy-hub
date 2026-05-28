@@ -43,6 +43,7 @@ import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 
 import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { fileToBase64 } from '@/lib/utils/file-to-base64'
 import { downloadDeviceRetireErrorExcel } from '@/lib/supplier/device-retire-error-export'
 import {
@@ -366,6 +367,7 @@ export function SupplierDeviceRetireDialog({
       void utils.supplier.getPhysicalDeviceStats.invalidate({ supplierId })
       void utils.supplier.listGpuInventory.invalidate({ supplierId })
       void utils.supplier.deviceRetire.getContext.invalidate({ supplierId })
+      invalidateGlobalDashboard(utils)
       toast.success(`已提交 ${result.retiredCount} 台设备下架`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '提交失败')
