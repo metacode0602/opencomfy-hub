@@ -111,7 +111,7 @@ function MachineBlock({
       layoutId={`machine-${sessionKey}-${id}`}
       layout
       title={`设备 #${id + 1}`}
-      className="inline-block size-[22px] cursor-pointer rounded border-[1.5px] transition-transform duration-150 hover:relative hover:z-10 hover:scale-[1.2]"
+      className="inline-block size-[28px] cursor-pointer rounded border-[1.5px] transition-transform duration-150 hover:relative hover:z-10 hover:scale-[1.2]"
       style={{
         backgroundColor: colors.bg,
         borderColor: colors.border,
@@ -149,19 +149,22 @@ function ZoneGrid({
 
   return (
     <div
-      className={cn("flex flex-col rounded-lg border px-3 py-2.5", className)}
+      className={cn(
+        "flex h-full min-h-0 flex-col rounded-lg border px-4 py-3",
+        className,
+      )}
       style={{
         backgroundColor: zoneStyle.bg,
         borderColor: zoneStyle.border,
       }}
     >
       <div
-        className="mb-2 text-[11px] font-medium tracking-wide"
+        className="mb-2.5 shrink-0 text-xs font-medium tracking-wide"
         style={{ color: zoneStyle.title }}
       >
         {title}
       </div>
-      <div className="flex min-h-[52px] flex-1 flex-wrap content-start gap-1">
+      <div className="flex min-h-0 flex-1 flex-wrap content-start gap-1.5">
         {zoneMachines.map((machine) => (
           <MachineBlock
             key={`${sessionKey}-${machine.id}`}
@@ -300,43 +303,48 @@ export default function GpuDeviceFlowPage() {
       </div>
 
       <LayoutGroup id={`gpu-flow-${sessionKey}`}>
+        <div className="flex h-[70vh] min-h-0 flex-col gap-2.5">
         <ZoneGrid
           title="商务采购 → 验收入库（64台）"
           zoneId="pool"
           machines={machines}
           sessionKey={sessionKey}
-          className="mb-2.5"
+          className="min-h-0 flex-[3] h-[20vh]"
         />
 
-        <div className="mb-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="flex min-h-0 flex-[2] flex-col gap-2.5 sm:flex-row">
           <ZoneGrid
             title="k8s 集群上架"
             zoneId="k8s"
             machines={machines}
             sessionKey={sessionKey}
+            className="min-h-0 flex-1"
           />
           <ZoneGrid
             title="线下交付（直接交付，不走k8s）"
             zoneId="offline"
             machines={machines}
             sessionKey={sessionKey}
+            className="min-h-0 flex-1"
           />
         </div>
 
-        <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-3">
+        <div className="flex min-h-0 flex-[3] flex-col gap-2.5 sm:flex-row">
           <ZoneGrid
             title="弹性服务池"
             zoneId="elastic"
             machines={machines}
             sessionKey={sessionKey}
+            className="min-h-0 flex-1"
           />
           <ZoneGrid
             title="裸金属池"
             zoneId="bare"
             machines={machines}
             sessionKey={sessionKey}
+            className="min-h-0 flex-1"
           />
-          <div className="flex h-full min-h-0 flex-row gap-2">
+          <div className="flex min-h-0 flex-1 flex-row gap-2.5">
             <ZoneGrid
               title="内部占用"
               zoneId="internal"
@@ -352,6 +360,7 @@ export default function GpuDeviceFlowPage() {
               className="min-h-0 flex-1"
             />
           </div>
+        </div>
         </div>
       </LayoutGroup>
 

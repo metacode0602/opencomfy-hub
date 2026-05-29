@@ -145,7 +145,7 @@ export function GlobalKpiSection() {
               <CardContent className="pb-3">
                 <div
                   className={cn(
-                    "text-2xl font-semibold tabular-nums",
+                    "text-lg font-semibold tabular-nums",
                     kpi.warning && "text-chart-4",
                   )}
                 >

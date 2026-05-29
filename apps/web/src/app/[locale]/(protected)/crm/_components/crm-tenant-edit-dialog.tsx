@@ -187,7 +187,7 @@ export function CrmTenantEditDialog({
                   value={form.tenantStatus}
                   onValueChange={(v) => patch({ tenantStatus: v as FormState["tenantStatus"] })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -202,7 +202,7 @@ export function CrmTenantEditDialog({
                   value={form.tenantType}
                   onValueChange={(v) => patch({ tenantType: v as FormState["tenantType"] })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -255,7 +255,7 @@ export function CrmTenantEditDialog({
                   value={form.customerType}
                   onValueChange={(v) => patch({ customerType: v as FormState["customerType"] })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -288,7 +288,7 @@ export function CrmTenantEditDialog({
                   value={form.customerStatus}
                   onValueChange={(v) => patch({ customerStatus: v as FormState["customerStatus"] })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>

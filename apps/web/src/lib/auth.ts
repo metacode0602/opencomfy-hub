@@ -29,11 +29,13 @@ const isProd = process.env.NODE_ENV === 'production'
 
 export const auth = betterAuth({
   advanced: {
-    crossSubDomainCookies: {
-      enabled: true,
-      domain: websiteConfig.auth.cookieDomain, // your domain
-      additionalCookies: ['better-auth.session_token'],
-    },
+    ...(isProd && {
+      crossSubDomainCookies: {
+        enabled: true,
+        domain: websiteConfig.auth.cookieDomain,
+        additionalCookies: ['better-auth.session_token'],
+      },
+    }),
   },
   trustedOrigins: websiteConfig.auth.trustedOrigins,
 
