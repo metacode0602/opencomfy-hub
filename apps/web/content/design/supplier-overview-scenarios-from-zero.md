@@ -151,9 +151,15 @@ planned_gpu_count = Σ(planLine.plannedQuantity × default_gpu_per_device)
 - 同一机房多条 `new_idc` 批次：**去重计 1**。
 - 批次终态且无实体待接入设备 → 从 KPI 移除。
 
-#### 2.1.5 Period 分析（已定：暂不叠加）
+#### 2.1.5 Period 分析（v1.1 修订）
 
-按日/按小时 **Period** 模式的 `device_pending_access`、漏斗「本期吞吐」**暂不**纳入计划管道；仍仅 replay 实体 `device_lifecycle_event` / 变更推导。创建批次 **不会** 在 Period 视图中产生「本期进入待接入」吞吐。
+| 能力 | v1.0（已定） | v1.1 资源构成 |
+|------|-------------|---------------|
+| `device_pending_access` KPI | 仅 replay 实体 | 建议 `mergeKpiMetric`（实体 + 计划） |
+| 漏斗「待接入」段 Snapshot | 实体 + 计划缺口 | 不变 |
+| Period 计划管道时序 | **暂不** replay | v1.0：资源构成饼图 **期末** pipeline 截面；完整时序见 [global-dashboard-resource-composition-chart-design.md §14](./global-dashboard-resource-composition-chart-design.md) |
+
+按日/按小时 **Period** 的 `device_pending_access` 吞吐 **仍不** 纳入计划管道（创建批次不产生 change_log 事件）。**资源构成卡片**在 Period 下展示计划虚拟扇区的 **期末值**。
 
 #### 2.1.6 UI（已定：本期不改）
 

@@ -1,5 +1,7 @@
 /** 资源总览 API 类型（§5.4 supplier.overview） */
 
+import type { GlobalResourceCompositionPayload } from '@/lib/types/global-dashboard-api'
+
 export type OverviewFiltersInput = {
   region: string
   supplierId: string
@@ -134,6 +136,8 @@ export type OverviewStatsResult = {
   pipelinePendingByDataCenter: PipelinePendingByDataCenter
   /** 目标总卡数：有效上架计划 − 有效下架计划（批次台账） */
   gpuTargetGpu: number
+  /** 资源构成饼图（互斥分桶 + 计划虚拟量） */
+  resourceComposition: GlobalResourceCompositionPayload
 }
 
 export type OverviewFilterOptionsResult = {

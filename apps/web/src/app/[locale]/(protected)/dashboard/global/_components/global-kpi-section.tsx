@@ -103,7 +103,7 @@ export function GlobalKpiSection() {
   }
 
   const footnote = isSnapshot
-    ? `数据截至 ${new Date(data.meta.asOf).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}。${data.resourcePools.footnote}`
+    ? `数据截至 ${new Date(data.meta.asOf).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}。${data.resourceComposition.footnote}`
     : `区间 ${new Date(data.meta.periodStart!).toLocaleDateString("zh-CN")} ~ ${new Date(data.meta.periodEnd!).toLocaleDateString("zh-CN")} · 主值为期末存量，副值为区间净增`
 
   return (

@@ -51,6 +51,37 @@ export type GlobalLifecycleStagePeriod = LifecycleFunnelStageDto & {
   secondaryValue?: string
 }
 
+export type ResourceCompositionDisplayUnit = 'gpu_cards' | 'card_hours'
+
+export type ResourceCompositionSliceKind = 'entity' | 'pipeline_virtual'
+
+export type GlobalResourceCompositionBreakdown = {
+  cardType: string
+  gpuCount: number
+  deviceCount: number
+}
+
+export type GlobalResourceCompositionSlice = {
+  key: string
+  label: string
+  kind: ResourceCompositionSliceKind
+  gpuCount: number
+  deviceCount: number
+  cardHours?: number
+  machineHours?: number
+  netChangeLabel?: string
+  breakdownByCardType?: GlobalResourceCompositionBreakdown[]
+}
+
+export type GlobalResourceCompositionPayload = {
+  displayUnit: ResourceCompositionDisplayUnit
+  denominator: { gpuCount: number; deviceCount: number }
+  slices: GlobalResourceCompositionSlice[]
+  centerPrimary: string
+  centerSecondary?: string
+  footnote: string
+}
+
 export type GlobalResourcePoolBreakdownSnapshot = {
   cardType: string
   onlineGpuCards: number
@@ -154,6 +185,9 @@ export type GlobalDashboardSnapshot = {
   meta: GlobalDashboardMeta
   kpis: GlobalKpiItem[]
   lifecycleFunnel: LifecycleFunnelStageDto[]
+  /** 互斥资源构成（权威） */
+  resourceComposition: GlobalResourceCompositionPayload
+  /** @deprecated 重叠池口径，兼容一期 */
   resourcePools: GlobalResourcePoolsPayload
   clusters: GlobalClusterStatusRow[]
   discrepancies: GlobalDiscrepancyRow[]

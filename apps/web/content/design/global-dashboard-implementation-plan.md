@@ -154,30 +154,23 @@ type OverviewKpiMetric = {
 
 **IDC 9 段模型**：保留在 `global-dashboard-period-analytics.md` 作为 **远期 Period 维度**；Snapshot 阶段不混用，避免与 CRM 状态机双轨。
 
-### 3.3 资源池分布（`ResourcePoolChartCard`）
+### 3.3 资源构成（`ResourcePoolChartCard`）
 
-**口径分层**：
+> **权威口径**：[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（v1.1，已确认）。
 
-| 层级 | P1 Snapshot | 说明 |
-|------|-------------|------|
-| **平台池（2 池）** | ✅ 实现 | 裸金属池 / 弹性用量池，与 §3.4.5 一致 |
-| **Workload 6 池** | ⏸ 占位 | platform/dedicated/inference/training/standby/maintenance 需 `workload_profile` + 监控，P1 用 2 池饼图替代或折叠 |
+**P1 饼图**：互斥分桶 + 计划虚拟量（`resourceComposition`），非重叠两池。
 
-**P1 饼图数据**：
+| 层级 | Snapshot | Period v1.0 |
+|------|----------|-------------|
+| **实体扇区** | `classifyDeviceExclusiveBucket` | 期末截面 replay |
+| **计划虚拟扇区** | `pending_access_pipeline` / `retiring_pipeline` | 期末 pipeline 缺口 |
+| **兼容** | `resourcePools` 重叠口径保留一期 | 旧卡时池图保留 |
 
-```typescript
-// 来自 getStats 全平台聚合（filters=all）
-slices: [
-  { key: 'elastic_service', label: '弹性用量池', gpuCount, deviceCount },
-  { key: 'bare_metal', label: '裸金属池', gpuCount, deviceCount },
-  { key: 'dual_pool', label: '双池（重叠）', gpuCount, deviceCount }, // 可选第三扇区或 footnote
-]
-```
+**中心总计**：`denominator.gpuCount`（闭合分母），非「池占用重叠和」。
 
-- **中心总计**：`gpuCount` 之和 **不等于** `gpu_total`（双池重复计数）；中心文案应写「池占用 GPU」而非「平台 GPU 总量」，并附 §5.4.6 footnote。
-- **利用率 / 财务 / 型号结构**：P1 隐藏或显示「暂无数据」；禁止继续展示 Mock 百分比以免误导。
+**与 overview 验证**：`pool_elastic_only + pool_bare_metal_only + pool_dual` = 去重后至少占一池 GPU（排除维护/下架等更高优先级实体）。
 
-**与 overview 对齐验证**：Global 裸金属 + 弹性 − 双池 = overview 供应商表各行 `bareMetalPoolGpu + elasticServiceGpu − dualPoolGpu` 之和。
+~~**P1 饼图数据**（重叠口径，已废弃）~~：见资源构成设计文档 §1.1。
 
 ### 3.4 机房集群状态（`ClusterStatusCard`）
 

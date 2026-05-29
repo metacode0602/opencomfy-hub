@@ -425,7 +425,7 @@ export const globalOpsDataAccess = {
         assignee: null,
         due: relativeDueLabel(plannedAt, now.getTime()),
         overdue: plannedAt != null && plannedAt.getTime() < now.getTime(),
-        href: `/supplier/onboarding-batches/${b.id}`,
+        href: `/supplier/online-tasks/${b.id}`,
       })
     }
 
@@ -449,7 +449,7 @@ export const globalOpsDataAccess = {
         assignee: null,
         due: '需立即核对',
         overdue: true,
-        href: `/supplier/onboarding-batches/${d.batchId}`,
+        href: `/supplier/online-tasks/${d.batchId}`,
       })
     }
 
@@ -467,6 +467,7 @@ export const globalOpsDataAccess = {
         pendingAccessDcCount,
       ),
       lifecycleFunnel: stats.lifecycleFunnel,
+      resourceComposition: stats.resourceComposition,
       resourcePools: {
         displayUnit: 'gpu_cards',
         slices: [

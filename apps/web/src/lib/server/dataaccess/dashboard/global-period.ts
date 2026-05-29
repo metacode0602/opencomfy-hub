@@ -7,6 +7,16 @@ import {
   normalizeCardKey,
   OVERVIEW_POOL_FOOTNOTE,
 } from '@/lib/server/aggregation/overview-aggregation'
+import {
+  computePipelineGapsAt,
+  loadInternalHoldDeviceIds,
+} from '@/lib/server/aggregation/pipeline-period-replay'
+import {
+  aggregateEntityCompositionBuckets,
+  buildResourceCompositionPayload,
+  type CompositionDeviceInput,
+  compositionGpuDeltas,
+} from '@/lib/server/aggregation/resource-composition-aggregation'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { isDualPool, resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
@@ -821,6 +831,70 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
     }
   }
 
+  const internalHoldDeviceIds = await loadInternalHoldDeviceIds()
+  const periodStartAt = new Date(periodStart.getTime() - 1)
+
+  const toCompositionDevices = (states: Map<string, ReplayState>): CompositionDeviceInput[] => {
+    const out: CompositionDeviceInput[] = []
+    for (const d of devices) {
+      const s = states.get(d.id)
+      if (!s) continue
+      out.push({
+        id: d.id,
+        gpuCount: d.gpuCount,
+        lifecycleStatus: s.lifecycleStatus,
+        opsStatus: s.opsStatus,
+        inMaintenance: s.inMaintenance,
+        cardTypeName: d.cardTypeName,
+        cardTypeCode: d.cardTypeCode,
+        cardTypeRole: d.cardTypeRole,
+      })
+    }
+    return out
+  }
+
+  const endEntityBuckets = aggregateEntityCompositionBuckets(
+    toCompositionDevices(statesAtEnd),
+    internalHoldDeviceIds,
+  )
+  const startEntityBuckets = aggregateEntityCompositionBuckets(
+    toCompositionDevices(statesAtStart),
+    internalHoldDeviceIds,
+  )
+
+  const overviewFilters = toOverviewFilters(filters)
+  const [pipelineEnd, pipelineStart] = await Promise.all([
+    computePipelineGapsAt(overviewFilters, periodEnd),
+    computePipelineGapsAt(overviewFilters, periodStartAt),
+  ])
+
+  const periodGpuDeltas = compositionGpuDeltas(
+    endEntityBuckets,
+    startEntityBuckets,
+    pipelineEnd.pendingAccess,
+    pipelineStart.pendingAccess,
+    pipelineEnd.retiring,
+    pipelineStart.retiring,
+  )
+
+  const totalEndGpu =
+    Object.values(endEntityBuckets).reduce((s, b) => s + b.gpuCount, 0) +
+    pipelineEnd.pendingAccess.gpuCount +
+    pipelineEnd.retiring.gpuCount
+  const totalStartGpu =
+    Object.values(startEntityBuckets).reduce((s, b) => s + b.gpuCount, 0) +
+    pipelineStart.pendingAccess.gpuCount +
+    pipelineStart.retiring.gpuCount
+
+  const resourceComposition = buildResourceCompositionPayload({
+    entityBuckets: endEntityBuckets,
+    pendingAccessPipeline: pipelineEnd.pendingAccess,
+    retiringPipeline: pipelineEnd.retiring,
+    displayUnit: 'gpu_cards',
+    periodGpuDeltas,
+    centerSecondary: `净增 ${formatNetChange(totalEndGpu - totalStartGpu, '卡').label}`,
+  })
+
   const periodAlerts = snapshot.alerts
 
   return {
@@ -836,6 +910,7 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
     },
     kpis,
     lifecycleFunnel,
+    resourceComposition,
     resourcePools: {
       displayUnit: 'card_hours',
       slices: poolSlices,

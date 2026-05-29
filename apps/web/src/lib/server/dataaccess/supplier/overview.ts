@@ -19,6 +19,7 @@ import {
   OFFLINE_DELIVERY_OPS,
   OTHER_DEPT_OPS,
   parseGpuScopeCount,
+  mergeKpiMetric,
   type PipelineBatchInput,
   regionFromDc,
   RESERVED_IDLE_OPS,
@@ -26,6 +27,10 @@ import {
   toPipelineBatchInput,
   type OverviewDeviceRow,
 } from '@/lib/server/aggregation/overview-aggregation'
+import {
+  aggregateRetirePipelinePending,
+  buildResourceCompositionFromDevices,
+} from '@/lib/server/aggregation/resource-composition-aggregation'
 import { resolveGpuTargetGpu } from '@/lib/server/dataaccess/dashboard/gpu-target'
 import {
   isDualPool,
@@ -49,6 +54,7 @@ import {
   faultIncident,
   gpuCardType,
   internalTestHold,
+  internalTestHoldDeviceLink,
   onboardingBatch,
   onboardingBatchDeviceLink,
   resourcePoolBinding,
@@ -308,6 +314,25 @@ export const supplierOverviewDataAccess = {
         })
         .from(internalTestHold)
 
+      const holdDeviceLinkRows = await db
+        .select({
+          deviceId: internalTestHoldDeviceLink.supplierDeviceId,
+          holdFrom: internalTestHold.holdFrom,
+          holdUntil: internalTestHold.holdUntil,
+        })
+        .from(internalTestHoldDeviceLink)
+        .innerJoin(internalTestHold, eq(internalTestHoldDeviceLink.holdId, internalTestHold.id))
+
+      const internalHoldDeviceIds = new Set<string>()
+      for (const h of holds) {
+        if (!isHoldActive(h.holdFrom, h.holdUntil)) continue
+        if (h.deviceId) internalHoldDeviceIds.add(h.deviceId)
+      }
+      for (const link of holdDeviceLinkRows) {
+        if (!isHoldActive(link.holdFrom, link.holdUntil)) continue
+        internalHoldDeviceIds.add(link.deviceId)
+      }
+
       const openFaults = await db
         .select({
           id: faultIncident.id,
@@ -416,6 +441,82 @@ export const supplierOverviewDataAccess = {
       const pipelinePendingByDataCenter = Object.fromEntries(
         aggregatePipelinePendingByDataCenter(pipelineBatchInputs),
       )
+
+      const retireBatchConditions = [
+        eq(onboardingBatch.batchKind, 'device_retire'),
+        notInArray(onboardingBatch.batchStatus, [...TERMINAL_BATCH_STATUSES]),
+      ]
+      if (filters.supplierId !== 'all') {
+        retireBatchConditions.push(eq(onboardingBatch.supplierId, filters.supplierId))
+      }
+
+      const activeRetireBatchesRaw = await db
+        .select({
+          id: onboardingBatch.id,
+          dataCenterId: onboardingBatch.dataCenterId,
+          dataCenterName: onboardingBatch.dataCenterName,
+          batchKind: onboardingBatch.batchKind,
+          onlineReason: onboardingBatch.onlineReason,
+          plannedDeviceCount: onboardingBatch.plannedDeviceCount,
+          plannedGpuCount: onboardingBatch.plannedGpuCount,
+          plannedLinesJson: onboardingBatch.plannedLinesJson,
+          touchedDeviceCount: onboardingBatch.touchedDeviceCount,
+          idcRegion: onboardingBatch.idcRegion,
+        })
+        .from(onboardingBatch)
+        .where(and(...retireBatchConditions))
+
+      const activeRetireBatches = activeRetireBatchesRaw.filter((b) =>
+        batchMatchesRegionFilter(b.idcRegion, b.dataCenterName, filters.region),
+      )
+
+      const retireTouchedGpuByBatchId = new Map<string, number>()
+      if (activeRetireBatches.length > 0) {
+        const retireBatchIds = activeRetireBatches.map((b) => b.id)
+        const retireLinkGpuRows = await db
+          .select({
+            batchId: onboardingBatchDeviceLink.businessOnboardingBatchId,
+            gpuCount: supplierDevice.gpuCount,
+            cardTypeName: gpuCardType.name,
+            cardTypeCode: gpuCardType.code,
+            cardTypeDeviceRole: gpuCardType.deviceRole,
+          })
+          .from(onboardingBatchDeviceLink)
+          .innerJoin(
+            supplierDevice,
+            eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
+          )
+          .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+          .where(inArray(onboardingBatchDeviceLink.businessOnboardingBatchId, retireBatchIds))
+
+        for (const row of retireLinkGpuRows) {
+          if (!row.batchId) continue
+          const gpu = metricGpuCount({
+            gpuCount: row.gpuCount,
+            cardTypeName: row.cardTypeName,
+            cardTypeCode: row.cardTypeCode,
+            cardTypeRole: resolveGpuCardTypeRole({
+              name: row.cardTypeName,
+              code: row.cardTypeCode,
+              deviceRole: row.cardTypeDeviceRole,
+            }),
+          })
+          retireTouchedGpuByBatchId.set(
+            row.batchId,
+            (retireTouchedGpuByBatchId.get(row.batchId) ?? 0) + gpu,
+          )
+        }
+      }
+
+      const retirePipelineBatchInputs: PipelineBatchInput[] = activeRetireBatches
+        .map((batch) =>
+          toPipelineBatchInput(batch, retireTouchedGpuByBatchId.get(batch.id) ?? 0),
+        )
+        .filter((batch) =>
+          cardFilterKey ? batchMatchesCardFilter(batch, cardFilterKey) : true,
+        )
+      const retirePipelinePending = aggregateRetirePipelinePending(retirePipelineBatchInputs)
+
       const pendingAccessDataCenterIds = computePendingAccessDataCenterIds(
         filteredDevices,
         pipelineBatchInputs,
@@ -707,7 +808,10 @@ export const supplierOverviewDataAccess = {
           gpuCount: totalGpu,
         },
         online: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线'),
-        pendingAccess: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
+        pendingAccess: mergeKpiMetric(
+          kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
+          pipelinePending,
+        ),
         onboarding: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '接入中'),
         maintenance: kpiFromDevices(
           filteredDevices,
@@ -803,6 +907,13 @@ export const supplierOverviewDataAccess = {
 
       const gpuTargetGpu = await resolveGpuTargetGpu(filters, new Date())
 
+      const resourceComposition = buildResourceCompositionFromDevices({
+        devices: filteredDevices,
+        internalHoldDeviceIds,
+        pendingAccessPipeline: pipelinePending,
+        retiringPipeline: retirePipelinePending,
+      })
+
       const result: OverviewStatsResult = {
         kpis,
         lifecycleFunnel,
@@ -814,6 +925,7 @@ export const supplierOverviewDataAccess = {
         pendingAccessDataCenterIds,
         pipelinePendingByDataCenter,
         gpuTargetGpu,
+        resourceComposition,
       }
 
       supplierLog('overview', 'getStats done', {

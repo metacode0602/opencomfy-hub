@@ -11,7 +11,7 @@
 
 **关联设计**：
 
-- [global-dashboard-implementation-plan.md](./global-dashboard-implementation-plan.md)
+- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — **资源构成饼图（互斥分桶 + 计划虚拟量，权威）**
 - [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)
 - [supplier-overview-scenarios-from-zero.md](./supplier-overview-scenarios-from-zero.md)
 - [datacenter-device-retire-design.md](./datacenter-device-retire-design.md)
@@ -530,7 +530,42 @@ stage.deviceCount = COUNT(d)
 
 Period 扩展：`throughputDeviceCount` = 期内进入该阶段的设备台数（change_log replay）。
 
-### 5.2 资源池分布 — `resourcePools`
+### 5.2 资源构成 / 资源池分布 — `resourceComposition`（权威）
+
+> **v1.1 修订**：互斥分桶 + 计划虚拟量见 [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)。  
+> 下文 `resourcePools`（重叠池口径）**保留为兼容别名**，新 UI 以 `resourceComposition` 为准。
+
+#### 5.2.1 `resourceComposition`（Snapshot）
+
+| 字段 | 说明 |
+|------|------|
+| `displayUnit` | `gpu_cards`（默认） |
+| `denominator` | 非退订实体 + 待接入/下架计划缺口 |
+| `slices` | 互斥扇区：`pool_elastic_only` / `pool_bare_metal_only` / `pool_dual` / `maintenance` / `pending_access_*` / `retiring_*` 等 |
+| `centerPrimary` | `合计 N 卡`（= `denominator.gpuCount`） |
+| `footnote` | `RESOURCE_COMPOSITION_FOOTNOTE` |
+
+实体分桶：`classifyDeviceExclusiveBucket`（设备级优先级，见资源构成设计 §5.1）。
+
+计划虚拟量：
+
+```
+pending_access_pipeline = aggregatePipelinePending(online | order_access 进行中批次)
+retiring_pipeline       = aggregateRetirePipelinePending(device_retire 进行中批次)
+```
+
+`kpis.pendingAccess`（修订）= `mergeKpiMetric(实体待接入, pending_access_pipeline)`。
+
+#### 5.2.2 `resourceComposition`（Period v1.0）
+
+| 字段 | 说明 |
+|------|------|
+| `displayUnit` | `gpu_cards`（期末截面） |
+| 实体扇区 | `change_log` 回放 `periodEnd` / `periodStart` → 互斥分桶 |
+| 计划虚拟扇区 | **期末截面**：`periodEnd` 时刻 pipeline 缺口（v1.0 不做区间内批次事件回放，见资源构成设计 §8.2.2） |
+| `netChangeLabel` | 各扇区 `期末 − 期初` |
+
+#### 5.2.3 兼容别名 `resourcePools`（重叠口径，待废弃）
 
 | 模式 | displayUnit | 切片值 |
 |------|-------------|--------|
@@ -593,7 +628,9 @@ status = ok | pending | abnormal   // 超期 planned_ready_at → abnormal
 | `aggregatePipelinePending` | `overview-aggregation.ts` | 汇总 pipeline 缺口 |
 | `kpiFromDevices` | `overview-aggregation.ts` | 设备过滤聚合 |
 | `buildLifecycleFunnel` | `overview-aggregation.ts` | 漏斗五段 |
-| `resolveDevicePoolMemberships` | `device-pool-membership.ts` | 池归属 |
+| `classifyDeviceExclusiveBucket` | `resource-composition-aggregation.ts` | 互斥资源构成分桶 |
+| `buildResourceCompositionFromDevices` | `resource-composition-aggregation.ts` | 资源构成饼图 payload |
+| `computePipelineGapsAt` | `pipeline-period-replay.ts` | Period 计划缺口时点回放 |
 
 ---
 

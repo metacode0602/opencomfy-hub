@@ -227,16 +227,21 @@ Daily 跑批 T+1；Hourly 跑批每小时 :05；Snapshot 读当前态或最近 h
 | 内部占用 | `standby` | 内部测试/占用 |
 | 维护中 | `maintenance` | 维护中 |
 
-### 3.4 资源池分布：展示口径与计量定义（权威）
+### 3.4 资源构成 / 资源池分布：展示口径与计量定义
 
-`ResourcePoolChartCard` 在 **Snapshot** 与 **Period（daily / hourly）** 下使用 **不同的主计量单位**；饼图扇区、中心总计、外围卡片主值 **必须同一口径**。
+> **v1.1 权威**：[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（互斥分桶 + 计划虚拟量）。  
+> 本节 §3.4.1–§3.4.4 描述的旧 **重叠两池** 口径降为 `resourcePools` 兼容别名；新卡片读 `resourceComposition`。
 
-### 3.4.1 展示口径对照
+`ResourcePoolChartCard` 在 **Snapshot** 与 **Period** 下均以 **互斥扇区** 闭合分母；Period v1.0 主值为 **期末 GPU 卡数截面**（计划虚拟扇区同期末 pipeline 缺口）。
 
-| 视图 | 饼图扇区 | 中心「总计」 | 外围卡片主值 | 外围卡型明细 |
-|------|----------|--------------|--------------|--------------|
-| **Snapshot** | 期末 **在线 GPU 卡数** | 各池在线 GPU 卡数之和 | `{N} 卡` | **卡型 × 期末在线 GPU 卡数**（不展示台时/卡时） |
-| **Daily / Hourly** | 区间内 **卡时** 合计 | 各池卡时之和 | `{N} 卡时` | **卡型 - 台时 - 卡时**（区间累计） |
+### 3.4.1 展示口径对照（resourceComposition）
+
+| 视图 | 饼图扇区 | 中心「总计」 | 外围卡片主值 |
+|------|----------|--------------|--------------|
+| **Snapshot** | 互斥构成（实体 + 计划虚拟） | `denominator` 卡数 | `{N} 卡` · 各扇区台数 |
+| **Daily / Hourly** | **期末**互斥构成（v1.0） | 期末合计 `N 卡` | 净增 vs 期初 |
+
+**计划虚拟扇区 Period**：v1.0 仅 `periodEnd` pipeline 截面；完整时序见资源构成设计 §14（批次进度事件表）。
 
 **Snapshot 期末**：`as_of` 时刻（默认 `now()`）。**Period 区间**：闭区间 `[period_start, period_end]`（时区 `Asia/Shanghai`）。
 

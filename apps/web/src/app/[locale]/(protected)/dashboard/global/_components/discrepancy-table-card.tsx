@@ -95,7 +95,7 @@ export function DiscrepancyTableCard() {
                   </TableCell>
                   <TableCell>
                     <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-                      <Link href={`/supplier/onboarding-batches/${r.batchId}`}>处理</Link>
+                      <Link href={`/supplier/online-tasks/${r.batchId}`}>处理</Link>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -103,7 +103,7 @@ export function DiscrepancyTableCard() {
             </TableBody>
           </Table>
         )}
-        <Link href="/supplier/onboarding-batches" className="text-xs text-primary hover:underline">
+        <Link href="/supplier/online-tasks" className="text-xs text-primary hover:underline">
           查看全部接入批次
         </Link>
       </CardContent>

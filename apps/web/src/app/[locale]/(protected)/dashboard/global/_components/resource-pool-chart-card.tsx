@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense } from "react"
+import { Suspense, useMemo } from "react"
 import { Cell, Label, Pie, PieChart } from "recharts"
 
 import {
@@ -21,49 +21,57 @@ import { DashboardCardLoading } from "../_lib/dashboard-card-states"
 import { useGlobalDashboard } from "../_lib/global-dashboard-context"
 import { formatCompactHours } from "../_lib/format-kpi"
 
-const poolChartConfig = {
-  elastic_service: {
-    label: "弹性用量池",
-    theme: { light: "var(--chart-1)", dark: "var(--chart-1)" },
-  },
-  bare_metal: {
-    label: "裸金属池",
-    theme: { light: "var(--chart-2)", dark: "var(--chart-2)" },
-  },
-} satisfies ChartConfig
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+] as const
 
 function ResourcePoolChartCardInner() {
   const { data, isLoading, isSnapshot } = useGlobalDashboard()
 
-  const pools = data?.resourcePools
-  const isCardHours = pools?.displayUnit === "card_hours"
-  const valueUnit = isCardHours ? "卡时" : "卡"
+  const composition = data?.resourceComposition
+  const slices = composition?.slices ?? []
 
-  const slices = pools?.slices ?? []
+  const chartConfig = useMemo(() => {
+    const config: ChartConfig = {}
+    slices.forEach((s, index) => {
+      const color = CHART_COLORS[index % CHART_COLORS.length]!
+      config[s.key] = {
+        label: s.label,
+        theme: { light: color, dark: color },
+      }
+    })
+    return config
+  }, [slices])
+
   const pieData = slices.map((s) => ({
     name: s.key,
-    value: isCardHours ? (s.cardHours ?? 0) : s.gpuCount,
+    value: s.gpuCount,
     key: s.key,
+    kind: s.kind,
   }))
 
   return (
     <Card className="border-border/80 lg:col-span-6">
       <CardHeader>
-        <CardTitle className="text-base">资源池分布</CardTitle>
+        <CardTitle className="text-base">资源构成</CardTitle>
         <CardDescription>
           {isSnapshot
-            ? "平台两池 GPU 占用（可与总量重叠计数）"
-            : "区间累计供应卡时（按变更日志回放在线×卡数×时长）"}
+            ? "互斥分桶 · 含计划缺口（非退订设备 + 虚拟计划量）"
+            : "期末互斥构成 · 计划缺口为期末截面"}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <DashboardCardLoading label="加载资源池…" />
+          <DashboardCardLoading label="加载资源构成…" />
         ) : pieData.length === 0 || pieData.every((p) => p.value === 0) ? (
-          <p className="py-12 text-center text-sm text-muted-foreground">暂无池占用数据</p>
+          <p className="py-12 text-center text-sm text-muted-foreground">暂无资源构成数据</p>
         ) : (
           <div className="mx-auto max-w-md">
-            <ChartContainer config={poolChartConfig} className="mx-auto aspect-square w-full">
+            <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full">
               <PieChart>
                 <ChartTooltip
                   cursor={false}
@@ -71,11 +79,11 @@ function ResourcePoolChartCardInner() {
                     <ChartTooltipContent
                       hideLabel
                       formatter={(value, name) => {
-                        const label =
-                          poolChartConfig[name as keyof typeof poolChartConfig]?.label ?? name
+                        const slice = slices.find((s) => s.key === name)
+                        const label = slice?.label ?? String(name)
                         return (
                           <span className="font-medium">
-                            {label}：{formatCompactHours(Number(value))} {valueUnit}
+                            {label}：{formatCompactHours(Number(value))} 卡
                           </span>
                         )
                       }}
@@ -88,10 +96,15 @@ function ResourcePoolChartCardInner() {
                   nameKey="name"
                   innerRadius="48%"
                   outerRadius="85%"
-                  paddingAngle={2}
+                  paddingAngle={slices.length > 6 ? 1 : 2}
                 >
-                  {pieData.map((entry) => (
-                    <Cell key={entry.key} fill={`var(--color-${entry.key})`} />
+                  {pieData.map((entry, index) => (
+                    <Cell
+                      key={entry.key}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
+                      stroke={entry.kind === "pipeline_virtual" ? "var(--border)" : undefined}
+                      strokeDasharray={entry.kind === "pipeline_virtual" ? "4 3" : undefined}
+                    />
                   ))}
                   <Label
                     content={({ viewBox }) => {
@@ -105,18 +118,18 @@ function ResourcePoolChartCardInner() {
                           >
                             <tspan
                               x={viewBox.cx}
-                              y={pools?.centerSecondary ? (viewBox.cy ?? 0) - 8 : viewBox.cy}
+                              y={composition?.centerSecondary ? (viewBox.cy ?? 0) - 8 : viewBox.cy}
                               className="fill-foreground text-base font-bold"
                             >
-                              {pools?.centerPrimary ?? "—"}
+                              {composition?.centerPrimary ?? "—"}
                             </tspan>
-                            {pools?.centerSecondary && (
+                            {composition?.centerSecondary && (
                               <tspan
                                 x={viewBox.cx}
                                 y={(viewBox.cy ?? 0) + 14}
                                 className="fill-muted-foreground text-[10px]"
                               >
-                                {pools.centerSecondary}
+                                {composition.centerSecondary}
                               </tspan>
                             )}
                           </text>
@@ -128,42 +141,35 @@ function ResourcePoolChartCardInner() {
                 </Pie>
               </PieChart>
             </ChartContainer>
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-              {slices.map((s) => (
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+              {slices.map((s, index) => (
                 <div
                   key={s.key}
                   className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5"
+                  style={{
+                    borderLeftWidth: 3,
+                    borderLeftColor: CHART_COLORS[index % CHART_COLORS.length],
+                  }}
                 >
-                  <div className="font-medium">{s.label}</div>
-                  <div className="tabular-nums text-muted-foreground">
-                    {isCardHours ? (
-                      <>
-                        {formatCompactHours(s.cardHours ?? 0)} 卡时
-                        {s.netChangeLabel && (
-                          <span className="ml-1 text-foreground/80">· {s.netChangeLabel}</span>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        {s.gpuCount.toLocaleString()} 卡 · {s.deviceCount} 台
-                      </>
+                  <div className="font-medium">
+                    {s.label}
+                    {s.kind === "pipeline_virtual" && (
+                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                        计划
+                      </span>
                     )}
                   </div>
-                  {isSnapshot && s.breakdownSnapshot && s.breakdownSnapshot.length > 0 && (
+                  <div className="tabular-nums text-muted-foreground">
+                    {s.gpuCount.toLocaleString()} 卡 · {s.deviceCount.toLocaleString()} 台
+                    {s.netChangeLabel && (
+                      <span className="ml-1 text-foreground/80">· {s.netChangeLabel}</span>
+                    )}
+                  </div>
+                  {s.breakdownByCardType && s.breakdownByCardType.length > 0 && (
                     <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
-                      {s.breakdownSnapshot.map((row) => (
+                      {s.breakdownByCardType.map((row) => (
                         <div key={row.cardType}>
-                          {row.cardType} · {row.onlineGpuCards.toLocaleString()} 卡
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {!isSnapshot && s.breakdownPeriod && s.breakdownPeriod.length > 0 && (
-                    <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
-                      {s.breakdownPeriod.map((row) => (
-                        <div key={row.cardType}>
-                          {row.cardType} - {formatCompactHours(row.machineHours)}台时 -{" "}
-                          {formatCompactHours(row.cardHours)}卡时
+                          {row.cardType} · {row.gpuCount.toLocaleString()} 卡
                         </div>
                       ))}
                     </div>
@@ -171,9 +177,9 @@ function ResourcePoolChartCardInner() {
                 </div>
               ))}
             </div>
-            {pools?.footnote && (
+            {composition?.footnote && (
               <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-                {pools.footnote}
+                {composition.footnote}
               </p>
             )}
           </div>

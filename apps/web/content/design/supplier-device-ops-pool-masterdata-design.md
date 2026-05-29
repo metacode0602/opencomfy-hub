@@ -10,7 +10,7 @@
 
 - [supplier-device-import-schema.md](./supplier-device-import-schema.md)
 - [supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md) §3.4.5
-- [global-dashboard-kpi-caliber-spec.md](./global-dashboard-kpi-caliber-spec.md) §4.4–§4.7
+- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — 大盘资源构成互斥分桶（优先于重叠池展示）
 - [supplier-overview-scenarios-from-zero.md](./supplier-overview-scenarios-from-zero.md)
 
 **关联实现**（确认后修改）：
