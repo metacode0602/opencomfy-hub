@@ -32,6 +32,7 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import { toast } from 'sonner'
+import { CreateBillingPeriodDialog } from '@/app/[locale]/(protected)/finance/create/_components/create-billing-period-dialog'
 
 function sumDecimal(values: (string | null)[]): number {
   return values.reduce((acc, v) => acc + (Number(v) || 0), 0)
@@ -59,6 +60,7 @@ export function FinanceBillingPeriodsContent() {
   const [search, setSearch] = useState('')
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
   const [acting, setActing] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const { data: periods = [], isLoading } = trpc.finance.periods.list.useQuery()
   const regeneratePeriod = trpc.finance.periods.regenerate.useMutation()
@@ -114,20 +116,27 @@ export function FinanceBillingPeriodsContent() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
+          {/* <Button variant="outline" asChild>
             <LocaleLink href="/finance/create/single">
               <Receipt className="w-4 h-4 mr-2" />
               CRM 账单收入
             </LocaleLink>
-          </Button>
-          <Button asChild>
-            <LocaleLink href="/finance/create">
-              <Plus className="w-4 h-4 mr-2" />
-              添加账期
-            </LocaleLink>
+          </Button> */}
+          <Button type="button" onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            添加账期
           </Button>
         </div>
       </div>
+
+      <CreateBillingPeriodDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onPeriodReady={async (period) => {
+          await utils.finance.periods.list.invalidate()
+          router.push(`/finance/create?periodId=${period.id}`)
+        }}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-l-4 border-l-blue-500">
@@ -244,28 +253,6 @@ export function FinanceBillingPeriodsContent() {
                         </Button>
                         <Button variant="outline" size="sm" asChild>
                           <LocaleLink href={`/finance/${p.id}/cost`}>成本</LocaleLink>
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setConfirmAction(
-                              isPublishedPeriodStatus(p.status)
-                                ? {
-                                    type: 'void',
-                                    periodId: p.id,
-                                    periodCode: p.period_code,
-                                  }
-                                : {
-                                    type: 'regenerate',
-                                    periodId: p.id,
-                                    periodCode: p.period_code,
-                                  },
-                            )
-                          }
-                        >
-                          <RotateCcw className="mr-1 h-3.5 w-3.5" />
-                          重新上传生成
                         </Button>
                       </div>
                     </TableCell>

@@ -14,7 +14,8 @@ import {
 } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
-import { IconDownload, IconLoader2, IconUpload } from "@tabler/icons-react"
+import { IconDownload, IconLoader2, IconPlus, IconUpload } from "@tabler/icons-react"
+import { CreateBillingPeriodDialog } from "./_components/create-billing-period-dialog"
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { formatMoney, formatText } from "../_lib/display"
@@ -880,6 +881,7 @@ export default function FinanceCreateBillingPeriodPage() {
   const [computeError, setComputeError] = useState<string | null>(null)
   const [supplementaryDraft, setSupplementaryDraft] = useState<Record<string, string>>({})
   const [savingSupplementary, setSavingSupplementary] = useState(false)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   const createPeriod = trpc.finance.periods.create.useMutation()
   const importFile = trpc.finance.periods.importFile.useMutation()
@@ -1418,11 +1420,24 @@ export default function FinanceCreateBillingPeriodPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <Button variant="ghost" size="sm" asChild>
             <LocaleLink href="/finance">← 返回账期列表</LocaleLink>
           </Button>
+          <Button type="button" onClick={() => setCreateDialogOpen(true)}>
+            <IconPlus className="mr-2 size-4" />
+            添加账期
+          </Button>
         </div>
+
+        <CreateBillingPeriodDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          onPeriodReady={(period) => {
+            // 静态阶段：接入 tRPC 后在此设置 periodId 并刷新页面数据
+            console.info("[static] period ready", period)
+          }}
+        />
 
         {!hasFullResult ? (
           <div className="space-y-6">
@@ -1618,10 +1633,7 @@ export default function FinanceCreateBillingPeriodPage() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <CostGroupedTable
-                    rows={draftBundle!.cost}
-                    periodCode={draftBundle!.period.period_code}
-                  />
+                  <CostGroupedTable rows={draftBundle!.cost} />
                 </CardContent>
               </Card>
 
