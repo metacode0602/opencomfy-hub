@@ -5,7 +5,7 @@ import {
 } from '@/lib/server/mappers/crm'
 import {
   billingTenant,
-  consumptionRecord,
+  consumptionUsageDaily,
   crmProject,
   customer,
   recharge,
@@ -49,11 +49,11 @@ const rechargeByTenant = db
 
 const consumptionByTenant = db
   .select({
-    tenantId: consumptionRecord.tenantId,
-    totalConsumption: sum(consumptionRecord.amount).as('total_consumption'),
+    tenantId: consumptionUsageDaily.tenantId,
+    totalConsumption: sum(consumptionUsageDaily.amount).as('total_consumption'),
   })
-  .from(consumptionRecord)
-  .groupBy(consumptionRecord.tenantId)
+  .from(consumptionUsageDaily)
+  .groupBy(consumptionUsageDaily.tenantId)
   .as('consumption_by_tenant')
 
 const tenantMetricsByCustomer = db

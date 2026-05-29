@@ -20,6 +20,7 @@ import {
   mockSalesManagers,
   mockTasks,
 } from '@/lib/data/mock-data'
+import { usageMonthFromDate } from '@/lib/crm/balance-snapshot-utils'
 import {
   accountActivity,
   accountManagerAssignment,
@@ -29,7 +30,7 @@ import {
   commerceOrder,
   commerceOrderItem,
   computeTask,
-  consumptionRecord,
+  consumptionUsageDaily,
   contract,
   coupon,
   crmProject,
@@ -39,6 +40,7 @@ import {
   recharge,
   tenantBill,
   tenantBillDetail,
+  tenantConsumptionDailyDetail,
   userStaff,
 } from '@workspace/db/schema'
 
@@ -221,18 +223,60 @@ export async function seedCrmFromMock(): Promise<void> {
       })
     }
 
+    const dailyUsageAgg = new Map<
+      string,
+      { id: string; tenantId: string; usageDate: string; productLine: string; amount: number }
+    >()
+
     for (const c of mockConsumptions) {
-      await tx.insert(consumptionRecord).values({
+      const usageDate = c.createdAt.slice(0, 10)
+      const usageMonth = usageMonthFromDate(usageDate)
+      const dailyKey = `${c.tenantId}|${usageDate}|${c.productLine}`
+      const existingDaily = dailyUsageAgg.get(dailyKey)
+      if (existingDaily) {
+        existingDaily.amount += c.amount
+      } else {
+        dailyUsageAgg.set(dailyKey, {
+          id: dailyKey,
+          tenantId: c.tenantId,
+          usageDate,
+          productLine: c.productLine,
+          amount: c.amount,
+        })
+      }
+
+      await tx.insert(tenantConsumptionDailyDetail).values({
         id: c.id,
         customerId: null,
         tenantId: c.tenantId,
-        projectId: c.projectId,
+        usageDate,
+        usageMonth,
         productLine: c.productLine,
-        resourceName: c.resourceName,
-        amount: String(c.amount),
-        duration: String(c.duration),
-        unit: c.unit,
-        occurredAt: new Date(c.createdAt),
+        dataCenterCode: 'seed',
+        dataCenterName: '种子数据',
+        gpuCardTypeCode: 'default',
+        gpuCardTypeName: c.resourceName,
+        taskName: c.resourceName,
+        totalAmount: String(c.amount),
+        voucherAmount: '0',
+        balanceAmount: String(c.amount),
+        totalCardHours: c.unit === 'hour' ? String(c.duration) : null,
+        platformIdempotencyKey: `seed-detail-${c.id}`,
+        source: 'seed',
+      })
+    }
+
+    for (const row of dailyUsageAgg.values()) {
+      await tx.insert(consumptionUsageDaily).values({
+        id: row.id,
+        customerId: null,
+        tenantId: row.tenantId,
+        usageDate: row.usageDate,
+        usageMonth: usageMonthFromDate(row.usageDate),
+        productLine: row.productLine,
+        amount: String(row.amount),
+        voucherAmount: '0',
+        balanceAmount: String(row.amount),
       })
     }
 

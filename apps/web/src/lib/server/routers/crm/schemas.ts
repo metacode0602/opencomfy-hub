@@ -146,3 +146,9 @@ export const billingTenantUpdateSchema = z.object({
     status: z.enum(['active', 'inactive', 'suspended']),
   }),
 })
+
+export const customerMergeSchema = z.object({
+  targetCustomerId: z.string().min(1),
+  sourceCustomerIds: z.array(z.string().min(1)).min(1),
+  defaultTenantId: z.string().min(1).optional(),
+})

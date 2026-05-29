@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { 
   ArrowLeft,
@@ -19,9 +19,11 @@ import {
   TrendingUp,
   ArrowUpRight,
   ArrowLeftRight,
+  GitMerge,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
+import { Skeleton } from '@workspace/ui/components/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
 import {
@@ -45,9 +47,12 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import type { Customer } from '@/lib/data/types'
-import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
+import { WORKBENCH_CHART_COLORS } from '@/components/dashboard/workbench/chart-utils'
 import { EditCustomerDialog } from './edit-customer-dialog'
+import { CustomerMergeDialog } from './customer-merge-dialog'
+import { CustomerDailyConsumptionPanel } from './customer-daily-consumption-panel'
 import {
   customerToFormValues,
   formValuesToCustomerInput,
@@ -72,40 +77,18 @@ interface CustomerDetailContentProps {
   customer: Customer
 }
 
-const consumptionByProduct = [
-  { name: 'Serverless', value: 35, color: '#6366f1' },
-  { name: '云主机', value: 25, color: '#22c55e' },
-  { name: 'Job 计算', value: 20, color: '#f59e0b' },
-  { name: '裸金属', value: 12, color: '#ef4444' },
-  { name: '存储', value: 8, color: '#8b5cf6' },
-]
-
-const monthlyConsumption = [
-  { month: '1月', amount: 45000 },
-  { month: '2月', amount: 52000 },
-  { month: '3月', amount: 68000 },
-  { month: '4月', amount: 75000 },
-  { month: '5月', amount: 88000 },
-]
-
 const consumptionChartConfig = {
-  amount: {
+  consumption: {
     label: '消费金额',
     color: '#6366f1',
   },
 } satisfies ChartConfig
 
-const productLineChartConfig = Object.fromEntries(
-  consumptionByProduct.map((item) => [
-    item.name,
-    { label: item.name, color: item.color },
-  ]),
-) satisfies ChartConfig
-
 export function CustomerDetailContent({ customer: initialCustomer }: CustomerDetailContentProps) {
   const [customer, setCustomer] = useState(initialCustomer)
   const [activeTab, setActiveTab] = useState('overview')
   const [editOpen, setEditOpen] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [convertOpen, setConvertOpen] = useState(false)
   const [convertNote, setConvertNote] = useState('')
   const [convertError, setConvertError] = useState<string | null>(null)
@@ -144,15 +127,51 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
   const { data: recharges = [] } = trpc.crm.customers.listRecharges.useQuery({
     customerId: customer.id,
   })
-  const { data: consumptions = [] } = trpc.crm.customers.listConsumptions.useQuery({
-    customerId: customer.id,
-  })
   const { data: coupons = [] } = trpc.crm.customers.listCoupons.useQuery({
     customerId: customer.id,
   })
   const { data: contracts = [] } = trpc.crm.customers.listContracts.useQuery({
     customerId: customer.id,
   })
+  const { data: consumptionTrend = [], isLoading: isTrendLoading } =
+    trpc.crm.customers.consumptionTrend.useQuery({
+      customerId: customer.id,
+      months: 12,
+    })
+  const { data: productLineRaw = [], isLoading: isProductLineLoading } =
+    trpc.crm.customers.productLineBreakdown.useQuery({
+      customerId: customer.id,
+    })
+
+  const monthlyConsumption = useMemo(
+    () =>
+      consumptionTrend.map((row) => ({
+        month: row.month.slice(5),
+        consumption: row.consumption,
+      })),
+    [consumptionTrend],
+  )
+
+  const consumptionByProduct = useMemo(() => {
+    const total = productLineRaw.reduce((acc, item) => acc + item.value, 0)
+    return productLineRaw.map((item, index) => ({
+      name: productLineNames[item.name] ?? item.name,
+      value: item.value,
+      percent: total > 0 ? Math.round((item.value / total) * 1000) / 10 : 0,
+      color: WORKBENCH_CHART_COLORS[index % WORKBENCH_CHART_COLORS.length]!,
+    }))
+  }, [productLineRaw])
+
+  const productLineChartConfig = useMemo(
+    () =>
+      Object.fromEntries(
+        consumptionByProduct.map((item) => [
+          item.name,
+          { label: item.name, color: item.color },
+        ]),
+      ) satisfies ChartConfig,
+    [consumptionByProduct],
+  )
 
   return (
     <div className="space-y-6">
@@ -174,6 +193,10 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
           <p className="text-muted-foreground">{customer.industry}</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setMergeOpen(true)}>
+            <GitMerge className="w-4 h-4 mr-2" />
+            合并客户
+          </Button>
           <Button variant="outline" onClick={() => setEditOpen(true)}>
             编辑信息
           </Button>
@@ -244,6 +267,17 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
         onUpdated={async () => {
           const updated = await utils.crm.customers.getById.fetch({ id: customer.id })
           if (updated) setCustomer(updated)
+        }}
+      />
+
+      <CustomerMergeDialog
+        open={mergeOpen}
+        onOpenChange={setMergeOpen}
+        targetCustomer={{ id: customer.id, name: customer.name }}
+        onMerged={async () => {
+          const updated = await utils.crm.customers.getById.fetch({ id: customer.id })
+          if (updated) setCustomer(updated)
+          void utils.crm.customers.listProjects.invalidate({ customerId: customer.id })
         }}
       />
 
@@ -348,7 +382,7 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
           <TabsTrigger value="overview">概览</TabsTrigger>
           <TabsTrigger value="projects">项目</TabsTrigger>
           <TabsTrigger value="recharges">充值记录</TabsTrigger>
-          <TabsTrigger value="consumptions">消费记录</TabsTrigger>
+          <TabsTrigger value="consumptions">消费明细</TabsTrigger>
           <TabsTrigger value="coupons">算力券</TabsTrigger>
           <TabsTrigger value="contracts">合同</TabsTrigger>
         </TabsList>
@@ -362,48 +396,56 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
               </CardHeader>
               <CardContent>
                 {activeTab === 'overview' && (
-                  <ChartContainer
-                    config={consumptionChartConfig}
-                    className="aspect-auto h-[240px] w-full min-w-0"
-                  >
-                    <AreaChart data={monthlyConsumption}>
-                      <defs>
-                        <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <XAxis 
-                        dataKey="month" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#71717a', fontSize: 12 }}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#71717a', fontSize: 12 }}
-                        tickFormatter={(value) => `${value / 1000}k`}
-                      />
-                      <ChartTooltip
-                        content={
-                          <ChartTooltipContent
-                            formatter={(value) =>
-                              `¥${Number(value ?? 0).toLocaleString()}`
-                            }
-                          />
-                        }
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="amount"
-                        stroke="#6366f1"
-                        strokeWidth={2}
-                        fillOpacity={1}
-                        fill="url(#colorAmount)"
-                      />
-                    </AreaChart>
-                  </ChartContainer>
+                  isTrendLoading ? (
+                    <Skeleton className="aspect-auto h-[240px] w-full" />
+                  ) : monthlyConsumption.length === 0 ? (
+                    <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+                      暂无消费趋势数据
+                    </div>
+                  ) : (
+                    <ChartContainer
+                      config={consumptionChartConfig}
+                      className="aspect-auto h-[240px] w-full min-w-0"
+                    >
+                      <AreaChart data={monthlyConsumption}>
+                        <defs>
+                          <linearGradient id="colorAmount" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <XAxis 
+                          dataKey="month" 
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#71717a', fontSize: 12 }}
+                        />
+                        <YAxis 
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#71717a', fontSize: 12 }}
+                          tickFormatter={(value) => `${value / 10000}万`}
+                        />
+                        <ChartTooltip
+                          content={
+                            <ChartTooltipContent
+                              formatter={(value) =>
+                                `¥${Number(value ?? 0).toLocaleString()}`
+                              }
+                            />
+                          }
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="consumption"
+                          stroke="#6366f1"
+                          strokeWidth={2}
+                          fillOpacity={1}
+                          fill="url(#colorAmount)"
+                        />
+                      </AreaChart>
+                    </ChartContainer>
+                  )
                 )}
               </CardContent>
             </Card>
@@ -415,48 +457,58 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
               </CardHeader>
               <CardContent>
                 {activeTab === 'overview' && (
-                  <div className="grid h-[240px] w-full min-w-0 grid-cols-5 items-center gap-2">
-                    <ChartContainer
-                      config={productLineChartConfig}
-                      className="col-span-3 aspect-auto h-full w-full min-w-0 [&>div]:aspect-auto"
-                    >
-                      <PieChart>
-                        <Pie
-                          data={consumptionByProduct}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={50}
-                          outerRadius={80}
-                          paddingAngle={2}
-                          dataKey="value"
-                          nameKey="name"
-                        >
-                          {consumptionByProduct.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <ChartTooltip
-                          content={
-                            <ChartTooltipContent
-                              formatter={(value) => `${Number(value ?? 0).toLocaleString()}%`}
-                            />
-                          }
-                        />
-                      </PieChart>
-                    </ChartContainer>
-                    <div className="col-span-2 min-w-0 space-y-2">
-                      {consumptionByProduct.map((item) => (
-                        <div key={item.name} className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: item.color }}
-                          />
-                          <span className="text-sm text-muted-foreground">{item.name}</span>
-                          <span className="text-sm font-medium ml-auto">{item.value}%</span>
-                        </div>
-                      ))}
+                  isProductLineLoading ? (
+                    <Skeleton className="aspect-auto h-[240px] w-full" />
+                  ) : consumptionByProduct.length === 0 ? (
+                    <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
+                      本月暂无产品线消费数据
                     </div>
-                  </div>
+                  ) : (
+                    <div className="grid h-[240px] w-full min-w-0 grid-cols-5 items-center gap-2">
+                      <ChartContainer
+                        config={productLineChartConfig}
+                        className="col-span-3 aspect-auto h-full w-full min-w-0 [&>div]:aspect-auto"
+                      >
+                        <PieChart>
+                          <Pie
+                            data={consumptionByProduct}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={80}
+                            paddingAngle={2}
+                            dataKey="value"
+                            nameKey="name"
+                          >
+                            {consumptionByProduct.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <ChartTooltip
+                            content={
+                              <ChartTooltipContent
+                                formatter={(value) =>
+                                  `¥${Number(value ?? 0).toLocaleString()}`
+                                }
+                              />
+                            }
+                          />
+                        </PieChart>
+                      </ChartContainer>
+                      <div className="col-span-2 min-w-0 space-y-2">
+                        {consumptionByProduct.map((item) => (
+                          <div key={item.name} className="flex items-center gap-2">
+                            <div 
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <span className="text-sm text-muted-foreground truncate">{item.name}</span>
+                            <span className="text-sm font-medium ml-auto shrink-0">{item.percent}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
                 )}
               </CardContent>
             </Card>
@@ -577,48 +629,7 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
         </TabsContent>
 
         <TabsContent value="consumptions" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">消费记录</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>产品线</TableHead>
-                    <TableHead>资源名称</TableHead>
-                    <TableHead>消费金额</TableHead>
-                    <TableHead>使用量</TableHead>
-                    <TableHead>时间</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {consumptions.map((consumption) => (
-                    <TableRow key={consumption.id}>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {productLineNames[consumption.productLine]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {consumption.resourceName}
-                      </TableCell>
-                      <TableCell>¥{consumption.amount.toLocaleString()}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {consumption.duration} {consumption.unit === 'hour' && '小时'}
-                        {consumption.unit === 'day' && '天'}
-                        {consumption.unit === 'month' && '月'}
-                        {consumption.unit === 'count' && '次'}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(consumption.createdAt).toLocaleString('zh-CN')}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+          <CustomerDailyConsumptionPanel customer={customer} />
         </TabsContent>
 
         <TabsContent value="coupons" className="mt-6">

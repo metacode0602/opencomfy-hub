@@ -209,7 +209,7 @@ function GlobalDashboardHeaderInner() {
           </h1>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{scopeLabel}</p>
         </div>
-
+        <GlobalDashboardScopeBar />
         <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <ViewToggleWithPeriodPopover />
           <DropdownMenu>

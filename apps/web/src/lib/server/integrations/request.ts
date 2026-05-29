@@ -1,6 +1,7 @@
 import "server-only"
 
 import { objectToQueryString } from "./common"
+import { formatSuanliOpenApiError, isSuanliTokenExpiredMessage } from "./suanli-api-errors"
 import { rsaPubkEncrypt as rsaEncrypt, rsaSign } from "./suanli-rsa"
 
 interface HttpHeaders {
@@ -186,8 +187,8 @@ async function suanliRequest<T = unknown>(method: "GET" | "POST", url: string, c
     return result.data
   }
 
-  if (result.code === "A003" || result.code === "C003") {
-    throw new Error(result.message || "登录已失效，请更新 SUANLI_OPENAPI_TOKEN")
+  if (result.code === "A003" || result.code === "C003" || isSuanliTokenExpiredMessage(result.message ?? "")) {
+    throw new Error(formatSuanliOpenApiError(new Error(result.message || "token expired")))
   }
 
   throw Object.assign(new Error(result.message || "请求失败"), {

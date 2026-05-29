@@ -229,6 +229,144 @@ export function BillingSyncSettingsContent() {
           )}
         </CardContent>
       </Card>
+
+      <BalanceSnapshotSettingsSection />
     </div>
+  )
+}
+
+function BalanceSnapshotRunRow({ run }: { run: import('@/lib/types/balance-snapshot').BalanceSnapshotJobRunDto }) {
+  return (
+    <TableRow>
+      <TableCell>{formatDt(run.startedAt)}</TableCell>
+      <TableCell>{run.trigger === 'manual' ? '手动' : '定时'}</TableCell>
+      <TableCell>{run.granularity === 'hour' ? '小时' : run.granularity === 'day' ? '日' : run.granularity}</TableCell>
+      <TableCell>{statusBadge(run.status)}</TableCell>
+      <TableCell>
+        {run.successCount}/{run.tenantCount}
+        {run.failedCount > 0 ? `（失败 ${run.failedCount}）` : ''}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">{formatDt(run.finishedAt)}</TableCell>
+    </TableRow>
+  )
+}
+
+function BalanceSnapshotSettingsSection() {
+  const utils = trpc.useUtils()
+  const { data: config } = trpc.crm.balanceSnapshot.getConfig.useQuery()
+  const { data: runsData, isLoading } = trpc.crm.balanceSnapshot.listRuns.useQuery({ limit: 20 })
+  const runNow = trpc.crm.balanceSnapshot.runNow.useMutation()
+
+  const handleRunNow = async () => {
+    try {
+      const results = await runNow.mutateAsync({ granularity: 'all' })
+      void utils.crm.balanceSnapshot.listRuns.invalidate()
+
+      const failed = results.filter((r) => r.status === 'failed')
+      const partial = results.filter((r) => r.status === 'partial')
+      if (failed.length > 0) {
+        const detail =
+          failed.map((r) => r.errorSummary).filter(Boolean).join('；') ||
+          '平台接口调用失败'
+        toast.error(detail)
+        return
+      }
+      if (partial.length > 0) {
+        toast.warning(
+          `部分采集成功：${results.map((r) => `${r.status}(${r.successCount}/${r.tenantCount})`).join('、')}`,
+        )
+        return
+      }
+      toast.success(
+        `余额快照采集完成：${results.map((r) => `${r.status}(${r.successCount}/${r.tenantCount})`).join('、')}`,
+      )
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '触发采集失败')
+    }
+  }
+
+  return (
+    <>
+      <div className="flex flex-wrap items-start justify-between gap-4 pt-2 border-t">
+        <div>
+          <h2 className="font-semibold">余额快照采集</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            定时拉取平台租户 coin，写入小时/日余额快照，供项目详情页余额变动图使用
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => void handleRunNow()} disabled={runNow.isPending}>
+          {runNow.isPending ? (
+            <>
+              <IconLoader2 className="mr-2 size-4 animate-spin" />
+              采集中…
+            </>
+          ) : (
+            <>
+              <IconRefresh className="mr-2 size-4" />
+              立即采集
+            </>
+          )}
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <IconClock className="size-4" />
+            余额快照调度
+          </CardTitle>
+          <CardDescription>环境变量 BALANCE_SNAPSHOT_*，修改后需重启服务</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+          <div>
+            <p className="text-muted-foreground">启用状态</p>
+            <p className="font-medium">{config?.enabled ? '已启用' : '未启用'}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">小时 Cron</p>
+            <p className="font-medium font-mono">{config?.hourlyCron ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">日末 Cron</p>
+            <p className="font-medium font-mono">{config?.dailyCron ?? '—'}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">时区</p>
+            <p className="font-medium">{config?.timezone ?? '—'}</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">采集历史</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <p className="p-6 text-sm text-muted-foreground">加载中…</p>
+          ) : !runsData?.runs.length ? (
+            <p className="p-6 text-sm text-muted-foreground">暂无采集记录</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>开始时间</TableHead>
+                  <TableHead>触发方式</TableHead>
+                  <TableHead>粒度</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>成功/租户数</TableHead>
+                  <TableHead>结束时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {runsData.runs.map((run) => (
+                  <BalanceSnapshotRunRow key={run.id} run={run} />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </>
   )
 }

@@ -99,11 +99,11 @@ const data = {
       url: "/supplier/order-access",
       icon: <ArrowDownToLineIcon className="size-4" />,
     },
-    {
-      title: "故障事件",
-      url: "/supplier/fault-incidents",
-      icon: <AlertCircleIcon className="size-4" />,
-    },
+    // {
+    //   title: "故障事件",
+    //   url: "/supplier/fault-incidents",
+    //   icon: <AlertCircleIcon className="size-4" />,
+    // },
     {
       title: "内部占用",
       url: "/supplier/test-holds",

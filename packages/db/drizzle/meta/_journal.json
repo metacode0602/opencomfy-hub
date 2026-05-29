@@ -379,6 +379,20 @@
       "when": 1779958071949,
       "tag": "0055_slimy_venus",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1779960000000,
+      "tag": "0056_tenant_balance_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1780017625060,
+      "tag": "0057_yielding_pestilence",
+      "breakpoints": true
     }
   ]
 }

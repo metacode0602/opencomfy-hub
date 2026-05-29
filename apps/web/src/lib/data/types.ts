@@ -286,6 +286,8 @@ export interface OrderItem {
 export interface Activity {
   id: string
   projectId: string
+  /** 工作台最近动态等场景 JOIN 项目名 */
+  projectName?: string
   type: 'comment' | 'file' | 'task' | 'meeting' | 'stage_change' | 'recharge' | 'consumption'
   title: string
   description: string
