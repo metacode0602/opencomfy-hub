@@ -309,10 +309,10 @@ export default function GpuDeviceFlowPage() {
           zoneId="pool"
           machines={machines}
           sessionKey={sessionKey}
-          className="min-h-0 flex-[3] h-[20vh]"
+          className="min-h-0 flex-[2]"
         />
 
-        <div className="flex min-h-0 flex-[2] flex-col gap-2.5 sm:flex-row">
+        <div className="flex min-h-0 flex-[3] flex-col gap-2.5 sm:flex-row">
           <ZoneGrid
             title="k8s 集群上架"
             zoneId="k8s"

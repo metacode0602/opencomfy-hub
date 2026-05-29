@@ -508,6 +508,42 @@ function applyLogsUntil(
   return states
 }
 
+type FaultReplayRow = {
+  supplierDeviceId: string | null
+  openedAt: Date
+  closedAt: Date | null
+}
+
+function countAbnormalDevicesAt(
+  faults: FaultReplayRow[],
+  filteredDeviceIds: Set<string>,
+  at: Date,
+): number {
+  const ids = new Set<string>()
+  const t = at.getTime()
+  for (const fault of faults) {
+    if (!fault.supplierDeviceId || !filteredDeviceIds.has(fault.supplierDeviceId)) continue
+    if (fault.openedAt.getTime() > t) continue
+    if (fault.closedAt && fault.closedAt.getTime() <= t) continue
+    ids.add(fault.supplierDeviceId)
+  }
+  return ids.size
+}
+
+async function loadFaultIncidentsForReplay(deviceIds: string[], periodEnd: Date) {
+  if (deviceIds.length === 0) return []
+  return db
+    .select({
+      supplierDeviceId: faultIncident.supplierDeviceId,
+      openedAt: faultIncident.openedAt,
+      closedAt: faultIncident.closedAt,
+    })
+    .from(faultIncident)
+    .where(
+      and(inArray(faultIncident.supplierDeviceId, deviceIds), lte(faultIncident.openedAt, periodEnd)),
+    )
+}
+
 function computeLifecycleThroughput(
   logs: Awaited<ReturnType<typeof loadChangeLogs>>,
   periodStart: Date,
@@ -608,13 +644,18 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
 
   const throughput = computeLifecycleThroughput(allLogs, periodStart, periodEnd)
 
+  const filteredDeviceIds = new Set(deviceIds)
+  const faultRows = await loadFaultIncidentsForReplay(deviceIds, periodEnd)
+
   const trendKeys: GlobalKpiKey[] = [
     'gpu_total',
     'device_online',
     'pool_elastic',
     'pool_bare_metal',
     'internal_test',
+    'device_abnormal',
     'device_pending_access',
+    'idc_pending_access',
   ]
 
   const trends: Record<GlobalKpiKey, GlobalKpiTrendPoint[]> = {} as Record<
@@ -651,8 +692,14 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
         case 'internal_test':
           value = agg.internalTestGpu
           break
+        case 'device_abnormal':
+          value = countAbnormalDevicesAt(faultRows, filteredDeviceIds, bucket.end)
+          break
         case 'device_pending_access':
           value = agg.pendingAccess.devices
+          break
+        case 'idc_pending_access':
+          value = agg.pendingAccessDcIds.size
           break
         default:
           break
