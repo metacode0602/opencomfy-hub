@@ -48,6 +48,11 @@ import { UploadIcon } from "lucide-react"
 const data = {
   navMain: [
     {
+      title: "设备流转",
+      url: "/dashboard/flow",
+      icon: <ArrowDownToLineIcon className="size-4" />,
+    },
+    {
       title: "接入看板",
       url: "/dashboard/global",
       icon: <ChartBarIcon className="size-4" />,
