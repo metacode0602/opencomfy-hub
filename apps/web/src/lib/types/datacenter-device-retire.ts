@@ -87,9 +87,9 @@ export const RETIRE_ACTION_TYPE_OPTIONS = [
   },
   {
     value: 'bare_metal_offboard' as const,
-    label: '裸金属下架',
+    label: '设备下架',
     description: '仅退裸金属池；运维变更表填「下架裸金属」',
-    changelogActions: ['下架裸金属'],
+    changelogActions: ['下架裸金属', '线下裸金属交付', '故障维修'],
   },
 ] as const
 
