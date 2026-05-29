@@ -28,7 +28,7 @@ export const PIPELINE_BATCH_KINDS = ['online', 'order_access'] as const
 
 export const LIFECYCLE_ORDER = ['待接入', '接入中', '在线', '维护中', '下线中'] as const
 
-export const BARE_METAL_DIRECT_OPS = ['网关直连裸金属上架中'] as const
+export const BARE_METAL_DIRECT_OPS = ['网关直连裸金属上架中', '单机直连裸金属上架中'] as const
 export const BARE_METAL_PROXY_OPS = ['网关代理裸金属上架中'] as const
 export const OFFLINE_DELIVERY_OPS = ['线下裸金属交付中'] as const
 export const GATEWAY_ONBOARDING_OPS = ['网关节点上架中'] as const
@@ -40,7 +40,7 @@ export const DEFAULT_GPU_PER_DEVICE = 8
 
 /** §5.4.6 表底口径说明 */
 export const OVERVIEW_POOL_FOOTNOTE =
-  '裸金属池占用：直连/单机上架中、线下交付及已绑定裸金属池设备；弹性用量池：platform/elastic 及网关代理裸金属；双池主要为代理裸金属，两列之和减去双池不等于独占 GPU 总数'
+  '裸金属池 / 弹性池 / 双池由设备主数据「设备状态」映射；在集群中仅计弹性池；代理裸金属稳态保持「网关代理裸金属上架中」；维修中不改变池归属；双池可重叠计数'
 
 export type OverviewDeviceRow = {
   id: string

@@ -83,6 +83,7 @@ function normalizeOverviewKpis(kpis: Partial<OverviewKpisDto> | undefined): Over
     inMaintenance: kpis?.inMaintenance ?? emptyMetric,
     reservedIdle: kpis?.reservedIdle ?? emptyMetric,
     internalTestGpu: kpis?.internalTestGpu ?? 0,
+    faultDownGpu: kpis?.faultDownGpu ?? 0,
     faultOpenCount: kpis?.faultOpenCount ?? 0,
     activeTestHolds: kpis?.activeTestHolds ?? 0,
     activeBatches: kpis?.activeBatches ?? 0,
@@ -572,8 +573,7 @@ export function SupplierOverviewContent() {
           </div>
           <span className="hidden sm:inline">·</span>
           <span>
-            裸金属池占用：直连/单机上架中、线下交付及已绑定裸金属池设备；弹性用量池：platform/elastic
-            及网关代理裸金属；双池主要为代理裸金属，两列之和减去双池不等于独占 GPU 总数
+            裸金属池 / 弹性池 / 双池由设备主数据「设备状态」映射；内部占用含其他部门使用与内部测试；维修中不改变池归属
           </span>
           <span className="hidden sm:inline">·</span>
           <span>KPI 与漏斗均展示 GPU 卡数与设备台数；lifecycle 按待接入 / 接入中 / 在线 / 维护中 / 下线中 五段统计</span>

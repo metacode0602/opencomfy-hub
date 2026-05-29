@@ -74,11 +74,6 @@ function parseExpectedDate(value: string): Date {
   if (Number.isNaN(d.getTime())) {
     throw new Error('期望完成日期格式无效')
   }
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  if (d < today) {
-    throw new Error('期望完成日期不能早于今天')
-  }
   return d
 }
 

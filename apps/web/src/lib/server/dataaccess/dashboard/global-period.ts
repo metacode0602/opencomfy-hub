@@ -151,7 +151,7 @@ function aggregateAt(
     agg.totalGpu += gpu
 
     const bindings = bindingsByDevice.get(d.id) ?? []
-    const memberships = resolveDevicePoolMemberships(s.opsStatus, bindings)
+    const memberships = resolveDevicePoolMemberships(s.opsStatus)
 
     if (LIFECYCLE_ORDER.includes(s.lifecycleStatus as (typeof LIFECYCLE_ORDER)[number])) {
       const bucket = agg.lifecycle[s.lifecycleStatus]!

@@ -13,7 +13,6 @@ import {
   isHoldActive,
   kpiFromDevices,
   LIFECYCLE_ORDER,
-  mergeKpiMetric,
   NON_SCHEDULABLE_OPS,
   normalizeCardKey,
   normalizeLifecycleStage,
@@ -75,13 +74,10 @@ function deviceMatchesPoolFilter(
   poolCode: string,
   poolBindingRows: Array<{ deviceId: string; poolCode: string | null; workloadProfile: string }>,
 ): boolean {
-  const bindings = bindingsForDevice(device.id, poolBindingRows)
-  if (bindings.some((b) => b.poolCode === poolCode)) return true
-
   const kind = poolKindForFilterPoolCode(poolCode, poolBindingRows)
   if (!kind) return false
 
-  const memberships = resolveDevicePoolMemberships(device.opsStatus, bindings)
+  const memberships = resolveDevicePoolMemberships(device.opsStatus)
   return memberships.has(kind)
 }
 
@@ -481,7 +477,7 @@ export const supplierOverviewDataAccess = {
           for (const bind of bindings) {
             if (bind.poolCode) poolCodes.add(bind.poolCode)
           }
-          const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+          const memberships = resolveDevicePoolMemberships(d.opsStatus)
           const deviceGpu = metricGpuCount(d)
           if (memberships.has('bare_metal')) bareMetalPoolGpu += deviceGpu
           if (memberships.has('elastic_service')) elasticServiceGpu += deviceGpu
@@ -505,6 +501,7 @@ export const supplierOverviewDataAccess = {
           onlineQuantity: row.onlineQuantity,
           maintenanceQuantity,
           internalTestGpu: totalInternalTest,
+          faultDownGpu,
           sellableQuantity,
           offlineQuantity: Math.max(0, row.quantity - row.onlineQuantity),
           bareMetalPoolGpu,
@@ -591,7 +588,7 @@ export const supplierOverviewDataAccess = {
         }
 
         const bindings = bindingsForDevice(d.id, poolBindingRows)
-        const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+        const memberships = resolveDevicePoolMemberships(d.opsStatus)
         if (memberships.has('bare_metal')) row.bareMetalPoolGpu += gpu
         if (memberships.has('elastic_service')) row.elasticServiceGpu += gpu
         if (isDualPool(memberships)) row.dualPoolGpu += gpu
@@ -683,7 +680,8 @@ export const supplierOverviewDataAccess = {
         0,
       )
       const sellableGpuRaw = inventoryDtoRows.reduce((s, r) => s + r.sellableQuantity, 0)
-      const internalTestGpu = inventoryDtoRows.reduce((s, r) => s + r.internalTestGpu, 0)
+      const inventoryInternalTestGpu = inventoryDtoRows.reduce((s, r) => s + r.internalTestGpu, 0)
+      const faultDownGpu = inventoryDtoRows.reduce((s, r) => s + r.faultDownGpu, 0)
 
       let otherDeptGpu = 0
       for (const d of filteredDevices) {
@@ -692,6 +690,7 @@ export const supplierOverviewDataAccess = {
         }
       }
 
+      const internalTestGpu = inventoryInternalTestGpu + otherDeptGpu
       const sellableGpu = Math.max(0, sellableGpuRaw - otherDeptGpu)
       const sellableRate =
         kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线').gpuCount > 0
@@ -708,10 +707,7 @@ export const supplierOverviewDataAccess = {
           gpuCount: totalGpu,
         },
         online: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线'),
-        pendingAccess: mergeKpiMetric(
-          kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
-          pipelinePending,
-        ),
+        pendingAccess: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
         onboarding: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '接入中'),
         maintenance: kpiFromDevices(
           filteredDevices,
@@ -727,7 +723,10 @@ export const supplierOverviewDataAccess = {
           ).length,
           gpuCount: sellableGpu,
         },
-        retiring: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '下线中'),
+        retiring: kpiFromDevices(
+          filteredDevices,
+          (d) => d.lifecycleStatus === '下线中' && d.opsStatus !== '已退订',
+        ),
         nonSchedulable: kpiFromDevices(filteredDevices, (d) =>
           NON_SCHEDULABLE_OPS.includes(d.opsStatus as (typeof NON_SCHEDULABLE_OPS)[number]),
         ),
@@ -736,6 +735,7 @@ export const supplierOverviewDataAccess = {
           RESERVED_IDLE_OPS.includes(d.opsStatus as (typeof RESERVED_IDLE_OPS)[number]),
         ),
         internalTestGpu,
+        faultDownGpu,
         faultOpenCount: openFaultsFiltered.length,
         activeTestHolds: holds.filter((h) => isHoldActive(h.holdFrom, h.holdUntil)).length,
         activeBatches: activeBatches.length,

@@ -24,6 +24,7 @@ export type OverviewKpisDto = {
   inMaintenance: OverviewKpiMetric
   reservedIdle: OverviewKpiMetric
   internalTestGpu: number
+  faultDownGpu: number
   faultOpenCount: number
   activeTestHolds: number
   activeBatches: number

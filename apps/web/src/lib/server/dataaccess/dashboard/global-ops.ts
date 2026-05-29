@@ -22,7 +22,6 @@ import {
   dataCenter,
   faultIncident,
   gpuCardType,
-  resourcePoolBinding,
   supplier,
   supplierDevice,
 } from '@workspace/db/schema'
@@ -105,6 +104,7 @@ function poolBreakdownSnapshot(
 function buildKpis(
   stats: Awaited<ReturnType<typeof supplierOverviewDataAccess.getStats>>,
   abnormalDeviceCount: number,
+  faultDownGpu: number,
   pendingAccessDcCount: number,
 ): GlobalKpiItem[] {
   const { kpis, supplierRows, gpuTargetGpu } = stats
@@ -148,9 +148,9 @@ function buildKpis(
     {
       key: 'device_abnormal',
       title: '异常设备',
-      unit: '台',
-      metric: { gpuCount: 0, deviceCount: abnormalDeviceCount },
-      warning: abnormalDeviceCount > 0,
+      unit: '卡 · 台',
+      metric: { gpuCount: faultDownGpu, deviceCount: abnormalDeviceCount },
+      warning: abnormalDeviceCount > 0 || faultDownGpu > 0,
     },
     {
       key: 'device_pending_access',
@@ -226,14 +226,6 @@ export const globalOpsDataAccess = {
         }),
       }))
 
-    const poolBindingRows = await db
-      .select({
-        deviceId: resourcePoolBinding.supplierDeviceId,
-        poolCode: resourcePoolBinding.poolCode,
-        workloadProfile: resourcePoolBinding.workloadProfile,
-      })
-      .from(resourcePoolBinding)
-
     const openFaults = await db
       .select({
         id: faultIncident.id,
@@ -277,10 +269,7 @@ export const globalOpsDataAccess = {
     let elasticDevices = 0
     let bareMetalDevices = 0
     for (const d of filteredDevices) {
-      const bindings = poolBindingRows
-        .filter((b) => b.deviceId === d.id)
-        .map((b) => ({ poolCode: b.poolCode, workloadProfile: b.workloadProfile }))
-      const memberships = resolveDevicePoolMemberships(d.opsStatus, bindings)
+      const memberships = resolveDevicePoolMemberships(d.opsStatus)
       if (memberships.has('elastic_service')) elasticDevices += 1
       if (memberships.has('bare_metal')) bareMetalDevices += 1
     }
@@ -471,7 +460,12 @@ export const globalOpsDataAccess = {
         filters: normalized,
         view: 'snapshot',
       },
-      kpis: buildKpis(stats, abnormalDeviceIds.size, pendingAccessDcCount),
+      kpis: buildKpis(
+        stats,
+        abnormalDeviceIds.size,
+        stats.kpis.faultDownGpu,
+        pendingAccessDcCount,
+      ),
       lifecycleFunnel: stats.lifecycleFunnel,
       resourcePools: {
         displayUnit: 'gpu_cards',

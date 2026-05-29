@@ -168,7 +168,6 @@ export function DatacenterDeviceRetireDialog({
   const previewMutation = trpc.supplier.deviceRetire.previewDatacenter.useMutation()
   const commitMutation = trpc.supplier.deviceRetire.commitDatacenter.useMutation()
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const effectiveContext: DatacenterRetireContext | null = context ?? null
   const isDatacenterClosure = retireReason === 'dc_closure'
 
@@ -240,7 +239,6 @@ export function DatacenterDeviceRetireDialog({
     Boolean(retireReason) &&
     Boolean(workOrderNo.trim()) &&
     Boolean(expectedCompletionDate) &&
-    expectedCompletionDate >= todayStr &&
     (isDatacenterClosure
       ? snapshotTotal > 0
       : Boolean(retireActionType) && planValidation.ok && hasInventory)
@@ -511,7 +509,6 @@ export function DatacenterDeviceRetireDialog({
                 <Input
                   id="dc-retire-date"
                   type="date"
-                  min={todayStr}
                   value={expectedCompletionDate}
                   onChange={(e) => setExpectedCompletionDate(e.target.value)}
                 />

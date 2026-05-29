@@ -849,30 +849,6 @@ export const deviceImportDataAccess = {
           }
         }
 
-        for (const patch of updatedDevices) {
-          await tx
-            .update(supplierDevice)
-            .set({
-              opsStatus: patch.ops_status ?? undefined,
-              lifecycleStatus: patch.lifecycle_status,
-              inMaintenance: patch.in_maintenance ?? false,
-              updatedAt: now,
-            })
-            .where(eq(supplierDevice.id, patch.id))
-        }
-
-        if (logs.length > 0 || updatedDevices.length > 0) {
-          const dcIds = [
-            dc.id,
-            ...updatedDevices.map((d) => d.data_center_id).filter(Boolean),
-          ]
-          await refreshSupplierGpuInventoryForDataCenters(tx, {
-            supplierId: params.supplierId,
-            dataCenterIds: dcIds,
-            syncedAt: now,
-          })
-        }
-
         if (businessBatch && deviceLinks.length > 0) {
           const hasActionMismatch = bindWarnings.some((w) => w.includes('不一致'))
           await refreshBatchProgress(
