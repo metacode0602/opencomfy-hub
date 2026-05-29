@@ -1,5 +1,7 @@
 // 模拟数据类型定义（v3.0：Customer / Project / PlatformTenant）
 
+import type { ProjectStage } from '@/lib/types/crm'
+
 /** 期望规模 — 单条卡型及数量 */
 export type ExpectedScaleCardEntry = {
   cardTypeId: string
@@ -125,7 +127,7 @@ export interface Project {
   platformTenantId?: string
   businessLineId: string
   businessLineName: string
-  stage: 'lead' | 'testing' | 'converted'
+  stage: ProjectStage
   status: 'active' | 'paused' | 'completed'
   /** API 读模型：来自 project_staff_assignment JOIN user_staff */
   preSalesManager: string

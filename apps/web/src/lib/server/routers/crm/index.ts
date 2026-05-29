@@ -30,6 +30,7 @@ import {
   customerMergeSchema,
   customerUpsertSchema,
   platformImportCommitItemSchema,
+  projectStageSchema,
   projectUpsertSchema,
   staffUpsertSchema,
   staffListSchema,
@@ -201,7 +202,7 @@ export const crmRouter = createTRPCRouter({
       .input(z.object({ id: z.string(), data: projectUpsertSchema }))
       .mutation(({ input }) => projectsDataAccess.update(input.id, input.data)),
     updateStage: adminProcedure
-      .input(z.object({ id: z.string(), stage: z.enum(['lead', 'testing', 'converted']) }))
+      .input(z.object({ id: z.string(), stage: projectStageSchema }))
       .mutation(({ input }) => projectsDataAccess.updateStage(input.id, input.stage)),
     updateStatus: adminProcedure
       .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))

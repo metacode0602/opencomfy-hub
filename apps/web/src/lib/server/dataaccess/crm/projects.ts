@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import type { Project } from '@/lib/data/types'
+import type { ProjectStage } from '@/lib/types/crm'
 import { mapProjectRow } from '@/lib/server/mappers/crm'
 import {
   billingTenant,
@@ -51,7 +52,7 @@ export type ProjectUpsertInput = {
   primaryTenantId?: string
   name: string
   description: string
-  stage: 'lead' | 'testing' | 'converted'
+  stage: ProjectStage
   status?: 'active' | 'paused' | 'completed'
   businessLineId: string
   monthlyBudget?: number

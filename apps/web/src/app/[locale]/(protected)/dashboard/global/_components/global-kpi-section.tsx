@@ -24,7 +24,11 @@ import { cn } from "@workspace/ui/lib/utils"
 
 import { DashboardCardError, DashboardCardLoading } from "../_lib/dashboard-card-states"
 import { useGlobalDashboard } from "../_lib/global-dashboard-context"
-import { formatKpiValue } from "../_lib/format-kpi"
+import {
+  formatGpuTotalSnapshotDelta,
+  formatGpuTotalSnapshotSubtitle,
+  formatKpiValue,
+} from "../_lib/format-kpi"
 
 const KPI_ICONS = [Cpu, Server, Layers, HardDrive, Warehouse, Package, ArrowDown, TrendingDown]
 
@@ -109,10 +113,17 @@ export function GlobalKpiSection() {
           const Icon = KPI_ICONS[idx] ?? Cpu
           const sparkline =
             kpi.trend?.map((p, i) => ({ i: String(i), v: p.value, label: p.label })) ?? []
+          const isGpuTotal = kpi.key === "gpu_total"
+          const gpuTotalSubtitle =
+            isSnapshot && isGpuTotal ? formatGpuTotalSnapshotSubtitle(kpi) : null
+          const snapshotGpuDelta =
+            isSnapshot && isGpuTotal ? formatGpuTotalSnapshotDelta(kpi) : null
           const deltaLabel = isSnapshot
-            ? "与资源总览同口径"
+            ? (snapshotGpuDelta?.label ?? "与资源总览同口径")
             : (kpi.netChangeLabel ?? "净增 —")
-          const deltaUp = kpi.netChangeUp ?? true
+          const deltaUp = isSnapshot
+            ? (snapshotGpuDelta?.up ?? true)
+            : (kpi.netChangeUp ?? true)
 
           const inner = (
             <Card
@@ -138,7 +149,18 @@ export function GlobalKpiSection() {
                     kpi.warning && "text-chart-4",
                   )}
                 >
-                  {formatKpiValue(kpi, isSnapshot)}
+                  {isGpuTotal && isSnapshot ? (
+                    <span className="flex flex-row items-center gap-0.5">
+                      <span>{formatKpiValue(kpi, isSnapshot)} 卡</span>
+                      {gpuTotalSubtitle && (
+                        <span className="text-sm font-normal text-muted-foreground">
+                          {gpuTotalSubtitle}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    formatKpiValue(kpi, isSnapshot)
+                  )}
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2">
                   <span

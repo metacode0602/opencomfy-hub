@@ -1,6 +1,8 @@
 import { db } from '@/lib/db'
 import { DASHBOARD_BATCH_BOUNDARY_CHANGE_ACTIONS, globalKpiDaily } from '@workspace/db/schema'
 import {
+  aggregateGpuTargetAt,
+  buildGpuTargetTrend,
   LIFECYCLE_ORDER,
   normalizeCardKey,
   OVERVIEW_POOL_FOOTNOTE,
@@ -29,6 +31,7 @@ import {
 import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 
 import { globalOpsDataAccess } from './global-ops'
+import { loadGpuTargetPlanBatches } from './gpu-target'
 import {
   bucketDurationHours,
   buildPeriodBuckets,
@@ -232,6 +235,7 @@ function buildPeriodKpis(
   trends: Record<GlobalKpiKey, GlobalKpiTrendPoint[]>,
   abnormalEnd: number,
   abnormalInPeriod: number,
+  gpuTarget: { end: number; start: number },
 ): GlobalKpiItem[] {
   const items: Array<{
     key: GlobalKpiKey
@@ -345,11 +349,20 @@ function buildPeriodKpis(
         : netGpu
     const netFmt = formatNetChange(net, row.netUnit)
     const periodPrimary =
-      row.unit === '卡 · 台'
+      row.key === 'gpu_total'
+        ? `${row.endGpu.toLocaleString()} 卡 · 目标 ${gpuTarget.end.toLocaleString()} 卡`
+        : row.unit === '卡 · 台'
         ? `${row.endGpu.toLocaleString()} 卡 · ${row.endDevices.toLocaleString()} 台`
         : row.unit === '台' || row.unit === '个'
           ? row.endDevices.toLocaleString()
           : row.endGpu.toLocaleString()
+
+    const targetNet = gpuTarget.end - gpuTarget.start
+    const targetNetFmt = formatNetChange(targetNet, '卡')
+    const netChangeLabel =
+      row.key === 'gpu_total'
+        ? `净增 ${netFmt.label} · 目标 ${targetNetFmt.label}`
+        : `净增 ${netFmt.label}`
 
     return {
       key: row.key,
@@ -364,9 +377,10 @@ function buildPeriodKpis(
       warning: row.warning,
       href: row.href,
       periodPrimary: `${periodPrimary}`,
-      netChangeLabel: `净增 ${netFmt.label}`,
-      netChangeUp: netFmt.up,
+      netChangeLabel,
+      netChangeUp: row.key === 'gpu_total' ? net >= 0 && targetNet >= 0 : netFmt.up,
       trend: trends[row.key] ?? [],
+      targetGpuCount: row.key === 'gpu_total' ? gpuTarget.end : undefined,
     }
   })
 }
@@ -564,6 +578,24 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
   const overviewStats = await supplierOverviewDataAccess.getStats(toOverviewFilters(filters))
   const internalTestGpu = overviewStats.kpis.internalTestGpu
 
+  const targetPlanBatches = await loadGpuTargetPlanBatches({
+    createdBefore: periodEnd,
+    supplierId: filters.supplierId,
+  })
+  const targetFilters = {
+    region: filters.region ?? 'all',
+    cardType: filters.cardType ?? 'all',
+    supplierId: filters.supplierId ?? 'all',
+    dataCenterId: filters.dataCenterId,
+  }
+  const gpuTargetEnd = aggregateGpuTargetAt(targetPlanBatches, periodEnd, targetFilters)
+  const gpuTargetStart = aggregateGpuTargetAt(
+    targetPlanBatches,
+    new Date(periodStart.getTime() - 1),
+    targetFilters,
+  )
+  const gpuTargetTrend = buildGpuTargetTrend(targetPlanBatches, buckets, targetFilters)
+
   const { devices, bindingsByDevice } = await loadReplayContext(filters)
   const deviceIds = devices.map((d) => d.id)
   const allLogs = await loadChangeLogs(deviceIds, periodEnd)
@@ -640,7 +672,19 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
     )
   const faultsInPeriodCount = periodFaults.length
 
-  const kpis = buildPeriodKpis(aggEnd, aggStart, trends, abnormalEnd, faultsInPeriodCount)
+  const kpis = buildPeriodKpis(
+    aggEnd,
+    aggStart,
+    trends,
+    abnormalEnd,
+    faultsInPeriodCount,
+    { end: gpuTargetEnd, start: gpuTargetStart },
+  )
+
+  const gpuTotalKpi = kpis.find((k) => k.key === 'gpu_total')
+  if (gpuTotalKpi && gpuTargetTrend.length >= 2) {
+    gpuTotalKpi.trend = gpuTargetTrend
+  }
 
   const lifecycleFunnel: GlobalLifecycleStagePeriod[] = LIFECYCLE_ORDER.map((stage) => {
     const endBucket = aggEnd.lifecycle[stage]!

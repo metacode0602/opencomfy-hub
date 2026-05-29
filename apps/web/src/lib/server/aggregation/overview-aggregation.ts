@@ -12,7 +12,16 @@ import type { GpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type { OverviewKpiMetric, LifecycleFunnelStageDto } from '@/lib/types/supplier-overview-api'
 
 export const CLOSED_FAULT_STATUSES = ['已关闭', 'closed'] as const
-export const TERMINAL_BATCH_STATUSES = ['已完成', '已取消'] as const
+export const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
+
+/** 目标总卡数台账：作废批次（不计入 gpu_target） */
+export const VOID_BATCH_STATUSES = ['cancelled', '已取消'] as const
+
+/** 目标总卡数：计入上架计划 */
+export const TARGET_ONBOARD_BATCH_KINDS = ['online', 'order_access'] as const
+
+/** 目标总卡数：计入下架计划 */
+export const TARGET_OFFBOARD_BATCH_KIND = 'device_retire' as const
 
 /** 计划管道叠加：进行中商务接入批次（Q1-B：online + order_access） */
 export const PIPELINE_BATCH_KINDS = ['online', 'order_access'] as const
@@ -153,6 +162,112 @@ export function regionFromDc(location: string | null, dcName: string): string {
   if (dcName.includes('深圳') || dcName.includes('广州')) return '华南'
   if (dcName.includes('内蒙古')) return '内蒙古'
   return '其他'
+}
+
+export function batchMatchesRegionFilter(
+  batchIdcRegion: string | null,
+  batchDataCenterName: string,
+  filterRegion: string,
+): boolean {
+  if (filterRegion === 'all') return true
+  return regionFromDc(batchIdcRegion, batchDataCenterName) === filterRegion
+}
+
+export type TargetPlanBatch = {
+  batchKind: string
+  batchStatus: string
+  supplierId: string
+  dataCenterId: string
+  dataCenterName: string
+  idcRegion: string | null
+  plannedDeviceCount: number
+  plannedGpuCount: number | null
+  plannedLinesJson: unknown
+  plannedLineCardKeys: string[]
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type TargetPlanBatchFilters = {
+  region?: string
+  cardType?: string
+  supplierId?: string
+  dataCenterId?: string
+}
+
+export function isVoidBatchStatus(status: string): boolean {
+  return (VOID_BATCH_STATUSES as readonly string[]).includes(status)
+}
+
+export function matchesTargetPlanBatch(
+  batch: TargetPlanBatch,
+  filters: TargetPlanBatchFilters,
+): boolean {
+  if (
+    filters.supplierId &&
+    filters.supplierId !== 'all' &&
+    batch.supplierId !== filters.supplierId
+  ) {
+    return false
+  }
+  if (filters.dataCenterId && batch.dataCenterId !== filters.dataCenterId) return false
+  if (
+    filters.region &&
+    filters.region !== 'all' &&
+    !batchMatchesRegionFilter(batch.idcRegion, batch.dataCenterName, filters.region)
+  ) {
+    return false
+  }
+  const cardFilter =
+    filters.cardType && filters.cardType !== 'all'
+      ? normalizeCardKey(filters.cardType)
+      : null
+  if (cardFilter) {
+    if (!batch.plannedLineCardKeys.length) return false
+    if (!batch.plannedLineCardKeys.some((key) => key === cardFilter)) return false
+  }
+  return true
+}
+
+/** 批次在时刻 T 是否仍计入目标台账（创建后、作废前） */
+export function isTargetBatchEffectiveAt(batch: TargetPlanBatch, at: Date): boolean {
+  const atMs = at.getTime()
+  if (batch.createdAt.getTime() > atMs) return false
+  if (isVoidBatchStatus(batch.batchStatus) && batch.updatedAt.getTime() <= atMs) {
+    return false
+  }
+  return true
+}
+
+export function signedPlannedGpuForTarget(batch: TargetPlanBatch): number {
+  const gpu = resolveBatchPlannedGpuCount(batch)
+  return batch.batchKind === TARGET_OFFBOARD_BATCH_KIND ? -gpu : gpu
+}
+
+export function aggregateGpuTargetAt(
+  batches: TargetPlanBatch[],
+  at: Date,
+  filters: TargetPlanBatchFilters,
+): number {
+  let sum = 0
+  for (const batch of batches) {
+    if (!matchesTargetPlanBatch(batch, filters)) continue
+    if (!isTargetBatchEffectiveAt(batch, at)) continue
+    sum += signedPlannedGpuForTarget(batch)
+  }
+  return sum
+}
+
+export function buildGpuTargetTrend(
+  batches: TargetPlanBatch[],
+  buckets: Array<{ key: string; label: string; end: Date }>,
+  filters: TargetPlanBatchFilters,
+): Array<{ key: string; label: string; value: number }> {
+  return buckets.map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    value: aggregateGpuTargetAt(batches, bucket.end, filters),
+  }))
 }
 
 export function parseGpuScopeCount(scope: string | null, fallback = 4): number {

@@ -107,16 +107,19 @@ function buildKpis(
   abnormalDeviceCount: number,
   pendingAccessDcCount: number,
 ): GlobalKpiItem[] {
-  const { kpis, supplierRows } = stats
+  const { kpis, supplierRows, gpuTargetGpu } = stats
   const poolElastic = supplierRows.reduce((s, r) => s + r.elasticServiceGpu, 0)
   const poolBareMetal = supplierRows.reduce((s, r) => s + r.bareMetalPoolGpu, 0)
+  const inventoryGpu = kpis.total.gpuCount
 
   return [
     {
       key: 'gpu_total',
       title: 'GPU 总卡数',
       unit: '卡',
-      metric: kpis.total
+      metric: kpis.total,
+      targetGpuCount: gpuTargetGpu,
+      warning: inventoryGpu > gpuTargetGpu,
     },
     {
       key: 'device_online',

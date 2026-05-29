@@ -3,6 +3,7 @@ import {
   aggregatePipelinePending,
   aggregatePipelinePendingByDataCenter,
   batchMatchesCardFilter,
+  batchMatchesRegionFilter,
   BARE_METAL_DIRECT_OPS,
   BARE_METAL_PROXY_OPS,
   buildLifecycleFunnel,
@@ -26,6 +27,7 @@ import {
   toPipelineBatchInput,
   type OverviewDeviceRow,
 } from '@/lib/server/aggregation/overview-aggregation'
+import { resolveGpuTargetGpu } from '@/lib/server/dataaccess/dashboard/gpu-target'
 import {
   isDualPool,
   poolKindForFilterPoolCode,
@@ -58,16 +60,6 @@ import {
 import { and, desc, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm'
 
 type DeviceRow = OverviewDeviceRow
-
-function batchMatchesRegionFilter(
-  batchIdcRegion: string | null,
-  batchDataCenterName: string,
-  filterRegion: string,
-): boolean {
-  if (filterRegion === 'all') return true
-  const batchRegion = regionFromDc(batchIdcRegion, batchDataCenterName)
-  return batchRegion === filterRegion
-}
 
 function bindingsForDevice(
   deviceId: string,
@@ -809,6 +801,8 @@ export const supplierOverviewDataAccess = {
         workOrderNo: b.workOrderNo,
       }))
 
+      const gpuTargetGpu = await resolveGpuTargetGpu(filters, new Date())
+
       const result: OverviewStatsResult = {
         kpis,
         lifecycleFunnel,
@@ -819,12 +813,14 @@ export const supplierOverviewDataAccess = {
         faultSla,
         pendingAccessDataCenterIds,
         pipelinePendingByDataCenter,
+        gpuTargetGpu,
       }
 
       supplierLog('overview', 'getStats done', {
         inventoryRows: inventoryDtoRows.length,
         supplierRows: supplierRows.length,
         totalGpu: kpis.total.gpuCount,
+        gpuTargetGpu,
       })
 
       return result

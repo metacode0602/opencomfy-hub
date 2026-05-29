@@ -131,6 +131,8 @@ export type OverviewStatsResult = {
   pendingAccessDataCenterIds: string[]
   /** 进行中上架/订单接入批次按机房的计划管道缺口（计划 − 已触达） */
   pipelinePendingByDataCenter: PipelinePendingByDataCenter
+  /** 目标总卡数：有效上架计划 − 有效下架计划（批次台账） */
+  gpuTargetGpu: number
 }
 
 export type OverviewFilterOptionsResult = {

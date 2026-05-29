@@ -148,9 +148,12 @@ resolveBatchPlannedGpuCount(batch) =
 
 ```
 1. batch_kind ∈ { online, order_access, device_retire }
-2. batch_status ≠ '已取消'          // 软删除 / 作废
-3. NOT is_deleted                   // 见 §2.3.4；当前库表无此列时用 (2) 代替
+2. batch_status ∉ VOID_BATCH_STATUSES
+   // VOID_BATCH_STATUSES = ['cancelled', '已取消']
+3. voided_at IS NULL   // P1 可选；P0 仅用 (2)
 ```
+
+**已定（2026-05-29）**：作废态使用 `batch_status = 'cancelled'`（兼容历史 `'已取消'`）。
 
 **重要**：
 
@@ -163,18 +166,20 @@ resolveBatchPlannedGpuCount(batch) =
 
 > 目标总卡数是 **计划台账累计值**，不是「进行中批次缺口」，也 **不** 随 `touched` / `online` / `retired` 进度递减。
 
-#### 2.3.4 「标记为删除」（待实现字段）
-
-当前 `onboarding_batch` **无** `deleted_at` / `is_deleted` 列；作废统一用 `batch_status = '已取消'`（`TERMINAL_BATCH_STATUSES` 之一）。
-
-**规范（v1.0 定稿，实现可分期）**：
+#### 2.3.4 「标记为删除」（已定）
 
 | 方案 | 字段 | 行为 |
 |------|------|------|
-| **P0（现有）** | `batch_status = '已取消'` | 从 `gpu_target` 聚合中排除；保留行审计 |
-| **P1（推荐）** | `voided_at timestamptz` + `voided_reason` | 语义更清晰；`batch_status` 可保持终态 |
+| **P0（已定）** | `batch_status ∈ {'cancelled', '已取消'}` | 从 `gpu_target` 聚合中排除；`updated_at` 作为 Period 作废时刻回放 |
+| **P1（可选）** | `voided_at timestamptz` | 语义更清晰 |
 
-文档口径统一称 **「作废批次」**：`已取消` 或 `voided_at IS NOT NULL`。
+#### 2.3.5 UI 展示（已定 2026-05-29）
+
+- **不**新增独立 KPI 卡片；在 **`gpu_total`（GPU 总卡数）** 卡片上同时展示：
+  - 主值：**库存** `metric.gpuCount`
+  - 副值：**目标** `targetGpuCount`
+  - Snapshot 副文案：缺口 / 超出目标
+- Period：主值 `"{库存} 卡 · 目标 {目标} 卡"`；Sparkline 按 **批次创建事件回放** `gpu_target`。
 
 ### 2.4 通用 KPI 结构
 
@@ -612,7 +617,7 @@ status = ok | pending | abnormal   // 超期 planned_ready_at → abnormal
 
 | 编号 | 项 | 现状 | 目标 |
 |------|-----|------|------|
-| 8.1 | `gpu_target` KPI | **未实现** | `buildKpis` 增加第 2 卡；类型 `GlobalKpiKey` 扩展 |
+| 8.1 | `gpu_target` KPI | **已实现**（合并至 `gpu_total.targetGpuCount`） | — |
 | 8.2 | 下架批次 `planned_gpu_count` | 部分创建路径为 0 | 与上架对称，`computePlannedGpuCount` 写入 |
 | 8.3 | Period `device_online` | replay 排除 inMaintenance | 与 Snapshot 统一 |
 | 8.4 | 批次作废 | 仅 `已取消` | 可选 `voided_at` 字段 |
@@ -637,3 +642,4 @@ status = ok | pending | abnormal   // 超期 planned_ready_at → abnormal
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-05-29 | 首版：明确 GPU 总卡数 vs 目标总卡数；全 9 KPI + 关联卡片口径 |
+| v1.1 | 2026-05-29 | 实现：`gpu_total` 卡片展示库存+目标；作废 `cancelled`；Period 批次创建回放 |

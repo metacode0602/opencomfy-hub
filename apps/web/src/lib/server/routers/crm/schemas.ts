@@ -1,4 +1,7 @@
 import { z } from 'zod'
+import { PROJECT_STAGE_VALUES } from '@/lib/types/crm'
+
+export const projectStageSchema = z.enum(PROJECT_STAGE_VALUES)
 
 const expectedScaleSchema = z
   .object({
@@ -64,7 +67,7 @@ export const projectStaffSchema = z.object({
 })
 
 export const tenantProjectImportFormSchema = z.object({
-  stage: z.enum(['lead', 'testing', 'converted']),
+  stage: projectStageSchema,
   businessLineId: z.string().min(1),
   preSalesStaffId: z.string(),
   accountManagerStaffId: z.string().min(1),
@@ -81,7 +84,7 @@ export const projectUpsertSchema = z.object({
   primaryTenantId: z.string().optional(),
   name: z.string().min(1),
   description: z.string(),
-  stage: z.enum(['lead', 'testing', 'converted']),
+  stage: projectStageSchema,
   status: z.enum(['active', 'paused', 'completed']).optional(),
   businessLineId: z.string().min(1),
   monthlyBudget: z.number().optional(),

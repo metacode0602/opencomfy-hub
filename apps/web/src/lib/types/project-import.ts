@@ -1,4 +1,6 @@
-export type ProjectImportStage = 'lead' | 'testing' | 'converted'
+import type { ProjectStage } from '@/lib/types/crm'
+
+export type ProjectImportStage = ProjectStage
 export type ProjectImportStatus = 'active' | 'paused' | 'completed'
 
 export type ProjectImportStaffRole =

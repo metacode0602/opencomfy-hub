@@ -41,6 +41,8 @@ export type GlobalKpiItem = {
   netChangeUp?: boolean
   /** Period：sparkline */
   trend?: GlobalKpiTrendPoint[]
+  /** GPU 总卡数卡片：目标总卡数（计划台账） */
+  targetGpuCount?: number
 }
 
 export type GlobalLifecycleStagePeriod = LifecycleFunnelStageDto & {
