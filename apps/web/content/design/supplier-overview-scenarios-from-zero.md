@@ -151,15 +151,18 @@ planned_gpu_count = Σ(planLine.plannedQuantity × default_gpu_per_device)
 - 同一机房多条 `new_idc` 批次：**去重计 1**。
 - 批次终态且无实体待接入设备 → 从 KPI 移除。
 
-#### 2.1.5 Period 分析（v1.1 修订）
+#### 2.1.5 Period 分析（v1.2 修订）
 
-| 能力 | v1.0（已定） | v1.1 资源构成 |
-|------|-------------|---------------|
-| `device_pending_access` KPI | 仅 replay 实体 | 建议 `mergeKpiMetric`（实体 + 计划） |
+| 能力 | KPI / 漏斗（已定） | 资源构成卡片（[卡时专篇](./global-dashboard-period-composition-card-hours-design.md) 已确认） |
+|------|-------------------|--------------------------------------------------------------------------------|
+| `device_pending_access` KPI Period | 仅 replay **实体** 吞吐 | KPI **不** 叠加计划管道（不变） |
 | 漏斗「待接入」段 Snapshot | 实体 + 计划缺口 | 不变 |
-| Period 计划管道时序 | **暂不** replay | v1.0：资源构成饼图 **期末** pipeline 截面；完整时序见 [global-dashboard-resource-composition-chart-design.md §14](./global-dashboard-resource-composition-chart-design.md) |
+| `resourceComposition` Period **目标** | — | `displayUnit=card_hours`；实体 ← 主数据快照；计划 ← `progress_event` |
+| `resourceComposition` Period **现网** | — | 期末 `gpu_cards` + change_log 实体回放（过渡，待 M5） |
 
-按日/按小时 **Period** 的 `device_pending_access` 吞吐 **仍不** 纳入计划管道（创建批次不产生 change_log 事件）。**资源构成卡片**在 Period 下展示计划虚拟扇区的 **期末值**。
+按日/按小时 **Period** 的 `device_pending_access` **吞吐仍不** 纳入计划管道（创建批次不产生 lifecycle 进入事件）。**资源构成**与 KPI **分轨**：卡片目标为区间 **供应卡时**，非 KPI 口径。
+
+`supplier_device_change_log`：**仅** 运维变更记录；**不** 驱动资源构成实体 Period（D2，见专篇 §4）。
 
 #### 2.1.6 UI（已定：本期不改）
 
@@ -304,7 +307,7 @@ flowchart LR
 | ------ | --- | ---------------------------------------- | ------------------------------------- |
 | **R1** | 运营  | 机房详情发起下架，上传建议清单 Excel                    | `onboarding_batch`（`device_retire`）   |
 | **R2** | 运维  | 线下执行下架                                   | —                                     |
-| **R3** | 运维  | 导入 **设备变更表**（动作「设备退订」/「非常规下线」，挂接下架批次或工单） | `change_log` + `device_link` + 更新设备状态 |
+| **R3** | 运维  | 导入 **设备变更表**（动作「设备退订」/「非常规下线」，挂接下架批次或工单） | `change_log` + `device_link` + `refreshBatchProgress`（D2：**不**直写 `supplier_device`；表内可见态由 **主数据导入** 更新，见 [ops-pool-masterdata D2](./supplier-device-ops-pool-masterdata-design.md)） |
 | **R4** | 系统  | `refreshBatchProgress`                   | 更新 `touched` / `retired` / 批次状态       |
 | **R5** | 运营  | 确认下架完成                                   | 批次 `已完成`                              |
 

@@ -6,9 +6,23 @@
 
 - [global-dashboard-implementation-plan.md](./global-dashboard-implementation-plan.md)（Snapshot 口径与 `/supplier/overview` 对齐）
 - [supplier-device-management-ops-panorama.md](./supplier-device-management-ops-panorama.md)（运营流程与变更表驱动进度）
+- [supplier-device-ops-pool-masterdata-design.md](./supplier-device-ops-pool-masterdata-design.md)（**D1/D2** 主数据真源与变更表边界）
 
-**文档性质**：产品设计 + 数据架构 + **前端已实现方案** + 后端待办  
-**版本**：v2.2（2026-05-27）
+**文档性质**：**大盘 Period 模式总纲**（三档视图、URL、生命周期/KPI Period、DWS 总览、前端 P2a、API 骨架）+ 后端待办  
+**版本**：v2.4（2026-05-29）  
+**状态**：**活跃（总纲，非废止）** — 资源构成 / Period 卡时子域已迁移至专篇，见下。
+
+### 权威口径分层（2026-05-29）
+
+| 主题 | 权威文档 | 本文角色 |
+|------|----------|----------|
+| **资源构成**（互斥扇区、Snapshot 卡数、计划虚拟量） | [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) | §3.4 仅索引 |
+| **Period 资源构成卡时/台时**（数据源、ETL、与 Snapshot 解耦，**已确认**） | [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) | §3.4 仅索引 |
+| **8 项 KPI**（Snapshot / Period KPI） | [global-dashboard-kpi-caliber-spec.md](./global-dashboard-kpi-caliber-spec.md) | §6.1 摘要 |
+| **三档 view、URL、前端 Mock、生命周期 Period** | **本文** | 主文 |
+| **§3.4.2–§3.4.7 旧「六池重叠 + change_log 回放卡时」** | — | **已废止**（v2.4 起，勿再引用） |
+
+> **不废止本文的原因**：整页 Period 仍需要总入口（视图语义、生命周期漏斗、KPI 趋势、P2b 卡片、DWS 分期）。废止的是 **与专篇冲突的子节**，不是整份文件。
 
 ---
 
@@ -33,14 +47,14 @@ v1.0 设计仅描述 Snapshot + Period 双模式的数据模型；**v2.0 在前�
 | **页头与时间控件** | ✅ 已实现 | 三档切换、日期/ datetime 范围、对比开关（UI） |
 | **KPI / 生命周期 / 资源池** | ✅ Mock 联动 | 随 `view` 与区间变化展示不同文案与趋势 |
 | **集群 / 差异 / 告警 / 待办** | ⏳ 静态 Mock | 尚未接入 `useGlobalDashboardQuery` |
-| **后端 API** | ❌ 未实现 | `dashboard.globalOps` tRPC 待建 |
-| **DWS 日/小时表** | ❌ 未实现 | `device_daily_snapshot` 等待建 |
+| **后端 API** | ⚠️ 部分已有 | `getSnapshot` / `getPeriod` 已接 DB；Period 构成仍为过渡态（§3.4.2） |
+| **DWS 日/小时表** | ❌ 未灌数 | `device_*_snapshot` 表已定义，主数据 ETL 待建（专篇 M2） |
 
 ### 1.3 非目标
 
 - 不替代供应商明细页（`/supplier/*`）CRUD。
 - 不做计费/财务月结（见 `/finance`）。
-- 不实现秒级调度用量监控（真实台时/卡时需接调度平台，见 §3.4.4）。
+- 不实现秒级调度用量监控（真实台时/卡时需接调度平台；供应侧卡时定义见 Period 卡时专篇 §7）。
 
 ---
 
@@ -106,14 +120,16 @@ export type GlobalDashboardQuery = {
 
 ### 2.4 与供应商域模型关系
 
-大盘 Period 统计应以 **设备级事实 + 日/小时快照** 为权威，与 [`supplier-device-management-ops-panorama.md`](./supplier-device-management-ops-panorama.md) 对齐：
+大盘 Period **按模块分轨**（与 [supplier-device-ops-pool-masterdata-design.md](./supplier-device-ops-pool-masterdata-design.md) D1/D2 一致）：
 
-| 数据来源 | 用途 |
-|----------|------|
-| `supplier_device_change_log` | 设备态变更 + **批次边界**（开始/结束工单）；见 §2.5 |
-| `supplier_device` | Snapshot 截面、池归属（`resolveDevicePoolMemberships`） |
-| `onboarding_batch` + `device_link` | 批次进度、差异/待办 |
-| `pool_binding_history`（待建） | 池划入/划出、台时/卡时 |
+| 数据来源 | 用途 | **不用于** |
+|----------|------|------------|
+| `supplier_device` | Snapshot 截面；**资源构成**互斥分桶（`ops_status` 推导池） | — |
+| `device_daily_snapshot` / `device_hourly_snapshot` | **资源构成 Period 卡时**（主数据 ETL 投影） | Snapshot 饼图主值（Snapshot 直读当前态） |
+| `supplier_device_change_log` | **仅** 运维变更审计 + 批次挂接 + `refreshBatchProgress`；生命周期 ETL（§2.5） | **禁止** 更新 `supplier_device`；**禁止** 资源构成实体 Period 回放 |
+| `onboarding_batch` + `device_link` | 批次进度、差异/待办、计划缺口 | 不为计划缺口伪造设备行 |
+| `onboarding_batch_progress_event`（待建） | 计划管道 Period 卡时阶梯积分 | — |
+| ~~`pool_binding_history`~~（**已删除** migration `0058`） | 旧六池 DWS | 互斥 `resourceComposition` 分桶 |
 
 生命周期漏斗 **UI 已对齐 CRM 五段**（非 v1.0 九段 IDC）：`待接入 → 接入中 → 在线 → 维护中 → 下线中`。
 
@@ -123,12 +139,12 @@ export type GlobalDashboardQuery = {
 
 #### 2.5.1 两类 change_log 语义
 
-| 类型 | 典型 `change_action` | 影响 batch | 影响 device lifecycle | 影响 KPI / 卡时 |
-|------|----------------------|------------|----------------------|-----------------|
-| **设备态变更** | `设备接收`、`加入集群`、上架类、`设备退订`… | 刷新进度缓存 | ✅ 按 §3.4.3.1 重算 | ✅ |
-| **批次边界** | `开始执行工单`、`工单执行结束` | ✅ `batch_status` 流转 | ❌ **不直接改** lifecycle | ❌ 不产生在线时长 |
+| 类型 | 典型 `change_action` | 影响 batch | 影响 device lifecycle（ETL） | 影响资源构成 Period 卡时 |
+|------|----------------------|------------|---------------------------|---------------------------|
+| **设备态变更** | `设备接收`、`加入集群`、上架类、`设备退订`… | 刷新进度缓存 | ✅ → `device_lifecycle_event` | ❌ **不** 回放实体（见专篇 §4） |
+| **批次边界** | `开始执行工单`、`工单执行结束` | ✅ `batch_status` 流转 | ❌ `batch_boundary` | ❌ 仅经 `progress_event` 影响计划管道 |
 
-**原则**：OPS 仍以变更表为准；批次在创建时约定 **目标 ops**（上架终态 / 下架终态），运维动作沿 ladder 推进，**工单结束 = 批次闭环**，不等于每台设备自动达标（可 `needs_review`）。
+**原则**：`supplier_device_change_log` **仅保存运维设备变更记录**（审计 + 批次触达）；设备截面真源为 **主数据导入/扫描**（D1）。工单结束 = 批次闭环，不等于每台设备自动达标（可 `needs_review`）。
 
 #### 2.5.2 写入 `device_lifecycle_event` 的规则
 
@@ -141,12 +157,14 @@ export type GlobalDashboardQuery = {
 
 #### 2.5.3 对大盘各模块的影响（摘要）
 
-| 模块 | 方案 A 下行为 |
+| 模块 | 行为（v2.4） |
 |------|----------------|
-| KPI / 资源池 Snapshot | 不变：读 `supplier_device` 截面 |
-| Period 台时/卡时（§3.4） | 不变：仅 `online(d,t)` 累计 |
-| 生命周期漏斗 Period | 仅 `state_transition` 驱动吞吐/停留 |
-| 差异/待办/批次卡片（P2b） | **增强**：目标 ops vs 实际 ops + 工单起止时间 |
+| KPI Snapshot | 读 `supplier_device` / overview（见 KPI 口径 spec） |
+| **资源构成 Snapshot** | 读 `supplier_device` + 当前 pipeline 缺口；`displayUnit=gpu_cards`（资源构成设计 §8.1） |
+| **资源构成 Period 卡时** | 读 `device_*_snapshot` + `progress_event`；`displayUnit=card_hours`（[Period 卡时专篇](./global-dashboard-period-composition-card-hours-design.md)） |
+| 旧 `resourcePools` Period | **废止** 两池重叠 + change_log 实体回放；可保留 API 别名，UI 不读 |
+| 生命周期漏斗 Period | 仅 `state_transition` 驱动吞吐/停留（仍可由 change_log 清洗事件） |
+| 差异/待办/批次卡片（P2b） | 目标 ops vs 实际 ops + 工单起止时间 |
 
 ---
 
@@ -154,45 +172,62 @@ export type GlobalDashboardQuery = {
 
 ### 3.1 分层总览
 
+> v2.4：**设备快照** 由 **主数据 ETL** 写入（非 change_log 清洗）。change_log 仅 → 生命周期事件 + 批次进度。详见 [Period 卡时专篇 §3](./global-dashboard-period-composition-card-hours-design.md)。
+
 ```mermaid
 flowchart TB
   subgraph ODS["ODS 操作数据"]
     DEV[supplier_device]
-    CL[supplier_device_change_log]
+    INV[device_inventory 导入]
+    CL[supplier_device_change_log 仅审计]
     BATCH[onboarding_batch]
-    POOL[resource_pool_binding]
-    LOG[entity_state_transition_log]
+    EV[onboarding_batch_progress_event 待建]
     FAULT[fault_incident]
   end
 
-  subgraph DWD["DWD 明细 — 待建"]
+  subgraph DWD["DWD 明细 — 待建/待灌"]
     EVT[device_lifecycle_event]
     SNAP_D[device_daily_snapshot]
     SNAP_H[device_hourly_snapshot]
-    POOL_HIST[pool_binding_history]
+    POOL_HIST[pool_binding_history 可选]
   end
 
   subgraph DWS["DWS 汇总 — 待建"]
     KPI_D[global_kpi_daily]
     KPI_H[global_kpi_hourly]
     STAGE_D[lifecycle_stage_daily]
-    POOL_D[resource_pool_daily]
-    POOL_H[resource_pool_hourly]
+    POOL_D[resource_pool_daily 旧六池 废止读]
+    COMP_D[resource_composition_* 可选]
   end
 
-  subgraph ADS["ADS API — 待建"]
-    API[getSnapshot / getPeriod]
+  subgraph ADS["ADS API"]
+    SNAP_API[getSnapshot]
+    PER_API[getPeriod]
   end
 
-  CL --> EVT
+  INV --> DEV
   DEV --> SNAP_D
-  EVT --> SNAP_H
-  POOL --> POOL_HIST
+  DEV --> SNAP_H
+  CL --> EVT
+  BATCH --> EV
+  CL --> BATCH
+  EVT --> STAGE_D
+  SNAP_D --> COMP_D
+  SNAP_H --> COMP_D
+  EV --> COMP_D
   SNAP_D --> KPI_D
-  SNAP_H --> KPI_H
-  KPI_D --> API
-  KPI_H --> API
+  DEV --> SNAP_API
+  SNAP_D --> PER_API
+  EV --> PER_API
+  KPI_D --> PER_API
 ```
+
+**读路径摘要**：
+
+| API | 资源构成 | 生命周期 / KPI |
+|-----|----------|----------------|
+| `getSnapshot` | `supplier_device` 当前态 | overview / 截面 |
+| `getPeriod` | `device_*_snapshot` + `progress_event`（**不** 调 `getSnapshot` 拼构成，专篇 §6） | `device_lifecycle_event` 或 change_log ETL |
 
 ### 3.2 核心表（摘要）
 
@@ -206,239 +241,68 @@ flowchart TB
 | `pool_codes[]` | 资源池归属 |
 | `gpu_count`, `card_type`, `data_center_id` | 维度 |
 
-Daily 跑批 T+1；Hourly 跑批每小时 :05；Snapshot 读当前态或最近 hour 快照。
+Daily / Hourly 由 **主数据 ETL** 灌数（`device_inventory` 导入 + 定时扫描 → `supplier_device` → 快照）；Snapshot **资源构成** 仍直读 `supplier_device` 当前态。详见 Period 卡时专篇 §8.3。
 
-#### `pool_binding_history`（SCD Type 2）
+#### `pool_binding_history`（SCD Type 2，可选）
 
-`device_id`, `pool_code`, `effective_from`, `effective_to` — 支撑池净增、台时/卡时。
+`device_id`, `pool_code`, `effective_from`, `effective_to` — 旧 **六池** `resourcePools` / 池净增 KPI；**互斥 `resourceComposition` 不依赖**。
 
-#### `resource_pool_daily` / `resource_pool_hourly`
+#### ~~`resource_pool_daily` / `resource_pool_hourly`~~（**已删除** migration `0058`）
 
-粒度：`time × pool_code × card_type` → `device_count`, `machine_hours`, `card_hours`。
+历史：六池重叠 × 在线卡时 DWS。表与 API `resourcePools` 已从代码库移除。
 
-### 3.3 资源池展示映射
+### 3.3 ~~旧六池 Mock 映射~~（**已删除**）
 
-| 大盘展示 | 池 key（Mock/UI） | 目标 `pool_code` |
-|----------|-------------------|------------------|
-| 弹性服务 | `platform` | `elastic_service` |
-| 裸金属 | `dedicated` | `bare_metal` |
-| 待上架 | `inference` | 待接入/待上架聚合 |
-| 线下交付 | `training` | 线下交付 ops |
-| 内部占用 | `standby` | 内部测试/占用 |
-| 维护中 | `maintenance` | 维护中 |
+> v2.5：`_lib/global-dashboard-mock-data.ts` 与 `getMockPoolData` 从未落地或已移除；`ResourcePoolChartCard` 经 `trpc.dashboard.globalOps` 读 `resourceComposition`。
 
-### 3.4 资源构成 / 资源池分布：展示口径与计量定义
+### 3.4 资源构成 / 资源池分布（索引 — 权威在外部专篇）
 
-> **v1.1 权威**：[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（互斥分桶 + 计划虚拟量）。  
-> 本节 §3.4.1–§3.4.4 描述的旧 **重叠两池** 口径降为 `resourcePools` 兼容别名；新卡片读 `resourceComposition`。
+> **v2.4**：本节 **不再** 定义公式。§3.4.2–§3.4.7（v2.2 六池重叠 + change_log 回放卡时）**已废止**；实施与评审以专篇为准。
 
-`ResourcePoolChartCard` 在 **Snapshot** 与 **Period** 下均以 **互斥扇区** 闭合分母；Period v1.0 主值为 **期末 GPU 卡数截面**（计划虚拟扇区同期末 pipeline 缺口）。
+#### 3.4.1 文档分工
 
-### 3.4.1 展示口径对照（resourceComposition）
-
-| 视图 | 饼图扇区 | 中心「总计」 | 外围卡片主值 |
-|------|----------|--------------|--------------|
-| **Snapshot** | 互斥构成（实体 + 计划虚拟） | `denominator` 卡数 | `{N} 卡` · 各扇区台数 |
-| **Daily / Hourly** | **期末**互斥构成（v1.0） | 期末合计 `N 卡` | 净增 vs 期初 |
-
-**计划虚拟扇区 Period**：v1.0 仅 `periodEnd` pipeline 截面；完整时序见资源构成设计 §14（批次进度事件表）。
-
-**Snapshot 期末**：`as_of` 时刻（默认 `now()`）。**Period 区间**：闭区间 `[period_start, period_end]`（时区 `Asia/Shanghai`）。
-
-**与财务域区别**：本大盘 **卡时** 指 **供应侧资源池可用 GPU·小时**（设备在线 × 卡数 × 时长），**不是** 租户账单消费卡时（见 `/finance` `balance_card_hours`）。
-
-### 3.4.2 前置定义
-
-| 符号 | 含义 |
+| 文档 | 内容 |
 |------|------|
-| `as_of` | Snapshot 截面时刻 |
-| `[T₀, T₁]` | Period 区间（daily 日界 / hourly 整点） |
-| `pool p` | 资源池，池归属与 `/supplier/overview` 一致（`resolveDevicePoolMemberships`） |
-| `card type g` | `gpu_card_type_id` / `gpu_card_type.code` |
-| `device d` | `supplier_device` 一行（一台物理机） |
-| `online(d, t)` | `t` 时刻 `d` 满足 **在线判定**（见 §3.4.5） |
-| `in_pool(d, p, t)` | `t` 时刻 `d` 归属池 `p` |
-| `gpu_count(d)` | `supplier_device.gpu_count` |
+| [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) | 互斥分桶、`classifyDeviceExclusiveBucket`、Snapshot `displayUnit=gpu_cards`、计划虚拟扇区、`onboarding_batch_progress_event` |
+| [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) | Period `displayUnit=card_hours`、主数据快照 ETL、`change_log` 仅审计、Schema 清单、**Period 与 Snapshot 代码解耦** |
 
-### 3.4.3 Snapshot：期末在线 GPU 卡数
+#### 3.4.2 展示口径对照（`resourceComposition`）
 
-**池级在线 GPU 卡数**（饼图 `value`、外围主值）：
+| 视图 | 饼图扇区 | 中心主值 | 外围主值 | 数据源 |
+|------|----------|----------|----------|--------|
+| **Snapshot** | 互斥构成（实体 + 计划虚拟） | 分母卡数 | `{N} 卡` | `supplier_device` + 当前 pipeline 缺口 |
+| **Period（目标）** | 同上 key | 区间合计 **卡时** | 卡时 + 台时 breakdown | `device_*_snapshot` + `progress_event` 积分 |
+| **Period（现网 v1.0）** | 同上 key | 期末 **卡数**（过渡） | 净增卡数 | change_log 回放实体 + 桶末 pipeline（待 M5 切换） |
 
-```
-online_gpu_cards(p, as_of)
-  = Σ_{d : online(d, as_of) ∧ in_pool(d, p, as_of)} gpu_count(d)
-```
+**供应侧卡时**：非租户账单消费卡时（与 `/finance` 区分）。**时间区间**：`[period_start, period_end]`，`Asia/Shanghai`。
 
-**卡型 breakdown**（外围明细，单位：卡）：
+**代码**：`getPeriod` **不得** 通过 `getSnapshot()` 组装 `resourceComposition`（专篇 §6）；可复用 `buildResourceCompositionPayload` 等 **纯函数**。
 
-```
-online_gpu_cards(p, g, as_of)
-  = Σ_{d : online(d, as_of) ∧ in_pool(d, p, as_of) ∧ card_type(d)=g} gpu_count(d)
-```
+#### 3.4.3 UI 字段（目标）
 
-**中心总计**：
+以 `GlobalResourceCompositionPayload` 为准（`displayUnit`: `gpu_cards` | `card_hours`）；扇区 `key` / `cardHours` / `machineHours` / `gpuCount` 见 Period 卡时专篇 §7.3。旧 `ResourcePoolSlice` / 六池 `pool_code` 仅服务于废止的 `resourcePools` 字段。
 
-```
-total_online_gpu_cards(as_of) = Σ_p online_gpu_cards(p, as_of)
-```
+#### 3.4.4 已废止章节（勿引用）
 
-**约束**：双池设备按 overview 规则 **可重叠计入多个池**；与 KPI「弹性资源池 / 裸金属池」卡数口径一致。
+| 原章节 | 废止原因 |
+|--------|----------|
+| §3.4.2 符号 `pool p` / `in_pool` 重叠 | 改为互斥 `bucket_key` |
+| §3.4.3 Snapshot 按六池在线卡数 | 改为互斥构成 + 非退订分母 |
+| §3.4.4 Period 按池 `online(d,t)` 积分 | 改为主数据状态时序 + 状态停留时长（默认含维护/待接入占位） |
+| §3.4.5 维护中 Period 不计卡时 | 与专篇 Q1 默认（**含**维护占位）冲突 |
+| §3.4.6–§3.4.7 六池 UI 示例 | 改读 `resourceComposition` slices |
 
-### 3.4.4 Period：台时与卡时计算方法
-
-#### 基本时间片
-
-将区间 `[T₀, T₁]` 划分为时间片 `τ`：
-
-- **Daily**：`τ` = 每个自然日（本地 0:00–24:00 与区间交集）
-- **Hourly**：`τ` = 每个整点小时 `[h:00, h+1:00)` 与区间交集
-
-设备 `d` 在池 `p`、时间片 `τ` 内的 **在线时长（小时）**：
-
-```
-duration_hours(d, p, τ)
-  = |{ t ∈ τ : online(d, t) ∧ in_pool(d, p, t) }|   -- 连续时间长度，单位：小时
-```
-
-实现上由 **小时/日快照** 或 **变更表状态区间** 回放得到（见 §3.2 `device_*_snapshot`、`pool_binding_history`）。
-
-#### 台时（machine_hours）
-
-**按台累计**：每台设备贡献的在线小时数，**不乘卡数**。
-
-```
-machine_hours(p, g, τ)
-  = Σ_{d : card_type(d)=g} duration_hours(d, p, τ)
-
-machine_hours(p, g, [T₀,T₁])
-  = Σ_{τ ⊆ [T₀,T₁]} machine_hours(p, g, τ)
-```
-
-**池级台时**（无卡型维度时）：
-
-```
-machine_hours(p, [T₀,T₁]) = Σ_g machine_hours(p, g, [T₀,T₁])
-```
-
-#### 卡时（card_hours）
-
-**按 GPU·小时累计**：每台设备在线时长 × 该机 GPU 卡数。
-
-```
-card_hours(p, g, τ)
-  = Σ_{d : card_type(d)=g} duration_hours(d, p, τ) × gpu_count(d)
-
-card_hours(p, g, [T₀,T₁])
-  = Σ_{τ ⊆ [T₀,T₁]} card_hours(p, g, τ)
-```
-
-**恒等关系**（单设备）：
-
-```
-card_hours(d, p, τ) = duration_hours(d, p, τ) × gpu_count(d)
-```
-
-**池级卡时**（Period 饼图扇区 `value`、外围主值）：
-
-```
-card_hours(p, [T₀,T₁]) = Σ_g card_hours(p, g, [T₀,T₁])
-```
-
-**中心总计**：
-
-```
-total_card_hours([T₀,T₁]) = Σ_p card_hours(p, [T₀,T₁])
-```
-
-#### 净增（Period 副指标，单位：卡时）
-
-```
-card_hours_net_change(p) = card_hours(p, [T₀,T₁]) − card_hours(p, [T₀−Δ, T₀))
-```
-
-其中 `Δ` 为与本期等长的上一周期（`compare=1` 时使用）；或简化为相对期初桶：
-
-```
-card_hours_end(p) − card_hours_start(p)   -- 以 period_end / period_start 单桶卡时近似，精确实现用 DWS
-```
-
-（产品展示优先 **区间累计卡时** 作主值；净增为辅助文案。）
-
-### 3.4.5 在线判定与例外
-
-| 规则 | 说明 |
-|------|------|
-| **在线** | `lifecycle_status = '在线'`，且 ops 状态不排除在线（与 overview `R-OV2` 一致） |
-| **维护中池** | Snapshot：计入该池内 `维护中` / `in_maintenance` 设备的 GPU 卡数（若业务归属该池）；Period：**台时/卡时展示 `—`**，不计入供应卡时 |
-| **待上架等池** | 仅统计归属该池且满足池语义的状态；具体映射见 [global-dashboard-implementation-plan.md](./global-dashboard-implementation-plan.md) §3.4.5 |
-| **双池** | 同一设备在同一时刻可计入多个池的 duration / 卡数（与 overview 重叠一致） |
-
-### 3.4.6 UI 字段映射
-
-**Snapshot — `ResourcePoolSlice`**
-
-```typescript
-interface ResourcePoolSliceSnapshot {
-  pool_code: string
-  pool_name: string
-  online_gpu_cards_end: number   // 饼图 value、外围「N 卡」
-  breakdown: {
-    card_type: string
-    online_gpu_cards_end: number // 仅卡数，无台时/卡时
-  }[]
-}
-```
-
-**Period — `ResourcePoolSlice`**
-
-```typescript
-interface ResourcePoolSlicePeriod {
-  pool_code: string
-  pool_name: string
-  card_hours_total: number       // 饼图 value、外围「N 卡时」
-  card_hours_net_change?: number
-  breakdown: {
-    card_type: string
-    machine_hours: number        // 台时
-    card_hours: number           // 卡时
-  }[]
-}
-```
-
-外围展示格式：
-
-- Snapshot：`{card_type} · {online_gpu_cards_end} 卡`
-- Period：`{card_type} - {machine_hours}台时 - {card_hours}卡时`
-
-### 3.4.7 计算示例
-
-**Snapshot**（`as_of = 2026-05-27 15:00`）
-
-| 池 | 设备 | 卡型 | gpu_count | 在线? | 贡献卡数 |
-|----|------|------|-----------|-------|----------|
-| 弹性服务 | SN-01 | A100 | 8 | 是 | 8 |
-| 弹性服务 | SN-02 | H100 | 8 | 是 | 8 |
-
-→ `online_gpu_cards(弹性服务) = 16`；A100 breakdown = 8，H100 breakdown = 8。
-
-**Period**（某日 1 小时时间片，弹性服务池）
-
-| 设备 | 卡型 | gpu_count | 在线 1h? | 台时 | 卡时 |
-|------|------|-----------|----------|------|------|
-| SN-01 | A100 | 8 | 是 | 1 | 8 |
-| SN-02 | H100 | 8 | 是 | 1 | 8 |
-
-→ 该小时 `machine_hours = 2`，`card_hours = 16`。若全天 24h 均在线，则日 `machine_hours = 48`，`card_hours = 384`。
+历史全文见 git `v2.2` 修订前版本。
 
 ## 4. 实现分期
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| **P0** | 主数据 + `change_log` → `entity_state_transition_log` | 部分已有 |
-| **P1** | `device_daily_snapshot` 日批 + 事件清洗 | 未开始 |
+| **P0** | 主数据 D1 + `change_log` 仅审计（D2）→ 生命周期 `device_lifecycle_event` | 部分已有 |
+| **P1** | 主数据 ETL → `device_*_snapshot`（**非** change_log 洗快照） | 未开始 |
 | **P2a** | 前端三档视图 + URL + Mock 联动（KPI/生命周期/资源池） | ✅ **已完成** |
 | **P2b** | 集群/差异/告警/待办接入 query；`compare` 数据 | 未开始 |
-| **P3** | `dashboard.globalOps.getSnapshot` / `getPeriod` + DWS | 未开始 |
+| **P3** | `getSnapshot` / `getPeriod` + `resourceComposition`；Period 卡时 M1–M6（专篇 §14） | 部分已有（Snapshot 构成 + Period 过渡） |
 | **P4** | 导出、下钻、与 overview 一致性测试 | 未开始 |
 
 ---
@@ -472,7 +336,7 @@ Suspense
 | 文件 | 职责 |
 |------|------|
 | `_lib/global-dashboard-query.ts` | URL ↔ `GlobalDashboardQuery` 解析/写入；`useGlobalDashboardQuery()` |
-| `_lib/global-dashboard-mock-data.ts` | `getMockKpiItems`、`getMockLifecycleStages`、`getMockPoolData`、`getCardCopy` |
+| `_lib/global-dashboard-context.tsx` | `trpc.dashboard.globalOps.getSnapshot` / `getPeriod` → 各 Card |
 
 **数据流**：
 
@@ -480,7 +344,7 @@ Suspense
 URL searchParams
   → parseGlobalDashboardQuery()
   → useGlobalDashboardQuery()  { query, setQuery, setView }
-  → getMock* (query)           → 各 Card 渲染
+  → GlobalDashboardProvider (tRPC)  → 各 Card 渲染
 ```
 
 ### 5.3 Header 与 ScopeBar
@@ -529,20 +393,22 @@ GPU 总卡数、在线设备、弹性资源池、裸金属池、内部占用、�
 
 标题/副标题由 `getCardCopy(query)` 驱动。
 
-### 5.6 资源池（`resource-pool-chart-card.tsx`）
+### 5.6 资源构成（`resource-pool-chart-card.tsx`）
 
-**目标口径**：见 §3.4。当前 Mock **未完全实现**（饼图仍用台数 Mock，见 §10.1）。
+**目标口径**：§3.4 索引 → [资源构成设计](./global-dashboard-resource-composition-chart-design.md) + [Period 卡时专篇](./global-dashboard-period-composition-card-hours-design.md)。当前 Mock **未完全实现**（见 §10.1）。
 
-| 元素 | Snapshot（目标） | Daily / Hourly（目标） |
-|------|------------------|------------------------|
-| 饼图扇区 | 各池 **期末在线 GPU 卡数** | 各池 **区间卡时** |
-| 中心主文案 | `总计 {N} 卡` | `总计 {N} 卡时` |
-| 中心副文案 | — | `净增 ±M 卡时`（可选） |
+| 元素 | Snapshot（目标） | Daily / Hourly Period（目标） |
+|------|------------------|-------------------------------|
+| 饼图扇区 | 互斥扇区 `gpuCount` / 卡数 | 互斥扇区 **`cardHours`** |
+| 中心主文案 | `合计 {N} 卡` | `合计 {N} 卡时` |
+| 中心副文案 | 计划缺口提示 | 卡时净增（可选） |
 | 外围主值 | `{N} 卡` | `{N} 卡时` |
-| 外围明细 | 卡型 · **在线 GPU 卡数** | **卡型 - 台时 - 卡时** |
-| 维护中池 | 卡数或 `—`（见 §3.4.5） | 台时/卡时均为 `—` |
+| 外围明细 | 卡型 · 卡数 | 卡型 · 台时 · 卡时 |
+| 计划虚拟扇区 | 虚线 + 「计划」角标 | 同上 |
 
-**当前 Mock 偏差**：扇区与外围主值仍用 **台数** + 固定常数缩放台时/卡时；接 API 时按 §3.4 重写 `getMockPoolData`。
+**现网**：已接 `resourceComposition`（互斥扇区）；Period 仍为 **期末卡数** 过渡态，卡时见专篇 M5–M6。
+
+**禁止**：Period 模式下调 `getSnapshot()` 取构成数据（专篇 §6.4）。
 
 ### 5.7 未联动卡片（P2b）
 
@@ -581,22 +447,14 @@ P2b 待办：接入 `query`，按 `occurred_at` / 期末截面过滤；`compare=
 | `stage_wip_end` | 期末仍停在该阶段的数量 |
 | `avg_dwell_time` | 离开该阶段的 `(leave − enter)` 均值 |
 
-### 6.3 资源池（`ResourcePoolChartCard`）
+### 6.3 资源构成（`ResourcePoolChartCard`）
 
-| 视图 | 饼图 / 外围主值 | breakdown |
-|------|-----------------|-----------|
-| **Snapshot** | `online_gpu_cards(p, as_of)`，单位 **卡** | `{ card_type, online_gpu_cards_end }` |
-| **Period** | `card_hours(p, [T₀,T₁])`，单位 **卡时** | `{ card_type, machine_hours, card_hours }` |
+| 视图 | 饼图 value | breakdown | 权威文档 |
+|------|------------|-----------|----------|
+| **Snapshot** | `slice.gpuCount`（`displayUnit=gpu_cards`） | 卡型 × 卡数 | 资源构成设计 §8.1 |
+| **Period（目标）** | `slice.cardHours`（`displayUnit=card_hours`） | 卡型 × 台时 × 卡时 | Period 卡时专篇 §7、§12 |
 
-完整公式见 **§3.4**。API 字段：
-
-| 字段 | Snapshot | Period |
-|------|----------|--------|
-| `slice.value` | `online_gpu_cards_end` | `card_hours_total` |
-| `center_total` | `Σ online_gpu_cards_end` | `Σ card_hours_total` |
-| `breakdown.machine_hours` | — | §3.4.4 |
-| `breakdown.card_hours` | — | §3.4.4 |
-| `net_change` | — | 卡时净增（可选） |
+API 字段：`resourceComposition`（`GlobalResourceCompositionPayload`）。已移除：`resourcePools`、六池 DWS 表。
 
 ### 6.4 其余卡片
 
@@ -634,7 +492,8 @@ interface GlobalDashboardResponse {
   }
   kpi: GlobalKpiPayload
   lifecycle: LifecycleFlowPayload
-  resource_pools: ResourcePoolPayload
+  resource_composition: GlobalResourceCompositionPayload  // 主读
+  resource_pools?: ResourcePoolPayload                    // 兼容别名，UI 不读
   clusters: ClusterStatusPayload[]
   discrepancies: DiscrepancyPayload[]
   alerts: AlertPayload[]
@@ -644,26 +503,29 @@ interface GlobalDashboardResponse {
 ```
 
 ```typescript
-interface ResourcePoolPayload {
-  display_unit: 'gpu_cards' | 'card_hours'  // snapshot | period
-  slices: ResourcePoolSliceSnapshot[] | ResourcePoolSlicePeriod[]  // §3.4.6
-  center_total: number
-  center_secondary?: string
+// 见 global-dashboard-api.ts — GlobalResourceCompositionPayload
+interface GlobalResourceCompositionPayload {
+  displayUnit: 'gpu_cards' | 'card_hours'
+  denominator: { gpuCount?: number; cardHours?: number; deviceCount?: number; machineHours?: number }
+  slices: Array<{ key: string; label: string; kind: 'entity' | 'pipeline_virtual'; gpuCount: number; cardHours?: number; machineHours?: number; ... }>
+  centerPrimary: string
+  centerSecondary?: string
+  footnote: string
 }
 ```
 
 **缓存**：Snapshot TTL 30s；历史 Period TTL 1h。
 
+**解耦**：`getPeriod` 内 `computePeriodResourceComposition()` **独立实现**；禁止从 `getSnapshot().resourceComposition` 拷贝（专篇 §6）。
+
 ### 7.3 替换 Mock 路径（前端接 API）
 
 | 步骤 | 文件 | 改动 |
 |------|------|------|
-| 1 | `_lib/global-dashboard-mock-data.ts` | `getMockPoolData(query)` 按 §3.4 分 Snapshot / Period 生成 `display_unit` 与 slices |
-| 2 | `_components/resource-pool-chart-card.tsx` | 读取 `display_unit`：Snapshot 格式化「N 卡」；Period 格式化「N 卡时」与 breakdown「台时 - 卡时」 |
-| 3 | `page.tsx` 或 data hook | `view=snapshot` → `getSnapshot`；`view=daily\|hourly` → `getPeriod`；保留 Suspense + query 不变 |
-| 4 | 类型 | 与 §3.4.6 `ResourcePoolSliceSnapshot` / `ResourcePoolSlicePeriod` 对齐 |
-
-Mock 阶段可先只改 `getMockPoolData`，使饼图/外围主值与 breakdown 口径与 §3.4 一致，再接 tRPC。
+| 1 | `_lib/global-dashboard-mock-data.ts` | Mock `resourceComposition`：Snapshot 卡数 / Period 卡时（专篇 §7.3） |
+| 2 | `_components/resource-pool-chart-card.tsx` | 按 `displayUnit` 渲染；仅消费 `resourceComposition` |
+| 3 | `page.tsx` 或 data hook | `view=snapshot` → `getSnapshot`；`view=daily\|hourly` → `getPeriod` |
+| 4 | `global-period.ts` | M5：移除 change_log 实体回放；不调用 `getSnapshot` 拼构成 |
 
 ---
 
@@ -688,12 +550,12 @@ GET /api/v1/dashboard/global?granularity=day&period_start=2026-05-01&period_end=
 |------|------|------|-----|------|
 | KPI | Period | `gpu_total` | 4,280 期末 / +120 净增 | 5 月净增 120 卡 |
 | 生命周期 | Period | 待接入.throughput | 34 | 5 月新进入待接入 34 台 |
-| 资源池 | **Snapshot** | `platform.online_gpu_cards_end` | 4,960 卡 | 弹性服务池期末在线 GPU 卡数（饼图扇区 = 外围主值） |
-| 资源池 | **Snapshot** | `platform.breakdown` | A100 · 3,200 卡；H100 · 1,760 卡 | 仅卡型 × 卡数，无台时/卡时 |
-| 资源池 | **Period** | `platform.card_hours_total` | 118,400 卡时 | 5 月弹性池累计供应卡时（饼图扇区 = 外围主值） |
-| 资源池 | **Period** | `platform.breakdown` | A100 - 1.82万台时 - 14.6万卡时 | 卡型维度台时/卡时（§3.4.4） |
+| 资源构成 | **Snapshot** | `pool_elastic_only.gpuCount` | 3,200 卡 | 互斥扇区「仅弹性」期末卡数 |
+| 资源构成 | **Snapshot** | `pending_access_pipeline.gpuCount` | 48 卡 | 计划缺口（虚拟扇区） |
+| 资源构成 | **Period** | `pool_dual.cardHours` | 12,480 卡时 | 双池扇区区间积分（目标态） |
+| 资源构成 | **Period** | `pending_access_pipeline.cardHours` | 960 卡时 | 计划缺口 × 时长（`progress_event`） |
 
-**Snapshot 与 Period 对照**：Snapshot 展示 **存量卡数**；Period 展示 **区间累计卡时**，二者主值 **不可直接数值对比**。若 `period_end = now` 且 Period 仅取末桶截面，期末 **卡数** KPI 应与 Snapshot 一致；Mock 当前不满足（§10.1）。
+**Snapshot 与 Period 对照**：Snapshot 主值 = **截面卡数**；Period 目标主值 = **区间卡时**（不可直接比大小）。Period 各扇区 **期末 `gpuCount`** 应与 Snapshot 同 key 对齐（专篇 PC-T7）。现网 Period 过渡态为期末卡数 + change_log（§3.4.2）。
 
 ---
 
@@ -716,8 +578,8 @@ GET /api/v1/dashboard/global?granularity=day&period_start=2026-05-01&period_end=
 
 | 问题 | 现状 | 目标 |
 |------|------|------|
-| 资源池饼图/外围主值 | Mock 用 **台数**（`BASE_POOL`） | Snapshot：**期末在线 GPU 卡数**；Period：**区间卡时**（§3.4） |
-| 资源池 breakdown | 固定常数 × factor，隐含 卡时≈台时×8 | Snapshot：仅卡型×卡数；Period：`machine_hours` / `card_hours` 按 §3.4.4 |
+| 资源构成饼图/外围主值 | Mock 用 **台数**（`BASE_POOL`） | Snapshot：互斥扇区 **卡数**；Period：**卡时**（§3.4 → 专篇） |
+| 资源构成 breakdown | 固定常数 × factor | Snapshot：卡型×卡数；Period：卡型×台时×卡时 |
 | 期末主值随 start 变化 | `seedFromQuery` 使用 `start_end` 拼接 | 期末仅依赖 `period_end` / Snapshot |
 | 净增 | 随机 `pick()` | `stock(end) − stock(start)` 或卡时净增 |
 | 对比上周期 | UI only | 嵌套 `compare` 响应或二次请求 |
@@ -726,22 +588,23 @@ GET /api/v1/dashboard/global?granularity=day&period_start=2026-05-01&period_end=
 
 ### 10.2 后端优先级
 
-1. **G0** — 抽取 `overview-aggregation.ts`，`getSnapshot` 接 DB  
-2. **G1** — `pool_binding_history` + `change_log` → 事件流（**区分 `state_transition` / `batch_boundary`**，§2.5）
-3. **G2** — `device_daily_snapshot` + `getPeriod(granularity=day)`  
-4. **G2+** — `device_hourly_snapshot` + `getPeriod(granularity=hour)`  
-5. **G3** — 全卡片接 API + `compare` + P2b 静态卡片  
+1. **G0** — `getSnapshot` 接 DB；`resourceComposition` Snapshot 路径（资源构成 Phase 1，**部分已有**）  
+2. **G1** — `change_log` → `device_lifecycle_event`（**仅生命周期**，§2.5）；`appendBatchProgressEvent`（M1）  
+3. **G2** — 主数据 ETL → `device_daily_snapshot`（**非** change_log 洗快照）  
+4. **G2+** — `device_hourly_snapshot` + Period 卡时聚合（专篇 M3–M5）  
+5. **G3** — `getPeriod` 与 Snapshot **解耦**；全卡片 + `compare` + P2b  
+6. **G4**（可选）— `pipeline_gap_*` / `resource_composition_*` DWS 加速（专篇 M7）  
 
 ### 10.3 台时/卡时
 
-**权威定义见 §3.4.4**，摘要：
+**权威定义**：[global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) §7。
 
-| 计量 | 公式 | 单位 | 用于 |
-|------|------|------|------|
-| **台时** | `Σ duration_hours(d, p, τ)`，按 **台** 累计，不乘 `gpu_count` | 台·小时 | Period 外围 breakdown |
-| **卡时** | `Σ duration_hours(d, p, τ) × gpu_count(d)` | GPU·小时 | Period 饼图/外围主值 |
+| 计量 | 摘要 | 用于 |
+|------|------|------|
+| **台时** | 互斥扇区/计划缺口 × 状态停留时长，按 **台** 计 | Period breakdown |
+| **卡时** | 上式 × `gpu_count`（计划缺口按缺口 GPU） | Period 饼图主值 |
 
-Mock 当前为规模比例缩放，非回放计算。真实值由 `device_*_snapshot` + `pool_binding_history` 聚合写入 `resource_pool_daily/hourly`（§3.2）；调度平台用量为 G4 增强，非 MVP 阻塞项。
+实体时序来自 **主数据快照**；计划时序来自 **`progress_event`**。废止：六池 `online(d,p,t)` + `resource_pool_daily` + change_log 实体回放。
 
 ---
 
@@ -751,17 +614,24 @@ Mock 当前为规模比例缩放，非回放计算。真实值由 `device_*_snap
 |------|------|----------|------------|
 | `page.tsx` | 页面布局、Suspense | — | — |
 | `_lib/global-dashboard-query.ts` | URL 查询态 | — | — |
-| `_lib/global-dashboard-mock-data.ts` | Mock 生成 | seed(query) | 输入 query |
+| `_lib/global-dashboard-context.tsx` | tRPC 数据 | `globalOps` | 输入 query |
 | `_components/global-dashboard-header.tsx` | Header + ScopeBar | — | ✅ |
-| `_components/global-kpi-section.tsx` | KPI + sparkline tooltip | `getMockKpiItems` | ✅ |
-| `_components/lifecycle-flow-card.tsx` | 五段漏斗 | `getMockLifecycleStages` | ✅ |
-| `_components/resource-pool-chart-card.tsx` | 饼图 + 外围卡 | `getMockPoolData` | ✅ |
+| `_components/global-kpi-section.tsx` | KPI + sparkline tooltip | `data.kpis` | ✅ |
+| `_components/lifecycle-flow-card.tsx` | 五段漏斗 | `data.lifecycleFunnel` | ✅ |
+| `_components/resource-pool-chart-card.tsx` | 饼图 + 外围卡 | `data.resourceComposition` | ✅ |
 | `_components/cluster-status-card.tsx` | 机房集群 | `CLUSTERS` 常量 | ❌ |
 | `_components/discrepancy-table-card.tsx` | 差异校验 | 常量 | ❌ |
 | `_components/alerts-timeline-card.tsx` | 告警 | 常量 | ❌ |
 | `_components/global-todos-card.tsx` | 待办 | 常量 | ❌ |
 
-**主数据写入路径**：运维导入变更表 → `supplier_device_change_log` →（目标）`entity_state_transition_log` → 快照/Period 聚合。见 [supplier-device-management-ops-panorama.md](./supplier-device-management-ops-panorama.md) §7。
+**写入路径（v2.4）**：
+
+- **设备截面 / 资源构成 Snapshot**：`device_inventory` 导入 / 扫描 → `supplier_device`（D1）  
+- **资源构成 Period 卡时**：同上 → ETL → `device_*_snapshot`（**非** change_log）  
+- **运维变更**：`device_changelog` → `supplier_device_change_log`（**仅审计**）→ `refreshBatchProgress` / `progress_event`  
+- **生命周期 Period**：change_log → `device_lifecycle_event`（与资源构成 Period **分轨**）  
+
+见 [supplier-device-ops-pool-masterdata-design.md](./supplier-device-ops-pool-masterdata-design.md)、[supplier-device-management-ops-panorama.md](./supplier-device-management-ops-panorama.md) §7。
 
 ---
 
@@ -774,3 +644,4 @@ Mock 当前为规模比例缩放，非回放计算。真实值由 `device_*_snap
 | v2.1 | 2026-05-27 | **§3.4 权威口径**：Snapshot 饼图/外围按期末在线 GPU 卡数；Period 按区间卡时；明确台时/卡时公式、UI 映射与示例；同步 §5.6、§6.3、§7.3、§8.3、§10 |
 | v2.2 | 2026-05-27 | **§2.5 方案 A**：工单起止仅驱动 batch_status；lifecycle 仍由运维变更推导；ETL 边界事件分类；同步 §6.2、§9、§10.2 |
 | v2.3 | 2026-05-27 | **计划管道**：Snapshot 待接入 KPI/漏斗叠加批次计划缺口；`planned_gpu_count`；`new_idc` 待接入机房；Period **暂不**叠加（§2.1.5 场景文档） |
+| v2.4 | 2026-05-29 | **部分废止 §3.4.2–§3.4.7**；资源构成/Period 卡时迁移至专篇（专篇 v1.3 已确认）；修正 §3.1 DWD、§2.4/§2.5 change_log 边界、§6/§7/§10 与代码解耦；保留总纲（view/URL/生命周期/KPI） |

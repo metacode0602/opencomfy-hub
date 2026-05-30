@@ -2,22 +2,28 @@
  * 全局运营监控大盘 — 时间段分析域表结构（Drizzle ORM / PostgreSQL）
  *
  * 设计依据：
- * - apps/web/content/design/global-dashboard-period-analytics.md（v2.1）
- * - apps/web/content/design/global-dashboard-implementation-plan.md（Snapshot 口径对齐 overview）
+ * - apps/web/content/design/global-dashboard-period-composition-card-hours-design.md（Period 资源构成卡时，已确认）
+ * - apps/web/content/design/global-dashboard-resource-composition-chart-design.md（互斥 resourceComposition）
+ * - apps/web/content/design/global-dashboard-period-analytics.md（v2.4 总纲）
+ * - apps/web/content/design/global-dashboard-kpi-caliber-spec.md
+ * - apps/web/content/design/supplier-device-ops-pool-masterdata-design.md（D1/D2）
  *
- * 分层：
- * - DWD 明细：设备/池事件与快照（由 supplier_device_change_log、resource_pool_binding 清洗）
- * - DWS 汇总：KPI / 生命周期 / 资源池 日桶与小时桶（支撑 getPeriod + sparkline）
+ * 分层与读路径：
+ * - DWD `device_*_snapshot`：由 **主数据 ETL**（device_inventory 导入 + 定时扫描 → supplier_device）投影；
+ *   **不** 由 supplier_device_change_log 清洗（change_log 仅审计 + 生命周期事件 + 批次进度）。
+ * - DWD `device_lifecycle_event`：由 change_log 清洗，**仅** 生命周期漏斗 Period，非 resourceComposition 实体源。
+ * - DWS `global_kpi_*` / `lifecycle_stage_*`：KPI 与五段漏斗。
+ * - `onboarding_batch_progress_event`：定义于 supply-schema（待 migration），计划管道 Period 卡时。
  *
- * 计量约定（§3.4）：
- * - Snapshot API 可读 supplier_device 当前态或最近 hour 快照；本 schema 快照表供 Period 回放
- * - machine_hours：按台累计在线时长，不乘 gpu_count
- * - card_hours：在线时长 × gpu_count（供应侧 GPU·小时，非财务消费卡时）
- * - pool_code 与 resolveDevicePoolMemberships / overview 一致；双池设备可重叠计入多池
+ * 计量约定（resourceComposition Period）：
+ * - Snapshot：getSnapshot 直读 supplier_device；可选读最近 hour 快照作 as_of 近似。
+ * - Period 实体卡时：device_*_snapshot + classifyDeviceExclusiveBucket（状态停留时长 × gpu_count）。
+ * - Period 计划卡时：progress_event 阶梯积分（planned−touched × 时长）。
+ * - machine_hours / card_hours：供应侧台时/卡时（非 /finance 消费卡时）。
  *
  * 约定：
- * - 主键 text；计数 integer；时长/卡时 numeric(15,4)；时间桶 timestamptz / date（业务时区 Asia/Shanghai）
- * - pool_codes、filters 等扩展 jsonb
+ * - 主键 text；计数 integer；时长/卡时 numeric(15,4)；时间桶 timestamptz / date（Asia/Shanghai）
+ * - device_*_snapshot.pool_codes[] 为 ETL 辅助列；互斥分桶以 ops_status + lifecycle 为准（见资源构成设计 §5）
  */
 
 import { relations } from "drizzle-orm"
@@ -39,7 +45,6 @@ import {
   dataCenter,
   gpuCardType,
   onboardingBatch,
-  resourcePoolBinding,
   supplier,
   supplierDevice,
   supplierDeviceChangeLog,
@@ -57,69 +62,6 @@ const dashboardTimestamps = {
     .defaultNow()
     .$onUpdate(() => new Date())
     .notNull(),
-}
-
-/**
- * 大盘资源池 code（六池）
- *
- * 写入 `pool_binding_history.pool_code`、`resource_pool_* .pool_code`、
- * `device_*_snapshot.pool_codes[]` 等字段；与 overview `resolveDevicePoolMemberships` 一致。
- *
- * | code | 大盘展示 | 前端 Mock key | 说明 |
- * |------|----------|---------------|------|
- * | elastic_service | 弹性服务 | platform | 闲时弹性调度主力池；Snapshot 饼图按期末在线 GPU 卡数 |
- * | bare_metal | 裸金属 | dedicated | 裸金属/独占池；可与 elastic_service 双池重叠 |
- * | pending_shelving | 待上架 | inference | 待接入/待上架设备聚合（非 IDC 部署链 pending_shelving） |
- * | offline_delivery | 线下交付 | training | 线下裸金属交付 ops 池 |
- * | internal_standby | 内部占用 | standby | 内部测试、hold 等占用池 |
- * | maintenance | 维护中 | maintenance | Snapshot 计卡数；Period 台时/卡时展示 —（§3.4.5） |
- */
-export const DASHBOARD_POOL_CODES = [
-  "elastic_service",
-  "bare_metal",
-  "pending_shelving",
-  "offline_delivery",
-  "internal_standby",
-  "maintenance",
-] as const
-
-export type DashboardPoolCode = (typeof DASHBOARD_POOL_CODES)[number]
-
-/** 资源池 code → 中文名 / Mock key / 口径说明 */
-export const DASHBOARD_POOL_CODE_META: Record<
-  DashboardPoolCode,
-  { label: string; mockKey: string; description: string }
-> = {
-  elastic_service: {
-    label: "弹性服务",
-    mockKey: "platform",
-    description: "闲时弹性调度主力资源池；Period 主值为区间累计卡时",
-  },
-  bare_metal: {
-    label: "裸金属",
-    mockKey: "dedicated",
-    description: "裸金属/网关代理池；允许与弹性池双池重叠计入",
-  },
-  pending_shelving: {
-    label: "待上架",
-    mockKey: "inference",
-    description: "待接入/待上架聚合；CRM 域对应 lifecycle_status=待接入",
-  },
-  offline_delivery: {
-    label: "线下交付",
-    mockKey: "training",
-    description: "线下裸金属交付中的设备归属池",
-  },
-  internal_standby: {
-    label: "内部占用",
-    mockKey: "standby",
-    description: "内部测试、internal_test_hold 等占用资源",
-  },
-  maintenance: {
-    label: "维护中",
-    mockKey: "maintenance",
-    description: "维护中设备；Snapshot 计 GPU 卡数，Period 不计供应台时/卡时",
-  },
 }
 
 /**
@@ -280,9 +222,10 @@ export type DashboardBatchBoundaryChangeAction =
 // ---------------------------------------------------------------------------
 
 /**
- * 设备生命周期变更事件（由 supplier_device_change_log / entity_state_transition_log 清洗）
- * 用于区间内 stage_throughput、avg_dwell_time 回放。
- * event_kind=batch_boundary 的行不参与 lifecycle 聚合（§2.5 方案 A）。
+ * 设备生命周期变更事件（由 supplier_device_change_log 清洗，可选 entity_state_transition_log）
+ * 消费方：LifecycleFlowCard Period（stage_throughput、avg_dwell_time）。
+ * **不** 用于 resourceComposition 实体 Period 卡时（实体源为 device_*_snapshot，见 Period 卡时专篇 §4）。
+ * event_kind=batch_boundary 不参与 lifecycle 聚合（period-analytics §2.5）。
  */
 export const deviceLifecycleEvent = pgTable(
   "device_lifecycle_event",
@@ -335,45 +278,9 @@ export const deviceLifecycleEvent = pgTable(
 )
 
 /**
- * 设备池归属历史（SCD Type 2）
- * 支撑池净增、台时/卡时按池回放；effective_to IS NULL 表示当前有效。
- */
-export const poolBindingHistory = pgTable(
-  "pool_binding_history",
-  {
-    id: text("id").primaryKey(),
-    supplierDeviceId: text("supplier_device_id")
-      .notNull()
-      .references(() => supplierDevice.id, { onDelete: "cascade" }),
-    poolCode: varchar("pool_code", { length: 64 }).notNull(),
-    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
-    effectiveTo: timestamp("effective_to", { withTimezone: true }),
-    sourceBindingId: text("source_binding_id").references(() => resourcePoolBinding.id, {
-      onDelete: "set null",
-    }),
-    /** 划入/划出/重绑等业务原因 */
-    changeReason: varchar("change_reason", { length: 64 }),
-    payload: jsonb("payload"),
-    ...dashboardTimestamps,
-  },
-  (table) => [
-    index("pool_binding_history_device_pool_from_idx").on(
-      table.supplierDeviceId,
-      table.poolCode,
-      table.effectiveFrom,
-    ),
-    index("pool_binding_history_pool_effective_idx").on(
-      table.poolCode,
-      table.effectiveFrom,
-      table.effectiveTo,
-    ),
-    index("pool_binding_history_effective_from_idx").on(table.effectiveFrom),
-  ],
-)
-
-/**
  * 设备日快照（自然日桶，Asia/Shanghai 日界）
- * 一行 = 某自然日结束截面 + 该日在线时长（供日粒度台时/卡时聚合）。
+ * ETL 源：supplier_device 主数据（device_inventory / 扫描），非 change_log。
+ * Period：resourceComposition 实体扇区日粒度卡时/台时积分（classifyDeviceExclusiveBucket）。
  */
 export const deviceDailySnapshot = pgTable(
   "device_daily_snapshot",
@@ -396,11 +303,11 @@ export const deviceDailySnapshot = pgTable(
     lifecycleStatus: varchar("lifecycle_status", { length: 32 }).notNull(),
     opsStatus: varchar("ops_status", { length: 64 }).notNull(),
     inMaintenance: boolean("in_maintenance").notNull().default(false),
-    /** 日末是否满足在线判定（§3.4.5） */
+    /** 日末是否满足在线判定（辅助；实体卡时默认按状态停留时长，见 Period 卡时专篇 §8.4） */
     isOnlineAtEnd: boolean("is_online_at_end").notNull().default(false),
-    /** 该自然日内在线时长，0~24，用于 machine_hours / card_hours 聚合 */
+    /** 该自然日内在线时长 0~24（可选权重；非唯一卡时口径） */
     onlineHours: durationHours("online_hours").notNull().default("0"),
-    /** 日末池归属；双池设备可含多个 pool_code */
+    /** 日末池 code 列表（辅助）；分桶以 ops_status 为准 */
     poolCodes: jsonb("pool_codes").$type<string[]>().notNull().default([]),
     idcCode: varchar("idc_code", { length: 64 }),
     idcRegion: varchar("idc_region", { length: 64 }),
@@ -429,7 +336,7 @@ export const deviceDailySnapshot = pgTable(
 
 /**
  * 设备小时快照（整点小时桶 [h:00, h+1:00)）
- * Snapshot API 可读最近一条 hour 快照作为 as_of 近似截面。
+ * ETL 源：主数据（同 device_daily_snapshot）。Period hourly 实体卡时积分；Snapshot 可选 as_of 近似。
  */
 export const deviceHourlySnapshot = pgTable(
   "device_hourly_snapshot",
@@ -475,87 +382,6 @@ export const deviceHourlySnapshot = pgTable(
       table.snapshotHour,
     ),
     index("device_hourly_snapshot_gpu_card_type_hour_idx").on(
-      table.gpuCardTypeId,
-      table.snapshotHour,
-    ),
-  ],
-)
-
-/**
- * 设备 × 池 × 日 明细（可选加速表）
- * 双池重叠时同一设备可有多行；供 resource_pool_daily 精确聚合台时/卡时。
- */
-export const devicePoolDailySnapshot = pgTable(
-  "device_pool_daily_snapshot",
-  {
-    id: text("id").primaryKey(),
-    snapshotDate: date("snapshot_date").notNull(),
-    supplierDeviceId: text("supplier_device_id")
-      .notNull()
-      .references(() => supplierDevice.id, { onDelete: "cascade" }),
-    poolCode: varchar("pool_code", { length: 64 }).notNull(),
-    gpuCardTypeId: text("gpu_card_type_id")
-      .notNull()
-      .references(() => gpuCardType.id, { onDelete: "restrict" }),
-    gpuCount: integer("gpu_count").notNull(),
-    onlineHours: durationHours("online_hours").notNull().default("0"),
-    machineHours: durationHours("machine_hours").notNull().default("0"),
-    cardHours: durationHours("card_hours").notNull().default("0"),
-    etlBatchId: text("etl_batch_id"),
-    ...dashboardTimestamps,
-  },
-  (table) => [
-    uniqueIndex("device_pool_daily_snapshot_uk").on(
-      table.snapshotDate,
-      table.supplierDeviceId,
-      table.poolCode,
-    ),
-    index("device_pool_daily_snapshot_date_pool_idx").on(
-      table.snapshotDate,
-      table.poolCode,
-    ),
-    index("device_pool_daily_snapshot_pool_card_type_date_idx").on(
-      table.poolCode,
-      table.gpuCardTypeId,
-      table.snapshotDate,
-    ),
-  ],
-)
-
-/**
- * 设备 × 池 × 小时 明细（可选加速表）
- */
-export const devicePoolHourlySnapshot = pgTable(
-  "device_pool_hourly_snapshot",
-  {
-    id: text("id").primaryKey(),
-    snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
-    supplierDeviceId: text("supplier_device_id")
-      .notNull()
-      .references(() => supplierDevice.id, { onDelete: "cascade" }),
-    poolCode: varchar("pool_code", { length: 64 }).notNull(),
-    gpuCardTypeId: text("gpu_card_type_id")
-      .notNull()
-      .references(() => gpuCardType.id, { onDelete: "restrict" }),
-    gpuCount: integer("gpu_count").notNull(),
-    onlineHours: durationHours("online_hours").notNull().default("0"),
-    machineHours: durationHours("machine_hours").notNull().default("0"),
-    cardHours: durationHours("card_hours").notNull().default("0"),
-    etlBatchId: text("etl_batch_id"),
-    ...dashboardTimestamps,
-  },
-  (table) => [
-    uniqueIndex("device_pool_hourly_snapshot_uk").on(
-      table.snapshotHour,
-      table.supplierDeviceId,
-      table.poolCode,
-    ),
-    index("device_pool_hourly_snapshot_hour_pool_idx").on(
-      table.snapshotHour,
-      table.poolCode,
-    ),
-    index("device_pool_hourly_snapshot_pool_card_type_hour_idx").on(
-      table.poolCode,
       table.gpuCardTypeId,
       table.snapshotHour,
     ),
@@ -662,78 +488,6 @@ export const lifecycleStageHourly = pgTable(
   ],
 )
 
-/**
- * 资源池日汇总
- * 粒度：snapshot_date × pool_code × gpu_card_type_id
- * Period 饼图/外围主值 = SUM(card_hours)；Snapshot 读 online_gpu_cards_end。
- */
-export const resourcePoolDaily = pgTable(
-  "resource_pool_daily",
-  {
-    id: text("id").primaryKey(),
-    snapshotDate: date("snapshot_date").notNull(),
-    poolCode: varchar("pool_code", { length: 64 }).notNull(),
-    gpuCardTypeId: text("gpu_card_type_id")
-      .notNull()
-      .references(() => gpuCardType.id, { onDelete: "restrict" }),
-    /** 日末在线 GPU 卡数（Snapshot §3.4.3） */
-    onlineGpuCardsEnd: integer("online_gpu_cards_end").notNull().default(0),
-    /** 日末归属该池的设备台数 */
-    deviceCountEnd: integer("device_count_end").notNull().default(0),
-    /** 当日内累计台时（§3.4.4）；维护中池为 0 */
-    machineHours: durationHours("machine_hours").notNull().default("0"),
-    /** 当日内累计卡时（§3.4.4）；维护中池为 0 */
-    cardHours: durationHours("card_hours").notNull().default("0"),
-    onlineGpuCardsNetChange: integer("online_gpu_cards_net_change"),
-    cardHoursNetChange: durationHours("card_hours_net_change"),
-    etlBatchId: text("etl_batch_id"),
-    ...dashboardTimestamps,
-  },
-  (table) => [
-    uniqueIndex("resource_pool_daily_uk").on(
-      table.snapshotDate,
-      table.poolCode,
-      table.gpuCardTypeId,
-    ),
-    index("resource_pool_daily_date_pool_idx").on(table.snapshotDate, table.poolCode),
-    index("resource_pool_daily_pool_date_idx").on(table.poolCode, table.snapshotDate),
-    index("resource_pool_daily_card_type_date_idx").on(
-      table.gpuCardTypeId,
-      table.snapshotDate,
-    ),
-  ],
-)
-
-/** 资源池小时汇总 */
-export const resourcePoolHourly = pgTable(
-  "resource_pool_hourly",
-  {
-    id: text("id").primaryKey(),
-    snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
-    poolCode: varchar("pool_code", { length: 64 }).notNull(),
-    gpuCardTypeId: text("gpu_card_type_id")
-      .notNull()
-      .references(() => gpuCardType.id, { onDelete: "restrict" }),
-    onlineGpuCardsEnd: integer("online_gpu_cards_end").notNull().default(0),
-    deviceCountEnd: integer("device_count_end").notNull().default(0),
-    machineHours: durationHours("machine_hours").notNull().default("0"),
-    cardHours: durationHours("card_hours").notNull().default("0"),
-    onlineGpuCardsNetChange: integer("online_gpu_cards_net_change"),
-    cardHoursNetChange: durationHours("card_hours_net_change"),
-    etlBatchId: text("etl_batch_id"),
-    ...dashboardTimestamps,
-  },
-  (table) => [
-    uniqueIndex("resource_pool_hourly_uk").on(
-      table.snapshotHour,
-      table.poolCode,
-      table.gpuCardTypeId,
-    ),
-    index("resource_pool_hourly_hour_pool_idx").on(table.snapshotHour, table.poolCode),
-    index("resource_pool_hourly_pool_hour_idx").on(table.poolCode, table.snapshotHour),
-  ],
-)
-
 // ---------------------------------------------------------------------------
 // ETL 批次（跑批审计）
 // ---------------------------------------------------------------------------
@@ -795,17 +549,6 @@ export const deviceLifecycleEventRelations = relations(deviceLifecycleEvent, ({ 
   }),
 }))
 
-export const poolBindingHistoryRelations = relations(poolBindingHistory, ({ one }) => ({
-  supplierDevice: one(supplierDevice, {
-    fields: [poolBindingHistory.supplierDeviceId],
-    references: [supplierDevice.id],
-  }),
-  sourceBinding: one(resourcePoolBinding, {
-    fields: [poolBindingHistory.sourceBindingId],
-    references: [resourcePoolBinding.id],
-  }),
-}))
-
 export const deviceDailySnapshotRelations = relations(deviceDailySnapshot, ({ one }) => ({
   supplierDevice: one(supplierDevice, {
     fields: [deviceDailySnapshot.supplierDeviceId],
@@ -844,16 +587,3 @@ export const deviceHourlySnapshotRelations = relations(deviceHourlySnapshot, ({ 
   }),
 }))
 
-export const resourcePoolDailyRelations = relations(resourcePoolDaily, ({ one }) => ({
-  gpuCardType: one(gpuCardType, {
-    fields: [resourcePoolDaily.gpuCardTypeId],
-    references: [gpuCardType.id],
-  }),
-}))
-
-export const resourcePoolHourlyRelations = relations(resourcePoolHourly, ({ one }) => ({
-  gpuCardType: one(gpuCardType, {
-    fields: [resourcePoolHourly.gpuCardTypeId],
-    references: [gpuCardType.id],
-  }),
-}))

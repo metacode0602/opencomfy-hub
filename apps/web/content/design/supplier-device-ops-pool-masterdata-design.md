@@ -11,6 +11,7 @@
 - [supplier-device-import-schema.md](./supplier-device-import-schema.md)
 - [supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md) §3.4.5
 - [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — 大盘资源构成互斥分桶（优先于重叠池展示）
+- [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) — Period 资源构成卡时/台时（已确认；D1/D2 在 Period 路径的落地）
 - [supplier-overview-scenarios-from-zero.md](./supplier-overview-scenarios-from-zero.md)
 
 **关联实现**（确认后修改）：

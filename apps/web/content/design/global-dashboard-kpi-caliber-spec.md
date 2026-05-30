@@ -11,13 +11,14 @@
 
 **关联设计**：
 
-- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — **资源构成饼图（互斥分桶 + 计划虚拟量，权威）**
-- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)
+- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — **资源构成饼图（互斥分桶 + 计划虚拟量，Snapshot 权威）**
+- [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) — **Period 资源构成卡时/台时（已确认）**
+- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md) — Period 模式总纲（view/URL/生命周期/KPI）
 - [supplier-overview-scenarios-from-zero.md](./supplier-overview-scenarios-from-zero.md)
 - [datacenter-device-retire-design.md](./datacenter-device-retire-design.md)
 
 **文档性质**：字段定义 + 全量 KPI 计算公式（权威口径）  
-**版本**：v1.0（2026-05-29）
+**版本**：v1.1（2026-05-29）
 
 ---
 
@@ -528,7 +529,7 @@ stage.gpuCount = Σ metricGpuCount(d)   // 该阶段设备
 stage.deviceCount = COUNT(d)
 ```
 
-Period 扩展：`throughputDeviceCount` = 期内进入该阶段的设备台数（change_log replay）。
+Period 扩展：`throughputDeviceCount` = 期内进入该阶段的设备台数（`device_lifecycle_event` / change_log ETL，**仅生命周期漏斗**，非资源构成 Period）。
 
 ### 5.2 资源构成 / 资源池分布 — `resourceComposition`（权威）
 
@@ -556,16 +557,23 @@ retiring_pipeline       = aggregateRetirePipelinePending(device_retire 进行中
 
 `kpis.pendingAccess`（修订）= `mergeKpiMetric(实体待接入, pending_access_pipeline)`。
 
-#### 5.2.2 `resourceComposition`（Period v1.0）
+#### 5.2.2 `resourceComposition`（Period）
 
-| 字段 | 说明 |
-|------|------|
-| `displayUnit` | `gpu_cards`（期末截面） |
-| 实体扇区 | `change_log` 回放 `periodEnd` / `periodStart` → 互斥分桶 |
-| 计划虚拟扇区 | **期末截面**：`periodEnd` 时刻 pipeline 缺口（v1.0 不做区间内批次事件回放，见资源构成设计 §8.2.2） |
-| `netChangeLabel` | 各扇区 `期末 − 期初` |
+> **权威**：[global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md)（已确认）。  
+> 本节 KPI 与资源构成 **分轨**：KPI Period 仍可不叠加计划管道（§2.1.5 场景文档）。
 
-#### 5.2.3 兼容别名 `resourcePools`（重叠口径，待废弃）
+| 字段 | 目标（专篇） | 现网过渡 |
+|------|-------------|----------|
+| `displayUnit` | `card_hours` | `gpu_cards`（期末截面） |
+| 实体扇区 | `device_*_snapshot` 状态停留积分 → 互斥分桶 | `change_log` 回放末态（待 M5 删除） |
+| 计划虚拟扇区 | `progress_event` 阶梯 → `cardHours` / `machineHours` | `periodEnd` pipeline 缺口截面 |
+| 饼图 `value` | `slice.cardHours` | `slice.gpuCount` |
+| `netChangeLabel` | 卡时净增（可选） | 各扇区 GPU 期末 − 期初 |
+| 代码 | `computePeriodResourceComposition()`，**不** 调 `getSnapshot()` 拼构成（专篇 §6） | 部分耦合 `getSnapshot` 辅助模块 |
+
+`supplier_device_change_log`：**仅** 运维变更审计与批次触达，**不** 作为实体扇区真源（专篇 §4）。
+
+#### 5.2.3 兼容别名 `resourcePools`（重叠口径，**废止 UI**）
 
 | 模式 | displayUnit | 切片值 |
 |------|-------------|--------|
@@ -679,4 +687,5 @@ status = ok | pending | abnormal   // 超期 planned_ready_at → abnormal
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-05-29 | 首版：明确 GPU 总卡数 vs 目标总卡数；全 9 KPI + 关联卡片口径 |
+| v1.1 | 2026-05-29 | §5.2.2 对齐 Period 卡时专篇；废止 change_log 实体构成；`resourcePools` 废止 UI |
 | v1.1 | 2026-05-29 | 实现：`gpu_total` 卡片展示库存+目标；作废 `cancelled`；Period 批次创建回放 |

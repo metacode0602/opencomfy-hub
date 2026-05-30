@@ -82,30 +82,6 @@ export type GlobalResourceCompositionPayload = {
   footnote: string
 }
 
-export type GlobalResourcePoolBreakdownSnapshot = {
-  cardType: string
-  onlineGpuCards: number
-}
-
-export type GlobalResourcePoolBreakdownPeriod = {
-  cardType: string
-  machineHours: number
-  cardHours: number
-}
-
-export type GlobalResourcePoolSlice = {
-  key: string
-  label: string
-  gpuCount: number
-  deviceCount: number
-  /** Period：区间卡时 */
-  cardHours?: number
-  machineHours?: number
-  netChangeLabel?: string
-  breakdownSnapshot?: GlobalResourcePoolBreakdownSnapshot[]
-  breakdownPeriod?: GlobalResourcePoolBreakdownPeriod[]
-}
-
 export type GlobalClusterStatusRow = {
   dataCenterId: string
   name: string
@@ -171,24 +147,12 @@ export type GlobalDashboardMeta = {
   comparePrevious?: boolean
 }
 
-export type GlobalResourcePoolsPayload = {
-  displayUnit: 'gpu_cards' | 'card_hours'
-  slices: GlobalResourcePoolSlice[]
-  dualPoolGpu: number
-  poolOccupancyGpu: number
-  centerPrimary: string
-  centerSecondary?: string
-  footnote: string
-}
-
 export type GlobalDashboardSnapshot = {
   meta: GlobalDashboardMeta
   kpis: GlobalKpiItem[]
   lifecycleFunnel: LifecycleFunnelStageDto[]
   /** 互斥资源构成（权威） */
   resourceComposition: GlobalResourceCompositionPayload
-  /** @deprecated 重叠池口径，兼容一期 */
-  resourcePools: GlobalResourcePoolsPayload
   clusters: GlobalClusterStatusRow[]
   discrepancies: GlobalDiscrepancyRow[]
   alerts: GlobalAlertRow[]

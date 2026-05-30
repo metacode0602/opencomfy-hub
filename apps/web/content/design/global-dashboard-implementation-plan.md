@@ -4,11 +4,13 @@
 **关联设计**：
 
 - [supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md) §5.4（资源总览读模型，**已部分落地**）
-- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)（时间段分析，**远期扩展**）
+- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)（Period 模式总纲：view/URL/生命周期/KPI）
+- [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md)（**Period 资源构成卡时，已确认**）
+- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（互斥资源构成 Snapshot + 扇区定义）
 - [supplier-lifecycle-product-plan.md](./supplier-lifecycle-product-plan.md)（产品定位）
 
 **文档性质**：实现方案（不涉及代码改动）  
-**版本**：v1.0（2026-05-23）
+**版本**：v1.1（2026-05-29）
 
 ---
 
@@ -58,8 +60,9 @@ flowchart TB
   BATCH[onboarding_batch + device_link] --> GAP[计划缺口 / 差异 / 待办]
   FAULT[fault_incident] --> ALERT[告警 / 异常 KPI]
   HOLD[internal_test_hold] --> SELL[可售扣减]
-  CHG[device_changelog commit] --> DEV
-  CHG --> INV
+  CHG[device_changelog commit] --> LOG[supplier_device_change_log 仅审计]
+  CHG --> BATCH[refreshBatchProgress / device_link]
+  INV[device_inventory commit] --> DEV
 ```
 
 **原则（R-OV1 ~ R-OV3）**：
@@ -160,11 +163,12 @@ type OverviewKpiMetric = {
 
 **P1 饼图**：互斥分桶 + 计划虚拟量（`resourceComposition`），非重叠两池。
 
-| 层级 | Snapshot | Period v1.0 |
+| 层级 | Snapshot | Period（目标，[卡时专篇](./global-dashboard-period-composition-card-hours-design.md)） |
 |------|----------|-------------|
-| **实体扇区** | `classifyDeviceExclusiveBucket` | 期末截面 replay |
-| **计划虚拟扇区** | `pending_access_pipeline` / `retiring_pipeline` | 期末 pipeline 缺口 |
-| **兼容** | `resourcePools` 重叠口径保留一期 | 旧卡时池图保留 |
+| **实体扇区** | `classifyDeviceExclusiveBucket` @ `supplier_device` | `device_*_snapshot` → **区间卡时** |
+| **计划虚拟扇区** | 当前 pipeline 缺口 | `progress_event` 阶梯 → **区间卡时** |
+| **现网过渡** | — | 期末 `gpu_cards` + change_log 实体回放（待 M5） |
+| **兼容** | — | ~~`resourcePools`~~ 已移除；**UI 只读** `resourceComposition` |
 
 **中心总计**：`denominator.gpuCount`（闭合分母），非「池占用重叠和」。
 
@@ -393,19 +397,24 @@ type GlobalDashboardSnapshot = {
 
 ---
 
-## 8. 与 Period 分析文档的关系
+## 8. 与 Period / 资源构成文档的关系
 
-[`global-dashboard-period-analytics.md`](./global-dashboard-period-analytics.md) 描述 **Snapshot + Period 双模式** 及 DWS 架构。本文 Snapshot 口径 **以 §5.4 为准**；Period 文档中的差异项如下：
+| 文档 | 职责 |
+|------|------|
+| **本文** | Snapshot 大盘 P1：KPI、生命周期、**resourceComposition 截面**、集群/差异/待办 |
+| [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md) | 三档 `view`、URL、生命周期 Period、KPI Period、DWS 总纲；§3.4.2–7 **已废止** |
+| [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) | 互斥扇区定义、Snapshot 构成、§14 批次事件 |
+| [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) | **Period 资源构成卡时/台时（已确认）**：主数据快照、progress_event、解耦 |
 
-| 主题 | Period 文档 | 本文 Snapshot 决策 |
-|------|-------------|-------------------|
-| 生命周期 | 9 段 `dim_lifecycle_stage` | **5 段 CRM**，与 overview 一致 |
-| 待上架 | `pending_shelving` | **`待接入`** CRM 状态 |
-| 资源池 | 6 个 `pool_code` | **2 池** bare_metal / elastic_service（§3.4.5） |
-| 差异四级 | 交付/部署/上架/可售 | **计划/触达/在线**（批次）；四级留 Period |
-| KPI delta | 环比/sparkline | P1 不实现；Period 接 `global_kpi_daily` |
+| 主题 | Period 总纲 / 旧叙述 | 当前决策 |
+|------|----------------------|----------|
+| 生命周期 | 9 段 IDC | **5 段 CRM** |
+| 资源池饼图 | 6 池重叠 / 两池卡时 | **互斥 `resourceComposition`** |
+| Period 构成主值 | 六池 `card_hours` + change_log | **专篇**：互斥扇区 `card_hours` + 主数据快照 |
+| `change_log` | 洗快照 / 回放实体 | **仅审计** + 生命周期 ETL + 批次进度 |
+| KPI delta | 环比/sparkline | Snapshot P1 可选；Period 接 `global_kpi_daily` |
 
-Period 模式应在 G5 启动，且 **Snapshot 期末值** 必须与本文 `getSnapshot` 在 `as_of = period_end` 时一致（见 period 文档 §7.3）。
+**一致性**：Period 各扇区 **期末 `gpuCount`** 应与 Snapshot `resourceComposition` 同 key 对齐（专篇 PC-T7）。Period **卡时主值** 不与 Snapshot 卡数直接对比。
 
 ---
 
@@ -427,3 +436,4 @@ Period 模式应在 G5 启动，且 **Snapshot 期末值** 必须与本文 `getS
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-05-23 | 初稿：基于已实现的 `supplier.overview.getStats` 对齐 Global 大盘 Snapshot 实现方案 |
+| v1.1 | 2026-05-29 | §3.3/§8 对齐 Period 卡时专篇；D2 变更表不写 `supplier_device` |

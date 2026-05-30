@@ -1,7 +1,6 @@
 import { db } from '@/lib/db'
-import { normalizeCardKey, OVERVIEW_POOL_FOOTNOTE } from '@/lib/server/aggregation/overview-aggregation'
+import { normalizeCardKey } from '@/lib/server/aggregation/overview-aggregation'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
-import { resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   GlobalAlertLevel,
@@ -83,22 +82,6 @@ function discrepancyStatus(
   if (gap <= 0) return 'ok'
   if (plannedReadyAt && plannedReadyAt.getTime() < now) return 'abnormal'
   return 'pending'
-}
-
-function poolBreakdownSnapshot(
-  inventoryRows: Array<{ cardTypeName: string; elasticServiceGpu: number; bareMetalPoolGpu: number }>,
-  field: 'elasticServiceGpu' | 'bareMetalPoolGpu',
-) {
-  const map = new Map<string, number>()
-  for (const row of inventoryRows) {
-    const gpu = field === 'elasticServiceGpu' ? row.elasticServiceGpu : row.bareMetalPoolGpu
-    if (gpu <= 0) continue
-    map.set(row.cardTypeName, (map.get(row.cardTypeName) ?? 0) + gpu)
-  }
-  return Array.from(map.entries()).map(([cardType, onlineGpuCards]) => ({
-    cardType,
-    onlineGpuCards,
-  }))
 }
 
 function buildKpis(
@@ -260,19 +243,6 @@ export const globalOpsDataAccess = {
         ? 1
         : 0
       : pendingAccessDcIds.size
-
-    const dualPoolGpu = stats.supplierRows.reduce((s, r) => s + r.dualPoolGpu, 0)
-    const elasticGpu = stats.supplierRows.reduce((s, r) => s + r.elasticServiceGpu, 0)
-    const bareMetalGpu = stats.supplierRows.reduce((s, r) => s + r.bareMetalPoolGpu, 0)
-    const poolOccupancyGpu = elasticGpu + bareMetalGpu
-
-    let elasticDevices = 0
-    let bareMetalDevices = 0
-    for (const d of filteredDevices) {
-      const memberships = resolveDevicePoolMemberships(d.opsStatus)
-      if (memberships.has('elastic_service')) elasticDevices += 1
-      if (memberships.has('bare_metal')) bareMetalDevices += 1
-    }
 
     const dcRows = await db
       .select({
@@ -468,30 +438,6 @@ export const globalOpsDataAccess = {
       ),
       lifecycleFunnel: stats.lifecycleFunnel,
       resourceComposition: stats.resourceComposition,
-      resourcePools: {
-        displayUnit: 'gpu_cards',
-        slices: [
-          {
-            key: 'elastic_service',
-            label: '弹性用量池',
-            gpuCount: elasticGpu,
-            deviceCount: elasticDevices,
-            breakdownSnapshot: poolBreakdownSnapshot(stats.inventoryRows, 'elasticServiceGpu'),
-          },
-          {
-            key: 'bare_metal',
-            label: '裸金属池',
-            gpuCount: bareMetalGpu,
-            deviceCount: bareMetalDevices,
-            breakdownSnapshot: poolBreakdownSnapshot(stats.inventoryRows, 'bareMetalPoolGpu'),
-          },
-        ],
-        dualPoolGpu,
-        poolOccupancyGpu,
-        centerPrimary: `${poolOccupancyGpu.toLocaleString()} 卡`,
-        centerSecondary: `双池重叠 ${dualPoolGpu.toLocaleString()} 卡`,
-        footnote: OVERVIEW_POOL_FOOTNOTE,
-      },
       clusters,
       discrepancies,
       alerts,

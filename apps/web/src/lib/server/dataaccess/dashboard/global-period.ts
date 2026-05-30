@@ -5,7 +5,6 @@ import {
   buildGpuTargetTrend,
   LIFECYCLE_ORDER,
   normalizeCardKey,
-  OVERVIEW_POOL_FOOTNOTE,
 } from '@/lib/server/aggregation/overview-aggregation'
 import {
   computePipelineGapsAt,
@@ -18,7 +17,7 @@ import {
   compositionGpuDeltas,
 } from '@/lib/server/aggregation/resource-composition-aggregation'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
-import { isDualPool, resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
+import { resolveDevicePoolMemberships } from '@/lib/supplier/device-pool-membership'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   GlobalDashboardFilters,
@@ -28,13 +27,11 @@ import type {
   GlobalKpiTrendPoint,
   GlobalLifecycleStagePeriod,
   GlobalPeriodInput,
-  GlobalResourcePoolSlice,
 } from '@/lib/types/global-dashboard-api'
 import type { OverviewFiltersInput } from '@/lib/types/supplier-overview-api'
 import {
   faultIncident,
   gpuCardType,
-  resourcePoolBinding,
   supplierDevice,
   supplierDeviceChangeLog,
 } from '@workspace/db/schema'
@@ -43,7 +40,6 @@ import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm'
 import { globalOpsDataAccess } from './global-ops'
 import { loadGpuTargetPlanBatches } from './gpu-target'
 import {
-  bucketDurationHours,
   buildPeriodBuckets,
   formatDateKey,
   type PeriodBucket,
@@ -72,8 +68,6 @@ type ReplayState = {
   inMaintenance: boolean
 }
 
-type PoolBinding = { poolCode: string | null; workloadProfile: string }
-
 type Aggregates = {
   totalGpu: number
   totalDevices: number
@@ -84,12 +78,9 @@ type Aggregates = {
   retiring: { gpu: number; devices: number }
   elasticGpu: number
   bareMetalGpu: number
-  dualPoolGpu: number
   internalTestGpu: number
   pendingAccessDcIds: Set<string>
   lifecycle: Record<string, { gpu: number; devices: number }>
-  poolCardHours: { elastic: number; bareMetal: number; machineHoursElastic: number; machineHoursBare: number }
-  poolBreakdown: Map<string, { elastic: number; bareMetal: number; machineHours: number; cardHours: number }>
 }
 
 function toOverviewFilters(filters: GlobalDashboardFilters): OverviewFiltersInput {
@@ -134,21 +125,16 @@ function emptyAggregates(): Aggregates {
     retiring: { gpu: 0, devices: 0 },
     elasticGpu: 0,
     bareMetalGpu: 0,
-    dualPoolGpu: 0,
     internalTestGpu: 0,
     pendingAccessDcIds: new Set(),
     lifecycle,
-    poolCardHours: { elastic: 0, bareMetal: 0, machineHoursElastic: 0, machineHoursBare: 0 },
-    poolBreakdown: new Map(),
   }
 }
 
 function aggregateAt(
   devices: DeviceBase[],
   states: Map<string, ReplayState>,
-  bindingsByDevice: Map<string, PoolBinding[]>,
   internalTestGpu: number,
-  bucketHours: number,
 ): Aggregates {
   const agg = emptyAggregates()
   agg.internalTestGpu = internalTestGpu
@@ -160,7 +146,6 @@ function aggregateAt(
     agg.totalDevices += 1
     agg.totalGpu += gpu
 
-    const bindings = bindingsByDevice.get(d.id) ?? []
     const memberships = resolveDevicePoolMemberships(s.opsStatus)
 
     if (LIFECYCLE_ORDER.includes(s.lifecycleStatus as (typeof LIFECYCLE_ORDER)[number])) {
@@ -191,43 +176,8 @@ function aggregateAt(
       agg.online.devices += 1
     }
 
-    if (memberships.has('elastic_service')) {
-      agg.elasticGpu += gpu
-      if (isOnlineState(s)) {
-        agg.poolCardHours.elastic += gpu * bucketHours
-        agg.poolCardHours.machineHoursElastic += bucketHours
-      }
-    }
-    if (memberships.has('bare_metal')) {
-      agg.bareMetalGpu += gpu
-      if (isOnlineState(s)) {
-        agg.poolCardHours.bareMetal += gpu * bucketHours
-        agg.poolCardHours.machineHoursBare += bucketHours
-      }
-    }
-    if (isDualPool(memberships)) agg.dualPoolGpu += gpu
-
-    if (isOnlineState(s) && (memberships.has('elastic_service') || memberships.has('bare_metal'))) {
-      const bd = agg.poolBreakdown.get(d.cardTypeName) ?? {
-        elastic: 0,
-        bareMetal: 0,
-        machineHours: 0,
-        cardHours: 0,
-      }
-      if (memberships.has('elastic_service')) {
-        bd.elastic += gpu
-        bd.cardHours += gpu * bucketHours
-        bd.machineHours += bucketHours
-      }
-      if (memberships.has('bare_metal')) {
-        bd.bareMetal += gpu
-        if (!memberships.has('elastic_service')) {
-          bd.cardHours += gpu * bucketHours
-          bd.machineHours += bucketHours
-        }
-      }
-      agg.poolBreakdown.set(d.cardTypeName, bd)
-    }
+    if (memberships.has('elastic_service')) agg.elasticGpu += gpu
+    if (memberships.has('bare_metal')) agg.bareMetalGpu += gpu
   }
 
   return agg
@@ -424,25 +374,7 @@ async function loadReplayContext(filters: GlobalDashboardFilters) {
     }))
     .filter((d) => matchesDeviceFilters(d, filters))
 
-  const deviceIds = devices.map((d) => d.id)
-
-  const poolBindingRows = await db
-    .select({
-      deviceId: resourcePoolBinding.supplierDeviceId,
-      poolCode: resourcePoolBinding.poolCode,
-      workloadProfile: resourcePoolBinding.workloadProfile,
-    })
-    .from(resourcePoolBinding)
-
-  const bindingsByDevice = new Map<string, PoolBinding[]>()
-  for (const b of poolBindingRows) {
-    if (!deviceIds.includes(b.deviceId)) continue
-    const list = bindingsByDevice.get(b.deviceId) ?? []
-    list.push({ poolCode: b.poolCode, workloadProfile: b.workloadProfile })
-    bindingsByDevice.set(b.deviceId, list)
-  }
-
-  return { devices, bindingsByDevice }
+  return { devices }
 }
 
 async function loadChangeLogs(deviceIds: string[], beforeEnd: Date) {
@@ -619,7 +551,6 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
   const granularity: PeriodGranularity = input.granularity
   const view: 'daily' | 'hourly' = granularity === 'day' ? 'daily' : 'hourly'
   const buckets = buildPeriodBuckets(granularity, periodStart, periodEnd)
-  const bucketH = bucketDurationHours(granularity)
 
   const overviewStats = await supplierOverviewDataAccess.getStats(toOverviewFilters(filters))
   const internalTestGpu = overviewStats.kpis.internalTestGpu
@@ -642,15 +573,15 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
   )
   const gpuTargetTrend = buildGpuTargetTrend(targetPlanBatches, buckets, targetFilters)
 
-  const { devices, bindingsByDevice } = await loadReplayContext(filters)
+  const { devices } = await loadReplayContext(filters)
   const deviceIds = devices.map((d) => d.id)
   const allLogs = await loadChangeLogs(deviceIds, periodEnd)
 
   const statesAtStart = buildInitialStates(devices, allLogs, new Date(periodStart.getTime() - 1))
   const statesAtEnd = applyLogsUntil(statesAtStart, allLogs, periodEnd)
 
-  const aggStart = aggregateAt(devices, statesAtStart, bindingsByDevice, internalTestGpu, 0)
-  const aggEnd = aggregateAt(devices, statesAtEnd, bindingsByDevice, internalTestGpu, 0)
+  const aggStart = aggregateAt(devices, statesAtStart, internalTestGpu)
+  const aggEnd = aggregateAt(devices, statesAtEnd, internalTestGpu)
 
   const throughput = computeLifecycleThroughput(allLogs, periodStart, periodEnd)
 
@@ -684,7 +615,7 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
     trends[key] = []
     for (const bucket of buckets) {
       const states = applyLogsUntil(statesAtStart, allLogs, bucket.end)
-      const agg = aggregateAt(devices, states, bindingsByDevice, internalTestGpu, 0)
+      const agg = aggregateAt(devices, states, internalTestGpu)
       let value = 0
       switch (key) {
         case 'gpu_total':
@@ -756,70 +687,6 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
       secondaryValue: `${tp} 台`,
     }
   })
-
-  let totalCardHours = 0
-  const poolSlices: GlobalResourcePoolSlice[] = [
-    {
-      key: 'elastic_service',
-      label: '弹性用量池',
-      gpuCount: 0,
-      deviceCount: 0,
-      cardHours: 0,
-      machineHours: 0,
-    },
-    {
-      key: 'bare_metal',
-      label: '裸金属池',
-      gpuCount: 0,
-      deviceCount: 0,
-      cardHours: 0,
-      machineHours: 0,
-    },
-  ]
-
-  const breakdownAcc = new Map<string, { machineHours: number; cardHours: number }>()
-
-  for (const bucket of buckets) {
-    const states = applyLogsUntil(statesAtStart, allLogs, bucket.end)
-    const agg = aggregateAt(devices, states, bindingsByDevice, internalTestGpu, bucketH)
-    poolSlices[0]!.cardHours! += agg.poolCardHours.elastic
-    poolSlices[0]!.machineHours! += agg.poolCardHours.machineHoursElastic
-    poolSlices[1]!.cardHours! += agg.poolCardHours.bareMetal
-    poolSlices[1]!.machineHours! += agg.poolCardHours.machineHoursBare
-    for (const [cardType, v] of agg.poolBreakdown) {
-      const cur = breakdownAcc.get(cardType) ?? { machineHours: 0, cardHours: 0 }
-      cur.machineHours += v.machineHours
-      cur.cardHours += v.cardHours
-      breakdownAcc.set(cardType, cur)
-    }
-  }
-
-  totalCardHours = (poolSlices[0]!.cardHours ?? 0) + (poolSlices[1]!.cardHours ?? 0)
-
-  const endStates = applyLogsUntil(statesAtStart, allLogs, periodEnd)
-  const endPoolAgg = aggregateAt(devices, endStates, bindingsByDevice, internalTestGpu, 0)
-  poolSlices[0]!.gpuCount = endPoolAgg.elasticGpu
-  poolSlices[1]!.gpuCount = endPoolAgg.bareMetalGpu
-
-  const breakdownPeriod = Array.from(breakdownAcc.entries()).map(([cardType, v]) => ({
-    cardType,
-    machineHours: Math.round(v.machineHours * 10) / 10,
-    cardHours: Math.round(v.cardHours),
-  }))
-
-  poolSlices[0]!.breakdownPeriod = breakdownPeriod
-  poolSlices[1]!.breakdownPeriod = breakdownPeriod
-
-  const startCardHours =
-    (aggStart.poolCardHours.elastic + aggStart.poolCardHours.bareMetal) * buckets.length * bucketH
-  poolSlices[0]!.netChangeLabel = formatNetChange(
-    Math.round((poolSlices[0]!.cardHours ?? 0) - aggStart.poolCardHours.elastic * buckets.length * bucketH),
-    '卡时',
-  ).label
-  poolSlices[1]!.netChangeLabel = formatNetChange(
-    Math.round((poolSlices[1]!.cardHours ?? 0) - aggStart.poolCardHours.bareMetal * buckets.length * bucketH),
-    '卡时',
-  ).label
 
   let compare: GlobalDashboardPeriod['compare']
   if (input.comparePrevious) {
@@ -911,15 +778,6 @@ export async function computeGlobalPeriod(input: GlobalPeriodInput): Promise<Glo
     kpis,
     lifecycleFunnel,
     resourceComposition,
-    resourcePools: {
-      displayUnit: 'card_hours',
-      slices: poolSlices,
-      dualPoolGpu: endPoolAgg.dualPoolGpu,
-      poolOccupancyGpu: totalCardHours,
-      centerPrimary: `${Math.round(totalCardHours).toLocaleString()} 卡时`,
-      centerSecondary: `净增 ${formatNetChange(totalCardHours - startCardHours, '卡时').label}`,
-      footnote: OVERVIEW_POOL_FOOTNOTE,
-    },
     clusters: snapshot.clusters,
     discrepancies: snapshot.discrepancies,
     alerts: periodAlerts,

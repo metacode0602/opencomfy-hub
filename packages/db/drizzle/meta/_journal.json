@@ -393,6 +393,13 @@
       "when": 1780017625060,
       "tag": "0057_yielding_pestilence",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1780101283869,
+      "tag": "0058_drop_legacy_dashboard_six_pool",
+      "breakpoints": true
     }
   ]
 }
