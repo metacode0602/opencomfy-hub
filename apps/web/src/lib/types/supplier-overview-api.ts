@@ -146,3 +146,53 @@ export type OverviewFilterOptionsResult = {
   cardTypes: string[]
   poolCodes: string[]
 }
+
+export type GpuResourceTrendRange = '24h' | '7d' | '30d'
+
+export type GpuResourceTrendRegionPoint = {
+  region: string
+  dataCenterName: string | null
+  totalCount: number
+  usedCount: number
+}
+
+export type GpuResourceTrendPoint = {
+  timestamp: string
+  label: string
+  totalCount: number
+  usedCount: number
+  regions: GpuResourceTrendRegionPoint[]
+}
+
+export type GpuResourceTrendResult = {
+  points: GpuResourceTrendPoint[]
+  meta: {
+    range: GpuResourceTrendRange
+    startTime: string
+    endTime: string | null
+    regionCount: number
+    gpuNameCount: number
+  }
+}
+
+export type GpuRegionUsageRow = {
+  region: string
+  dataCenterName: string | null
+  gpuName: string | null
+  totalGpuCount: number
+  totalDeviceCount: number
+  elasticUsedCount: number
+  spotUsedCount: number
+  idleCount: number
+}
+
+export type GpuRegionOverviewResult = {
+  rows: GpuRegionUsageRow[]
+  meta: {
+    regionCount: number
+    gpuNameCount: number
+  }
+}
+
+/** 开放平台 /admin/statistics/data_count 汇总（source / gpu 各 type 计数之和） */
+export type AdminStatisticsDataCountResult = OverviewKpiMetric

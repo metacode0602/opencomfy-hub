@@ -74,7 +74,8 @@ import {
   faultIncidentCreateSchema,
   faultIncidentListSchema,
 } from '@/lib/server/routers/supplier/fault-incident-schemas'
-import { overviewFiltersSchema } from '@/lib/server/routers/supplier/overview-schemas'
+import { overviewFiltersSchema, gpuResourceTrendSchema } from '@/lib/server/routers/supplier/overview-schemas'
+import { gpuResourceStatisticsDataAccess } from '@/lib/server/dataaccess/supplier/gpu-resource-statistics'
 import { supplierListSchema, supplierCreateSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
 import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter-create-schemas'
 import {
@@ -1167,6 +1168,37 @@ export const supplierRouter = createTRPCRouter({
         mapImportError(e)
       }
     }),
+
+    getGpuResourceTrend: protectedProcedure
+      .input(gpuResourceTrendSchema)
+      .query(async ({ input }) => {
+        try {
+          return await gpuResourceStatisticsDataAccess.getTrend(input.range)
+        } catch (e) {
+          supplierError('router.overview.getGpuResourceTrend', 'failed', e, input)
+          mapImportError(e)
+        }
+      }),
+
+    getGpuRegionOverview: protectedProcedure.query(async () => {
+      try {
+        return await gpuResourceStatisticsDataAccess.getRegionOverview()
+      } catch (e) {
+        supplierError('router.overview.getGpuRegionOverview', 'failed', e)
+        mapImportError(e)
+      }
+    }),
+
+    getAdminStatisticsDataCount: protectedProcedure
+      .input(overviewFiltersSchema.pick({ region: true }))
+      .query(async ({ input }) => {
+        try {
+          return await gpuResourceStatisticsDataAccess.getAdminStatisticsDataCount(input.region)
+        } catch (e) {
+          supplierError('router.overview.getAdminStatisticsDataCount', 'failed', e, input)
+          mapImportError(e)
+        }
+      }),
   }),
 
   platformPricing: createTRPCRouter({
