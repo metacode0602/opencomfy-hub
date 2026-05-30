@@ -9,10 +9,9 @@ import { computeBillingPeriodCost, collectCostTenantPlatformIds } from './comput
 import { computeBillingPeriodIncome } from './compute-billing-period-income'
 import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { FinanceError } from './errors'
-import { importExcelFile, getImportSlotStatuses } from './import'
+import { getImportSlotStatuses } from './import-slot-status'
 import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
-import { purgeBillingPeriodArtifacts } from './purge'
 import {
   ensureRegenerateCostWindow,
   purgeCostImportsForRegenerate,
@@ -42,6 +41,14 @@ import { customerFullNamesByTenantIds } from './income-customer-enrich'
 import { validateSingleIncome } from './validate-single-income'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
+
+async function financeImport() {
+  return import('./import')
+}
+
+async function financePurge() {
+  return import('./purge')
+}
 
 export type BillingPeriodDto = {
   id: string
@@ -183,7 +190,12 @@ export const financeBillingPeriodsDataAccess = {
     }
   },
 
-  importExcelFile,
+  async importExcelFile(
+    ...args: Parameters<(typeof import('./import'))['importExcelFile']>
+  ) {
+    const { importExcelFile } = await financeImport()
+    return importExcelFile(...args)
+  },
   getImportSlotStatuses,
   computeBillingPeriodCost,
   computeBillingPeriodIncome,
@@ -442,6 +454,7 @@ export const financeBillingPeriodsDataAccess = {
     if (period.status === 'void') {
       throw new FinanceError('CONFLICT', '作废账期不可重新生成')
     }
+    const { purgeBillingPeriodArtifacts } = await financePurge()
     await purgeBillingPeriodArtifacts({
       billingPeriodId: periodId,
       scope: 'full',
@@ -511,6 +524,7 @@ export const financeBillingPeriodsDataAccess = {
     if (period.status !== 'published' && period.status !== 'adjusted') {
       throw new FinanceError('PRECONDITION_FAILED', '仅已发布账期可作废')
     }
+    const { purgeBillingPeriodArtifacts } = await financePurge()
     await purgeBillingPeriodArtifacts({
       billingPeriodId: periodId,
       scope: 'full',

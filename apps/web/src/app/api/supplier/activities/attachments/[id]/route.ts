@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/lib/auth'
-import { supplierActivityDataAccess } from '@/lib/server/dataaccess/supplier/supplier-activity'
 
 export async function GET(
   _req: Request,
@@ -13,7 +12,10 @@ export async function GET(
   }
 
   const { id } = await params
-  const attachment = await supplierActivityDataAccess.getAttachmentForDownload(id)
+  const { getSupplierActivityAttachmentForDownload } = await import(
+    '@/lib/server/dataaccess/supplier/supplier-activity-attachment-download'
+  )
+  const attachment = await getSupplierActivityAttachmentForDownload(id)
   if (!attachment) {
     return NextResponse.json({ error: '附件不存在' }, { status: 404 })
   }

@@ -31,19 +31,27 @@ import {
   buildMarkedErrorWorkbookBuffer,
   summarizeImportErrors,
 } from './import-errors'
-import {
-  deleteStorageFile,
-  saveImportErrorReport,
-  saveImportSourceFile,
-} from './import-storage'
 import { financeError, financeLog } from './logger'
+import { getImportSlotStatuses } from './import-slot-status'
 import { appendOperationLog, newId } from './operation-log'
-import { purgeBillingPeriodArtifacts } from './purge'
 import { listTenantBillWindows, syncTenantBillWindowsForPeriod } from './tenant-bill-windows'
 import {
   persistBatchErrorReport,
   validateCrossFileImports,
 } from './validate-import'
+
+async function importStorageLocal() {
+  return import('./import-storage-local')
+}
+
+async function purgeBillingPeriodArtifacts(
+  ...args: Parameters<
+    (typeof import('./purge'))['purgeBillingPeriodArtifacts']
+  >
+) {
+  const { purgeBillingPeriodArtifacts: purge } = await import('./purge')
+  return purge(...args)
+}
 
 function parseDateCell(raw: string | null): Date | null {
   if (!raw) return null
@@ -336,6 +344,7 @@ async function recordParseFailure(input: {
     sheet: input.sheet,
     errors: input.errors,
   })
+  const { saveImportErrorReport } = await importStorageLocal()
   const errorReportPath = await saveImportErrorReport({
     billingPeriodId: input.billingPeriodId,
     fileType: input.fileType,
@@ -414,6 +423,7 @@ export async function importExcelFile(input: {
   const sheet = parseWorkbookDetailed(input.buffer, input.fileName)
   const batchId = newId()
   const fileSha256 = sha256Hex(input.buffer)
+  const { saveImportSourceFile } = await importStorageLocal()
   const storagePath = await saveImportSourceFile({
     billingPeriodId: input.billingPeriodId,
     fileType: input.fileType,
@@ -567,51 +577,9 @@ export async function importExcelFile(input: {
       periodStatus,
     }
   } catch (e) {
+    const { deleteStorageFile } = await importStorageLocal()
     await deleteStorageFile(storagePath)
     financeError('import', 'failed', e, { periodId: input.billingPeriodId })
     throw e
-  }
-}
-
-export async function getImportSlotStatuses(periodId: string) {
-  const batches = await db.query.billingPeriodImportBatch.findMany({
-    where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
-  })
-  const mapSlot = (fileType: ImportFileType) => {
-    const b = batches.find((x) => x.fileType === fileType)
-    if (!b) return null
-    return {
-      batchId: b.id,
-      fileName: b.fileName,
-      parseStatus: b.parseStatus as 'ok' | 'error',
-      parseErrorCount: b.parseErrorCount,
-      rowCount: b.rowCount,
-      hasErrorReport: Boolean(b.errorReportPath),
-    }
-  }
-
-  const windows = await listTenantBillWindows(periodId)
-  const tenantBillWindows = windows.map((w) => {
-    const b = batches.find(
-      (x) => x.fileType === 'tenant_bill' && x.windowId === w.id,
-    )
-    return {
-      windowId: w.id,
-      windowStart: w.windowStart,
-      windowEnd: w.windowEnd,
-      sortOrder: w.sortOrder,
-      batchId: b?.id ?? null,
-      fileName: b?.fileName ?? null,
-      parseStatus: (b?.parseStatus ?? 'empty') as 'ok' | 'error' | 'empty',
-      parseErrorCount: b?.parseErrorCount ?? 0,
-      rowCount: b?.rowCount ?? 0,
-      hasErrorReport: Boolean(b?.errorReportPath),
-    }
-  })
-
-  return {
-    customer: mapSlot('customer_consumption'),
-    baremetal: mapSlot('baremetal_order'),
-    tenantBillWindows,
   }
 }

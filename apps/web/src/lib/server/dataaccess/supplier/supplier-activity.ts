@@ -5,17 +5,32 @@ import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import type { SupplierActivity, SupplierActivityAttachment } from '@/lib/types/supplier-domain'
 import { supplier, supplierActivity, supplierActivityAttachment, userStaff } from '@workspace/db/schema'
 import { desc, eq, inArray } from 'drizzle-orm'
-import {
-  readSupplierActivityFile,
-  resolveSupplierActivityDownloadUrl,
-  saveSupplierActivityFile,
-} from './supplier-activity-storage'
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024
 const MAX_FILES = 5
 
 function newId() {
   return crypto.randomUUID()
+}
+
+function resolveSupplierActivityDownloadUrl(attachmentId: string): string {
+  return `/api/supplier/activities/attachments/${attachmentId}`
+}
+
+async function saveSupplierActivityFile(input: {
+  supplierId: string
+  activityId: string
+  fileName: string
+  buffer: Buffer
+  mimeType?: string
+}) {
+  const driver = process.env.SUPPLIER_ACTIVITY_STORAGE_DRIVER?.trim().toLowerCase()
+  if (driver === 'oss') {
+    const { saveSupplierActivityFile: saveToOss } = await import('./supplier-activity-storage')
+    return saveToOss(input)
+  }
+  const { saveLocalSupplierActivityFile } = await import('./supplier-activity-local-storage')
+  return saveLocalSupplierActivityFile(input)
 }
 
 export type SupplierActivityFileInput = {
@@ -194,16 +209,9 @@ export const supplierActivityDataAccess = {
   },
 
   async getAttachmentForDownload(attachmentId: string) {
-    const attachment = await db.query.supplierActivityAttachment.findFirst({
-      where: eq(supplierActivityAttachment.id, attachmentId),
-    })
-    if (!attachment) return null
-
-    const buffer = await readSupplierActivityFile(attachment.storageUri)
-    return {
-      fileName: attachment.fileName,
-      mimeType: attachment.mimeType ?? 'application/octet-stream',
-      buffer,
-    }
+    const { getSupplierActivityAttachmentForDownload } = await import(
+      './supplier-activity-attachment-download'
+    )
+    return getSupplierActivityAttachmentForDownload(attachmentId)
   },
 }

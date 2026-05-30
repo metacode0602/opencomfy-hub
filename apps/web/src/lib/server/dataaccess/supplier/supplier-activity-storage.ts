@@ -1,10 +1,7 @@
 import { createHmac } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 
 export type SupplierActivityStorageDriver = 'local' | 'oss'
 
-const LOCAL_URI_PREFIX = 'local://'
 const OSS_URI_PREFIX = 'oss://'
 
 function sanitizeFileName(name: string): string {
@@ -14,22 +11,6 @@ function sanitizeFileName(name: string): string {
 export function getSupplierActivityStorageDriver(): SupplierActivityStorageDriver {
   const driver = process.env.SUPPLIER_ACTIVITY_STORAGE_DRIVER?.trim().toLowerCase()
   return driver === 'oss' ? 'oss' : 'local'
-}
-
-export function getSupplierActivityStorageRoot(): string {
-  return (
-    process.env.SUPPLIER_ACTIVITY_STORAGE_ROOT ??
-    path.join(process.cwd(), '.data', 'supplier-activity-attachments')
-  )
-}
-
-function resolveLocalPath(relativePath: string): string {
-  const root = getSupplierActivityStorageRoot()
-  const abs = path.resolve(root, relativePath)
-  if (!abs.startsWith(path.resolve(root))) {
-    throw new Error('非法存储路径')
-  }
-  return abs
 }
 
 function getOssConfig() {
@@ -59,21 +40,6 @@ function buildOssAuthorization(
   const stringToSign = [method, '', contentType, date, resource].join('\n')
   const signature = createHmac('sha1', accessKeySecret).update(stringToSign).digest('base64')
   return `OSS ${accessKeyId}:${signature}`
-}
-
-async function saveToLocal(input: {
-  supplierId: string
-  activityId: string
-  fileName: string
-  buffer: Buffer
-}): Promise<string> {
-  const rel = path
-    .join(input.supplierId, input.activityId, `${crypto.randomUUID()}_${sanitizeFileName(input.fileName)}`)
-    .replace(/\\/g, '/')
-  const abs = resolveLocalPath(rel)
-  await mkdir(path.dirname(abs), { recursive: true })
-  await writeFile(abs, input.buffer)
-  return `${LOCAL_URI_PREFIX}${rel}`
 }
 
 async function saveToOss(input: {
@@ -132,13 +98,14 @@ export async function saveSupplierActivityFile(input: {
   if (getSupplierActivityStorageDriver() === 'oss') {
     return saveToOss(input)
   }
-  return saveToLocal(input)
+  const { saveLocalSupplierActivityFile } = await import('./supplier-activity-local-storage')
+  return saveLocalSupplierActivityFile(input)
 }
 
 export async function readSupplierActivityFile(storageUri: string): Promise<Buffer> {
-  if (storageUri.startsWith(LOCAL_URI_PREFIX)) {
-    const rel = storageUri.slice(LOCAL_URI_PREFIX.length)
-    return readFile(resolveLocalPath(rel))
+  if (storageUri.startsWith('local://')) {
+    const { readLocalSupplierActivityFile } = await import('./supplier-activity-local-storage')
+    return readLocalSupplierActivityFile(storageUri)
   }
 
   if (storageUri.startsWith(OSS_URI_PREFIX)) {

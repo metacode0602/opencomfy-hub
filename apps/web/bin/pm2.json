@@ -3,7 +3,7 @@
     {
       "name": "@gongji-crm-web",
       "script": "apps/web/server.js",
-      "exec_mode": "fork",
+      "exec_mode": "cluster",
       "instances": 1
     }
   ]

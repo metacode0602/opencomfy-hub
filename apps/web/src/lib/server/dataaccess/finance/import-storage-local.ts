@@ -1,24 +1,14 @@
 import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-function sanitizeFileName(name: string): string {
-  return name.replace(/[^\w.\-()\u4e00-\u9fff]+/g, '_').slice(0, 200)
-}
+import {
+  LOCAL_STORAGE_SUBDIRS,
+  resolveModuleStoragePath,
+  sanitizeStorageFileName,
+} from '../local-storage-root'
 
-export function getFinanceImportStorageRoot(): string {
-  return (
-    process.env.FINANCE_IMPORT_STORAGE_ROOT ??
-    path.join(process.cwd(), '.data', 'finance-imports')
-  )
-}
-
-export function resolveStoragePath(relativePath: string): string {
-  const root = getFinanceImportStorageRoot()
-  const abs = path.resolve(root, relativePath)
-  if (!abs.startsWith(path.resolve(root))) {
-    throw new Error('非法存储路径')
-  }
-  return abs
+function resolveStoragePath(relativePath: string): string {
+  return resolveModuleStoragePath(LOCAL_STORAGE_SUBDIRS.financeImports, relativePath)
 }
 
 export async function saveImportSourceFile(input: {
@@ -32,7 +22,7 @@ export async function saveImportSourceFile(input: {
     .join(
       input.billingPeriodId,
       input.fileType,
-      `${input.batchId}_${sanitizeFileName(input.fileName)}`,
+      `${input.batchId}_${sanitizeStorageFileName(input.fileName)}`,
     )
     .replace(/\\/g, '/')
   const abs = resolveStoragePath(rel)
