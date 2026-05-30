@@ -115,3 +115,15 @@ export function previousPeriodRange(periodStart: Date, periodEnd: Date) {
 export function bucketDurationHours(granularity: PeriodGranularity): number {
   return granularity === 'day' ? 24 : 1
 }
+
+/** 桶与区间 [periodStart, periodEnd] 交集的小时数（§7.1 |τ|） */
+export function effectiveBucketDurationHours(
+  bucket: PeriodBucket,
+  periodStart: Date,
+  periodEnd: Date,
+): number {
+  const startMs = Math.max(bucket.start.getTime(), periodStart.getTime())
+  const endMs = Math.min(bucket.end.getTime(), periodEnd.getTime())
+  if (endMs < startMs) return 0
+  return (endMs - startMs + 1) / (60 * 60 * 1000)
+}

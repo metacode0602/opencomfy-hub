@@ -29,6 +29,10 @@ import {
 export const RESOURCE_COMPOSITION_FOOTNOTE =
   '实体分桶互斥（维护中 > 下架中 > 待接入 > … > 池拓扑）；双池为独立扇区。待接入/下架中「计划缺口」来自进行中批次 planned−touched，无 device_id。库存级 internal_test hold 可能未计入设备扇区。'
 
+/** Period 卡时模式脚注（专篇 §13） */
+export const RESOURCE_COMPOSITION_PERIOD_CARD_HOURS_FOOTNOTE =
+  '实体卡时/台时：由设备主数据导入与定时扫描写入的快照/状态时序积分；互斥分桶规则与 Snapshot 一致。计划缺口卡时/台时：由进行中批次的 planned−touched 对时间积分；设备变更表仅刷新批次进度，不驱动池/维护/下架等实体扇区。供应侧卡时非租户账单消费卡时。库存级 internal_test hold 可能未计入设备扇区。历史批次缺口在进度事件回填完成前，计划卡时可能标记为近似值。'
+
 export const RESOURCE_COMPOSITION_BUCKET_KEYS = [
   'pending_access_pipeline',
   'pending_access_entity',
@@ -213,16 +217,38 @@ function formatNetChange(delta: number, unit: string): string {
   return `${sign}${delta.toLocaleString()} ${unit}`
 }
 
+export type EntityCardHoursByBucket = Partial<
+  Record<
+    ResourceCompositionBucketKey,
+    {
+      cardHours: number
+      machineHours: number
+      byCardType: Map<string, { cardHours: number; machineHours: number }>
+    }
+  >
+>
+
+export type PipelineCardHoursSlice = { cardHours: number; machineHours: number }
+
 export function buildResourceCompositionPayload(input: {
   entityBuckets: Record<ResourceCompositionBucketKey, BucketAcc>
   pendingAccessPipeline: PipelinePendingGap
   retiringPipeline: PipelinePendingGap
   displayUnit?: ResourceCompositionDisplayUnit
   periodGpuDeltas?: Partial<Record<ResourceCompositionBucketKey, number>>
+  periodCardHoursDeltas?: Partial<Record<ResourceCompositionBucketKey, number>>
+  entityCardHours?: EntityCardHoursByBucket
+  pipelineCardHours?: {
+    pendingAccess: PipelineCardHoursSlice
+    retiring: PipelineCardHoursSlice
+  }
   centerSecondary?: string
+  footnote?: string
+  approximate?: boolean
 }): GlobalResourceCompositionPayload {
   const displayUnit = input.displayUnit ?? 'gpu_cards'
   const unitLabel = displayUnit === 'card_hours' ? '卡时' : '卡'
+  const useCardHours = displayUnit === 'card_hours'
 
   const buckets = { ...input.entityBuckets }
   buckets.pending_access_pipeline.gpuCount = input.pendingAccessPipeline.gpuCount
@@ -232,27 +258,60 @@ export function buildResourceCompositionPayload(input: {
 
   let denominatorGpu = 0
   let denominatorDevices = 0
+  let denominatorCardHours = 0
+  let denominatorMachineHours = 0
 
   const slices: GlobalResourceCompositionSlice[] = []
 
   for (const key of RESOURCE_COMPOSITION_BUCKET_KEYS) {
     const acc = buckets[key]
     const meta = SLICE_META[key]
-    if (acc.gpuCount <= 0 && acc.deviceCount <= 0) continue
+    const hoursAcc = input.entityCardHours?.[key]
+    const pipelineHours =
+      key === 'pending_access_pipeline'
+        ? input.pipelineCardHours?.pendingAccess
+        : key === 'retiring_pipeline'
+          ? input.pipelineCardHours?.retiring
+          : undefined
+
+    const sliceCardHours =
+      (hoursAcc?.cardHours ?? 0) + (pipelineHours?.cardHours ?? 0)
+    const sliceMachineHours =
+      (hoursAcc?.machineHours ?? 0) + (pipelineHours?.machineHours ?? 0)
+
+    const hasGpuSlice = acc.gpuCount > 0 || acc.deviceCount > 0
+    const hasHoursSlice = sliceCardHours > 0 || sliceMachineHours > 0
+    if (!hasGpuSlice && !hasHoursSlice) continue
 
     denominatorGpu += acc.gpuCount
     denominatorDevices += acc.deviceCount
+    if (useCardHours) {
+      denominatorCardHours += sliceCardHours
+      denominatorMachineHours += sliceMachineHours
+    }
 
     const breakdownByCardType =
-      meta.kind === 'entity' && acc.byCardType.size > 0
-        ? Array.from(acc.byCardType.entries()).map(([cardType, gpuCount]) => ({
+      meta.kind === 'entity' && hoursAcc && hoursAcc.byCardType.size > 0 && useCardHours
+        ? Array.from(hoursAcc.byCardType.entries()).map(([cardType, row]) => ({
             cardType,
-            gpuCount,
+            gpuCount: 0,
             deviceCount: 0,
+            cardHours: Math.round(row.cardHours),
+            machineHours: Math.round(row.machineHours * 10) / 10,
           }))
-        : undefined
+        : meta.kind === 'entity' && acc.byCardType.size > 0
+          ? Array.from(acc.byCardType.entries()).map(([cardType, gpuCount]) => ({
+              cardType,
+              gpuCount,
+              deviceCount: 0,
+            }))
+          : undefined
 
-    const delta = input.periodGpuDeltas?.[key]
+    const delta =
+      useCardHours && input.periodCardHoursDeltas
+        ? input.periodCardHoursDeltas[key]
+        : input.periodGpuDeltas?.[key]
+
     const slice: GlobalResourceCompositionSlice = {
       key,
       label: meta.label,
@@ -261,30 +320,49 @@ export function buildResourceCompositionPayload(input: {
       deviceCount: acc.deviceCount,
       breakdownByCardType,
     }
+    if (useCardHours) {
+      slice.cardHours = Math.round(sliceCardHours)
+      slice.machineHours = Math.round(sliceMachineHours * 10) / 10
+    }
     if (delta !== undefined) {
       slice.netChangeLabel = `净增 ${formatNetChange(delta, unitLabel)}`
     }
     slices.push(slice)
   }
 
-  const centerPrimary =
-    displayUnit === 'card_hours'
-      ? `${Math.round(denominatorGpu).toLocaleString()} 卡时`
-      : `${denominatorGpu.toLocaleString()} 卡`
+  const centerPrimary = useCardHours
+    ? `${Math.round(denominatorCardHours).toLocaleString()} 卡时`
+    : `${denominatorGpu.toLocaleString()} 卡`
 
   const pipelineGpu =
     input.pendingAccessPipeline.gpuCount + input.retiringPipeline.gpuCount
   const centerSecondary =
     input.centerSecondary ??
-    (pipelineGpu > 0 ? `含计划缺口 ${pipelineGpu.toLocaleString()} 卡` : undefined)
+    (useCardHours
+      ? undefined
+      : pipelineGpu > 0
+        ? `含计划缺口 ${pipelineGpu.toLocaleString()} 卡`
+        : undefined)
 
   return {
     displayUnit,
-    denominator: { gpuCount: denominatorGpu, deviceCount: denominatorDevices },
+    denominator: useCardHours
+      ? {
+          gpuCount: denominatorGpu,
+          deviceCount: denominatorDevices,
+          cardHours: Math.round(denominatorCardHours),
+          machineHours: Math.round(denominatorMachineHours * 10) / 10,
+        }
+      : { gpuCount: denominatorGpu, deviceCount: denominatorDevices },
     slices,
     centerPrimary,
     centerSecondary,
-    footnote: RESOURCE_COMPOSITION_FOOTNOTE,
+    footnote:
+      input.footnote ??
+      (useCardHours
+        ? RESOURCE_COMPOSITION_PERIOD_CARD_HOURS_FOOTNOTE
+        : RESOURCE_COMPOSITION_FOOTNOTE),
+    approximate: input.approximate,
   }
 }
 
@@ -307,6 +385,30 @@ export function buildResourceCompositionFromDevices(input: {
     displayUnit: input.displayUnit,
     periodGpuDeltas: input.periodGpuDeltas,
   })
+}
+
+export function compositionCardHoursDeltas(
+  end: EntityCardHoursByBucket,
+  start: EntityCardHoursByBucket,
+  pipelineEnd: { pendingAccess: PipelineCardHoursSlice; retiring: PipelineCardHoursSlice },
+  pipelineStart: { pendingAccess: PipelineCardHoursSlice; retiring: PipelineCardHoursSlice },
+): Partial<Record<ResourceCompositionBucketKey, number>> {
+  const deltas: Partial<Record<ResourceCompositionBucketKey, number>> = {}
+  for (const key of RESOURCE_COMPOSITION_BUCKET_KEYS) {
+    let endH = end[key]?.cardHours ?? 0
+    let startH = start[key]?.cardHours ?? 0
+    if (key === 'pending_access_pipeline') {
+      endH = pipelineEnd.pendingAccess.cardHours
+      startH = pipelineStart.pendingAccess.cardHours
+    }
+    if (key === 'retiring_pipeline') {
+      endH = pipelineEnd.retiring.cardHours
+      startH = pipelineStart.retiring.cardHours
+    }
+    const delta = Math.round(endH - startH)
+    if (delta !== 0) deltas[key] = delta
+  }
+  return deltas
 }
 
 export function compositionGpuDeltas(

@@ -6,7 +6,9 @@
 
 **文档性质**：产品全景与操作指南；描述「当前已实现能力 + 数据模型目标态」，便于运营经理建立端到端心智模型。
 
-**版本**：v1.1（2026-05-27）
+**版本**：v1.2（2026-05-29）
+
+**导航变更（计划）**：侧栏三项（设备上架 / 订单接入 / 设备下架）合并为 **「计划批次」** → `/supplier/online-tasks`（类型筛选 + 列表 Badge，无 Tab）；**内部占用** 仍独立菜单 → `/supplier/test-holds`。详见 [supplier-planned-batches-hub-design.md](./supplier-planned-batches-hub-design.md)。
 
 ---
 
@@ -205,15 +207,19 @@ flowchart LR
 
 ### 6.1 运营经理日常导航
 
+> **目标态（已确认设计）**：侧栏 **「计划批次」** → `/supplier/online-tasks`（**无 Tab**，类型筛选 + 行内 Badge；仅 `online` / `order_access` / `device_retire`）。侧栏 **「内部占用」** 保留 → `/supplier/test-holds`。旧 `order-access` / `offline-tasks` URL 保留、不 redirect。详见 [supplier-planned-batches-hub-design.md](./supplier-planned-batches-hub-design.md)。
 
 | 路由 | 页面 | 核心能力 | 对应数据表 |
 |------|------|----------|------------|
 | `/supplier/datacenters/[id]` | 机房详情 | 库存大盘、运维导入、下架发起、下架批次列表、成本面板 | `data_center`、`supplier_gpu_inventory`、`onboarding_batch` |
-| `/supplier/online-tasks` | 设备上架 | 上架批次列表、新建、确认入库（清单路径） | `onboarding_batch`（`online`） |
-| `/supplier/online-tasks/[id]` | 上架批次详情 | 计划进度、导入明细、已挂接设备、关联任务 | 同上 + `plan_line`、`device_link` |
-| `/supplier/order-access` | 订单接入 | 与上架对称，`batch_kind=order_access` | 同上 |
-| `/supplier/offline-tasks` | 设备下架 | 全局下架批次列表、进度汇总 | `onboarding_batch`（`device_retire`） |
-| `/supplier/offline-tasks/[id]` | 下架批次详情 | 已执行设备、建议清单、进度标记 | 同上 + `change_log` |
+| `/supplier/online-tasks` | **计划批次** | 类型筛选 + 统一表 + Badge；KPI 随筛选（专篇 §5）；新建上架/订单 | `onboarding_batch`（三 kind） |
+| `/supplier/online-tasks/[id]` | 上架批次详情 | 计划进度、导入明细、已挂接设备、关联任务、调整/完成/作废 | 同上 + `plan_line`、`device_link`、`progress_event` |
+| `/supplier/order-access` | 订单接入（直链保留） | 侧栏不暴露；列表语义并入计划批次「订单接入」筛选 | `onboarding_batch`（`order_access`） |
+| `/supplier/order-access/[id]` | 订单接入详情 | 同上架详情结构 | 同上 |
+| `/supplier/offline-tasks` | 设备下架（直链保留） | 侧栏不暴露；列表语义并入计划批次「设备下架」筛选 | `onboarding_batch`（`device_retire`） |
+| `/supplier/offline-tasks/[id]` | 下架批次详情 | 已执行设备、建议清单、进度标记、调整/完成/作废 | 同上 + `change_log` |
+| `/supplier/test-holds` | **内部占用** | 侧栏独立入口；列表/KPI 与现网一致 | `internal_test_hold` |
+| `/supplier/test-holds/[id]` | 占用详情 | 挂接设备、结束占用 | 同上 |
 | `/supplier/devices` | 物理机台账 | SN 级列表与详情下钻 | `supplier_device` |
 | `/supplier/inventory/[id]` | 聚合库存详情 | 机房×卡型 L1 明细 | `supplier_gpu_inventory` |
 
@@ -245,14 +251,16 @@ flowchart LR
 - **编辑信息** / **设为在线·离线** — 机房级可用性（`data_center.status`）
 - **设备下架 / 裁撤** — 打开 `DatacenterDeviceRetireDialog` 创建下架计划
 
-### 6.3 设备上架页 — 计划与进度
+### 6.3 计划批次列表 — `/supplier/online-tasks`
 
-列表页（`OnboardingBatchesContent`）提供：
+**设计专篇**：[supplier-planned-batches-hub-design.md](./supplier-planned-batches-hub-design.md)（侧栏、类型筛选、Badge、KPI）。
 
-- 统计：批次总数、接入中、已入库、待确认入库
-- 筛选：批次状态（待开始 / 接入中 / 已完成）、导入状态
-- 列：批次号、供应商/机房、上架计划（卡型×数量）、导入状态、已入库/计划、上架原因、计划就绪时间
-- 快捷操作：`importStatus=parsed` 时可「确认入库」（清单 CSV 路径）
+- **无 Tab**；筛选条 **类型**（全部 / 上架 / 订单 / 下架）
+- **统一表格** + **类型 Badge** 列
+- **KPI**：随类型筛选切换（上架/订单一套、下架一套、全部一套，见专篇 §5）
+- 快捷操作：`importStatus=parsed` 时可「确认入库」（上架/订单行）
+
+**内部占用**：侧栏 `/supplier/test-holds`，不纳入本页。
 
 详情页（`OnboardingBatchDetailContent`）Tab 结构：
 
@@ -273,14 +281,16 @@ flowchart LR
 | 已上线 | `online_device_count` | 已关联且 `lifecycle_status=在线` |
 | 计划完成 | `planned_ready_at` | 目标就绪时间 |
 
-### 6.4 设备下架页 — 退出与裁撤
+### 6.4 设备下架 — 计划批次筛选与详情
 
-列表页（`OfflineTasksContent`）：
+计划批次页 **类型 = 设备下架** 时列表/KPI 对齐原 `OfflineTasksContent`（专篇 §5.2）：
 
 - 统计：批次总数、已下架批次、累计下架设备、累计错误行
 - 筛选：供应商、导入状态
 - 进度列：`touchedDeviceCount / plannedDeviceCount`（退订 N 台）
 - 异常：`progressFlags.needs_review` 显示「待复核」
+
+创建入口仍在 **机房详情**「设备下架 / 裁撤」，不在列表强制新建。
 
 详情页（`DeviceRetireBatchDetailContent`）：
 

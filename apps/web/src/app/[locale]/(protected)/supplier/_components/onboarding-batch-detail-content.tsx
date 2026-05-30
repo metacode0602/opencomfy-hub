@@ -9,6 +9,7 @@ import {
   ChevronRight,
   FileSpreadsheet,
   Loader2,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
@@ -38,6 +39,11 @@ import {
   onboardingBatchDetailPath,
 } from '@/lib/supplier/onboarding-batch-utils'
 import type { OnboardingBatchDetailTask } from '@/lib/types/onboarding-batch-api'
+import { AdjustOnboardingBatchPlanDialog } from './adjust-onboarding-batch-plan-dialog'
+import { BatchLifecycleActions } from './batch-lifecycle-actions'
+import { BatchAdjustHistoryList, BatchProgressTimeline } from './batch-progress-timeline'
+
+const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
 
 type RouteKind = Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
 
@@ -112,6 +118,7 @@ export function OnboardingBatchDetailContent({
   })
 
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [adjustOpen, setAdjustOpen] = useState(false)
 
   const batch = detail?.batch
   const progress = detail?.progress
@@ -224,6 +231,9 @@ export function OnboardingBatchDetailContent({
   }
 
   const hasImport = batch.importStatus !== 'none'
+  const canAdjustPlan = !TERMINAL_BATCH_STATUSES.includes(
+    batch.batchStatus as (typeof TERMINAL_BATCH_STATUSES)[number],
+  )
 
   return (
     <div className="space-y-6">
@@ -248,21 +258,48 @@ export function OnboardingBatchDetailContent({
             </p>
           </div>
         </div>
-        {batch.importStatus === 'parsed' && (
-          <Button
-            className="gap-2"
-            disabled={commitListMutation.isPending}
-            onClick={handleCommit}
-          >
-            {commitListMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
-            确认入库
-          </Button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {canAdjustPlan && (
+            <Button variant="outline" className="gap-2" onClick={() => setAdjustOpen(true)}>
+              <SlidersHorizontal className="w-4 h-4" />
+              调整计划
+            </Button>
+          )}
+          <BatchLifecycleActions
+            batchId={batch.id}
+            batchStatus={batch.batchStatus}
+            touchedDeviceCount={progress.touched}
+            batchKind={batch.batchKind}
+            onSuccess={() => void refetch()}
+          />
+          {batch.importStatus === 'parsed' && (
+            <Button
+              className="gap-2"
+              disabled={commitListMutation.isPending}
+              onClick={handleCommit}
+            >
+              {commitListMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4" />
+              )}
+              确认入库
+            </Button>
+          )}
+        </div>
       </div>
+
+      <AdjustOnboardingBatchPlanDialog
+        batchId={batch.id}
+        open={adjustOpen}
+        onOpenChange={setAdjustOpen}
+        batchKind={batch.batchKind}
+        plannedLinesJson={batch.plannedLinesJson}
+        plannedReadyAt={batch.plannedReadyAt}
+        touchedDeviceCount={progress.touched}
+        plannedDeviceCount={progress.planned}
+        onSuccess={() => void refetch()}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
@@ -310,6 +347,8 @@ export function OnboardingBatchDetailContent({
           <TabsTrigger value="overview">批次概览</TabsTrigger>
           <TabsTrigger value="devices">已入库设备 ({devices.length})</TabsTrigger>
           <TabsTrigger value="tasks">关联任务 ({tasks.length})</TabsTrigger>
+          <TabsTrigger value="timeline">进度时间轴</TabsTrigger>
+          <TabsTrigger value="audit">调整审计</TabsTrigger>
         </TabsList>
 
         <TabsContent value="progress" className="space-y-4 mt-4">
@@ -632,6 +671,14 @@ export function OnboardingBatchDetailContent({
           ) : (
             tasks.map((t) => <OnboardingTaskCard key={t.id} task={t} />)
           )}
+        </TabsContent>
+
+        <TabsContent value="timeline" className="mt-4">
+          <BatchProgressTimeline batchId={batch.id} />
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-4">
+          <BatchAdjustHistoryList batchId={batch.id} />
         </TabsContent>
       </Tabs>
     </div>

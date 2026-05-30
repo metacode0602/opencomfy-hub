@@ -47,9 +47,11 @@ function ResourcePoolChartCardInner() {
     return config
   }, [slices])
 
+  const useCardHours = composition?.displayUnit === "card_hours"
+
   const pieData = slices.map((s) => ({
     name: s.key,
-    value: s.gpuCount,
+    value: useCardHours ? (s.cardHours ?? 0) : s.gpuCount,
     key: s.key,
     kind: s.kind,
   }))
@@ -61,7 +63,12 @@ function ResourcePoolChartCardInner() {
         <CardDescription>
           {isSnapshot
             ? "互斥分桶 · 含计划缺口（非退订设备 + 虚拟计划量）"
-            : "期末互斥构成 · 计划缺口为期末截面"}
+            : "区间供应卡时（主数据状态时序 + 计划批次进度；变更表仅更新批次缺口）"}
+          {composition?.approximate && (
+            <span className="block text-amber-600 dark:text-amber-500">
+              主数据快照缺失，实体卡时按当前态近似
+            </span>
+          )}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -81,6 +88,15 @@ function ResourcePoolChartCardInner() {
                       formatter={(value, name) => {
                         const slice = slices.find((s) => s.key === name)
                         const label = slice?.label ?? String(name)
+                        if (useCardHours) {
+                          const mh = slice?.machineHours
+                          return (
+                            <span className="font-medium">
+                              {label}：{formatCompactHours(Number(value))} 卡时
+                              {mh != null ? `（${formatCompactHours(mh)} 台时）` : ""}
+                            </span>
+                          )
+                        }
                         return (
                           <span className="font-medium">
                             {label}：{formatCompactHours(Number(value))} 卡
@@ -160,7 +176,22 @@ function ResourcePoolChartCardInner() {
                     )}
                   </div>
                   <div className="tabular-nums text-muted-foreground">
-                    {s.gpuCount.toLocaleString()} 卡 · {s.deviceCount.toLocaleString()} 台
+                    {useCardHours ? (
+                      <>
+                        {(s.cardHours ?? 0).toLocaleString()} 卡时
+                        {s.machineHours != null && (
+                          <> · {s.machineHours.toLocaleString()} 台时</>
+                        )}
+                        <span className="text-[10px]">
+                          {" "}
+                          · 期末 {s.gpuCount.toLocaleString()} 卡
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        {s.gpuCount.toLocaleString()} 卡 · {s.deviceCount.toLocaleString()} 台
+                      </>
+                    )}
                     {s.netChangeLabel && (
                       <span className="ml-1 text-foreground/80">· {s.netChangeLabel}</span>
                     )}
@@ -169,7 +200,10 @@ function ResourcePoolChartCardInner() {
                     <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
                       {s.breakdownByCardType.map((row) => (
                         <div key={row.cardType}>
-                          {row.cardType} · {row.gpuCount.toLocaleString()} 卡
+                          {row.cardType}
+                          {useCardHours && row.cardHours != null
+                            ? ` · ${row.cardHours.toLocaleString()} 卡时`
+                            : ` · ${row.gpuCount.toLocaleString()} 卡`}
                         </div>
                       ))}
                     </div>

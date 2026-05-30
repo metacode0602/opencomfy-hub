@@ -37,11 +37,16 @@ import {
 import { datacenterDeviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-device-retire'
 import { internalTestHoldDataAccess } from '@/lib/server/dataaccess/supplier/internal-test-hold'
 import {
+  onboardingBatchAdjustHistorySchema,
+  onboardingBatchAdjustPlanSchema,
+  onboardingBatchCompleteSchema,
   onboardingBatchCommitListSchema,
   onboardingBatchCreateSchema,
   onboardingBatchListBySupplierSchema,
   onboardingBatchListSchema,
   onboardingBatchParseListSchema,
+  onboardingBatchProgressEventsSchema,
+  onboardingBatchVoidSchema,
 } from '@/lib/server/routers/supplier/onboarding-batch-schemas'
 import { supplierActivityListSchema, supplierActivityCreateSchema } from '@/lib/server/routers/supplier/supplier-activity-schemas'
 import {
@@ -709,6 +714,80 @@ export const supplierRouter = createTRPCRouter({
         mapImportError(e)
       }
     }),
+
+    adjustPlan: adminProcedure
+      .input(onboardingBatchAdjustPlanSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          const staff = staffId
+            ? await staffDataAccess.getById(staffId).catch(() => null)
+            : null
+          return await onboardingBatchDataAccess.adjustPlan({
+            ...input,
+            operatorStaffId: staffId,
+            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+          })
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    listProgressEvents: protectedProcedure
+      .input(onboardingBatchProgressEventsSchema)
+      .query(async ({ input }) => {
+        try {
+          return await onboardingBatchDataAccess.listProgressEvents(input.batchId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    listAdjustHistory: protectedProcedure
+      .input(onboardingBatchAdjustHistorySchema)
+      .query(async ({ input }) => {
+        try {
+          return await onboardingBatchDataAccess.listAdjustHistory(input.batchId)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    completeBatch: adminProcedure
+      .input(onboardingBatchCompleteSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          const staff = staffId
+            ? await staffDataAccess.getById(staffId).catch(() => null)
+            : null
+          return await onboardingBatchDataAccess.completeBatch({
+            ...input,
+            operatorStaffId: staffId,
+            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+          })
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    voidBatch: adminProcedure
+      .input(onboardingBatchVoidSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          const staff = staffId
+            ? await staffDataAccess.getById(staffId).catch(() => null)
+            : null
+          return await onboardingBatchDataAccess.voidBatch({
+            ...input,
+            operatorStaffId: staffId,
+            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+          })
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
   }),
 
   internalTestHold: createTRPCRouter({

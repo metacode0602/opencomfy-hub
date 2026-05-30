@@ -186,7 +186,7 @@ planned_gpu_count = Σ(planLine.plannedQuantity × default_gpu_per_device)
 
 | 步骤     | 角色    | 操作                                       | 系统写入                                      |
 | ------ | ----- | ---------------------------------------- | ----------------------------------------- |
-| **S1** | 商务/运营 | `/supplier/online-tasks` → 新建上架批次        | `onboarding_batch`（`online`）              |
+| **S1** | 商务/运营 | `/supplier/online-tasks`（侧栏「计划批次」）→ 类型「设备上架」→ 新建批次 | `onboarding_batch`（`online`）              |
 | **S2** | 运维    | 线下施工、更新飞书多维表格                            | —                                         |
 | **S3** | 运维    | 机房详情 → 导入 **设备主数据表**                     | `device_inventory` 批次 + `supplier_device` |
 | **S4** | 运维    | 导入 **设备变更表**（工单 `WO-2026-001`，动作如「设备接收」） | `device_changelog` + `device_link`        |

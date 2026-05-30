@@ -259,7 +259,7 @@ export function OnboardingBatchWizardDialog({
   }
 
   const invalidateList = () => {
-    void utils.supplier.onboardingBatch.list.invalidate({ batchKind })
+    void utils.supplier.onboardingBatch.list.invalidate()
     invalidateGlobalDashboard(utils)
   }
 

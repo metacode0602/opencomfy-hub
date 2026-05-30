@@ -59,6 +59,8 @@ export type GlobalResourceCompositionBreakdown = {
   cardType: string
   gpuCount: number
   deviceCount: number
+  cardHours?: number
+  machineHours?: number
 }
 
 export type GlobalResourceCompositionSlice = {
@@ -73,13 +75,22 @@ export type GlobalResourceCompositionSlice = {
   breakdownByCardType?: GlobalResourceCompositionBreakdown[]
 }
 
+export type GlobalResourceCompositionDenominator = {
+  gpuCount: number
+  deviceCount: number
+  cardHours?: number
+  machineHours?: number
+}
+
 export type GlobalResourceCompositionPayload = {
   displayUnit: ResourceCompositionDisplayUnit
-  denominator: { gpuCount: number; deviceCount: number }
+  denominator: GlobalResourceCompositionDenominator
   slices: GlobalResourceCompositionSlice[]
   centerPrimary: string
   centerSecondary?: string
   footnote: string
+  /** 主数据快照缺失时用当前态恒定回填 */
+  approximate?: boolean
 }
 
 export type GlobalClusterStatusRow = {

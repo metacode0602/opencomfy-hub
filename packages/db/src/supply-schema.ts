@@ -564,6 +564,50 @@ export const onboardingBatchPlanLine = pgTable(
   ],
 )
 
+/** 批次计划/触达/终态不可变事件日志（Period 计划卡时阶梯积分权威时序） */
+export const onboardingBatchProgressEvent = pgTable(
+  "onboarding_batch_progress_event",
+  {
+    id: text("id").primaryKey(),
+    onboardingBatchId: text("onboarding_batch_id")
+      .notNull()
+      .references(() => onboardingBatch.id, { onDelete: "cascade" }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    eventType: varchar("event_type", { length: 32 }).notNull(),
+    batchKind: varchar("batch_kind", { length: 32 }).notNull(),
+    batchStatus: varchar("batch_status", { length: 32 }).notNull(),
+    plannedDeviceCount: integer("planned_device_count").notNull(),
+    plannedGpuCount: integer("planned_gpu_count").notNull(),
+    touchedDeviceCount: integer("touched_device_count").notNull(),
+    touchedPipelineGpu: integer("touched_pipeline_gpu").notNull(),
+    supplierId: text("supplier_id")
+      .notNull()
+      .references(() => supplier.id, { onDelete: "restrict" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, {
+      onDelete: "set null",
+    }),
+    idcRegion: varchar("idc_region", { length: 64 }),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("onboarding_batch_progress_event_batch_occurred_idx").on(
+      table.onboardingBatchId,
+      table.occurredAt,
+    ),
+    index("onboarding_batch_progress_event_occurred_idx").on(table.occurredAt),
+    index("onboarding_batch_progress_event_kind_occurred_idx").on(
+      table.batchKind,
+      table.occurredAt,
+    ),
+    index("onboarding_batch_progress_event_supplier_dc_occurred_idx").on(
+      table.supplierId,
+      table.dataCenterId,
+      table.occurredAt,
+    ),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // §3.4 物理设备与节点（device 需在 import_row / task 之前声明）
 // ---------------------------------------------------------------------------
@@ -1199,6 +1243,7 @@ export const onboardingBatchRelations = relations(onboardingBatch, ({ one, many 
   }),
   importRows: many(onboardingBatchImportRow),
   planLines: many(onboardingBatchPlanLine),
+  progressEvents: many(onboardingBatchProgressEvent),
   tasks: many(onboardingTask),
   /** supplier_device.onboarding_batch_id（仅 inventory 批次） */
   inventoryDevices: many(supplierDevice, {
@@ -1261,6 +1306,24 @@ export const onboardingBatchPlanLineRelations = relations(onboardingBatchPlanLin
     references: [gpuCardType.id],
   }),
 }))
+
+export const onboardingBatchProgressEventRelations = relations(
+  onboardingBatchProgressEvent,
+  ({ one }) => ({
+    batch: one(onboardingBatch, {
+      fields: [onboardingBatchProgressEvent.onboardingBatchId],
+      references: [onboardingBatch.id],
+    }),
+    supplier: one(supplier, {
+      fields: [onboardingBatchProgressEvent.supplierId],
+      references: [supplier.id],
+    }),
+    dataCenter: one(dataCenter, {
+      fields: [onboardingBatchProgressEvent.dataCenterId],
+      references: [dataCenter.id],
+    }),
+  }),
+)
 
 export const onboardingBatchDeviceLinkRelations = relations(
   onboardingBatchDeviceLink,
@@ -1332,6 +1395,7 @@ export type DataCenterRow = typeof dataCenter.$inferSelect
 export type SupplierContractRow = typeof supplierContract.$inferSelect
 export type OnboardingBatchRow = typeof onboardingBatch.$inferSelect
 export type OnboardingBatchPlanLineRow = typeof onboardingBatchPlanLine.$inferSelect
+export type OnboardingBatchProgressEventRow = typeof onboardingBatchProgressEvent.$inferSelect
 export type OnboardingBatchDeviceLinkRow = typeof onboardingBatchDeviceLink.$inferSelect
 export type SupplierDeviceRow = typeof supplierDevice.$inferSelect
 export type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSelect

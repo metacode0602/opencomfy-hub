@@ -27,6 +27,7 @@ import {
   DEVICE_COOPERATION_TYPE_LABELS,
   type DeviceCooperationType,
 } from '@/lib/types/supplier-domain'
+import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { mapDbDeviceToDomain } from '@/lib/server/dataaccess/supplier/datacenter-retire-shared'
@@ -489,6 +490,14 @@ export const datacenterDeviceRetireDataAccess = {
             hasList,
           },
           occurredAt: now,
+        })
+
+        await appendBatchProgressEvent({
+          batchId,
+          eventType: 'batch_created',
+          occurredAt: now,
+          tx,
+          payload: { source: 'system' },
         })
       })
     } catch (e) {
