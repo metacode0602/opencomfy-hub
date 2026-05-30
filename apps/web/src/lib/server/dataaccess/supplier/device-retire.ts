@@ -21,6 +21,7 @@ import type { RetireProgressFlags } from '@/lib/supplier/retire-changelog-utils'
 import type { RetireActionType, RetirePlanMode } from '@/lib/types/datacenter-device-retire'
 import type { OnboardingBatchPlannedLineJson } from '@/lib/types/onboarding-batch-api'
 import type { SupplierDevice } from '@/lib/types/supplier-domain'
+import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { mapDbDeviceToDomain } from '@/lib/server/dataaccess/supplier/datacenter-retire-shared'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
@@ -495,6 +496,14 @@ export const deviceRetireDataAccess = {
               legacyImport: true,
             },
             occurredAt: now,
+          })
+
+          await appendBatchProgressEvent({
+            batchId,
+            eventType: 'batch_created',
+            occurredAt: now,
+            tx,
+            payload: { source: 'system' },
           })
 
           supplierLog('device-retire', 'batch created (legacy, no device mutation)', {

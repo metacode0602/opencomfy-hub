@@ -112,6 +112,8 @@ export const gpuCardType = pgTable(
     memoryGb: integer("memory_gb"), // 内存容量（GB）
     tdpWatts: integer("tdp_watts"), // 功耗（瓦）
     computeCapability: varchar("compute_capability", { length: 64 }), // 计算能力
+    /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+    deviceRole: varchar("device_role", { length: 16 }).notNull().default("compute"),
     status: varchar("status", { length: 32 }).notNull(), // 状态
     ...supplyTimestamps,
   },
@@ -465,6 +467,8 @@ export const onboardingBatch = pgTable(
     /** 上架计划明细（卡型 + 合作类型 + 数量） */
     plannedLinesJson: jsonb("planned_lines_json").notNull().default([]),
     plannedDeviceCount: integer("planned_device_count").notNull().default(0),
+    /** 计划 GPU 卡数（创建/修订批次时按 plan_lines × 默认卡/台 持久化） */
+    plannedGpuCount: integer("planned_gpu_count").notNull().default(0),
     listUploadMode: varchar("list_upload_mode", { length: 32 }).notNull().default("none"),
     /** 飞书审批工单号（商务手动录入）；业务批次必填，supplier 内唯一 */
     workOrderNo: varchar("work_order_no", { length: 64 }),
@@ -557,6 +561,50 @@ export const onboardingBatchPlanLine = pgTable(
       table.cooperationType,
     ),
     index("onboarding_batch_plan_line_batch_id_idx").on(table.onboardingBatchId),
+  ],
+)
+
+/** 批次计划/触达/终态不可变事件日志（Period 计划卡时阶梯积分权威时序） */
+export const onboardingBatchProgressEvent = pgTable(
+  "onboarding_batch_progress_event",
+  {
+    id: text("id").primaryKey(),
+    onboardingBatchId: text("onboarding_batch_id")
+      .notNull()
+      .references(() => onboardingBatch.id, { onDelete: "cascade" }),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    eventType: varchar("event_type", { length: 32 }).notNull(),
+    batchKind: varchar("batch_kind", { length: 32 }).notNull(),
+    batchStatus: varchar("batch_status", { length: 32 }).notNull(),
+    plannedDeviceCount: integer("planned_device_count").notNull(),
+    plannedGpuCount: integer("planned_gpu_count").notNull(),
+    touchedDeviceCount: integer("touched_device_count").notNull(),
+    touchedPipelineGpu: integer("touched_pipeline_gpu").notNull(),
+    supplierId: text("supplier_id")
+      .notNull()
+      .references(() => supplier.id, { onDelete: "restrict" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, {
+      onDelete: "set null",
+    }),
+    idcRegion: varchar("idc_region", { length: 64 }),
+    payload: jsonb("payload"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("onboarding_batch_progress_event_batch_occurred_idx").on(
+      table.onboardingBatchId,
+      table.occurredAt,
+    ),
+    index("onboarding_batch_progress_event_occurred_idx").on(table.occurredAt),
+    index("onboarding_batch_progress_event_kind_occurred_idx").on(
+      table.batchKind,
+      table.occurredAt,
+    ),
+    index("onboarding_batch_progress_event_supplier_dc_occurred_idx").on(
+      table.supplierId,
+      table.dataCenterId,
+      table.occurredAt,
+    ),
   ],
 )
 
@@ -871,6 +919,18 @@ export const internalTestHold = pgTable(
   "internal_test_hold",
   {
     id: text("id").primaryKey(),
+    /** 台账登记：供应商 / 机房 */
+    supplierId: text("supplier_id").references(() => supplier.id, { onDelete: "restrict" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, { onDelete: "restrict" }),
+    workOrderNo: varchar("work_order_no", { length: 64 }),
+    userName: varchar("user_name", { length: 128 }),
+    department: varchar("department", { length: 32 }),
+    settlementMode: varchar("settlement_mode", { length: 32 }),
+    gpuCardTypeId: text("gpu_card_type_id").references(() => gpuCardType.id, {
+      onDelete: "restrict",
+    }),
+    unitCount: integer("unit_count"),
+    remark: text("remark"),
     supplierDeviceId: text("supplier_device_id").references(() => supplierDevice.id, {
       onDelete: "cascade",
     }),
@@ -878,14 +938,40 @@ export const internalTestHold = pgTable(
       () => supplierGpuInventory.id,
       { onDelete: "cascade" },
     ),
-    scope: varchar("scope", { length: 255 }).notNull(),
+    scope: varchar("scope", { length: 255 }).notNull().default("planned"),
     holdFrom: timestamp("hold_from", { withTimezone: true }).notNull(),
     holdUntil: timestamp("hold_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("internal_test_hold_supplier_device_id_idx").on(table.supplierDeviceId),
     index("internal_test_hold_inventory_id_idx").on(table.supplierGpuInventoryId),
+    index("internal_test_hold_supplier_id_idx").on(table.supplierId),
+    index("internal_test_hold_data_center_id_idx").on(table.dataCenterId),
+    index("internal_test_hold_work_order_no_idx").on(table.workOrderNo),
+  ],
+)
+
+/** 内部占用台账 ↔ 已录入物理机 */
+export const internalTestHoldDeviceLink = pgTable(
+  "internal_test_hold_device_link",
+  {
+    id: text("id").primaryKey(),
+    holdId: text("hold_id")
+      .notNull()
+      .references(() => internalTestHold.id, { onDelete: "cascade" }),
+    supplierDeviceId: text("supplier_device_id")
+      .notNull()
+      .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    port: varchar("port", { length: 16 }).notNull().default("22"),
+    loginUsername: varchar("login_username", { length: 128 }).notNull(),
+    loginPassword: text("login_password").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("internal_test_hold_device_link_uk").on(table.holdId, table.supplierDeviceId),
+    index("internal_test_hold_device_link_hold_id_idx").on(table.holdId),
   ],
 )
 
@@ -1157,6 +1243,7 @@ export const onboardingBatchRelations = relations(onboardingBatch, ({ one, many 
   }),
   importRows: many(onboardingBatchImportRow),
   planLines: many(onboardingBatchPlanLine),
+  progressEvents: many(onboardingBatchProgressEvent),
   tasks: many(onboardingTask),
   /** supplier_device.onboarding_batch_id（仅 inventory 批次） */
   inventoryDevices: many(supplierDevice, {
@@ -1219,6 +1306,24 @@ export const onboardingBatchPlanLineRelations = relations(onboardingBatchPlanLin
     references: [gpuCardType.id],
   }),
 }))
+
+export const onboardingBatchProgressEventRelations = relations(
+  onboardingBatchProgressEvent,
+  ({ one }) => ({
+    batch: one(onboardingBatch, {
+      fields: [onboardingBatchProgressEvent.onboardingBatchId],
+      references: [onboardingBatch.id],
+    }),
+    supplier: one(supplier, {
+      fields: [onboardingBatchProgressEvent.supplierId],
+      references: [supplier.id],
+    }),
+    dataCenter: one(dataCenter, {
+      fields: [onboardingBatchProgressEvent.dataCenterId],
+      references: [dataCenter.id],
+    }),
+  }),
+)
 
 export const onboardingBatchDeviceLinkRelations = relations(
   onboardingBatchDeviceLink,
@@ -1290,6 +1395,7 @@ export type DataCenterRow = typeof dataCenter.$inferSelect
 export type SupplierContractRow = typeof supplierContract.$inferSelect
 export type OnboardingBatchRow = typeof onboardingBatch.$inferSelect
 export type OnboardingBatchPlanLineRow = typeof onboardingBatchPlanLine.$inferSelect
+export type OnboardingBatchProgressEventRow = typeof onboardingBatchProgressEvent.$inferSelect
 export type OnboardingBatchDeviceLinkRow = typeof onboardingBatchDeviceLink.$inferSelect
 export type SupplierDeviceRow = typeof supplierDevice.$inferSelect
 export type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSelect
@@ -1297,3 +1403,5 @@ export type LifecycleStateDefinitionRow = typeof lifecycleStateDefinition.$infer
 export type SupplierOpsUploadBatchRow = typeof supplierOpsUploadBatch.$inferSelect
 export type SupplierUnitCostRow = typeof supplierUnitCost.$inferSelect
 export type SupplierGpuInventoryRow = typeof supplierGpuInventory.$inferSelect
+export type InternalTestHoldRow = typeof internalTestHold.$inferSelect
+export type InternalTestHoldDeviceLinkRow = typeof internalTestHoldDeviceLink.$inferSelect

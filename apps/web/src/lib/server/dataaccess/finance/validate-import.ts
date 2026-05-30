@@ -9,11 +9,6 @@ import { and, eq, inArray } from 'drizzle-orm'
 import type { ImportFileType } from './constants'
 import type { ImportCellError } from './import-errors'
 import { buildMarkedErrorWorkbookBuffer } from './import-errors'
-import {
-  deleteStorageFile,
-  readStorageFile,
-  saveImportErrorReport,
-} from './import-storage'
 import { parseWorkbookDetailed } from './excel-parser'
 export {
   findMissingBaremetalPlatformListPrice,
@@ -22,6 +17,10 @@ export {
   type MissingPricingPair,
   type PricingFailureReason,
 } from './tenant-bill-pricing'
+
+async function importStorageLocal() {
+  return import('./import-storage-local')
+}
 
 export type CrossFileValidation = {
   ok: boolean
@@ -144,6 +143,7 @@ export async function persistBatchErrorReport(input: {
   })
   if (!batch?.storagePath) throw new Error('batch not found')
 
+  const { readStorageFile, deleteStorageFile, saveImportErrorReport } = await importStorageLocal()
   const source = await readStorageFile(batch.storagePath)
   const sheet = parseWorkbookDetailed(source, batch.fileName)
   const buffer = buildMarkedErrorWorkbookBuffer({ sheet, errors: input.errors })
@@ -180,6 +180,7 @@ export async function readErrorReportBySlot(input: {
     where: and(...conditions),
   })
   if (!batch?.errorReportPath) return null
+  const { readStorageFile } = await importStorageLocal()
   const buf = await readStorageFile(batch.errorReportPath)
   const base = batch.fileName.replace(/\.(xlsx|xls|csv)$/i, '')
   return {

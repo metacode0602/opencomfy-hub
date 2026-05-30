@@ -1,10 +1,10 @@
 import { AppShell } from '@/components/dashboard/app-shell'
-import { OfflineTasksContent } from '../_components/offline-tasks-content'
+import { PlannedBatchesContent } from '../_components/planned-batches-content'
 
 export default function SupplierOfflineTasksPage() {
   return (
     <AppShell>
-      <OfflineTasksContent />
+      <PlannedBatchesContent fixedBatchKind="device_retire" showLegacyHint />
     </AppShell>
   )
 }

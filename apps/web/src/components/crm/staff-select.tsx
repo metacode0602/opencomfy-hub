@@ -43,6 +43,17 @@ const NONE_VALUE = "__none__"
 export const STAFF_SELECT_DROPDOWN_ATTR = "data-staff-select-dropdown"
 const DROPDOWN_Z_INDEX = 200
 
+/** 在 Dialog 内使用时，挂到 DialogContent 的 onPointerDownOutside / onInteractOutside / onFocusOutside */
+export function preventStaffSelectOutsideDismiss(event: Event) {
+  const target = event.target
+  if (
+    target instanceof Element &&
+    target.closest(`[${STAFF_SELECT_DROPDOWN_ATTR}]`)
+  ) {
+    event.preventDefault()
+  }
+}
+
 type DropdownPosition = {
   top: number
   left: number
@@ -230,7 +241,7 @@ export function StaffSelect({
               width: dropdownPosition.width,
               zIndex: DROPDOWN_Z_INDEX,
             }}
-            className="bg-popover text-popover-foreground fixed overflow-hidden rounded-lg shadow-md ring-1 ring-foreground/10"
+            className="pointer-events-auto bg-popover text-popover-foreground fixed overflow-hidden rounded-lg shadow-md ring-1 ring-foreground/10"
             onMouseDown={(event) => event.preventDefault()}
           >
             <Command shouldFilter={false}>
@@ -242,6 +253,10 @@ export function StaffSelect({
                       value={NONE_VALUE}
                       data-checked={!selectedId ? true : undefined}
                       onSelect={() => handleClear()}
+                      onPointerDown={(event) => {
+                        event.preventDefault()
+                        handleClear()
+                      }}
                     >
                       <span className="text-muted-foreground">{clearLabel}</span>
                     </CommandItem>
@@ -252,6 +267,10 @@ export function StaffSelect({
                       value={member.id}
                       data-checked={selectedId === member.id ? true : undefined}
                       onSelect={() => handleSelect(member.id)}
+                      onPointerDown={(event) => {
+                        event.preventDefault()
+                        handleSelect(member.id)
+                      }}
                     >
                       <StaffOptionLabel
                         name={member.display_name}

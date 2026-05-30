@@ -62,7 +62,7 @@ export const websiteConfig = {
   },
   auth: {
     emailSuffix: 'gongjiyun.com', // 邮箱后缀
-    cookieDomain: process.env.NODE_ENV === 'production' ? '.gongjiyun.com' : '192.168.110.16',
+    cookieDomain: process.env.NODE_ENV === 'production' ? '.gongjiyun.com' : undefined,
     trustedOrigins:
       process.env.NODE_ENV === 'production'
         ? ['https://www.gongjiyun.com', 'https://gongjiyun.com']

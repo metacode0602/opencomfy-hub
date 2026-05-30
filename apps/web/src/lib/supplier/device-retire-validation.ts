@@ -227,6 +227,3 @@ export function summarizeDeviceRetireCommit(preview: DeviceRetirePreviewResult):
     meta: preview.meta,
   }
 }
-
-/** @deprecated 使用 summarizeDeviceRetireCommit；Mock 阶段保留别名 */
-export const mockCommitDeviceRetire = summarizeDeviceRetireCommit

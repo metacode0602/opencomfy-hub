@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   ArrowLeft,
   Building2,
@@ -50,6 +51,7 @@ import { trpc } from '@/lib/trpc/client'
 import { productLineNames } from '@/lib/data/types'
 import { getRoleLabel, stageSteps } from '@/components/dashboard/project-detail-constants'
 import { ProjectConsumptionTrendChart } from '@/components/dashboard/project-consumption-trend-chart'
+import { ProjectBalanceTrendChart } from '@/components/dashboard/project-balance-trend-chart'
 import { getActivityIcon } from '@/components/dashboard/project-detail-utils'
 import { ProjectTimelinePanel } from '@/components/dashboard/project-timeline-panel'
 import { ProjectDailyConsumptionPanel } from '@/components/dashboard/project-daily-consumption-panel'
@@ -69,8 +71,22 @@ interface ProjectDetailContentProps {
 }
 
 export function ProjectDetailContent({ project: initialProject }: ProjectDetailContentProps) {
+  const searchParams = useSearchParams()
+  const tabFromUrl = searchParams.get('tab')
+  const validTabs = new Set([
+    'overview',
+    'timeline',
+    'consumption',
+    'tasks',
+    'orders',
+    'coupons',
+    'recharges',
+    'bills',
+  ])
   const [project, setProject] = useState(initialProject)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState(
+    tabFromUrl && validTabs.has(tabFromUrl) ? tabFromUrl : 'overview',
+  )
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [billingSyncOpen, setBillingSyncOpen] = useState(false)
@@ -366,6 +382,9 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
+          <div className="grid grid-cols-1 gap-6">
+            <ProjectBalanceTrendChart projectId={project.id} />
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ProjectConsumptionTrendChart projectId={project.id} />
 

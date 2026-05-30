@@ -374,7 +374,7 @@ export const billingPeriodImportBatch = pgTable(
     }),
     fileType: varchar("file_type", { length: 32 }).notNull(),
     fileName: varchar("file_name", { length: 512 }).notNull(),
-    /** 相对 FINANCE_IMPORT_STORAGE_ROOT 的路径 */
+    /** 相对 DATA_DIR/finance-imports 的路径 */
     storagePath: varchar("storage_path", { length: 1024 }).notNull().default(""),
     /** 标注错误单元格后的 xlsx 路径 */
     errorReportPath: varchar("error_report_path", { length: 1024 }),

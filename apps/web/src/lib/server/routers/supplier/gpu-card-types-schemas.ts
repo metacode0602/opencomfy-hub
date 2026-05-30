@@ -19,6 +19,7 @@ export const gpuCardTypeUpsertSchema = z.object({
   memoryGB: z.number().int().positive('请填写有效的显存容量（GB）'),
   tdpWatts: z.number().int().positive('请填写有效的 TDP（W）').optional(),
   computeCapability: z.string().trim().max(64).optional(),
+  deviceRole: z.enum(['compute', 'infra']).optional(),
 })
 
 export const gpuCardTypeUpdateSchema = gpuCardTypeUpsertSchema.omit({ code: true })

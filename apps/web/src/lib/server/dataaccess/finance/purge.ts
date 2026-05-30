@@ -12,15 +12,15 @@ import {
 import { and, eq } from 'drizzle-orm'
 import type { ImportFileType, PurgeScope } from './constants'
 import { FinanceError } from './errors'
-import {
-  deletePeriodImportDirectory,
-  deleteStorageFile,
-} from './import-storage'
 import { financeLog } from './logger'
 import { appendOperationLog } from './operation-log'
 import { purgeCostDerived } from './purge-cost'
 
 type DbExecutor = Pick<typeof db, 'delete' | 'update'>
+
+async function importStorageLocal() {
+  return import('./import-storage-local')
+}
 
 async function deleteIncomeDerivedForPeriod(tx: DbExecutor, periodId: string): Promise<void> {
   await tx.delete(platformIncomeMonthly).where(eq(platformIncomeMonthly.billingPeriodId, periodId))
@@ -86,6 +86,7 @@ export async function purgeBillingPeriodArtifacts(input: {
         fileType === 'tenant_bill' && windowId
           ? batches.filter((b) => b.windowId === windowId)
           : batches
+      const { deleteStorageFile } = await importStorageLocal()
       for (const b of targetBatches) {
         await deleteStorageFile(b.storagePath)
         await deleteStorageFile(b.errorReportPath)
@@ -140,6 +141,7 @@ export async function purgeBillingPeriodArtifacts(input: {
       const batches = await tx.query.billingPeriodImportBatch.findMany({
         where: eq(billingPeriodImportBatch.billingPeriodId, periodId),
       })
+      const { deleteStorageFile } = await importStorageLocal()
       for (const b of batches) {
         await deleteStorageFile(b.storagePath)
         await deleteStorageFile(b.errorReportPath)
@@ -165,6 +167,7 @@ export async function purgeBillingPeriodArtifacts(input: {
   })
 
   if (scope === 'full') {
+    const { deletePeriodImportDirectory } = await importStorageLocal()
     await deletePeriodImportDirectory(periodId)
   }
 

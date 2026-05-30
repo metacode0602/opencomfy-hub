@@ -12,6 +12,7 @@ import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Bell } from "lucide-react"
 import { SiteHeaderSearch } from "./site-header-search"
+import { GlobalDashboardProvider } from "@/app/[locale]/(protected)/dashboard/global/_lib/global-dashboard-context"
 
 function isGlobalDashboardPath(pathname: string | null) {
   if (!pathname) return false
@@ -33,7 +34,9 @@ export function SiteHeader() {
         <div className="flex h-(--header-height) shrink-0 items-center gap-2 border-b px-4 lg:px-6">
           <SidebarTrigger className="-ml-1" />
           <div className="min-w-0 flex-1">
+          <GlobalDashboardProvider>
             <GlobalDashboardHeader />
+            </GlobalDashboardProvider>
           </div>
           <ThemeToggle />
         </div>

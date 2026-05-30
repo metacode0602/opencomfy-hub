@@ -1,87 +1,64 @@
-"use client"
+'use client'
 
-import { useMemo } from "react"
-import { useSupplierDomainMockStore } from "@/lib/stores/supplier-domain-mock-store"
-
-function readStore() {
-  return useSupplierDomainMockStore.getState()
-}
-
-export function supplierLabelSync(supplierId: string) {
-  const s = readStore().suppliers.find((x) => x.id === supplierId)
-  return s?.short_name ?? supplierId
-}
-
-export function contractNoSync(contractId: string) {
-  if (!contractId) return "—"
-  const c = readStore().contracts.find((x) => x.id === contractId)
-  return c?.contract_no ?? contractId
-}
-
-export function deviceLabelSync(deviceId: string) {
-  if (!deviceId) return "—"
-  const d = readStore().devices.find((x) => x.id === deviceId)
-  return d ? `${d.asset_no} / ${d.sn}` : deviceId
-}
-
-export function batchCodeSync(batchId: string) {
-  const b = readStore().onboardingBatches.find((x) => x.id === batchId)
-  return b?.batch_code ?? batchId
-}
-
-export function termsVersionLabelSync(termsId: string) {
-  const t = readStore().termsVersions.find((x) => x.id === termsId)
-  return t ? `${t.deal_mode} · ${termsId.slice(0, 10)}` : termsId
-}
+import { useMemo } from 'react'
+import { trpc } from '@/lib/trpc/client'
 
 export function useSupplierLabel(supplierId: string) {
-  const name = useSupplierDomainMockStore((s) => s.suppliers.find((x) => x.id === supplierId)?.short_name)
-  return name ?? supplierId
+  const { data } = trpc.supplier.getById.useQuery(
+    { id: supplierId },
+    { enabled: Boolean(supplierId) },
+  )
+  return data?.shortName ?? data?.name ?? supplierId
 }
 
 export function useContractNo(contractId: string) {
-  return useSupplierDomainMockStore((s) => {
-    if (!contractId) return "—"
-    return s.contracts.find((c) => c.id === contractId)?.contract_no ?? contractId
+  const { data: contracts = [] } = trpc.supplier.listAllContracts.useQuery(undefined, {
+    enabled: Boolean(contractId),
+    staleTime: 60_000,
   })
+  if (!contractId) return '—'
+  return contracts.find((c) => c.id === contractId)?.contractNo ?? contractId
 }
 
 export function useDeviceLabel(deviceId: string) {
-  const d = useSupplierDomainMockStore((s) =>
-    deviceId ? s.devices.find((x) => x.id === deviceId) : undefined,
+  const { data } = trpc.supplier.getPhysicalDeviceDetail.useQuery(
+    { deviceId },
+    { enabled: Boolean(deviceId) },
   )
   return useMemo(() => {
-    if (!deviceId) return "—"
-    return d ? `${d.asset_no} / ${d.sn}` : deviceId
-  }, [d, deviceId])
+    if (!deviceId) return '—'
+    const device = data?.device
+    return device ? `${device.assetNo} / ${device.sn}` : deviceId
+  }, [data, deviceId])
 }
 
 export function useBatchCode(batchId: string) {
-  return useSupplierDomainMockStore((s) => s.onboardingBatches.find((b) => b.id === batchId)?.batch_code ?? batchId)
+  const { data } = trpc.supplier.onboardingBatch.getById.useQuery(
+    { id: batchId },
+    { enabled: Boolean(batchId) },
+  )
+  return data?.batchCode ?? batchId
 }
 
 export function useTermsVersionLabel(termsId: string) {
-  const t = useSupplierDomainMockStore((s) => s.termsVersions.find((x) => x.id === termsId))
-  return useMemo(() => (t ? `${t.deal_mode} · ${termsId.slice(0, 10)}` : termsId), [t, termsId])
-}
-
-export function dataCenterLabelSync(dataCenterId: string) {
-  if (!dataCenterId) return "—"
-  const dc = readStore().dataCenters.find((x) => x.id === dataCenterId)
-  return dc ? `${dc.name} (${dc.code})` : dataCenterId
+  return termsId ? `${termsId.slice(0, 10)}` : '—'
 }
 
 export function useDataCenterLabel(dataCenterId: string) {
-  const dc = useSupplierDomainMockStore((s) =>
-    dataCenterId ? s.dataCenters.find((x) => x.id === dataCenterId) : undefined,
+  const { data } = trpc.supplier.getDataCenterDetail.useQuery(
+    { dataCenterId },
+    { enabled: Boolean(dataCenterId) },
   )
-  return dc ? `${dc.name} (${dc.code})` : dataCenterId || "—"
+  if (!dataCenterId) return '—'
+  const dc = data?.dataCenter
+  return dc ? `${dc.name} (${dc.code})` : dataCenterId
 }
 
-export function useAssigneeLabel(id: string) {
-  const map: Record<string, string> = {
-    "staff-mock-01": "张三（mock）",
-    "staff-mock-02": "李四（mock）",
-  }
-  return map[id] ?? id
+export function useAssigneeLabel(staffId: string) {
+  const { data } = trpc.crm.staff.getById.useQuery(
+    { id: staffId },
+    { enabled: Boolean(staffId) },
+  )
+  if (!staffId) return '—'
+  return data?.display_name ?? staffId
 }

@@ -9,6 +9,7 @@ import {
   SuanliOpenApiError,
 } from '@/lib/server/integrations/suanli-tenant-api'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
+import { balanceSnapshotDataAccess } from '@/lib/server/dataaccess/crm/balance-snapshot'
 import type {
   PlatformImportCommitItem,
   PlatformImportCommitResult,
@@ -89,6 +90,32 @@ async function loadLocalTenantsByPlatformIds(platformIds: string[]) {
     })
   }
   return map
+}
+
+async function writeBalanceSnapshotAfterImport(input: {
+  tenantId: string
+  customerId: string
+  platformTenantId: string
+  balance: string
+  creditLimit: string | null
+  traceId: string
+}) {
+  try {
+    await balanceSnapshotDataAccess.writeManualSnapshot({
+      tenantId: input.tenantId,
+      customerId: input.customerId,
+      platformTenantId: input.platformTenantId,
+      balance: input.balance,
+      creditLimit: input.creditLimit,
+      source: 'platform_import',
+    })
+  } catch (e) {
+    crmWarn('platform-import', 'balance snapshot failed', {
+      traceId: input.traceId,
+      tenantId: input.tenantId,
+      err: e instanceof Error ? e.message : String(e),
+    })
+  }
 }
 
 export const platformTenantImportDataAccess = {
@@ -224,6 +251,14 @@ export const platformTenantImportDataAccess = {
             tenantId: local.tenantId,
             tenantName: fields.name,
           })
+          await writeBalanceSnapshotAfterImport({
+            tenantId: local.tenantId,
+            customerId: local.customerId,
+            platformTenantId,
+            balance: fields.balance,
+            creditLimit: fields.credit_limit,
+            traceId,
+          })
           continue
         }
 
@@ -235,6 +270,9 @@ export const platformTenantImportDataAccess = {
           })
           continue
         }
+
+        let createdTenantId: string | undefined
+        let createdCustomerId: string | undefined
 
         await db.transaction(async (tx) => {
           let customerId: string
@@ -289,12 +327,25 @@ export const platformTenantImportDataAccess = {
             platformRegisteredAt: fields.platformRegisteredAt,
           })
           createdTenants++
+          createdTenantId = tenantId
+          createdCustomerId = customerId
           importedTenants.push({
             platformTenantId,
             tenantId,
             tenantName: fields.name,
           })
         })
+
+        if (createdTenantId && createdCustomerId) {
+          await writeBalanceSnapshotAfterImport({
+            tenantId: createdTenantId,
+            customerId: createdCustomerId,
+            platformTenantId,
+            balance: fields.balance,
+            creditLimit: fields.credit_limit,
+            traceId,
+          })
+        }
       } catch (e) {
         crmWarn('platform-import', 'commit row failed', {
           traceId,

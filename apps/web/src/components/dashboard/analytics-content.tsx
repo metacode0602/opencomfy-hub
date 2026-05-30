@@ -114,7 +114,9 @@ export function AnalyticsContent() {
   }))
 
   const totalConsumption =
-    productLineData.reduce((acc, p) => acc + p.value, 0) || summary?.totalConsumption || 0
+    productLineData.reduce((acc, p) => acc + p.value, 0) ||
+    summary?.thisMonthConsumption ||
+    0
 
   return (
     <div className="space-y-6">
@@ -137,10 +139,6 @@ export function AnalyticsContent() {
               <SelectItem value="year">最近 1 年</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline">
-            <Download className="w-4 h-4 mr-2" />
-            导出报表
-          </Button>
         </div>
       </div>
 
@@ -179,7 +177,7 @@ export function AnalyticsContent() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">活跃客户</p>
-                <p className="text-2xl font-bold">{summary?.customerCount ?? 0}</p>
+                <p className="text-2xl font-bold">{summary?.activeCustomerCount ?? 0}</p>
               </div>
               <div className="flex items-center text-green-500 text-sm">
                 <TrendingUp className="w-4 h-4 mr-1" />

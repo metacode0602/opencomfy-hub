@@ -754,7 +754,6 @@ export const consumptionUsageDaily = pgTable(
     productLine: varchar("product_line", { length: 64 }),
     unit: varchar("unit", { length: 32 }),
     amount: money("amount"), // 总消费（元）
-    balance: tenantMoney("balance"), // 平台同步租户金额：允许负值，精度覆盖平台 coin（约 12 位整数）
     voucherAmount: money("voucher_amount"), // 算力券消费金额
     balanceAmount: money("balance_amount"), // 余额/实付消费金额
     totalCardHours: cardHours("total_card_hours"),
@@ -967,6 +966,84 @@ export const billingSyncJobItem = pgTable(
   ],
 )
 
+/** 余额快照采集任务 */
+export const balanceSnapshotJobRun = pgTable(
+  "balance_snapshot_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 32 }).notNull(),
+    granularity: varchar("granularity", { length: 8 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 32 }).notNull(),
+    tenantCount: integer("tenant_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("balance_snapshot_job_run_started_at_idx").on(table.startedAt),
+    index("balance_snapshot_job_run_status_idx").on(table.status),
+  ],
+)
+
+/** 余额快照采集租户明细 */
+export const balanceSnapshotJobItem = pgTable(
+  "balance_snapshot_job_item",
+  {
+    id: text("id").primaryKey(),
+    jobRunId: text("job_run_id")
+      .notNull()
+      .references(() => balanceSnapshotJobRun.id, { onDelete: "cascade" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 32 }).notNull(),
+    granularity: varchar("granularity", { length: 8 }).notNull(),
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    error: text("error"),
+  },
+  (table) => [
+    index("balance_snapshot_job_item_job_run_id_idx").on(table.jobRunId),
+    index("balance_snapshot_job_item_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
+/** 租户账户余额快照（小时 / 日）；见 tenant-balance-snapshot-design.md */
+export const tenantBalanceSnapshot = pgTable(
+  "tenant_balance_snapshot",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }),
+    granularity: varchar("granularity", { length: 8 }).notNull(), // hour | day
+    bucketStart: timestamp("bucket_start", { withTimezone: true }).notNull(),
+    bucketDate: date("bucket_date").notNull(),
+    balance: tenantMoney("balance").notNull(),
+    creditLimit: tenantMoney("credit_limit"),
+    source: varchar("source", { length: 32 }).notNull().default("platform_sync"),
+    platformTenantId: varchar("platform_tenant_id", { length: 128 }),
+    platformCoinRaw: numeric("platform_coin_raw", { precision: 20, scale: 4 }),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+    jobRunId: text("job_run_id").references(() => balanceSnapshotJobRun.id, {
+      onDelete: "set null",
+    }),
+    ...crmTimestamps,
+  },
+  (table) => [
+    uniqueIndex("tenant_balance_snapshot_uk").on(
+      table.tenantId,
+      table.granularity,
+      table.bucketStart,
+    ),
+    index("tenant_balance_snapshot_tenant_date_idx").on(table.tenantId, table.bucketDate),
+    index("tenant_balance_snapshot_granularity_date_idx").on(table.granularity, table.bucketDate),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // Relations（查询用）
 // ---------------------------------------------------------------------------
@@ -989,6 +1066,35 @@ export const billingTenantRelations = relations(billingTenant, ({ one, many }) =
   recharges: many(recharge),
   projectLinks: many(projectTenant),
   billingSyncJobItems: many(billingSyncJobItem),
+  balanceSnapshots: many(tenantBalanceSnapshot),
+  balanceSnapshotJobItems: many(balanceSnapshotJobItem),
+}))
+
+export const tenantBalanceSnapshotRelations = relations(tenantBalanceSnapshot, ({ one }) => ({
+  tenant: one(billingTenant, {
+    fields: [tenantBalanceSnapshot.tenantId],
+    references: [billingTenant.id],
+  }),
+  jobRun: one(balanceSnapshotJobRun, {
+    fields: [tenantBalanceSnapshot.jobRunId],
+    references: [balanceSnapshotJobRun.id],
+  }),
+}))
+
+export const balanceSnapshotJobRunRelations = relations(balanceSnapshotJobRun, ({ many }) => ({
+  items: many(balanceSnapshotJobItem),
+  snapshots: many(tenantBalanceSnapshot),
+}))
+
+export const balanceSnapshotJobItemRelations = relations(balanceSnapshotJobItem, ({ one }) => ({
+  jobRun: one(balanceSnapshotJobRun, {
+    fields: [balanceSnapshotJobItem.jobRunId],
+    references: [balanceSnapshotJobRun.id],
+  }),
+  tenant: one(billingTenant, {
+    fields: [balanceSnapshotJobItem.tenantId],
+    references: [billingTenant.id],
+  }),
 }))
 
 export const billingSyncJobRunRelations = relations(billingSyncJobRun, ({ many }) => ({
@@ -1081,6 +1187,9 @@ export type NewCustomerRow = typeof customer.$inferInsert
 export type BillingTenantRow = typeof billingTenant.$inferSelect
 export type BillingSyncJobRunRow = typeof billingSyncJobRun.$inferSelect
 export type BillingSyncJobItemRow = typeof billingSyncJobItem.$inferSelect
+export type TenantBalanceSnapshotRow = typeof tenantBalanceSnapshot.$inferSelect
+export type BalanceSnapshotJobRunRow = typeof balanceSnapshotJobRun.$inferSelect
+export type BalanceSnapshotJobItemRow = typeof balanceSnapshotJobItem.$inferSelect
 export type CrmProjectRow = typeof crmProject.$inferSelect
 export type ProjectTagRow = typeof projectTag.$inferSelect
 export type UserStaffRow = typeof userStaff.$inferSelect

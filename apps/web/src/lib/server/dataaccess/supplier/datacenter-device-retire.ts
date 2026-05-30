@@ -18,6 +18,7 @@ import type {
   DatacenterRetireCommitResult,
   DatacenterRetireContext,
   DatacenterRetireListParseResult,
+  DatacenterRetireListSampleRow,
   DatacenterRetirePlanLine,
   DatacenterRetirePreviewResult,
   RetireActionType,
@@ -27,6 +28,7 @@ import {
   DEVICE_COOPERATION_TYPE_LABELS,
   type DeviceCooperationType,
 } from '@/lib/types/supplier-domain'
+import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { mapDbDeviceToDomain } from '@/lib/server/dataaccess/supplier/datacenter-retire-shared'
@@ -73,11 +75,6 @@ function parseExpectedDate(value: string): Date {
   const d = new Date(`${value}T00:00:00`)
   if (Number.isNaN(d.getTime())) {
     throw new Error('期望完成日期格式无效')
-  }
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  if (d < today) {
-    throw new Error('期望完成日期不能早于今天')
   }
   return d
 }
@@ -353,6 +350,58 @@ async function buildPreview(
   })
 }
 
+async function listRetireListSampleRows(
+  dataCenterId: string,
+  planLines: DatacenterRetireRequestInput['planLines'],
+): Promise<DatacenterRetireListSampleRow[]> {
+  const hit = await loadDataCenterById(dataCenterId)
+  const normalized = await normalizePlanLines(dataCenterId, planLines)
+  const rows: DatacenterRetireListSampleRow[] = []
+
+  for (const line of normalized) {
+    const devices = await db
+      .select({
+        externalIp: supplierDevice.externalIp,
+        internalIp: supplierDevice.internalIp,
+        externalDeviceId: supplierDevice.externalDeviceId,
+        assetNo: supplierDevice.assetNo,
+        cardName: gpuCardType.name,
+      })
+      .from(supplierDevice)
+      .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+      .where(
+        and(
+          eq(supplierDevice.dataCenterId, dataCenterId),
+          eq(supplierDevice.supplierId, hit.dataCenter.supplierId),
+          eq(supplierDevice.gpuCardTypeId, line.gpuCardTypeId),
+          eq(supplierDevice.cooperationType, line.cooperationType),
+          eq(supplierDevice.lifecycleStatus, '在线'),
+          ne(supplierDevice.opsStatus, '已退订'),
+        ),
+      )
+      .limit(line.plannedQuantity)
+
+    if (devices.length < line.plannedQuantity) {
+      throw new Error(
+        `${line.gpuCardTypeName} · ${DEVICE_COOPERATION_TYPE_LABELS[line.cooperationType]} 可下架设备不足（需要 ${line.plannedQuantity} 台，仅 ${devices.length} 台）`,
+      )
+    }
+
+    for (const device of devices) {
+      rows.push({
+        gpuCardTypeName: device.cardName ?? line.gpuCardTypeName,
+        cooperationType: DEVICE_COOPERATION_TYPE_LABELS[line.cooperationType],
+        externalIp: device.externalIp ?? '',
+        internalIp: device.internalIp ?? '',
+        externalDeviceId: device.externalDeviceId ?? '',
+        assetNo: device.assetNo ?? '',
+      })
+    }
+  }
+
+  return rows
+}
+
 export const datacenterDeviceRetireDataAccess = {
   async getContext(dataCenterId: string): Promise<DatacenterRetireContext> {
     const hit = await loadDataCenterById(dataCenterId)
@@ -367,6 +416,8 @@ export const datacenterDeviceRetireDataAccess = {
       availability,
     }
   },
+
+  listRetireListSampleRows,
 
   async preview(input: DatacenterRetireRequestInput): Promise<DatacenterRetirePreviewResult> {
     supplierLog('datacenter-device-retire', 'preview start', {
@@ -494,6 +545,14 @@ export const datacenterDeviceRetireDataAccess = {
             hasList,
           },
           occurredAt: now,
+        })
+
+        await appendBatchProgressEvent({
+          batchId,
+          eventType: 'batch_created',
+          occurredAt: now,
+          tx,
+          payload: { source: 'system' },
         })
       })
     } catch (e) {

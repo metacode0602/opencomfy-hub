@@ -44,6 +44,7 @@ import {
   IMPORT_STATUS_LABELS,
   onboardingBatchDetailPath,
 } from '@/lib/supplier/onboarding-batch-utils'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { OnboardingBatchWizardDialog } from './onboarding-batch-wizard-dialog'
 
 function formatDt(value: Date | string | null | undefined) {
@@ -101,6 +102,7 @@ export function OnboardingBatchesContent({
     onSuccess: (result) => {
       toast.success(`已入库 ${result.committedCount} 台设备`)
       void utils.supplier.onboardingBatch.list.invalidate({ batchKind })
+      invalidateGlobalDashboard(utils)
     },
     onError: (e) => toast.error(e.message),
   })
@@ -243,7 +245,9 @@ export function OnboardingBatchesContent({
                   <TableCell>
                     <div>{b.supplierShortName}</div>
                     <div className="text-xs text-muted-foreground">
+                      <Link href={`/supplier/datacenters/${b.dataCenterId}`} className="text-primary hover:underline">
                       {b.idcCode} · {b.dataCenterName}
+                      </Link>
                     </div>
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground max-w-[180px] truncate" title={formatPlanSummary(b.plannedLinesJson as Parameters<typeof formatPlanSummary>[0])}>

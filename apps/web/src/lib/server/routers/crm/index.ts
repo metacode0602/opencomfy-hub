@@ -2,6 +2,7 @@ import { createTRPCRouter, protectedProcedure, adminProcedure } from '../trpc'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { customersDataAccess } from '@/lib/server/dataaccess/crm/customers'
+import { customerMergeDataAccess } from '@/lib/server/dataaccess/crm/customer-merge'
 import { projectsDataAccess } from '@/lib/server/dataaccess/crm/projects'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { contractsDataAccess } from '@/lib/server/dataaccess/crm/contracts'
@@ -21,12 +22,15 @@ import {
   tenantBillingImportDataAccess,
 } from '@/lib/server/dataaccess/crm/tenant-billing-import'
 import { billingScheduledSyncDataAccess } from '@/lib/server/dataaccess/crm/billing-scheduled-sync'
+import { balanceSnapshotDataAccess } from '@/lib/server/dataaccess/crm/balance-snapshot'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
   billingTenantUpdateSchema,
+  customerMergeSchema,
   customerUpsertSchema,
   platformImportCommitItemSchema,
+  projectStageSchema,
   projectUpsertSchema,
   staffUpsertSchema,
   staffListSchema,
@@ -117,9 +121,56 @@ export const crmRouter = createTRPCRouter({
     listRecharges: protectedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listRechargesByCustomer(input.customerId)),
-    listConsumptions: protectedProcedure
-      .input(z.object({ customerId: z.string() }))
-      .query(({ input }) => billingDataAccess.listConsumptionsByCustomer(input.customerId)),
+    listDailyConsumptions: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.string(),
+          productLine: z.string().optional(),
+          usageMonth: z.string().optional(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.listDailyConsumptionsByCustomer(input.customerId, {
+          productLine: input.productLine,
+          usageMonth: input.usageMonth,
+        }),
+      ),
+    listDailyConsumptionDetails: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.string(),
+          tenantId: z.string(),
+          usageDate: z.string(),
+          productLine: z.string(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.listDailyConsumptionDetailsByCustomer(input.customerId, {
+          tenantId: input.tenantId,
+          usageDate: input.usageDate,
+          productLine: input.productLine,
+        }),
+      ),
+    consumptionTrend: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.string(),
+          months: z.number().int().min(1).max(24).optional(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.consumptionTrendByCustomer(input.customerId, input.months),
+      ),
+    productLineBreakdown: protectedProcedure
+      .input(
+        z.object({
+          customerId: z.string(),
+          usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+        }),
+      )
+      .query(({ input }) =>
+        billingDataAccess.productLineBreakdownByCustomer(input.customerId, input.usageMonth),
+      ),
     listCoupons: protectedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listCouponsByCustomer(input.customerId)),
@@ -129,6 +180,12 @@ export const crmRouter = createTRPCRouter({
     listTenants: protectedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listTenantsByCustomer(input.customerId)),
+    previewMerge: adminProcedure.input(customerMergeSchema).query(({ input }) =>
+      customerMergeDataAccess.previewMerge(input),
+    ),
+    merge: adminProcedure.input(customerMergeSchema).mutation(({ input }) =>
+      customerMergeDataAccess.mergeCustomers(input),
+    ),
   }),
 
   projects: createTRPCRouter({
@@ -145,7 +202,7 @@ export const crmRouter = createTRPCRouter({
       .input(z.object({ id: z.string(), data: projectUpsertSchema }))
       .mutation(({ input }) => projectsDataAccess.update(input.id, input.data)),
     updateStage: adminProcedure
-      .input(z.object({ id: z.string(), stage: z.enum(['lead', 'testing', 'converted']) }))
+      .input(z.object({ id: z.string(), stage: projectStageSchema }))
       .mutation(({ input }) => projectsDataAccess.updateStage(input.id, input.stage)),
     updateStatus: adminProcedure
       .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))
@@ -231,6 +288,22 @@ export const crmRouter = createTRPCRouter({
         billingDataAccess.listDailyConsumptionsByProject(input.projectId, {
           productLine: input.productLine,
           usageMonth: input.usageMonth,
+        }),
+      ),
+    listBalanceSnapshots: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string(),
+          granularity: z.enum(['hour', 'day']),
+          usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+          usageDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        }),
+      )
+      .query(({ input }) =>
+        balanceSnapshotDataAccess.listForProject(input.projectId, {
+          granularity: input.granularity,
+          usageMonth: input.usageMonth,
+          usageDate: input.usageDate,
         }),
       ),
     listDailyConsumptionDetails: protectedProcedure
@@ -446,16 +519,24 @@ export const crmRouter = createTRPCRouter({
 
   dashboard: createTRPCRouter({
     summary: protectedProcedure.query(() => dashboardDataAccess.summary()),
-    recentProjects: protectedProcedure.query(() => dashboardDataAccess.recentProjects()),
-    recentActivities: protectedProcedure.query(() => dashboardDataAccess.recentActivities()),
-    pendingBills: protectedProcedure.query(() => dashboardDataAccess.pendingBills()),
+    recentProjects: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(20).optional() }).optional())
+      .query(({ input }) => dashboardDataAccess.recentProjects(input?.limit)),
+    recentActivities: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
+      .query(({ input }) => dashboardDataAccess.recentActivities(input?.limit)),
+    pendingBills: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
+      .query(({ input }) => dashboardDataAccess.pendingBills(input?.limit)),
   }),
 
   analytics: createTRPCRouter({
-    consumptionTrend: protectedProcedure.query(() => dashboardDataAccess.consumptionTrend()),
-    productLineBreakdown: protectedProcedure.query(() =>
-      dashboardDataAccess.productLineBreakdown(),
-    ),
+    consumptionTrend: protectedProcedure
+      .input(z.object({ months: z.number().int().min(1).max(24).optional() }).optional())
+      .query(({ input }) => dashboardDataAccess.consumptionTrend(input?.months)),
+    productLineBreakdown: protectedProcedure
+      .input(z.object({ usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional())
+      .query(({ input }) => dashboardDataAccess.productLineBreakdown(input?.usageMonth)),
   }),
 
   calendar: createTRPCRouter({
@@ -530,5 +611,31 @@ export const crmRouter = createTRPCRouter({
     getRunById: adminProcedure
       .input(z.object({ id: z.string().min(1) }))
       .query(({ input }) => billingScheduledSyncDataAccess.getRunById(input.id)),
+  }),
+
+  balanceSnapshot: createTRPCRouter({
+    getConfig: adminProcedure.query(() => balanceSnapshotDataAccess.getConfig()),
+    runNow: adminProcedure
+      .input(
+        z
+          .object({
+            granularity: z.enum(['hour', 'day', 'all']).optional(),
+          })
+          .optional(),
+      )
+      .mutation(async ({ input }) => balanceSnapshotDataAccess.runNow(input)),
+    listRuns: adminProcedure
+      .input(
+        z
+          .object({
+            limit: z.number().int().min(1).max(100).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => balanceSnapshotDataAccess.listRuns(input)),
+    getRunById: adminProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(({ input }) => balanceSnapshotDataAccess.getRunById(input.id)),
   }),
 })

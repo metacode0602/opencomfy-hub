@@ -388,6 +388,7 @@ export function SingleIncomeRecomputeDialog({
         </div>
 
         <DialogFooter className="border-t px-6 py-4">
+          <div className="flex flex-wrap items-center gap-2 pb-2 pr-2">
           <Button
             type="button"
             variant="outline"
@@ -428,6 +429,7 @@ export function SingleIncomeRecomputeDialog({
               "确认并写入"
             )}
           </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

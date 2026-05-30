@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
-import { supplierDevice, supplierGpuInventory } from '@workspace/db/schema'
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { gpuCardType, supplierDevice, supplierGpuInventory } from '@workspace/db/schema'
+import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
+import { and, eq, ne } from 'drizzle-orm'
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
@@ -25,6 +26,25 @@ type InventoryAggregateRow = {
   maintenanceDeviceCount: number
 }
 
+function isDeviceOnline(row: {
+  lifecycleStatus: string
+  inMaintenance: boolean
+  opsStatus: string
+}): boolean {
+  return (
+    row.lifecycleStatus === '在线' &&
+    !row.inMaintenance &&
+    row.opsStatus !== '不可调度节点运行中'
+  )
+}
+
+function isDeviceMaintenance(row: {
+  lifecycleStatus: string
+  inMaintenance: boolean
+}): boolean {
+  return row.lifecycleStatus === '维护中' || row.inMaintenance
+}
+
 async function queryDeviceAggregates(
   tx: DbTx,
   supplierId: string,
@@ -33,22 +53,16 @@ async function queryDeviceAggregates(
   const rows = await tx
     .select({
       gpuCardTypeId: supplierDevice.gpuCardTypeId,
-      quantity: sql<number>`coalesce(sum(${supplierDevice.gpuCount}), 0)`.mapWith(Number),
-      onlineQuantity: sql<number>`coalesce(sum(case
-        when ${supplierDevice.lifecycleStatus} = '在线'
-          and ${supplierDevice.inMaintenance} = false
-          and ${supplierDevice.opsStatus} <> '不可调度节点运行中'
-        then ${supplierDevice.gpuCount}
-        else 0
-      end), 0)`.mapWith(Number),
-      maintenanceDeviceCount: sql<number>`coalesce(sum(case
-        when ${supplierDevice.lifecycleStatus} = '维护中'
-          or ${supplierDevice.inMaintenance} = true
-        then 1
-        else 0
-      end), 0)`.mapWith(Number),
+      gpuCount: supplierDevice.gpuCount,
+      lifecycleStatus: supplierDevice.lifecycleStatus,
+      inMaintenance: supplierDevice.inMaintenance,
+      opsStatus: supplierDevice.opsStatus,
+      cardTypeName: gpuCardType.name,
+      cardTypeCode: gpuCardType.code,
+      deviceRole: gpuCardType.deviceRole,
     })
     .from(supplierDevice)
+    .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
     .where(
       and(
         eq(supplierDevice.supplierId, supplierId),
@@ -56,14 +70,40 @@ async function queryDeviceAggregates(
         ne(supplierDevice.lifecycleStatus, '退订'),
       ),
     )
-    .groupBy(supplierDevice.gpuCardTypeId)
 
-  return rows.map((r) => ({
-    gpuCardTypeId: r.gpuCardTypeId,
-    quantity: r.quantity,
-    onlineQuantity: r.onlineQuantity,
-    maintenanceDeviceCount: r.maintenanceDeviceCount,
-  }))
+  const byCardType = new Map<string, InventoryAggregateRow>()
+
+  for (const row of rows) {
+    const role = resolveGpuCardTypeRole({
+      name: row.cardTypeName,
+      code: row.cardTypeCode,
+      deviceRole: row.deviceRole,
+    })
+    const isOnline = isDeviceOnline(row)
+    const isMaintenance = isDeviceMaintenance(row)
+
+    let agg = byCardType.get(row.gpuCardTypeId)
+    if (!agg) {
+      agg = {
+        gpuCardTypeId: row.gpuCardTypeId,
+        quantity: 0,
+        onlineQuantity: 0,
+        maintenanceDeviceCount: 0,
+      }
+      byCardType.set(row.gpuCardTypeId, agg)
+    }
+
+    if (role === 'infra') {
+      agg.quantity += 1
+      if (isOnline) agg.onlineQuantity += 1
+    } else {
+      agg.quantity += row.gpuCount
+      if (isOnline) agg.onlineQuantity += row.gpuCount
+    }
+    if (isMaintenance) agg.maintenanceDeviceCount += 1
+  }
+
+  return Array.from(byCardType.values())
 }
 
 /**

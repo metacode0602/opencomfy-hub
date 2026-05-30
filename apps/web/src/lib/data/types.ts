@@ -1,5 +1,7 @@
 // 模拟数据类型定义（v3.0：Customer / Project / PlatformTenant）
 
+import type { ProjectStage } from '@/lib/types/crm'
+
 /** 期望规模 — 单条卡型及数量 */
 export type ExpectedScaleCardEntry = {
   cardTypeId: string
@@ -125,7 +127,7 @@ export interface Project {
   platformTenantId?: string
   businessLineId: string
   businessLineName: string
-  stage: 'lead' | 'testing' | 'converted'
+  stage: ProjectStage
   status: 'active' | 'paused' | 'completed'
   /** API 读模型：来自 project_staff_assignment JOIN user_staff */
   preSalesManager: string
@@ -286,6 +288,8 @@ export interface OrderItem {
 export interface Activity {
   id: string
   projectId: string
+  /** 工作台最近动态等场景 JOIN 项目名 */
+  projectName?: string
   type: 'comment' | 'file' | 'task' | 'meeting' | 'stage_change' | 'recharge' | 'consumption'
   title: string
   description: string
@@ -525,6 +529,16 @@ export interface DataCenterStats {
   onlineGpu: number
 }
 
+/** 平台定价详情页 — 接入机房的摘要信息（来自 GPU 库存聚合） */
+export type PlatformPricingDatacenterContext = {
+  dataCenterId: string
+  dataCenterName: string
+  supplierId: string
+  supplierName: string
+  location: string
+  status: DataCenter['status']
+}
+
 export interface DataCenterDetail {
   dataCenter: DataCenter
   gpuInventory: DataCenterDevice[]
@@ -544,6 +558,8 @@ export type GPUCardTypeManufacturer = 'NVIDIA' | 'AMD' | 'Intel' | 'Huawei' | 'O
 
 export type GPUCardTypeStatus = 'active' | 'disabled'
 
+export type GPUCardTypeRole = 'compute' | 'infra'
+
 export interface GPUCardType {
   id: string
   /** 业务编码，落库 gpu_card_type.code */
@@ -553,6 +569,8 @@ export interface GPUCardType {
   memoryGB: number
   tdpWatts?: number
   computeCapability?: string
+  /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+  deviceRole?: GPUCardTypeRole
   status: GPUCardTypeStatus
   createdAt?: string
   updatedAt?: string
@@ -567,6 +585,8 @@ export interface DataCenterDevice {
   supplierShortName?: string
   cardTypeId: string
   cardTypeName: string
+  /** compute=算力卡型；infra=管控/存储等无 GPU 卡型 */
+  cardTypeRole?: GPUCardTypeRole
   quantity: number
   onlineQuantity: number
   // 卡时模式成本

@@ -35,6 +35,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@workspace/ui/components/alert'
 import { Checkbox } from '@workspace/ui/components/checkbox'
 import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import {
   DEVICE_COOPERATION_TYPE_LABELS,
   type DeviceCooperationType,
@@ -58,7 +59,7 @@ import {
   getListedQuantity,
   validateRetirePlanLineDrafts,
 } from '@/lib/supplier/datacenter-retire-plan-validation'
-import { downloadDatacenterRetireListSampleCsv } from '@/lib/data/datacenter-device-retire-list-sample'
+import { downloadDatacenterRetireListSampleCsv } from '@/lib/supplier/datacenter-retire-list-sample'
 import {
   getChangelogActionHint,
   getRetireScenarioLabel,
@@ -135,6 +136,7 @@ export function DatacenterDeviceRetireDialog({
   dataCenterName: string
   onSuccess?: () => void
 }) {
+  const utils = trpc.useUtils()
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadFileRef = useRef<File | null>(null)
 
@@ -151,6 +153,7 @@ export function DatacenterDeviceRetireDialog({
   const [preview, setPreview] = useState<DatacenterRetirePreviewResult | null>(null)
   const [commitResult, setCommitResult] = useState<DatacenterRetireCommitResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sampleDownloading, setSampleDownloading] = useState(false)
 
   const {
     data: context,
@@ -166,7 +169,6 @@ export function DatacenterDeviceRetireDialog({
   const previewMutation = trpc.supplier.deviceRetire.previewDatacenter.useMutation()
   const commitMutation = trpc.supplier.deviceRetire.commitDatacenter.useMutation()
 
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const effectiveContext: DatacenterRetireContext | null = context ?? null
   const isDatacenterClosure = retireReason === 'dc_closure'
 
@@ -238,7 +240,6 @@ export function DatacenterDeviceRetireDialog({
     Boolean(retireReason) &&
     Boolean(workOrderNo.trim()) &&
     Boolean(expectedCompletionDate) &&
-    expectedCompletionDate >= todayStr &&
     (isDatacenterClosure
       ? snapshotTotal > 0
       : Boolean(retireActionType) && planValidation.ok && hasInventory)
@@ -274,6 +275,34 @@ export function DatacenterDeviceRetireDialog({
           })),
       uploadList: !isDatacenterClosure && uploadList,
       listFile,
+    }
+  }
+
+  const onDownloadSample = async () => {
+    if (!planValidation.ok) {
+      toast.error(planValidation.error ?? '请先填写有效的下架计划')
+      return
+    }
+    setSampleDownloading(true)
+    try {
+      const rows = await utils.supplier.deviceRetire.getDatacenterRetireListSample.fetch({
+        dataCenterId,
+        planLines: planValidation.normalized.map((line) => ({
+          gpuCardTypeId: line.gpuCardTypeId,
+          gpuCardTypeCode: line.gpuCardTypeCode,
+          cooperationType: line.cooperationType,
+          plannedQuantity: line.plannedQuantity,
+        })),
+      })
+      downloadDatacenterRetireListSampleCsv(
+        `下架清单-样例-${effectiveContext?.dataCenterName ?? dataCenterName}.csv`,
+        rows,
+      )
+      toast.success('已下载样例文件')
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setSampleDownloading(false)
     }
   }
 
@@ -349,6 +378,7 @@ export function DatacenterDeviceRetireDialog({
       setWizardStep('done')
       toast.success(`${result.scenarioLabel}批次 ${result.batchCodes[0]} 已创建`)
       onSuccess?.()
+      invalidateGlobalDashboard(utils)
     } catch (e) {
       toast.error(getErrorMessage(e))
     } finally {
@@ -508,7 +538,6 @@ export function DatacenterDeviceRetireDialog({
                 <Input
                   id="dc-retire-date"
                   type="date"
-                  min={todayStr}
                   value={expectedCompletionDate}
                   onChange={(e) => setExpectedCompletionDate(e.target.value)}
                 />
@@ -718,9 +747,14 @@ export function DatacenterDeviceRetireDialog({
               variant="outline"
               size="sm"
               className="gap-1"
-              onClick={() => downloadDatacenterRetireListSampleCsv()}
+              disabled={sampleDownloading}
+              onClick={() => void onDownloadSample()}
             >
-              <Download className="h-3.5 w-3.5" />
+              {sampleDownloading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
               下载样例
             </Button>
             <div

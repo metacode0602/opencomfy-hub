@@ -1,4 +1,4 @@
-/** 供应链侧「设备上架 / 订单接入 / 故障事件」批量导入（mock） */
+/** 供应链侧「设备上架 / 订单接入 / 故障事件」批量导入 */
 
 export type SupplierOpsBatchKind = "online-tasks" | "order-access" | "fault-incidents"
 

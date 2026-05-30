@@ -337,6 +337,69 @@
       "when": 1779791246518,
       "tag": "0049_lethal_silver_surfer",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1779867355195,
+      "tag": "0050_last_arclight",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1779870000000,
+      "tag": "0051_onboarding_batch_planned_gpu",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1779869840083,
+      "tag": "0052_ambitious_ricochet",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1779874993218,
+      "tag": "0053_optimal_ser_duncan",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1779880000000,
+      "tag": "0054_internal_test_hold_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1779958071949,
+      "tag": "0055_slimy_venus",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1779960000000,
+      "tag": "0056_tenant_balance_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1780017625060,
+      "tag": "0057_yielding_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1780101283869,
+      "tag": "0058_drop_legacy_dashboard_six_pool",
+      "breakpoints": true
     }
   ]
 }

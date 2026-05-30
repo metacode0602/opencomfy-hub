@@ -26,7 +26,6 @@ import {
   Computer,
   Cpu,
   CreditCard,
-  DownloadIcon,
   Factory,
   FileText,
   FolderKanban,
@@ -34,6 +33,7 @@ import {
   History,
   LayoutDashboard,
   ListOrdered,
+  ListTodo,
   Server,
   Settings,
   Sparkles,
@@ -43,10 +43,13 @@ import {
 import Link from "next/link"
 import { websiteConfig } from "@/lib/config/website"
 import { DollarSignIcon } from "lucide-react"
-import { UploadIcon } from "lucide-react"
-
 const data = {
   navMain: [
+    {
+      title: "设备流转",
+      url: "/dashboard/flow",
+      icon: <ArrowDownToLineIcon className="size-4" />,
+    },
     {
       title: "接入看板",
       url: "/dashboard/global",
@@ -85,24 +88,9 @@ const data = {
       icon: <Cpu className="size-4" />,
     },    
     {
-      title: "设备下架",
-      url: "/supplier/offline-tasks",
-      icon: <DownloadIcon className="size-4" />,
-    },    
-    {
-      title: "设备上架",
+      title: "计划批次",
       url: "/supplier/online-tasks",
-      icon: <UploadIcon className="size-4" />,
-    },
-    {
-      title: "订单接入",
-      url: "/supplier/order-access",
-      icon: <ArrowDownToLineIcon className="size-4" />,
-    },
-    {
-      title: "故障事件",
-      url: "/supplier/fault-incidents",
-      icon: <AlertCircleIcon className="size-4" />,
+      icon: <ListTodo className="size-4" />,
     },
     {
       title: "内部占用",
@@ -116,11 +104,11 @@ const data = {
       url: "/crm/workbench",
       icon: <LayoutDashboard className="size-4" />,
     },
-    {
-      title: "数据看板",
-      url: "/crm/analytics",
-      icon: <BarChart3 className="size-4" />,
-    },
+    // {
+    //   title: "数据看板",
+    //   url: "/crm/analytics",
+    //   icon: <BarChart3 className="size-4" />,
+    // },
     {
       title: "客户管理",
       url: "/crm/customers",
@@ -141,16 +129,16 @@ const data = {
       url: "/crm/staff",
       icon: <Users className="size-4" />,
     },
-    {
-      title: "合同",
-      url: "/crm/contracts",
-      icon: <FileText className="size-4" />,
-    },
-    {
-      title: "日历",
-      url: "/crm/calendar",
-      icon: <CalendarDays className="size-4" />,
-    }
+    // {
+    //   title: "合同",
+    //   url: "/crm/contracts",
+    //   icon: <FileText className="size-4" />,
+    // },
+    // {
+    //   title: "日历",
+    //   url: "/crm/calendar",
+    //   icon: <CalendarDays className="size-4" />,
+    // }
   ],
   navMarketplace: [
     {

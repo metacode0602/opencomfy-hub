@@ -1,7 +1,8 @@
 "use client"
 
-import * as React from "react"
+import { Suspense, useCallback, useMemo } from "react"
 import { Cell, Label, Pie, PieChart } from "recharts"
+import type { PieLabelRenderProps } from "recharts"
 
 import {
   Card,
@@ -16,374 +17,370 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@workspace/ui/components/chart"
-import { cn } from "@workspace/ui/lib/utils"
 
-const poolChartConfig = {
-  platform: {
-    label: "弹性服务部署",
-    theme: { light: "var(--chart-1)", dark: "var(--chart-1)" },
-  },
-  dedicated: {
-    label: "裸金属短租",
-    theme: { light: "var(--chart-2)", dark: "var(--chart-2)" },
-  },
-  inference: {
-    label: "Job任务",
-    theme: { light: "var(--chart-3)", dark: "var(--chart-3)" },
-  },
-  training: {
-    label: "云主机",
-    theme: { light: "var(--chart-4)", dark: "var(--chart-4)" },
-  },
-  standby: {
-    label: "内部测试",
-    theme: { light: "var(--chart-5)", dark: "var(--chart-5)" },
-  },
-  maintenance: {
-    label: "维保中",
-    theme: { light: "var(--chart-2)", dark: "var(--chart-2)" },
-  },
-} satisfies ChartConfig
+import type { GlobalResourceCompositionSlice } from "@/lib/types/global-dashboard-api"
 
-const POOL_PIE = [
-  { name: "platform", value: 620, key: "platform" as const },
-  { name: "dedicated", value: 480, key: "dedicated" as const },
-  { name: "inference", value: 510, key: "inference" as const },
-  { name: "training", value: 430, key: "training" as const },
-  { name: "standby", value: 280, key: "standby" as const },
-  { name: "maintenance", value: 181, key: "maintenance" as const },
-]
+import { DashboardCardLoading } from "../_lib/dashboard-card-states"
+import { useGlobalDashboard } from "../_lib/global-dashboard-context"
+import { formatCompactHours } from "../_lib/format-kpi"
 
-const POOL_DETAILS: Record<
-  (typeof POOL_PIE)[number]["key"],
-  {
-    title: string
-    utilization: string
-    count: string
-    gpu: string
-    finance: string
-  }
-> = {
-  platform: {
-    title: "弹性服务部署",
-    utilization: "68.2%",
-    count: "620 台",
-    gpu: "A100 52% · H100 48%",
-    finance: "收入 +12% / 成本稳定",
-  },
-  dedicated: {
-    title: "裸金属短租",
-    utilization: "71.0%",
-    count: "480 台",
-    gpu: "A100 80GB 为主",
-    finance: "合同履约正常",
-  },
-  inference: {
-    title: "Job任务",
-    utilization: "59.4%",
-    count: "510 台",
-    gpu: "H100 60%",
-    finance: "按量计费",
-  },
-  training: {
-    title: "云主机",
-    utilization: "55.1%",
-    count: "430 台",
-    gpu: "A100 / H100 混合",
-    finance: "预留 + 突发",
-  },
-  standby: {
-    title: "内部测试",
-    utilization: "22.0%",
-    count: "280 台",
-    gpu: "多型号",
-    finance: "缓冲成本",
-  },
-  maintenance: {
-    title: "维保中",
-    utilization: "—",
-    count: "181 台",
-    gpu: "维保中",
-    finance: "停机不计费",
-  },
-}
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+] as const
 
 const RADIAN = Math.PI / 180
+const MIN_LABEL_PERCENT = 0.03
+const MAX_VISIBLE_LEGEND_SLICES = 7
 
-/** 与 Recharts PolarUtils.polarToCartesian 一致（angle 为度） */
-function polarToCartesian(cx: number, cy: number, radius: number, angle: number) {
+/** 仅扩大 SVG 画布留白，饼图与引导线 label 保持固定像素尺寸 */
+const CANVAS_BASE_SIZE = 480
+const CANVAS_SCALE = 1.25
+const CANVAS_SIZE = Math.round(CANVAS_BASE_SIZE * CANVAS_SCALE)
+const CANVAS_PADDING = (CANVAS_SIZE - CANVAS_BASE_SIZE) / 2
+const CHART_MARGIN = {
+  top: 16 + CANVAS_PADDING * 0.85,
+  right: 24 + CANVAS_PADDING,
+  bottom: 16 + CANVAS_PADDING * 0.85,
+  left: 24 + CANVAS_PADDING,
+}
+
+/** 上一版 480px 画布 + 70%/46% 半径下的实际像素尺寸 */
+const PIE_OUTER_RADIUS_PX = Math.round(CANVAS_BASE_SIZE * 0.5 * 0.7)
+const PIE_INNER_RADIUS_PX = Math.round(CANVAS_BASE_SIZE * 0.5 * 0.46)
+const LABEL_BASE_OUTER_RADIUS = PIE_OUTER_RADIUS_PX
+
+function getLabelMetrics(outerRadius: number) {
+  const scale = Math.max(0.95, Math.min(1.55, outerRadius / LABEL_BASE_OUTER_RADIUS))
+
   return {
-    x: cx + Math.cos(-RADIAN * angle) * radius,
-    y: cy + Math.sin(-RADIAN * angle) * radius,
+    scale,
+    titleSize: 12 * scale,
+    metricSize: 10.5 * scale,
+    leaderGap: 14 * scale,
+    elbowOffset: 10 * scale,
+    textGap: 8 * scale,
+    dotRadius: 2.2 * scale,
+    strokeWidth: 1 * scale,
+    lineHeight: 1.15 * scale,
   }
 }
 
-function getPoolTotal() {
-  return POOL_PIE.reduce((s, x) => s + x.value, 0)
-}
+function getCenterLabelMetrics(viewBox: {
+  innerRadius?: number
+  outerRadius?: number
+  cx?: number
+  cy?: number
+}) {
+  const innerRadius = Number(viewBox.innerRadius ?? 0)
+  const scale =
+    innerRadius > 0 ? Math.max(0.95, Math.min(1.5, innerRadius / 52)) : 1
 
-const PIE_START = 90
-const PIE_END = -270
-const PIE_PADDING = 1.5
-
-/** 与 Recharts `computePieSectors` 一致，得到各扇区中点角度（度，与 polarToCartesian 一致） */
-function getSectorMidAnglesDegrees(): number[] {
-  const values = POOL_PIE.map((p) => p.value)
-  const sum = values.reduce((a, b) => a + b, 0)
-  const notZeroItemCount = values.filter((v) => v !== 0).length
-  const sign = Math.sign(PIE_END - PIE_START)
-  const absDelta = Math.min(Math.abs(PIE_END - PIE_START), 360)
-  const totalPaddingAngle =
-    (absDelta >= 360 ? notZeroItemCount : Math.max(0, notZeroItemCount - 1)) * PIE_PADDING
-  const realTotalAngle = absDelta - totalPaddingAngle
-
-  const mids: number[] = []
-  let prevEnd: number | undefined
-  for (let i = 0; i < values.length; i++) {
-    const val = values[i]!
-    let start: number
-    if (i > 0) {
-      start = prevEnd! + sign * PIE_PADDING * (val !== 0 ? 1 : 0)
-    } else {
-      start = PIE_START
-    }
-    const end = start + sign * ((val / sum) * realTotalAngle)
-    mids.push((start + end) / 2)
-    prevEnd = end
+  return {
+    primarySize: 16 * scale,
+    secondarySize: 11 * scale,
+    lineGap: 14 * scale,
   }
-  return mids
 }
 
-const SECTOR_MID_DEG = getSectorMidAnglesDegrees()
-
-function getSliceOuterPoints(cx: number, cy: number, outerR: number) {
-  return SECTOR_MID_DEG.map((midDeg) => polarToCartesian(cx, cy, outerR, midDeg))
+type ResourcePoolPieDatum = {
+  name: string
+  value: number
+  key: string
+  kind: GlobalResourceCompositionSlice["kind"]
+  fill: string
+  slice: GlobalResourceCompositionSlice
 }
 
-/** 折线路径：饼边 → 正交肘点 → 卡片锚点（朝向圆心一侧边中点） */
-function elbowPath(sx: number, sy: number, tx: number, ty: number): string {
-  const dx = tx - sx
-  const dy = ty - sy
-  const preferHorizontal = Math.abs(dx) >= Math.abs(dy)
-  if (preferHorizontal) {
-    const mx = sx + dx * 0.55
-    return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ty} L ${tx} ${ty}`
+function formatSlicePrimaryMetric(slice: GlobalResourceCompositionSlice, useCardHours: boolean) {
+  if (useCardHours) {
+    return `${(slice.cardHours ?? 0).toLocaleString()} 卡时`
   }
-  const my = sy + dy * 0.55
-  return `M ${sx} ${sy} L ${sx} ${my} L ${tx} ${my} L ${tx} ${ty}`
+  return `${slice.gpuCount.toLocaleString()} 卡`
 }
 
-function anchorTowardCenter(
-  rect: DOMRect,
-  container: DOMRect,
-  cx: number,
-  cy: number
-): { x: number; y: number } {
-  const left = rect.left - container.left
-  const right = rect.right - container.left
-  const top = rect.top - container.top
-  const bottom = rect.bottom - container.top
-  const mx = (left + right) / 2
-  const my = (top + bottom) / 2
-  const vx = cx - mx
-  const vy = cy - my
-  if (Math.abs(vx) >= Math.abs(vy)) {
-    const x = vx >= 0 ? right : left
-    return { x, y: my }
+function ResourcePoolSliceLabel({
+  cx = 0,
+  cy = 0,
+  midAngle = 0,
+  outerRadius = 0,
+  percent = 0,
+  fill,
+  payload,
+  index = 0,
+  useCardHours,
+  sliceCount,
+}: PieLabelRenderProps & { useCardHours: boolean; sliceCount: number }) {
+  const slice = (payload as ResourcePoolPieDatum | undefined)?.slice
+  if (!slice) {
+    return null
   }
-  const y = vy >= 0 ? bottom : top
-  return { x: mx, y }
+  if (sliceCount > MAX_VISIBLE_LEGEND_SLICES && index >= MAX_VISIBLE_LEGEND_SLICES) {
+    return null
+  }
+  if (sliceCount > MAX_VISIBLE_LEGEND_SLICES && percent < MIN_LABEL_PERCENT) {
+    return null
+  }
+
+  const color = fill ?? CHART_COLORS[0]
+  const cos = Math.cos(-midAngle * RADIAN)
+  const sin = Math.sin(-midAngle * RADIAN)
+  const radius = Number(outerRadius)
+  const {
+    titleSize,
+    metricSize,
+    leaderGap,
+    elbowOffset,
+    textGap,
+    dotRadius,
+    strokeWidth,
+    lineHeight,
+  } = getLabelMetrics(radius)
+  const sx = cx + radius * cos
+  const sy = cy + radius * sin
+  const mx = cx + (radius + leaderGap) * cos
+  const my = cy + (radius + leaderGap) * sin
+  const ex = mx + (cos >= 0 ? 1 : -1) * elbowOffset
+  const ey = my
+  const textAnchor = cos >= 0 ? "start" : "end"
+  const textX = ex + (cos >= 0 ? 1 : -1) * textGap
+
+  return (
+    <g className="recharts-pie-label-text">
+      <path
+        d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`}
+        stroke={color}
+        fill="none"
+        strokeWidth={strokeWidth}
+        opacity={0.55}
+      />
+      <circle cx={ex} cy={ey} r={dotRadius} fill={color} stroke="none" />
+      <text x={textX} y={ey} textAnchor={textAnchor} dominantBaseline="central">
+        <tspan fill={color} fontSize={titleSize} fontWeight={500}>
+          {slice.label}
+          {slice.kind === "pipeline_virtual" ? " · 计划" : ""}
+        </tspan>
+        <tspan
+          x={textX}
+          dy={`${lineHeight}em`}
+          className="fill-muted-foreground"
+          fontSize={metricSize}
+        >
+          {formatSlicePrimaryMetric(slice, useCardHours)}
+          {slice.netChangeLabel ? ` · ${slice.netChangeLabel}` : ""}
+        </tspan>
+      </text>
+    </g>
+  )
+}
+
+function ResourcePoolChartCardInner() {
+  const { data, isLoading, isSnapshot } = useGlobalDashboard()
+
+  const composition = data?.resourceComposition
+  const slices = composition?.slices ?? []
+
+  const chartConfig = useMemo(() => {
+    const config: ChartConfig = {}
+    slices.forEach((s, index) => {
+      const color = CHART_COLORS[index % CHART_COLORS.length]!
+      config[s.key] = {
+        label: s.label,
+        theme: { light: color, dark: color },
+      }
+    })
+    return config
+  }, [slices])
+
+  const useCardHours = composition?.displayUnit === "card_hours"
+
+  const pieData = useMemo<ResourcePoolPieDatum[]>(
+    () =>
+      slices.map((s, index) => ({
+        name: s.key,
+        value: useCardHours ? (s.cardHours ?? 0) : s.gpuCount,
+        key: s.key,
+        kind: s.kind,
+        fill: CHART_COLORS[index % CHART_COLORS.length]!,
+        slice: s,
+      })),
+    [slices, useCardHours],
+  )
+
+  const renderSliceLabel = useCallback(
+    (props: PieLabelRenderProps) => {
+      const { key, ...labelProps } = props as PieLabelRenderProps & { key?: React.Key }
+      return (
+        <ResourcePoolSliceLabel
+          key={key}
+          {...labelProps}
+          useCardHours={useCardHours}
+          sliceCount={slices.length}
+        />
+      )
+    },
+    [useCardHours, slices.length],
+  )
+
+  return (
+    <Card className="flex h-full min-h-0 flex-col border-border/80 lg:col-span-6">
+      <CardHeader className="shrink-0">
+        <CardTitle className="text-base">资源构成</CardTitle>
+        <CardDescription>
+          {isSnapshot
+            ? "互斥分桶 · 含计划缺口（非退订设备 + 虚拟计划量）"
+            : "区间供应卡时（主数据状态时序 + 计划批次进度；变更表仅更新批次缺口）"}
+          {composition?.approximate && (
+            <span className="block text-amber-600 dark:text-amber-500">
+              主数据快照缺失，实体卡时按当前态近似
+            </span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex min-h-0 flex-1 flex-col pb-3 pt-0">
+        {isLoading ? (
+          <DashboardCardLoading label="加载资源构成…" />
+        ) : pieData.length === 0 || pieData.every((p) => p.value === 0) ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">暂无资源构成数据</p>
+        ) : (
+          <div
+            className="flex min-h-[450px] flex-1 items-center justify-center sm:min-h-[500px] lg:min-h-[550px]"
+            style={{ containerType: "size" }}
+          >
+            <ChartContainer
+              config={chartConfig}
+              initialDimension={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}
+              className="aspect-square max-h-full max-w-full [height:min(100cqh,100cqw)] [width:min(100cqh,100cqw)] [&_.recharts-pie-label-text]:fill-foreground [&_.recharts-responsive-container]:!size-full"
+            >
+              <PieChart margin={CHART_MARGIN}>
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    hideLabel
+                    className="gap-2 px-3 py-2 text-sm"
+                    formatter={(value, name) => {
+                      const slice = slices.find((s) => s.key === name)
+                      const label = slice?.label ?? String(name)
+                      if (useCardHours) {
+                        const mh = slice?.machineHours
+                        return (
+                          <div className="grid gap-1.5">
+                            <span className="font-semibold">
+                              {label}：{formatCompactHours(Number(value))} 卡时
+                              {mh != null ? `（${formatCompactHours(mh)} 台时）` : ""}
+                            </span>
+                            {slice?.gpuCount != null && (
+                              <span className="text-muted-foreground">
+                                期末 {slice.gpuCount.toLocaleString()} 卡
+                              </span>
+                            )}
+                            {slice?.breakdownByCardType?.map((row) => (
+                              <span key={row.cardType} className="text-muted-foreground">
+                                {row.cardType}
+                                {row.cardHours != null
+                                  ? ` · ${row.cardHours.toLocaleString()} 卡时`
+                                  : ` · ${row.gpuCount.toLocaleString()} 卡`}
+                              </span>
+                            ))}
+                          </div>
+                        )
+                      }
+                      return (
+                        <div className="grid gap-1.5">
+                          <span className="font-semibold">
+                            {label}：{formatCompactHours(Number(value))} 卡
+                          </span>
+                          {slice?.deviceCount != null && (
+                            <span className="text-muted-foreground">
+                              {slice.deviceCount.toLocaleString()} 台
+                            </span>
+                          )}
+                          {slice?.breakdownByCardType?.map((row) => (
+                            <span key={row.cardType} className="text-muted-foreground">
+                              {row.cardType} · {row.gpuCount.toLocaleString()} 卡
+                            </span>
+                          ))}
+                        </div>
+                      )
+                    }}
+                  />
+                }
+              />
+              <Pie
+                data={pieData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={PIE_INNER_RADIUS_PX}
+                outerRadius={PIE_OUTER_RADIUS_PX}
+                paddingAngle={slices.length > 6 ? 1 : 2}
+                minAngle={2}
+                labelLine={false}
+                label={renderSliceLabel}
+              >
+                {pieData.map((entry) => (
+                  <Cell
+                    key={entry.key}
+                    fill={entry.fill}
+                    stroke={entry.kind === "pipeline_virtual" ? "var(--border)" : undefined}
+                    strokeDasharray={entry.kind === "pipeline_virtual" ? "4 3" : undefined}
+                  />
+                ))}
+                <Label
+                  content={({ viewBox }) => {
+                    if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                      const { primarySize, secondarySize, lineGap } = getCenterLabelMetrics(viewBox)
+                      const hasSecondary = Boolean(composition?.centerSecondary)
+
+                      return (
+                        <text
+                          x={viewBox.cx}
+                          y={viewBox.cy}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          <tspan
+                            x={viewBox.cx}
+                            y={hasSecondary ? (viewBox.cy ?? 0) - lineGap / 2 : viewBox.cy}
+                            className="fill-foreground"
+                            fontSize={primarySize}
+                            fontWeight={700}
+                          >
+                            {composition?.centerPrimary ?? "—"}
+                          </tspan>
+                          {composition?.centerSecondary && (
+                            <tspan
+                              x={viewBox.cx}
+                              y={(viewBox.cy ?? 0) + lineGap / 2}
+                              className="fill-muted-foreground"
+                              fontSize={secondarySize}
+                            >
+                              {composition.centerSecondary}
+                            </tspan>
+                          )}
+                        </text>
+                      )
+                    }
+                    return null
+                  }}
+                />
+              </Pie>
+            </PieChart>
+          </ChartContainer>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export function ResourcePoolChartCard() {
-  const totalPool = React.useMemo(() => getPoolTotal(), [])
-  const utilization = "62.7%"
-
-  const containerRef = React.useRef<HTMLDivElement>(null)
-  const chartWrapRef = React.useRef<HTMLDivElement>(null)
-  const cardRefs = React.useRef<(HTMLDivElement | null)[]>([])
-
-  const [paths, setPaths] = React.useState<string[]>([])
-
-  const measure = React.useCallback(() => {
-    const container = containerRef.current
-    const chartWrap = chartWrapRef.current
-    if (!container || !chartWrap) return
-
-    const cr = container.getBoundingClientRect()
-    const hr = chartWrap.getBoundingClientRect()
-    const cx = hr.left + hr.width / 2 - cr.left
-    const cy = hr.top + hr.height / 2 - cr.top
-    // 与 Pie outerRadius 百分比大致对齐（联线起点落在扇区外缘）
-    const outerR = (Math.min(hr.width, hr.height) / 2) * 0.93
-
-    const slicePts = getSliceOuterPoints(cx, cy, outerR)
-
-    const next: string[] = []
-    for (let i = 0; i < POOL_PIE.length; i++) {
-      const el = cardRefs.current[i]
-      if (!el) {
-        next.push("")
-        continue
-      }
-      const br = el.getBoundingClientRect()
-      const anchor = anchorTowardCenter(br, cr, cx, cy)
-      const pt = slicePts[i]
-      if (!pt) {
-        next.push("")
-        continue
-      }
-      const { x: sx, y: sy } = pt
-      next.push(elbowPath(sx, sy, anchor.x, anchor.y))
-    }
-    setPaths(next)
-  }, [])
-
-  React.useLayoutEffect(() => {
-    const run = () => {
-      requestAnimationFrame(() => requestAnimationFrame(measure))
-    }
-    run()
-    const ro = new ResizeObserver(run)
-    if (containerRef.current) ro.observe(containerRef.current)
-    if (chartWrapRef.current) ro.observe(chartWrapRef.current)
-    window.addEventListener("resize", run)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener("resize", run)
-    }
-  }, [measure])
-
   return (
-    <Card className="border-border/80 lg:col-span-6">
-      <CardHeader>
-        <CardTitle className="text-base">资源池分布与利用率</CardTitle>
-        <CardDescription>各池规模、型号结构与财务概览</CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-visible pb-2">
-        <div
-          ref={containerRef}
-          className="relative mx-auto aspect-[10/9] w-full max-w-4xl min-h-[min(92vw,520px)] sm:aspect-[16/11] sm:min-h-[440px]"
-        >
-          <svg className="pointer-events-none absolute inset-0 size-full" aria-hidden>
-            {paths.map(
-              (pathD, i) =>
-                pathD && (
-                  <path
-                    key={POOL_PIE[i]!.key}
-                    d={pathD}
-                    fill="none"
-                    stroke={`var(--color-${POOL_PIE[i]!.key})`}
-                    strokeWidth={2.5}
-                    strokeOpacity={1}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                )
-            )}
-          </svg>
-
-          {POOL_PIE.map((p, i) => {
-            const midDeg = SECTOR_MID_DEG[i]!
-            const orbitPct = 47
-            const pOrbit = polarToCartesian(50, 50, orbitPct, midDeg)
-            const detail = POOL_DETAILS[p.key]
-            return (
-              <div
-                key={p.key}
-                ref={(node) => {
-                  cardRefs.current[i] = node
-                }}
-                className={cn(
-                  "absolute z-[1] w-[min(42vw,148px)] max-w-[148px] rounded-lg border border-dashed bg-muted/20 p-2 text-[10px] shadow-sm backdrop-blur-[2px] sm:w-[158px] sm:max-w-[158px] sm:p-2.5 sm:text-xs",
-                  "border-border/80"
-                )}
-                style={{
-                  left: `${pOrbit.x}%`,
-                  top: `${pOrbit.y}%`,
-                  transform: "translate(-50%, -50%)",
-                }}
-              >
-                <div
-                  className="size-2 shrink-0 rounded-full ring-2 ring-background"
-                  style={{ backgroundColor: `var(--color-${p.key})` }}
-                />
-                <div className="mt-1 font-medium leading-tight text-foreground">{detail.title}</div>
-                <div className="mt-0.5 text-muted-foreground">
-                  利用率 <span className="text-foreground">{detail.utilization}</span> · {detail.count}
-                </div>
-                <div className="mt-0.5 line-clamp-2 text-muted-foreground">{detail.gpu}</div>
-                <div className="mt-0.5 line-clamp-2 text-muted-foreground">{detail.finance}</div>
-              </div>
-            )
-          })}
-
-          <div
-            ref={chartWrapRef}
-            className="absolute left-1/2 top-1/2 z-[2] w-[min(68%,280px)] -translate-x-1/2 -translate-y-1/2 sm:w-[min(62%,340px)]"
-          >
-            <ChartContainer
-              config={poolChartConfig}
-              className="mx-auto aspect-square w-full [&>div]:aspect-square"
-            >
-              <PieChart margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
-                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                <Pie
-                  data={POOL_PIE}
-                  dataKey="value"
-                  nameKey="name"
-                  startAngle={90}
-                  endAngle={-270}
-                  innerRadius="48%"
-                  outerRadius="93%"
-                  strokeWidth={1.5}
-                  paddingAngle={1.5}
-                >
-                  {POOL_PIE.map((entry) => (
-                    <Cell
-                      key={entry.key}
-                      fill={`var(--color-${entry.key})`}
-                      stroke="var(--background)"
-                      strokeOpacity={0.45}
-                    />
-                  ))}
-                  <Label
-                    content={({ viewBox }) => {
-                      if (viewBox && "cx" in viewBox && "cy" in viewBox) {
-                        return (
-                          <text
-                            x={viewBox.cx}
-                            y={viewBox.cy}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            <tspan
-                              x={viewBox.cx}
-                              y={(viewBox.cy ?? 0) - 8}
-                              className="fill-foreground text-lg font-bold"
-                            >
-                              总计 {totalPool.toLocaleString()}
-                            </tspan>
-                            <tspan
-                              x={viewBox.cx}
-                              y={(viewBox.cy ?? 0) + 14}
-                              className="fill-muted-foreground text-xs"
-                            >
-                              利用率 {utilization}
-                            </tspan>
-                          </text>
-                        )
-                      }
-                      return null
-                    }}
-                  />
-                </Pie>
-              </PieChart>
-            </ChartContainer>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <Suspense fallback={null}>
+      <ResourcePoolChartCardInner />
+    </Suspense>
   )
 }

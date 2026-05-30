@@ -4,11 +4,13 @@
 **关联设计**：
 
 - [supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md) §5.4（资源总览读模型，**已部分落地**）
-- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)（时间段分析，**远期扩展**）
+- [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md)（Period 模式总纲：view/URL/生命周期/KPI）
+- [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md)（**Period 资源构成卡时，已确认**）
+- [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（互斥资源构成 Snapshot + 扇区定义）
 - [supplier-lifecycle-product-plan.md](./supplier-lifecycle-product-plan.md)（产品定位）
 
 **文档性质**：实现方案（不涉及代码改动）  
-**版本**：v1.0（2026-05-23）
+**版本**：v1.1（2026-05-29）
 
 ---
 
@@ -58,8 +60,9 @@ flowchart TB
   BATCH[onboarding_batch + device_link] --> GAP[计划缺口 / 差异 / 待办]
   FAULT[fault_incident] --> ALERT[告警 / 异常 KPI]
   HOLD[internal_test_hold] --> SELL[可售扣减]
-  CHG[device_changelog commit] --> DEV
-  CHG --> INV
+  CHG[device_changelog commit] --> LOG[supplier_device_change_log 仅审计]
+  CHG --> BATCH[refreshBatchProgress / device_link]
+  INV[device_inventory commit] --> DEV
 ```
 
 **原则（R-OV1 ~ R-OV3）**：
@@ -111,8 +114,8 @@ type OverviewKpiMetric = {
 | 裸金属池 | `pool_bare_metal` | §3.4.5：`memberships.has('bare_metal')` | 卡 | `Σ bareMetalPoolGpu` |
 | 内部占用 | `internal_test` | L1 测试标记 + `internal_test_hold` 叠加 | 卡 | `kpis.internalTestGpu` |
 | 异常设备 | `device_abnormal` | 未关闭 `fault_incident` 关联设备去重台数；辅：`faultOpenCount` | 台 | `kpis.faultOpenCount` + 设备维度 |
-| 待上架设备 | `device_pending_shelving` | **`lifecycle_status = '待接入'`**（非 IDC「待上架」） | 卡 · 台 | `kpis.pendingAccess` |
-| 待上架机房 | `idc_pending_access` | 存在 `待接入` 设备的 `data_center` / `idc_region` 去重数 | 个 | 由设备聚合 |
+| 待上架设备 | `device_pending_shelving` | Snapshot：**实体** `lifecycle_status='待接入'` **+ 进行中批次计划缺口**（§2.1 `supplier-overview-scenarios-from-zero.md`） | 卡 · 台 | `kpis.pendingAccess` |
+| 待上架机房 | `idc_pending_access` | Snapshot：实体待接入机房 **∪** `online_reason='new_idc'` 的进行中 `online` 批次机房（**严格枚举**） | 个 | 与 overview 聚合一致 |
 
 **口径对齐说明（重要）**：
 
@@ -144,7 +147,7 @@ type OverviewKpiMetric = {
 
 | 阶段 | 聚合 | warn 条件 |
 |------|------|-----------|
-| 待接入 | `lifecycle_status = '待接入'` | `deviceCount > 0` |
+| 待接入 | 实体 `lifecycle_status = '待接入'` **+ Snapshot 计划缺口** | `deviceCount > 0` |
 | 接入中 | `lifecycle_status = '接入中'` | 同上 |
 | 在线 | `lifecycle_status = '在线'` | — |
 | 维护中 | `lifecycle_status = '维护中'` 或 `in_maintenance=true` | — |
@@ -154,30 +157,24 @@ type OverviewKpiMetric = {
 
 **IDC 9 段模型**：保留在 `global-dashboard-period-analytics.md` 作为 **远期 Period 维度**；Snapshot 阶段不混用，避免与 CRM 状态机双轨。
 
-### 3.3 资源池分布（`ResourcePoolChartCard`）
+### 3.3 资源构成（`ResourcePoolChartCard`）
 
-**口径分层**：
+> **权威口径**：[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md)（v1.1，已确认）。
 
-| 层级 | P1 Snapshot | 说明 |
-|------|-------------|------|
-| **平台池（2 池）** | ✅ 实现 | 裸金属池 / 弹性用量池，与 §3.4.5 一致 |
-| **Workload 6 池** | ⏸ 占位 | platform/dedicated/inference/training/standby/maintenance 需 `workload_profile` + 监控，P1 用 2 池饼图替代或折叠 |
+**P1 饼图**：互斥分桶 + 计划虚拟量（`resourceComposition`），非重叠两池。
 
-**P1 饼图数据**：
+| 层级 | Snapshot | Period（目标，[卡时专篇](./global-dashboard-period-composition-card-hours-design.md)） |
+|------|----------|-------------|
+| **实体扇区** | `classifyDeviceExclusiveBucket` @ `supplier_device` | `device_*_snapshot` → **区间卡时** |
+| **计划虚拟扇区** | 当前 pipeline 缺口 | `progress_event` 阶梯 → **区间卡时** |
+| **现网过渡** | — | 期末 `gpu_cards` + change_log 实体回放（待 M5） |
+| **兼容** | — | ~~`resourcePools`~~ 已移除；**UI 只读** `resourceComposition` |
 
-```typescript
-// 来自 getStats 全平台聚合（filters=all）
-slices: [
-  { key: 'elastic_service', label: '弹性用量池', gpuCount, deviceCount },
-  { key: 'bare_metal', label: '裸金属池', gpuCount, deviceCount },
-  { key: 'dual_pool', label: '双池（重叠）', gpuCount, deviceCount }, // 可选第三扇区或 footnote
-]
-```
+**中心总计**：`denominator.gpuCount`（闭合分母），非「池占用重叠和」。
 
-- **中心总计**：`gpuCount` 之和 **不等于** `gpu_total`（双池重复计数）；中心文案应写「池占用 GPU」而非「平台 GPU 总量」，并附 §5.4.6 footnote。
-- **利用率 / 财务 / 型号结构**：P1 隐藏或显示「暂无数据」；禁止继续展示 Mock 百分比以免误导。
+**与 overview 验证**：`pool_elastic_only + pool_bare_metal_only + pool_dual` = 去重后至少占一池 GPU（排除维护/下架等更高优先级实体）。
 
-**与 overview 对齐验证**：Global 裸金属 + 弹性 − 双池 = overview 供应商表各行 `bareMetalPoolGpu + elasticServiceGpu − dualPoolGpu` 之和。
+~~**P1 饼图数据**（重叠口径，已废弃）~~：见资源构成设计文档 §1.1。
 
 ### 3.4 机房集群状态（`ClusterStatusCard`）
 
@@ -400,19 +397,24 @@ type GlobalDashboardSnapshot = {
 
 ---
 
-## 8. 与 Period 分析文档的关系
+## 8. 与 Period / 资源构成文档的关系
 
-[`global-dashboard-period-analytics.md`](./global-dashboard-period-analytics.md) 描述 **Snapshot + Period 双模式** 及 DWS 架构。本文 Snapshot 口径 **以 §5.4 为准**；Period 文档中的差异项如下：
+| 文档 | 职责 |
+|------|------|
+| **本文** | Snapshot 大盘 P1：KPI、生命周期、**resourceComposition 截面**、集群/差异/待办 |
+| [global-dashboard-period-analytics.md](./global-dashboard-period-analytics.md) | 三档 `view`、URL、生命周期 Period、KPI Period、DWS 总纲；§3.4.2–7 **已废止** |
+| [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) | 互斥扇区定义、Snapshot 构成、§14 批次事件 |
+| [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) | **Period 资源构成卡时/台时（已确认）**：主数据快照、progress_event、解耦 |
 
-| 主题 | Period 文档 | 本文 Snapshot 决策 |
-|------|-------------|-------------------|
-| 生命周期 | 9 段 `dim_lifecycle_stage` | **5 段 CRM**，与 overview 一致 |
-| 待上架 | `pending_shelving` | **`待接入`** CRM 状态 |
-| 资源池 | 6 个 `pool_code` | **2 池** bare_metal / elastic_service（§3.4.5） |
-| 差异四级 | 交付/部署/上架/可售 | **计划/触达/在线**（批次）；四级留 Period |
-| KPI delta | 环比/sparkline | P1 不实现；Period 接 `global_kpi_daily` |
+| 主题 | Period 总纲 / 旧叙述 | 当前决策 |
+|------|----------------------|----------|
+| 生命周期 | 9 段 IDC | **5 段 CRM** |
+| 资源池饼图 | 6 池重叠 / 两池卡时 | **互斥 `resourceComposition`** |
+| Period 构成主值 | 六池 `card_hours` + change_log | **专篇**：互斥扇区 `card_hours` + 主数据快照 |
+| `change_log` | 洗快照 / 回放实体 | **仅审计** + 生命周期 ETL + 批次进度 |
+| KPI delta | 环比/sparkline | Snapshot P1 可选；Period 接 `global_kpi_daily` |
 
-Period 模式应在 G5 启动，且 **Snapshot 期末值** 必须与本文 `getSnapshot` 在 `as_of = period_end` 时一致（见 period 文档 §7.3）。
+**一致性**：Period 各扇区 **期末 `gpuCount`** 应与 Snapshot `resourceComposition` 同 key 对齐（专篇 PC-T7）。Period **卡时主值** 不与 Snapshot 卡数直接对比。
 
 ---
 
@@ -434,3 +436,4 @@ Period 模式应在 G5 启动，且 **Snapshot 期末值** 必须与本文 `getS
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-05-23 | 初稿：基于已实现的 `supplier.overview.getStats` 对齐 Global 大盘 Snapshot 实现方案 |
+| v1.1 | 2026-05-29 | §3.3/§8 对齐 Period 卡时专篇；D2 变更表不写 `supplier_device` |

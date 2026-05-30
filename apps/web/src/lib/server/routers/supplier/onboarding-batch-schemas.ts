@@ -61,11 +61,19 @@ export const onboardingBatchCreateSchema = z
     }
   })
 
+export const plannedBatchKindFilterSchema = z.enum([
+  'all',
+  'online',
+  'order_access',
+  'device_retire',
+])
+
 export const onboardingBatchListSchema = z.object({
-  batchKind: z.enum(['online', 'order_access']),
+  batchKind: plannedBatchKindFilterSchema,
   search: z.string().optional(),
   batchStatus: z.string().optional(),
   importStatus: z.string().optional(),
+  supplierId: z.string().optional(),
 })
 
 export const onboardingBatchListBySupplierSchema = z.object({
@@ -80,4 +88,31 @@ export const onboardingBatchParseListSchema = z.object({
 
 export const onboardingBatchCommitListSchema = z.object({
   batchId: z.string().min(1),
+})
+
+export const onboardingBatchAdjustPlanSchema = z.object({
+  batchId: z.string().min(1),
+  reason: z.string().trim().min(4, '请填写调整原因（至少 4 字）'),
+  effectiveAt: z.string().datetime().optional(),
+  planLines: z.array(onboardingBatchPlanLineSchema).min(1, '请至少保留一行计划'),
+  plannedReadyAt: z.string().optional(),
+  batchStatus: z.string().optional(),
+})
+
+export const onboardingBatchProgressEventsSchema = z.object({
+  batchId: z.string().min(1),
+})
+
+export const onboardingBatchAdjustHistorySchema = z.object({
+  batchId: z.string().min(1),
+})
+
+export const onboardingBatchCompleteSchema = z.object({
+  batchId: z.string().min(1),
+  remark: z.string().trim().optional(),
+})
+
+export const onboardingBatchVoidSchema = z.object({
+  batchId: z.string().min(1),
+  reason: z.string().trim().min(4, '请填写作废原因（至少 4 字）'),
 })

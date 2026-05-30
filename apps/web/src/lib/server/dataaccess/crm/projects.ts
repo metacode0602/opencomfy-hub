@@ -1,10 +1,11 @@
 import { db } from '@/lib/db'
 import type { Project } from '@/lib/data/types'
+import type { ProjectStage } from '@/lib/types/crm'
 import { mapProjectRow } from '@/lib/server/mappers/crm'
 import {
   billingTenant,
   businessLine,
-  consumptionRecord,
+  consumptionUsageDaily,
   crmProject,
   customer,
   projectStaffAssignment,
@@ -16,7 +17,7 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
-import { and, asc, count, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
 import type { ProjectTag } from '@/lib/data/types'
 
 export type ProjectListFilters = {
@@ -51,7 +52,7 @@ export type ProjectUpsertInput = {
   primaryTenantId?: string
   name: string
   description: string
-  stage: 'lead' | 'testing' | 'converted'
+  stage: ProjectStage
   status?: 'active' | 'paused' | 'completed'
   businessLineId: string
   monthlyBudget?: number
@@ -198,11 +199,25 @@ async function loadProjectEnrichment(projectIds: string[]) {
   const consumptionSums =
     allTenantIds.length > 0
       ? await db
-          .select({ projectId: consumptionRecord.projectId, value: sum(consumptionRecord.amount) })
-          .from(consumptionRecord)
-          .where(inArray(consumptionRecord.projectId, projectIds))
-          .groupBy(consumptionRecord.projectId)
+          .select({
+            tenantId: consumptionUsageDaily.tenantId,
+            value: sum(consumptionUsageDaily.amount),
+          })
+          .from(consumptionUsageDaily)
+          .where(inArray(consumptionUsageDaily.tenantId, allTenantIds))
+          .groupBy(consumptionUsageDaily.tenantId)
       : []
+
+  const consumptionByTenant = new Map(
+    consumptionSums.map((r) => [r.tenantId, Number(r.value ?? 0)]),
+  )
+  const consumptionMap = new Map<string, number>()
+  for (const [projectId, tenantIds] of tenantIdsByProject) {
+    consumptionMap.set(
+      projectId,
+      tenantIds.reduce((acc, tenantId) => acc + (consumptionByTenant.get(tenantId) ?? 0), 0),
+    )
+  }
 
   const tagsMap = await loadTagsByProjectIds(projectIds)
 
@@ -249,7 +264,7 @@ async function loadProjectEnrichment(projectIds: string[]) {
 
   return {
     staffMap,
-    consumptionMap: new Map(consumptionSums.map((r) => [r.projectId!, Number(r.value ?? 0)])),
+    consumptionMap,
     customerMap: new Map(customers.map((c) => [c.id, { name: c.name, type: c.type }])),
     lineMap: new Map(lines.map((l) => [l.id, l.name])),
     tagsMap,
@@ -352,6 +367,16 @@ export const projectsDataAccess = {
         billingSyncLastStatus: row.billingSyncLastStatus ?? null,
         billingSyncLastError: row.billingSyncLastError ?? null,
       }))
+  },
+
+  async listRecent(limit = 5): Promise<Project[]> {
+    const rows = await db
+      .select()
+      .from(crmProject)
+      .orderBy(desc(crmProject.updatedAt), desc(crmProject.createdAt))
+      .limit(limit)
+    const enrich = await loadProjectEnrichment(rows.map((r) => r.id))
+    return rows.map((row) => mapToProject(row, enrich))
   },
 
   async list(filters: ProjectListFilters = {}): Promise<Project[]> {

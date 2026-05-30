@@ -1,6 +1,42 @@
-/** B 端客户经营与 CRM 域 — 前端 mock 模型（v3.0 Customer / Project / PlatformTenant） */
+/** B 端客户经营与 CRM 域 — 类型定义（v3.0 Customer / Project / PlatformTenant） */
 
 export type JsonObject = Record<string, unknown>
+
+/** 项目阶段枚举值（与 STAGE_OPTIONS 保持一致） */
+export const PROJECT_STAGE_VALUES = [
+  "lead",
+  "converted",
+  "early_communication",
+  "testing",
+  "trial_completed",
+  "production_operation",
+  "service_terminated",
+  "requirements_not_met",
+  "service_suspended",
+  "lead_pending",
+  "phase_service_completed",
+  "not_target_customer",
+] as const
+
+export type ProjectStage = (typeof PROJECT_STAGE_VALUES)[number]
+
+/**
+ * 项目阶段选项
+ */
+export const STAGE_OPTIONS: ReadonlyArray<{ value: ProjectStage; label: string }> = [
+  { value: "lead", label: "线索培育" },
+  { value: "converted", label: "已转正" },
+  { value: "early_communication", label: "前期交流" },
+  { value: "testing", label: "试用中" },
+  { value: "trial_completed", label: "试用完成" },
+  { value: "production_operation", label: "生产运营" },
+  { value: "service_terminated", label: "服务终止" },
+  { value: "requirements_not_met", label: "需求不满足" },
+  { value: "service_suspended", label: "服务暂停" },
+  { value: "lead_pending", label: "线索pending" },
+  { value: "phase_service_completed", label: "阶段性服务完成" },
+  { value: "not_target_customer", label: "非目标客户" },
+]
 
 export type Customer = {
   id: string

@@ -39,8 +39,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
-import { mockSupplierContracts, mockSuppliers } from '@/lib/data/mock-data'
 import type { ContractPricingTier, ContractPricingMode, CooperationMode, SupplierContract } from '@/lib/data/types'
+import { trpc } from '@/lib/trpc/client'
 import {
   contractPricingModeNames,
   isSharePricingMode,
@@ -93,10 +93,6 @@ function pricingSummary(contract: SupplierContract) {
   return '—'
 }
 
-function buildInitialContracts(): SupplierContract[] {
-  return mockSupplierContracts.map((c) => ({ ...c }))
-}
-
 const ACCEPT_CONTRACT_FILE = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 const emptyTier = (order: number): ContractPricingTier => ({
@@ -146,7 +142,8 @@ function cooperationModeFromPricing(pricingMode: ContractPricingMode): Cooperati
 }
 
 export function ContractsContent() {
-  const [contracts, setContracts] = useState<SupplierContract[]>(buildInitialContracts)
+  const { data: contracts = [], isLoading } = trpc.supplier.listAllContracts.useQuery()
+  const { data: suppliers = [] } = trpc.supplier.list.useQuery()
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [view, setView] = useState<'list' | 'detail'>('list')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -269,7 +266,7 @@ export function ContractsContent() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部供应商</SelectItem>
-                {mockSuppliers.map((s) => (
+                {suppliers.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.shortName}
                   </SelectItem>
@@ -321,7 +318,13 @@ export function ContractsContent() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredContracts.length === 0 ? (
+            {isLoading ? (
+              <TableRow className="border-border">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
+                  加载合同列表…
+                </TableCell>
+              </TableRow>
+            ) : filteredContracts.length === 0 ? (
               <TableRow className="border-border">
                 <TableCell colSpan={8} className="text-center text-muted-foreground py-12">
                   暂无匹配的合同
@@ -577,7 +580,7 @@ function PricingTermsBody({ contract }: { contract: SupplierContract }) {
               <TableRow key={tier.tierOrder} className="border-border">
                 <TableCell className="font-medium">第 {tier.tierOrder} 档</TableCell>
                 <TableCell className="text-foreground">
-                  {tier.thresholdFromHours.toLocaleString()} 小时
+                  {(tier.thresholdFromHours ?? 0).toLocaleString()} 小时
                   {tier.thresholdToHours != null
                     ? ` ~ ${tier.thresholdToHours.toLocaleString()} 小时`
                     : ' 及以上'}

@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft,
   Download,
   FileSpreadsheet,
   FlaskConical,
+  Loader2,
   Plus,
   StopCircle,
 } from 'lucide-react'
@@ -32,20 +33,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@workspace/ui/components/alert-dialog'
-import { useSupplierDomainMockStore } from '@/lib/stores/supplier-domain-mock-store'
 import {
   INTERNAL_TEST_HOLD_DEPARTMENT_LABELS,
   INTERNAL_TEST_HOLD_SETTLEMENT_LABELS,
-  type InternalTestHold,
-  type InternalTestHoldDevice,
 } from '@/lib/types/supplier-domain'
-import { useDataCenterLabel, useSupplierLabel } from '@/lib/supplier/supplier-domain-lookups'
+import type { InternalTestHoldDetailDevice } from '@/lib/types/internal-test-hold-api'
+import { trpc } from '@/lib/trpc/client'
+import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { downloadTestHoldDevicesExcel } from '@/lib/supplier/test-hold-device-export'
 import { TestHoldDeviceEntryDialog } from './test-hold-device-entry-dialog'
 
-function formatDt(iso: string | null | undefined) {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', {
+function formatDt(value: Date | string | null | undefined) {
+  if (!value) return '—'
+  const d = value instanceof Date ? value : new Date(value)
+  return d.toLocaleString('zh-CN', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -54,52 +55,53 @@ function formatDt(iso: string | null | undefined) {
   })
 }
 
-function isActive(hold: InternalTestHold) {
+function isActive(holdFrom: Date, holdUntil: Date | null) {
   const now = Date.now()
-  const from = new Date(hold.hold_from).getTime()
-  const until = hold.hold_until ? new Date(hold.hold_until).getTime() : null
+  const from = new Date(holdFrom).getTime()
+  const until = holdUntil ? new Date(holdUntil).getTime() : null
   if (now < from) return false
   if (until != null && now > until) return false
   return true
 }
 
 type ConfirmAction =
-  | { type: 'end_device'; device: InternalTestHoldDevice }
+  | { type: 'end_device'; device: InternalTestHoldDetailDevice }
   | { type: 'end_all' }
   | null
 
 export function TestHoldDetailContent({ holdId }: { holdId: string }) {
-  const hold = useSupplierDomainMockStore((s) =>
-    s.internalTestHolds.find((h) => h.id === holdId),
-  )
-  const upsertInternalTestHold = useSupplierDomainMockStore((s) => s.upsertInternalTestHold)
+  const utils = trpc.useUtils()
+  const { data: hold, isLoading, isError } = trpc.supplier.internalTestHold.getById.useQuery({
+    holdId,
+  })
 
   const [deviceDialogOpen, setDeviceDialogOpen] = useState(false)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null)
 
-  const supplierName = useSupplierLabel(hold?.supplier_id ?? '')
-  const dataCenterLabel = useDataCenterLabel(hold?.data_center_id ?? '')
+  const endMutation = trpc.supplier.internalTestHold.end.useMutation({
+    onSuccess: () => {
+      toast.success('已结束全部占用')
+      void utils.supplier.internalTestHold.getById.invalidate({ holdId })
+      void utils.supplier.internalTestHold.list.invalidate()
+      invalidateGlobalDashboard(utils)
+      setConfirmAction(null)
+    },
+    onError: (error) => toast.error(error.message),
+  })
 
-  const devices = useMemo(() => hold?.devices ?? [], [hold?.devices])
-  const active = hold ? isActive(hold) : false
+  const unlinkMutation = trpc.supplier.internalTestHold.unlinkDevice.useMutation({
+    onSuccess: () => {
+      toast.success('已移除设备占用')
+      void utils.supplier.internalTestHold.getById.invalidate({ holdId })
+      void utils.supplier.internalTestHold.list.invalidate()
+      invalidateGlobalDashboard(utils)
+      setConfirmAction(null)
+    },
+    onError: (error) => toast.error(error.message),
+  })
 
-  const confirmEndDevice = () => {
-    if (!hold || confirmAction?.type !== 'end_device') return
-    const nextDevices = (hold.devices ?? []).filter((d) => d.id !== confirmAction.device.id)
-    upsertInternalTestHold({ ...hold, devices: nextDevices })
-    toast.success(`已结束设备 ${confirmAction.device.sn ?? confirmAction.device.internal_ip} 的占用`)
-    setConfirmAction(null)
-  }
-
-  const confirmEndAll = () => {
-    if (!hold || confirmAction?.type !== 'end_all') return
-    upsertInternalTestHold({
-      ...hold,
-      hold_until: new Date().toISOString(),
-    })
-    toast.success('已结束全部占用')
-    setConfirmAction(null)
-  }
+  const devices = hold?.devices ?? []
+  const active = hold ? isActive(hold.holdFrom, hold.holdUntil) : false
 
   const exportExcel = () => {
     if (!hold) return
@@ -107,16 +109,29 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
       toast.error('暂无已录入设备，无法导出')
       return
     }
-    const ok = downloadTestHoldDevicesExcel({ hold, devices })
+    const ok = downloadTestHoldDevicesExcel({
+      holdId: hold.id,
+      userName: hold.userName,
+      devices,
+    })
     if (ok) toast.success('设备上架 Excel 已下载')
   }
 
-  if (!hold) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        加载占用详情...
+      </div>
+    )
+  }
+
+  if (isError || !hold) {
     return (
       <div className="space-y-4">
         <Link href="/supplier/test-holds">
           <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="h-4 w-4" />
             返回内部占用
           </Button>
         </Link>
@@ -131,39 +146,44 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <Link href="/supplier/test-holds">
             <Button variant="ghost" size="icon" className="mt-1">
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="h-4 w-4" />
             </Button>
           </Link>
           <div>
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-2xl font-semibold">内部占用详情</h1>
               <Badge
                 variant="outline"
-                className={active ? 'bg-purple-500/20 text-purple-400 border-purple-500/30' : ''}
+                className={active ? 'border-purple-500/30 bg-purple-500/20 text-purple-400' : ''}
               >
                 {active ? '进行中' : '已结束'}
               </Badge>
             </div>
-            <p className="text-sm text-muted-foreground mt-1">
-              {hold.user_name} · {INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[hold.department]} ·{' '}
-              <span className="font-mono">{hold.card_type}</span> × {hold.unit_count} 台
+            <p className="mt-1 text-sm text-muted-foreground">
+              {hold.userName} · {INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[hold.department]} ·{' '}
+              <span className="font-mono">{hold.cardTypeName}</span> × {hold.unitCount} 台
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="gap-2" onClick={exportExcel} disabled={devices.length === 0}>
-            <Download className="w-4 h-4" />
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={exportExcel}
+            disabled={devices.length === 0}
+          >
+            <Download className="h-4 w-4" />
             导出上架 Excel
           </Button>
           {active && (
             <>
               <Button variant="outline" className="gap-2" onClick={() => setDeviceDialogOpen(true)}>
-                <Plus className="w-4 h-4" />
+                <Plus className="h-4 w-4" />
                 录入设备
               </Button>
               <Button
@@ -171,7 +191,7 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
                 className="gap-2"
                 onClick={() => setConfirmAction({ type: 'end_all' })}
               >
-                <StopCircle className="w-4 h-4" />
+                <StopCircle className="h-4 w-4" />
                 全部结束占用
               </Button>
             </>
@@ -179,12 +199,12 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card>
-          <CardContent className="p-4 flex gap-3">
-            <FlaskConical className="w-8 h-8 text-purple-500 shrink-0" />
+          <CardContent className="flex gap-3 p-4">
+            <FlaskConical className="h-8 w-8 shrink-0 text-purple-500" />
             <div>
-              <p className="text-2xl font-semibold">{hold.unit_count}</p>
+              <p className="text-2xl font-semibold">{hold.unitCount}</p>
               <p className="text-xs text-muted-foreground">申请台数</p>
             </div>
           </CardContent>
@@ -197,14 +217,14 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm font-medium">{formatDt(hold.hold_from)}</p>
-            <p className="text-xs text-muted-foreground mt-1">开始时间</p>
+            <p className="text-sm font-medium">{formatDt(hold.holdFrom)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">开始时间</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm font-medium">{formatDt(hold.hold_until)}</p>
-            <p className="text-xs text-muted-foreground mt-1">结束时间</p>
+            <p className="text-sm font-medium">{formatDt(hold.holdUntil)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">结束时间</p>
           </CardContent>
         </Card>
       </div>
@@ -212,28 +232,34 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">申请信息</CardTitle>
-          <CardDescription>内部测试 GPU 占用登记（Mock）</CardDescription>
+          <CardDescription>内部测试 GPU 占用登记</CardDescription>
         </CardHeader>
         <CardContent>
-          <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-4 text-sm">
+          <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <dt className="text-muted-foreground">供应商</dt>
               <dd className="mt-1">
                 <Link
-                  href={`/supplier/suppliers/${hold.supplier_id}`}
+                  href={`/supplier/suppliers/${hold.supplierId}`}
                   className="text-primary hover:underline"
                 >
-                  {supplierName}
+                  {hold.supplierShortName ?? hold.supplierName}
                 </Link>
               </dd>
             </div>
             <div>
               <dt className="text-muted-foreground">机房</dt>
-              <dd className="mt-1">{dataCenterLabel}</dd>
+              <dd className="mt-1">{hold.dataCenterName}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">飞书工单</dt>
+              <dd className="mt-1">
+                <code className="rounded bg-muted px-2 py-0.5 text-xs">{hold.workOrderNo}</code>
+              </dd>
             </div>
             <div>
               <dt className="text-muted-foreground">使用者</dt>
-              <dd className="mt-1">{hold.user_name}</dd>
+              <dd className="mt-1">{hold.userName}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">使用部门</dt>
@@ -241,16 +267,16 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
             </div>
             <div>
               <dt className="text-muted-foreground">卡型</dt>
-              <dd className="mt-1 font-mono">{hold.card_type}</dd>
+              <dd className="mt-1 font-mono">{hold.cardTypeName}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">结算方式</dt>
-              <dd className="mt-1">{INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[hold.settlement_mode]}</dd>
+              <dd className="mt-1">{INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[hold.settlementMode]}</dd>
             </div>
             <div>
               <dt className="text-muted-foreground">占用时段</dt>
               <dd className="mt-1">
-                {formatDt(hold.hold_from)} — {formatDt(hold.hold_until)}
+                {formatDt(hold.holdFrom)} — {formatDt(hold.holdUntil)}
               </dd>
             </div>
             <div>
@@ -269,22 +295,22 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <CardTitle className="text-base flex items-center gap-2">
-                <FileSpreadsheet className="w-4 h-4" />
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileSpreadsheet className="h-4 w-4" />
                 设备列表
               </CardTitle>
               <CardDescription>
                 已录入 {devices.length} 台
-                {hold.unit_count > devices.length
-                  ? `，尚有 ${hold.unit_count - devices.length} 台待录入`
+                {hold.unitCount > devices.length
+                  ? `，尚有 ${hold.unitCount - devices.length} 台待录入`
                   : ''}
               </CardDescription>
             </div>
             {devices.length > 0 && (
               <Button variant="outline" size="sm" className="gap-2" onClick={exportExcel}>
-                <Download className="w-4 h-4" />
+                <Download className="h-4 w-4" />
                 导出 Excel
               </Button>
             )}
@@ -292,7 +318,7 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
         </CardHeader>
         <CardContent className="p-0">
           {devices.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground text-sm">
+            <div className="py-12 text-center text-sm text-muted-foreground">
               暂无设备，请点击「录入设备」添加
             </div>
           ) : (
@@ -313,17 +339,17 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
                   {devices.map((d) => (
                     <TableRow key={d.id}>
                       <TableCell className="font-mono text-xs">{d.sn ?? '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{d.internal_ip}</TableCell>
-                      <TableCell className="font-mono text-xs">{d.external_ip}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.internalIp ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{d.externalIp ?? '—'}</TableCell>
                       <TableCell className="font-mono text-xs">{d.port}</TableCell>
-                      <TableCell>{d.root_account}</TableCell>
+                      <TableCell>{d.rootAccount}</TableCell>
                       <TableCell className="font-mono text-xs text-muted-foreground">
-                        {d.root_password}
+                        {d.rootPasswordMasked}
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Button variant="ghost" size="sm" asChild>
-                            <Link href={`/supplier/devices/${d.device_id}`}>详情</Link>
+                            <Link href={`/supplier/devices/${d.deviceId}`}>详情</Link>
                           </Button>
                           {active && (
                             <Button
@@ -347,12 +373,15 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
       </Card>
 
       <TestHoldDeviceEntryDialog
-        hold={hold}
+        holdId={hold.id}
         open={deviceDialogOpen}
         onOpenChange={setDeviceDialogOpen}
       />
 
-      <AlertDialog open={confirmAction?.type === 'end_device'} onOpenChange={(open) => !open && setConfirmAction(null)}>
+      <AlertDialog
+        open={confirmAction?.type === 'end_device'}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认结束单台设备占用？</AlertDialogTitle>
@@ -360,10 +389,10 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
               将从本内部占用中移除设备{' '}
               <span className="font-mono">
                 {confirmAction?.type === 'end_device'
-                  ? confirmAction.device.sn ?? confirmAction.device.internal_ip
+                  ? confirmAction.device.sn ?? confirmAction.device.internalIp
                   : ''}
               </span>
-              ，该设备将不再计入本次内部内部占用（Mock）。
+              ，该设备将不再计入本次内部占用。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -371,7 +400,11 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
             <AlertDialogAction
               type="button"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmEndDevice}
+              disabled={unlinkMutation.isPending}
+              onClick={() => {
+                if (confirmAction?.type !== 'end_device') return
+                unlinkMutation.mutate({ holdId: hold.id, linkId: confirmAction.device.id })
+              }}
             >
               确认结束
             </AlertDialogAction>
@@ -379,12 +412,15 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={confirmAction?.type === 'end_all'} onOpenChange={(open) => !open && setConfirmAction(null)}>
+      <AlertDialog
+        open={confirmAction?.type === 'end_all'}
+        onOpenChange={(open) => !open && setConfirmAction(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认结束全部占用？</AlertDialogTitle>
             <AlertDialogDescription>
-              将立即结束 {hold.user_name} 的 {hold.card_type} × {hold.unit_count} 台内部占用，
+              将立即结束 {hold.userName} 的 {hold.cardTypeName} × {hold.unitCount} 台内部占用，
               结束时间为当前时刻。已录入的 {devices.length} 台设备记录仍保留供查阅。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -393,7 +429,8 @@ export function TestHoldDetailContent({ holdId }: { holdId: string }) {
             <AlertDialogAction
               type="button"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={confirmEndAll}
+              disabled={endMutation.isPending}
+              onClick={() => endMutation.mutate({ holdId: hold.id })}
             >
               确认全部结束
             </AlertDialogAction>

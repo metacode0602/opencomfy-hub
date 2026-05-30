@@ -1,5 +1,7 @@
 /** 资源总览 API 类型（§5.4 supplier.overview） */
 
+import type { GlobalResourceCompositionPayload } from '@/lib/types/global-dashboard-api'
+
 export type OverviewFiltersInput = {
   region: string
   supplierId: string
@@ -24,6 +26,7 @@ export type OverviewKpisDto = {
   inMaintenance: OverviewKpiMetric
   reservedIdle: OverviewKpiMetric
   internalTestGpu: number
+  faultDownGpu: number
   faultOpenCount: number
   activeTestHolds: number
   activeBatches: number
@@ -114,6 +117,11 @@ export type FaultSlaSummaryDto = {
   }>
 }
 
+export type PipelinePendingByDataCenter = Record<
+  string,
+  { deviceCount: number; gpuCount: number }
+>
+
 export type OverviewStatsResult = {
   kpis: OverviewKpisDto
   lifecycleFunnel: LifecycleFunnelStageDto[]
@@ -122,6 +130,14 @@ export type OverviewStatsResult = {
   inventoryRows: InventoryOverviewRowDto[]
   batchSummaries: OnboardingBatchSummaryDto[]
   faultSla: FaultSlaSummaryDto
+  /** Snapshot：实体待接入机房 ∪ new_idc 进行中批次机房 */
+  pendingAccessDataCenterIds: string[]
+  /** 进行中上架/订单接入批次按机房的计划管道缺口（计划 − 已触达） */
+  pipelinePendingByDataCenter: PipelinePendingByDataCenter
+  /** 目标总卡数：有效上架计划 − 有效下架计划（批次台账） */
+  gpuTargetGpu: number
+  /** 资源构成饼图（互斥分桶 + 计划虚拟量） */
+  resourceComposition: GlobalResourceCompositionPayload
 }
 
 export type OverviewFilterOptionsResult = {

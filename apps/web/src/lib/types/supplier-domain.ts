@@ -1,4 +1,4 @@
-/** 供应商与算力资源域（设计文档 §2.1）— 前端 mock 类型 */
+/** 供应商与算力资源域（设计文档 §2.1）— 类型定义 */
 
 export type Supplier = {
   id: string
@@ -358,6 +358,8 @@ export type InternalTestHold = {
   id: string
   supplier_id: string
   data_center_id: string
+  /** 飞书审批工单号 */
+  work_order_no: string
   user_name: string
   department: InternalTestHoldDepartment
   card_type: string
@@ -378,6 +380,14 @@ export type ResourcePoolBinding = {
   is_exclusive_pool: boolean
 }
 
+export type SupplierActivityAttachment = {
+  id: string
+  name: string
+  size: number
+  type: string
+  url: string
+}
+
 export type SupplierActivity = {
   id: string
   supplier_id: string
@@ -385,10 +395,12 @@ export type SupplierActivity = {
   title: string
   description: string | null
   author_name: string
+  author_staff_id?: string | null
   author_role: "business" | "ops" | "system"
   ref_domain: string | null
   ref_id: string | null
   occurred_at: string
+  attachments?: SupplierActivityAttachment[]
 }
 
 export type LifecycleStateDefinition = {

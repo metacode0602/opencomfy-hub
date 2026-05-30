@@ -14,6 +14,7 @@ import {
   Edit,
   Gift,
   FolderKanban,
+  GitMerge,
   Pause,
   MoreHorizontal,
 } from 'lucide-react'
@@ -48,16 +49,19 @@ import { trpc } from '@/lib/trpc/client'
 import type { Customer } from '@/lib/data/types'
 import { CreateCustomerDialog } from './create-customer-dialog'
 import { EditCustomerDialog } from './edit-customer-dialog'
+import { CustomerMergeDialog } from './customer-merge-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 
 export function CustomersContent() {
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('active')
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
+  const [mergeTarget, setMergeTarget] = useState<Customer | null>(null)
 
   const { data: customers = [], isLoading, refetch } = trpc.crm.customers.list.useQuery({
     search: search || undefined,
@@ -77,6 +81,11 @@ export function CustomersContent() {
   const openEdit = (customer: Customer) => {
     setEditingCustomer(customer)
     setEditOpen(true)
+  }
+
+  const openMerge = (customer: Customer) => {
+    setMergeTarget(customer)
+    setMergeOpen(true)
   }
 
   return (
@@ -104,6 +113,15 @@ export function CustomersContent() {
         customer={editingCustomer}
         onUpdated={() => void refetch()}
       />
+
+      {mergeTarget ? (
+        <CustomerMergeDialog
+          open={mergeOpen}
+          onOpenChange={setMergeOpen}
+          targetCustomer={{ id: mergeTarget.id, name: mergeTarget.name }}
+          onMerged={() => void refetch()}
+        />
+      ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -261,6 +279,10 @@ export function CustomersContent() {
                         <DropdownMenuItem onClick={() => openEdit(row)}>
                           <Edit className="w-4 h-4 mr-2" />
                           编辑信息
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openMerge(row)}>
+                          <GitMerge className="w-4 h-4 mr-2" />
+                          合并客户
                         </DropdownMenuItem>
                         <DropdownMenuItem>
                           <CreditCard className="w-4 h-4 mr-2" />

@@ -10,17 +10,32 @@ import {
   userStaff,
 } from '@workspace/db/schema'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
-import {
-  readProjectActivityFile,
-  resolveProjectActivityDownloadUrl,
-  saveProjectActivityFile,
-} from './project-activity-storage'
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024
 const MAX_FILES = 5
 
 function newId() {
   return crypto.randomUUID()
+}
+
+function resolveProjectActivityDownloadUrl(attachmentId: string): string {
+  return `/api/crm/project-activities/attachments/${attachmentId}`
+}
+
+async function saveProjectActivityFile(input: {
+  projectId: string
+  activityId: string
+  fileName: string
+  buffer: Buffer
+  mimeType?: string
+}) {
+  const driver = process.env.PROJECT_ACTIVITY_STORAGE_DRIVER?.trim().toLowerCase()
+  if (driver === 'oss') {
+    const { saveProjectActivityFile: saveToOss } = await import('./project-activity-storage')
+    return saveToOss(input)
+  }
+  const { saveLocalProjectActivityFile } = await import('./project-activity-local-storage')
+  return saveLocalProjectActivityFile(input)
 }
 
 type ActivityAuthorRole = Activity['authorRole']
@@ -251,16 +266,9 @@ export const projectActivitiesDataAccess = {
   },
 
   async getAttachmentForDownload(attachmentId: string) {
-    const attachment = await db.query.projectActivityAttachment.findFirst({
-      where: eq(projectActivityAttachment.id, attachmentId),
-    })
-    if (!attachment) return null
-
-    const buffer = await readProjectActivityFile(attachment.storageUri)
-    return {
-      fileName: attachment.fileName,
-      mimeType: attachment.mimeType ?? 'application/octet-stream',
-      buffer,
-    }
+    const { getProjectActivityAttachmentForDownload } = await import(
+      './project-activity-attachment-download'
+    )
+    return getProjectActivityAttachmentForDownload(attachmentId)
   },
 }

@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
-import { mockGPUCardTypes } from '@/lib/data/mock-data'
+import { trpc } from '@/lib/trpc/client'
 import {
   emptyExpectedScale,
   productLineNames,
@@ -40,6 +40,7 @@ export function CustomerExpectedScaleFields({
   onChange,
   idPrefix = 'expected-scale',
 }: CustomerExpectedScaleFieldsProps) {
+  const { data: cardTypes = [] } = trpc.supplier.gpuCardTypes.listActive.useQuery()
   const scale = value ?? emptyExpectedScale
 
   const applyPatch = (partial: Partial<CustomerExpectedScale>) => {
@@ -100,7 +101,7 @@ export function CustomerExpectedScaleFields({
                       <SelectValue placeholder="选择卡型" />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockGPUCardTypes.map((card) => (
+                      {cardTypes.map((card) => (
                         <SelectItem
                           key={card.id}
                           value={card.id}

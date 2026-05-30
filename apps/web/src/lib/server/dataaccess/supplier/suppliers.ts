@@ -325,6 +325,8 @@ export const suppliersDataAccess = {
         inventory: supplierGpuInventory,
         dataCenterName: dataCenter.name,
         cardTypeName: gpuCardType.name,
+        cardTypeCode: gpuCardType.code,
+        cardTypeDeviceRole: gpuCardType.deviceRole,
         supplierShortName: supplier.shortName,
       })
       .from(supplierGpuInventory)
@@ -334,8 +336,14 @@ export const suppliersDataAccess = {
       .where(and(...conditions))
       .orderBy(supplier.shortName, dataCenter.name, gpuCardType.name)
 
-    return rows.map(({ inventory, dataCenterName, cardTypeName, supplierShortName }) =>
-      mapGpuInventoryRow(inventory, { dataCenterName, cardTypeName, supplierShortName }),
+    return rows.map(({ inventory, dataCenterName, cardTypeName, cardTypeCode, cardTypeDeviceRole, supplierShortName }) =>
+      mapGpuInventoryRow(inventory, {
+        dataCenterName,
+        cardTypeName,
+        cardTypeCode,
+        cardTypeDeviceRole,
+        supplierShortName,
+      }),
     )
   },
 
@@ -350,6 +358,8 @@ export const suppliersDataAccess = {
         inventory: supplierGpuInventory,
         dataCenterName: dataCenter.name,
         cardTypeName: gpuCardType.name,
+        cardTypeCode: gpuCardType.code,
+        cardTypeDeviceRole: gpuCardType.deviceRole,
         supplierShortName: supplier.shortName,
       })
       .from(supplierGpuInventory)
@@ -364,6 +374,8 @@ export const suppliersDataAccess = {
     const inventory = mapGpuInventoryRow(hit.inventory, {
       dataCenterName: hit.dataCenterName,
       cardTypeName: hit.cardTypeName,
+      cardTypeCode: hit.cardTypeCode,
+      cardTypeDeviceRole: hit.cardTypeDeviceRole,
       supplierShortName: hit.supplierShortName,
     })
 
@@ -419,6 +431,21 @@ export const suppliersDataAccess = {
       .orderBy(sql`${supplierContract.createdAt} DESC`)
 
     return contractRows.map((row) => mapSupplierContractRow(row, supplierRow.name))
+  },
+
+  async listAllContracts(): Promise<SupplierContract[]> {
+    const rows = await db
+      .select({
+        contract: supplierContract,
+        supplierShortName: supplier.shortName,
+      })
+      .from(supplierContract)
+      .innerJoin(supplier, eq(supplierContract.supplierId, supplier.id))
+      .orderBy(sql`${supplierContract.createdAt} DESC`)
+
+    return rows.map(({ contract, supplierShortName }) =>
+      mapSupplierContractRow(contract, supplierShortName),
+    )
   },
 
   async listBillsBySupplier(supplierId: string): Promise<SupplierBill[]> {

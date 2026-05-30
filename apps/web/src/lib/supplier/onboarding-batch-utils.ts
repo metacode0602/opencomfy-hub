@@ -2,6 +2,16 @@ import type { OnboardingBatchKind, OnboardingParsedRow, SupplierDevice } from "@
 import type { OnboardingBatchRow } from "@workspace/db/schema"
 import type { SupplierOpsInventoryRow } from "@/lib/types/supplier-ops-batch"
 
+export type PlannedBatchKind = "online" | "order_access" | "device_retire"
+
+export type PlannedBatchKindFilter = PlannedBatchKind | "all"
+
+export const PLANNED_BATCH_KINDS: PlannedBatchKind[] = [
+  "online",
+  "order_access",
+  "device_retire",
+]
+
 export function batchKindFromRoute(kind: "online-tasks" | "order-access"): OnboardingBatchKind {
   return kind === "online-tasks" ? "online" : "order_access"
 }
@@ -10,11 +20,35 @@ export function routeKindFromBatch(batchKind: OnboardingBatchKind): "online-task
   return batchKind === "online" ? "online-tasks" : "order-access"
 }
 
+export function isPlannedBatchKind(kind: string): kind is PlannedBatchKind {
+  return (PLANNED_BATCH_KINDS as readonly string[]).includes(kind)
+}
+
+export const BATCH_KIND_BADGE: Record<
+  PlannedBatchKind,
+  { label: string; className: string }
+> = {
+  online: {
+    label: "设备上架",
+    className: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  },
+  order_access: {
+    label: "订单接入",
+    className: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  },
+  device_retire: {
+    label: "设备下架",
+    className: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  },
+}
+
 export function onboardingBatchDetailPath(
   batch: Pick<OnboardingBatchRow, "id" | "batchKind">,
 ): string {
-  const kind = routeKindFromBatch(batch.batchKind as OnboardingBatchKind)
-  return `/supplier/${kind}/${batch.id}`
+  const kind = batch.batchKind
+  if (kind === "device_retire") return `/supplier/offline-tasks/${batch.id}`
+  if (kind === "order_access") return `/supplier/order-access/${batch.id}`
+  return `/supplier/online-tasks/${batch.id}`
 }
 
 export function generateBatchCode(batchKind: OnboardingBatchKind): string {

@@ -1,0 +1,1 @@
+ALTER TABLE "gpu_card_type" ADD COLUMN "device_role" varchar(16) DEFAULT 'compute' NOT NULL;

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/lib/auth'
-import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 
 export async function GET(
   _req: Request,
@@ -13,7 +12,10 @@ export async function GET(
   }
 
   const { id } = await params
-  const attachment = await projectActivitiesDataAccess.getAttachmentForDownload(id)
+  const { getProjectActivityAttachmentForDownload } = await import(
+    '@/lib/server/dataaccess/crm/project-activity-attachment-download'
+  )
+  const attachment = await getProjectActivityAttachmentForDownload(id)
   if (!attachment) {
     return NextResponse.json({ error: '附件不存在' }, { status: 404 })
   }

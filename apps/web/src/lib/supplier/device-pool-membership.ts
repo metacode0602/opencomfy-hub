@@ -5,10 +5,18 @@ export type ResourcePoolBindingLike = {
   workloadProfile: string
 }
 
-const OPS_POOL_MEMBERSHIPS: Record<string, PoolKind[]> = {
+/**
+ * ops_status → 资源池（主数据真源，§supplier-device-ops-pool-masterdata-design.md §3.1）
+ * infra/CPU 设备在聚合层 metricGpuCount=0，池列不累加 GPU。
+ */
+export const OPS_POOL_MEMBERSHIPS: Record<string, readonly PoolKind[]> = {
+  在集群中: ['elastic_service'],
+  集群组件运行中: ['elastic_service'],
   网关直连裸金属上架中: ['bare_metal'],
+  单机直连裸金属上架中: ['bare_metal'],
   网关代理裸金属上架中: ['bare_metal', 'elastic_service'],
   线下裸金属交付中: ['bare_metal'],
+  网关节点上架中: ['bare_metal', 'elastic_service'],
 }
 
 export function isElasticPool(poolCode: string | null, workloadProfile: string): boolean {
@@ -25,17 +33,12 @@ export function isBareMetalPool(poolCode: string | null, workloadProfile: string
 
 export function resolveDevicePoolMemberships(
   opsStatus: string,
-  bindings: ResourcePoolBindingLike[],
+  _bindings: ResourcePoolBindingLike[] = [],
 ): Set<PoolKind> {
   const pools = new Set<PoolKind>()
 
   for (const kind of OPS_POOL_MEMBERSHIPS[opsStatus] ?? []) {
     pools.add(kind)
-  }
-
-  for (const bind of bindings) {
-    if (isBareMetalPool(bind.poolCode, bind.workloadProfile)) pools.add('bare_metal')
-    if (isElasticPool(bind.poolCode, bind.workloadProfile)) pools.add('elastic_service')
   }
 
   return pools

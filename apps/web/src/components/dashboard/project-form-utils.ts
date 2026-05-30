@@ -1,4 +1,3 @@
-import { getBusinessLineById } from '@/lib/data/mock-data'
 import { resolveDefaultStaffId } from '@/lib/crm/staff-constants'
 import type { UserStaff } from '@/lib/types/crm'
 import type { BusinessLine, Project } from '@/lib/data/types'
@@ -47,9 +46,7 @@ export function formValuesToProject(
   base: Pick<Project, 'id'> & Partial<Project>,
   businessLines: BusinessLine[],
 ): Project {
-  const line =
-    businessLines.find((b) => b.id === values.businessLineId) ??
-    getBusinessLineById(values.businessLineId)
+  const line = businessLines.find((b) => b.id === values.businessLineId)
 
   return {
     id: base.id,
@@ -77,6 +74,7 @@ export function formValuesToProject(
     thisMonthConsumption: base.thisMonthConsumption ?? 0,
     totalConsumption: base.totalConsumption ?? 0,
     balance: base.balance ?? 0,
+    tags: base.tags ?? [],
   }
 }
 
@@ -109,7 +107,7 @@ export function validateProjectForm(values: ProjectFormValues): string | null {
   return null
 }
 
-/** 将 CRM Store 中的业务线转为表单使用的 DTO */
+/** 将 tRPC 业务线列表转为表单 DTO */
 export function mapStoreBusinessLines(
   rows: {
     id: string

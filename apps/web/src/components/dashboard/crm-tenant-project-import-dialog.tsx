@@ -34,7 +34,7 @@ import { IconAlertTriangle, IconCloudDownload, IconLoader2 } from "@tabler/icons
 import { toast } from "sonner"
 
 import type { BusinessLine } from "@/lib/data/types"
-import type { UserStaff } from "@/lib/types/crm"
+import { STAGE_OPTIONS, type UserStaff } from "@/lib/types/crm"
 import {
   emptyTenantProjectImportForm,
   PLATFORM_TENANT_IMPORT_MAX_IDS,
@@ -48,13 +48,12 @@ import type {
   TenantProjectImportPreviewResult,
   TenantProjectImportPreviewRow,
 } from "@/lib/types/tenant-project-import"
-import { StaffSelect, STAFF_SELECT_DROPDOWN_ATTR } from "@/components/crm/staff-select"
+import {
+  preventStaffSelectOutsideDismiss,
+  StaffSelect,
+} from "@/components/crm/staff-select"
 
-const STAGE_OPTIONS = [
-  { value: "lead" as const, label: "线索孵化" },
-  { value: "testing" as const, label: "测试中" },
-  { value: "converted" as const, label: "已转正" },
-]
+
 
 function actionBadge(action: TenantProjectImportPreviewRow["action"]) {
   switch (action) {
@@ -247,25 +246,13 @@ export function CrmTenantProjectImportDialog({
   const showDone = phase === "done"
   const formReady = !metaLoading && businessLines.length > 0 && staff.length > 0
 
-  const preventStaffSelectOutsideDismiss = React.useCallback(
-    (event: Event) => {
-      const target = event.target
-      if (
-        target instanceof Element &&
-        target.closest(`[${STAFF_SELECT_DROPDOWN_ATTR}]`)
-      ) {
-        event.preventDefault()
-      }
-    },
-    [],
-  )
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
         className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-4xl"
         onPointerDownOutside={preventStaffSelectOutsideDismiss}
         onInteractOutside={preventStaffSelectOutsideDismiss}
+        onFocusOutside={preventStaffSelectOutsideDismiss}
       >
         <DialogHeader className="shrink-0">
           <DialogTitle>

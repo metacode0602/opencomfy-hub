@@ -6,6 +6,7 @@ import {
   supplierDevice,
 } from '@workspace/db/schema'
 import { and, eq, sql } from 'drizzle-orm'
+import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
 import {
   mergeRetireProgressFlags,
   type RetireProgressFlags,
@@ -96,6 +97,14 @@ export async function refreshBatchProgress(
       })
       .where(eq(onboardingBatch.id, businessBatchId))
 
+    await appendBatchProgressEvent({
+      batchId: businessBatchId,
+      eventType: 'progress_synced',
+      occurredAt: syncedAt,
+      tx: runner,
+      payload: { source: 'system' },
+    })
+
     supplierLog('batch-progress', 'refresh done (onboarding)', {
       businessBatchId,
       touched,
@@ -158,6 +167,7 @@ async function refreshDeviceRetireBatchProgress(
     progressFlags = mergeRetireProgressFlags(progressFlags, { has_over_plan_link: true })
   }
 
+  const prevStatus = batch.batchStatus
   let batchStatus = batch.batchStatus
   if (planned > 0 && touched >= planned) {
     batchStatus = '已完成'
@@ -178,7 +188,34 @@ async function refreshDeviceRetireBatchProgress(
     })
     .where(eq(onboardingBatch.id, batch.id))
 
-  supplierLog('batch-progress', 'refresh done (device_retire)', {
+  if (batchStatus !== prevStatus) {
+    await appendBatchProgressEvent({
+      batchId: batch.id,
+      eventType: 'status_changed',
+      occurredAt: syncedAt,
+      tx: runner,
+      payload: { source: 'system', from: prevStatus, to: batchStatus },
+    })
+    if (batchStatus === '已完成') {
+      await appendBatchProgressEvent({
+        batchId: batch.id,
+        eventType: 'batch_completed',
+        occurredAt: syncedAt,
+        tx: runner,
+        payload: { source: 'system' },
+      })
+    }
+  }
+
+  await appendBatchProgressEvent({
+    batchId: batch.id,
+    eventType: 'progress_synced',
+    occurredAt: syncedAt,
+    tx: runner,
+    payload: { source: 'system' },
+  })
+
+    supplierLog('batch-progress', 'refresh done (device_retire)', {
     businessBatchId: batch.id,
     touched,
     retired,

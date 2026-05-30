@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FileText, Plus, Upload, X } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -23,7 +23,7 @@ import {
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
 import type { Supplier, SupplierContract } from '@/lib/data/types'
-import { useCrmMockStore } from '@/lib/stores/crm-mock-store'
+import { trpc } from '@/lib/trpc/client'
 
 const contractStatusNames: Record<'draft' | 'pending' | 'active', string> = {
   draft: '草稿',
@@ -81,11 +81,9 @@ export function CreateSupplierContractDialog({
   const [fileError, setFileError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const fileObjectUrlRef = useRef<string | null>(null)
-  const userStaff = useCrmMockStore((s) => s.userStaff)
-  const activeStaff = useMemo(
-    () => userStaff.filter((s) => s.status === 'active'),
-    [userStaff],
-  )
+  const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery(undefined, {
+    enabled: open,
+  })
 
   const resetForm = () => {
     setForm(defaultCreateForm())

@@ -83,6 +83,7 @@ function normalizeOverviewKpis(kpis: Partial<OverviewKpisDto> | undefined): Over
     inMaintenance: kpis?.inMaintenance ?? emptyMetric,
     reservedIdle: kpis?.reservedIdle ?? emptyMetric,
     internalTestGpu: kpis?.internalTestGpu ?? 0,
+    faultDownGpu: kpis?.faultDownGpu ?? 0,
     faultOpenCount: kpis?.faultOpenCount ?? 0,
     activeTestHolds: kpis?.activeTestHolds ?? 0,
     activeBatches: kpis?.activeBatches ?? 0,
@@ -238,22 +239,6 @@ export function SupplierOverviewContent() {
               ))}
             </SelectContent>
           </Select>
-          <Select
-            value={filters.poolCode}
-            onValueChange={(v) => setFilters((f) => ({ ...f, poolCode: v }))}
-          >
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="资源池" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部资源池</SelectItem>
-              {poolCodes.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
       </div>
 
@@ -293,48 +278,59 @@ export function SupplierOverviewContent() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-12">
-        <Card className="border-border/80 lg:col-span-4">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">物理机生命周期漏斗</CardTitle>
-            <CardDescription>L2 物理设备按 lifecycle_status 分布</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-0">
-            {funnel.map((row, idx) => (
-              <div key={row.stage}>
-                {idx > 0 && (
-                  <div className="flex justify-center py-0.5 text-muted-foreground">
-                    <ArrowDown className="size-3" />
-                  </div>
-                )}
-                <div
-                  className={cn(
-                    'flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 py-2',
-                    row.warn && 'border-chart-4/40 bg-chart-4/5',
-                  )}
-                >
-                  <span className="text-sm font-medium">{row.stage}</span>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold tabular-nums">
-                      {row.gpuCount} 卡 · {row.deviceCount} 台
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div className="mt-4 flex gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/supplier/online-tasks">
-                  <Upload className="mr-1.5 size-3.5" />
-                  接入工作台
-                </Link>
-              </Button>
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/supplier/devices">
-                  物理机台账
-                  <ChevronRight className="ml-1 size-3.5" />
-                </Link>
-              </Button>
+      <Card className="border-border/80 lg:col-span-4">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <div>
+              <CardTitle className="text-base">活跃接入批次</CardTitle>
+              <CardDescription>接入中 / 待开始批次，催办上架进度</CardDescription>
             </div>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/supplier/online-tasks">批次列表</Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {batchSummaries.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">暂无活跃接入批次</p>
+            ) : (
+              <div className="space-y-3">
+                {batchSummaries.map((batch) => (
+                  <div
+                    key={batch.id}
+                    className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/10 p-3"
+                  >
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-sm font-medium">{batch.batchCode}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {batch.batchKind === 'online' ? '设备上架' : '订单接入'}
+                        </Badge>
+                        <Badge variant="outline">{batch.batchStatus}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {batch.supplierName} · {batch.dataCenterName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {batch.workOrderNo ? `工单 ${batch.workOrderNo} · ` : ''}
+                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 接收{' '}
+                        {batch.touchedDeviceCount}/{batch.plannedDeviceCount} · 在线{' '}
+                        {batch.onlineDeviceCount} · 计划就绪 {formatDt(batch.plannedReadyAt)}
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link
+                        href={
+                          batch.batchKind === 'online'
+                            ? `/supplier/online-tasks/${batch.id}`
+                            : `/supplier/order-access/${batch.id}`
+                        }
+                      >
+                        查看
+                      </Link>
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -564,128 +560,7 @@ export function SupplierOverviewContent() {
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="border-border/80">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-base">活跃接入批次</CardTitle>
-              <CardDescription>接入中 / 待开始批次，催办上架进度</CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/supplier/online-tasks">批次列表</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {batchSummaries.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">暂无活跃接入批次</p>
-            ) : (
-              <div className="space-y-3">
-                {batchSummaries.map((batch) => (
-                  <div
-                    key={batch.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/10 p-3"
-                  >
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm font-medium">{batch.batchCode}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {batch.batchKind === 'online' ? '设备上架' : '订单接入'}
-                        </Badge>
-                        <Badge variant="outline">{batch.batchStatus}</Badge>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {batch.supplierName} · {batch.dataCenterName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {batch.workOrderNo ? `工单 ${batch.workOrderNo} · ` : ''}
-                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 触达{' '}
-                        {batch.touchedDeviceCount}/{batch.plannedDeviceCount} · 在线{' '}
-                        {batch.onlineDeviceCount} · 计划就绪 {formatDt(batch.plannedReadyAt)}
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm" asChild>
-                      <Link
-                        href={
-                          batch.batchKind === 'online'
-                            ? `/supplier/online-tasks/${batch.id}`
-                            : `/supplier/order-access/${batch.id}`
-                        }
-                      >
-                        查看
-                      </Link>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
-        <Card className="border-border/80">
-          <CardHeader className="flex flex-row items-center justify-between pb-3">
-            <div>
-              <CardTitle className="text-base">故障 SLA 概览</CardTitle>
-              <CardDescription>
-                未关闭 {faultSla.openCount} · P1 {faultSla.p1Count} · P2 {faultSla.p2Count}
-                {faultSla.avgResolutionHours != null &&
-                  ` · 平均关闭 ${faultSla.avgResolutionHours.toFixed(1)}h`}
-              </CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/supplier/fault-incidents">故障中心</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {faultSla.recentOpen.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
-                <CheckCircle2 className="size-8 text-emerald-500/60" />
-                <p className="text-sm">当前无未关闭故障</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {faultSla.recentOpen.map((fault) => (
-                  <div
-                    key={fault.id}
-                    className="flex items-start justify-between gap-3 rounded-lg border border-border/60 p-3"
-                  >
-                    <div className="flex min-w-0 items-start gap-3">
-                      <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className={severityColors[fault.severity]}>
-                            {fault.severity}
-                          </Badge>
-                          <span className="truncate text-sm font-medium">{fault.faultType}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          {fault.incidentStatus} · 开启于 {formatDt(fault.openedAt)}
-                        </p>
-                      </div>
-                    </div>
-                    <Button variant="outline" size="sm" asChild>
-                      <Link href="/supplier/fault-incidents">处理</Link>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="mt-4 flex gap-2">
-              <Button variant="outline" size="sm" asChild>
-                <Link href="/supplier/test-holds">
-                  <FlaskConical className="mr-1.5 size-3.5" />
-                  内部占用台账
-                </Link>
-              </Button>
-              {poolCodes.length > 0 && (
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/supplier/devices">
-                    <Layers className="mr-1.5 size-3.5" />
-                    资源池绑定
-                  </Link>
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <Card className="border-border/60 bg-muted/10">
@@ -698,8 +573,7 @@ export function SupplierOverviewContent() {
           </div>
           <span className="hidden sm:inline">·</span>
           <span>
-            裸金属池占用：直连/单机上架中、线下交付及已绑定裸金属池设备；弹性用量池：platform/elastic
-            及网关代理裸金属；双池主要为代理裸金属，两列之和减去双池不等于独占 GPU 总数
+            裸金属池 / 弹性池 / 双池由设备主数据「设备状态」映射；内部占用含其他部门使用与内部测试；维修中不改变池归属
           </span>
           <span className="hidden sm:inline">·</span>
           <span>KPI 与漏斗均展示 GPU 卡数与设备台数；lifecycle 按待接入 / 接入中 / 在线 / 维护中 / 下线中 五段统计</span>

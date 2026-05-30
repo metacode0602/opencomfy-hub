@@ -12,6 +12,7 @@ import {
 } from '@workspace/ui/components/select'
 import type { BusinessLine, PlatformTenant } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
+import { STAGE_OPTIONS, type ProjectStage } from '@/lib/types/crm'
 
 export type ProjectFormValues = {
   customerId: string
@@ -19,7 +20,7 @@ export type ProjectFormValues = {
   primaryTenantId: string
   name: string
   description: string
-  stage: 'lead' | 'testing' | 'converted'
+  stage: ProjectStage
   businessLineId: string
   preSalesStaffId: string
   accountManagerStaffId: string
@@ -28,12 +29,6 @@ export type ProjectFormValues = {
   monthlyBudget: string
   startDate: string
 }
-
-const STAGE_OPTIONS = [
-  { value: 'lead' as const, label: '线索孵化' },
-  { value: 'testing' as const, label: '测试中' },
-  { value: 'converted' as const, label: '已转正' },
-]
 
 const NONE_TENANT = '__none__'
 const NONE_STAFF = '__none_staff__'

@@ -1,0 +1,1 @@
+ALTER TABLE "onboarding_batch" ADD COLUMN "planned_gpu_count" integer DEFAULT 0 NOT NULL;

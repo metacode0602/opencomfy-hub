@@ -102,7 +102,7 @@ export type PlatformImportCommitResult = {
   billing?: PlatformImportBillingBatchResult
 }
 
-export type MockImportCustomerOption = {
+export type ImportCustomerOption = {
   id: string
   name: string
   type: 'B' | 'C'

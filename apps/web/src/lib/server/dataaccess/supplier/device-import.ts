@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
   DeviceChangelogParsedRow,
   DeviceInventoryParsedRow,
@@ -378,6 +379,7 @@ export const deviceImportDataAccess = {
     const cardTypesByDataCenter = new Map<string, Set<string>>()
     const affectedDataCenterIds = new Set<string>([dc.id])
     const warnings: string[] = []
+    const affectedDeviceIds = new Set<string>()
     let insertedCount = 0
     let updatedCount = 0
     const existingDevices = await listSupplierDevicesForImport(params.supplierId)
@@ -432,11 +434,18 @@ export const deviceImportDataAccess = {
 
         for (const device of newDevices) {
           const row = findImportRowForDevice(device, okRows)
-          const gpuCardTypeId =
-            row != null ? gpuValidation.rowResolutions.get(row.row_no)?.gpuCardTypeId : undefined
-          if (!gpuCardTypeId) {
+          const resolution = row != null ? gpuValidation.rowResolutions.get(row.row_no) : undefined
+          if (!resolution) {
             throw new Error(`第 ${row?.row_no ?? '?'} 行显卡型号未解析，无法入库`)
           }
+          const gpuCardTypeId = resolution.gpuCardTypeId
+          const gpuCount = resolveDeviceGpuCount(
+            device.gpu_count,
+            resolveGpuCardTypeRole({
+              name: resolution.gpuCardTypeName,
+              code: resolution.gpuCardTypeCode,
+            }),
+          )
           const existing = findDeviceByImportKeys(devicesInImportPool, {
             sn: device.sn,
             asset_no: device.asset_no,
@@ -457,7 +466,7 @@ export const deviceImportDataAccess = {
                 externalDeviceId: device.external_device_id,
                 idcCode: device.idc_code,
                 idcRegion: device.idc_region || null,
-                gpuCount: Number(device.gpu_count) || 8,
+                gpuCount,
                 internalIp: device.internal_ip || null,
                 opsStatus: device.ops_status ?? '预留闲置中',
                 lifecycleStatus: device.lifecycle_status,
@@ -477,6 +486,7 @@ export const deviceImportDataAccess = {
               .where(eq(supplierDevice.id, existing.id))
 
             updatedCount++
+            affectedDeviceIds.add(existing.id)
             const pricingDataCenterId = existing.data_center_id || dc.id
             affectedDataCenterIds.add(pricingDataCenterId)
             trackImportedCardType(cardTypesByDataCenter, pricingDataCenterId, gpuCardTypeId)
@@ -534,7 +544,7 @@ export const deviceImportDataAccess = {
             sn: device.sn,
             idcCode: device.idc_code,
             idcRegion: device.idc_region || null,
-            gpuCount: Number(device.gpu_count) || 8,
+            gpuCount,
             externalIp: device.external_ip || null,
             internalIp: device.internal_ip || null,
             opsStatus: device.ops_status ?? '预留闲置中',
@@ -555,6 +565,7 @@ export const deviceImportDataAccess = {
             updatedAt: now,
           })
           insertedCount++
+          affectedDeviceIds.add(device.id)
           trackImportedCardType(cardTypesByDataCenter, dc.id, gpuCardTypeId)
           upsertDeviceInImportPool(devicesInImportPool, {
             ...device,
@@ -649,11 +660,31 @@ export const deviceImportDataAccess = {
 
     const committedCount = insertedCount + updatedCount
 
+    if (affectedDeviceIds.size > 0) {
+      try {
+        const { projectDeviceSnapshotsAfterInventoryImport } = await import(
+          '@/lib/server/jobs/dashboard-masterdata-snapshot/project-devices'
+        )
+        await projectDeviceSnapshotsAfterInventoryImport({
+          deviceIds: [...affectedDeviceIds],
+          occurredAt: now,
+          onboardingBatchId: batchId,
+        })
+      } catch (snapshotError) {
+        supplierError('device-import', 'masterdata snapshot projection failed', snapshotError, {
+          batchId,
+          deviceCount: affectedDeviceIds.size,
+        })
+        warnings.push('设备主数据快照写入失败，Period 可能标记为近似值，请稍后重试或联系运维')
+      }
+    }
+
     supplierLog('device-import', 'commitInventory done', {
       batchId,
       committedCount,
       insertedCount,
       updatedCount,
+      snapshotDevices: affectedDeviceIds.size,
     })
 
     return {
@@ -839,30 +870,6 @@ export const deviceImportDataAccess = {
                 },
               })
           }
-        }
-
-        for (const patch of updatedDevices) {
-          await tx
-            .update(supplierDevice)
-            .set({
-              opsStatus: patch.ops_status ?? undefined,
-              lifecycleStatus: patch.lifecycle_status,
-              inMaintenance: patch.in_maintenance ?? false,
-              updatedAt: now,
-            })
-            .where(eq(supplierDevice.id, patch.id))
-        }
-
-        if (logs.length > 0 || updatedDevices.length > 0) {
-          const dcIds = [
-            dc.id,
-            ...updatedDevices.map((d) => d.data_center_id).filter(Boolean),
-          ]
-          await refreshSupplierGpuInventoryForDataCenters(tx, {
-            supplierId: params.supplierId,
-            dataCenterIds: dcIds,
-            syncedAt: now,
-          })
         }
 
         if (businessBatch && deviceLinks.length > 0) {

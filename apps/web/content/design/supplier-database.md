@@ -23,7 +23,7 @@
 | 数据源 | 路径 | 使用页面/组件 | 说明 |
 |--------|------|---------------|------|
 | **经营列表 Mock** | `lib/data/mock-data.ts` + `lib/data/types.ts` | `/supplier/suppliers`、`contracts`、`devices`、`unit-costs`；`SuppliersContent`、`ContractsContent`、`DevicesContent`、`UnitCostsContent`；详情各 Panel | `Supplier`、`SupplierContract`、`DataCenter`、`DataCenterDevice`（**机房×卡型聚合**）、`GPUCardType`、`SupplierPricingRecord`、`SupplierPricingHistory`、`SupplierBill` |
-| **接入域 Mock** | `lib/data/supplier-domain-mock.ts` + `lib/types/supplier-domain.ts` + `supplier-domain-mock-store` | 侧边栏规划路由 `online-tasks` / `order-access` / `fault-incidents` / `test-holds`（页面待建） | 物理机 `SupplierDevice`、`ComputeNode`、接入批次/任务、故障、测试占用、资源池绑定、状态审计 |
+| **接入域 Mock** | `lib/data/supplier-domain-mock.ts` + `lib/types/supplier-domain.ts` + `supplier-domain-mock-store` | 侧栏 **「计划批次」** → `/supplier/online-tasks`（类型筛选+Badge）；**「内部占用」** → `/supplier/test-holds`。见 [supplier-planned-batches-hub-design.md](./supplier-planned-batches-hub-design.md) | 物理机 `SupplierDevice`、`ComputeNode`、接入批次/任务、故障、测试占用、资源池绑定、状态审计 |
 | **批量导入 Mock** | `lib/data/supplier-ops-batch-seed.ts` + `lib/types/supplier-ops-batch.ts` | 同上 ops 路由 | CSV 解析批次 `SupplierOpsUploadBatch` |
 | **财务衔接** | `lib/types/finance.ts` + `cost-row-utils.ts` | `/finance/*` 成本表 | `platform_cost_monthly.supplier_unit_cost_id` → `supplier_unit_cost` |
 
@@ -1452,7 +1452,7 @@ GROUP BY 1, 2, 3;
 1. **Mock 合并**：`mock-data` 聚合模型与 `supplier-domain-mock` 物理模型并存属预期；落库后通过 `supplier_device` → `supplier_gpu_inventory` 同步统一。
 2. **CRM 共用**：`user_staff` 建议继续复用 CRM 域表，不重复建员工表。
 3. **Schema 拆分**：可实现为 `packages/db/src/supplier-schema.ts`，与 `crm-schema.ts` 并列；跨域 FK 在 migration 中声明。
-4. **待建页面**：`online-tasks`、`order-access`、`fault-incidents`、`test-holds` 侧边栏已预留，表结构已覆盖，UI 落地时直接对接 §3.3–§3.5。
+4. **计划批次**：列表 `/supplier/online-tasks`（三 kind 统一表，无 Tab）；**内部占用** 侧栏保留 `/supplier/test-holds`。见 [supplier-planned-batches-hub-design.md](./supplier-planned-batches-hub-design.md)。
 
 ---
 

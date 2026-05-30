@@ -8,6 +8,8 @@
 
 **关联主文档**：[supplier-database.md](./supplier-database.md)、[supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md)（v2.2 资源总览 / 字典）
 
+**第三方集成**：[supplier-device-masterdata-integration-api-design.md](./supplier-device-masterdata-integration-api-design.md) — REST 字段对齐本章 §4.1 / §4.2 表头；**不** 通过 API 更新「显卡数量」等导入专属列。
+
 **Drizzle 实现**：`packages/db/src/supply-schema.ts`、`packages/db/src/supply-lifecycle-dictionary.ts`
 
 ---
@@ -71,7 +73,7 @@
 
 `lifecycle_state_definition.domain = device_change_action`；`supplier_device_change_log.change_action` 存原文。
 
-**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`上架网关直连裸金属`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
+**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`网关直连裸金属上架中`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
 
 `payload.default_ops_status` / **`default_pool_bindings`** 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status` 并同步 `resource_pool_binding`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
 
@@ -356,7 +358,7 @@
 | 内网IP地址 | `supplier_device.internal_ip` |
 | 设备标识 | `supplier_device.asset_no` 或 `sn` |
 | 显卡型号 | `gpu_card_type` → `gpu_card_type_id`（§4.1.1） |
-| 显卡数量 | `supplier_device.gpu_count` |
+| 显卡数量 | `supplier_device.gpu_count`（**仅 Excel 导入**；第三方 API **禁止** 写入，见 integration API §2.3） |
 | 设备状态 | `supplier_device.ops_status` + 映射 → `lifecycle_status` |
 | 维修中 | `supplier_device.in_maintenance` |
 | K8s集群 | `compute_node.cluster_name` |

@@ -1,0 +1,188 @@
+
+<style>
+  @keyframes arrive { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  @keyframes fly {
+    0%   { transform: translate(0,0) scale(1); opacity:1; }
+    40%  { transform: translate(var(--tx), var(--ty)) scale(0.85); opacity:0.9; }
+    100% { transform: translate(var(--tx), var(--ty)) scale(1); opacity:1; }
+  }
+  .machine { width:22px; height:22px; border-radius:4px; display:inline-block; cursor:pointer; transition: transform 0.15s; border: 1.5px solid rgba(0,0,0,0.12); }
+  .machine:hover { transform:scale(1.2); z-index:10; position:relative; }
+  .machine.arriving { animation: arrive 0.35s ease-out both; }
+  .machine.pending  { background:#D3D1C7; border-color:#B4B2A9; }
+  .machine.elastic  { background:#7F77DD; border-color:#534AB7; }
+  .machine.bare     { background:#D85A30; border-color:#993C1D; }
+  .machine.internal { background:#1D9E75; border-color:#0F6E56; }
+  .machine.offline  { background:#EF9F27; border-color:#BA7517; }
+  .machine.frozen   { background:#85B7EB; border-color:#378ADD; }
+  .phase-label { font-size:12px; color:var(--color-text-secondary); font-weight:500; margin:0 0 6px; }
+  .zone { border:0.5px solid var(--color-border-tertiary); border-radius:8px; padding:10px 12px; }
+  .zone-title { font-size:11px; color:var(--color-text-secondary); margin:0 0 8px; letter-spacing:0.03em; }
+  .grid { display:flex; flex-wrap:wrap; gap:4px; min-height:52px; }
+  .legend-dot { width:12px; height:12px; border-radius:3px; display:inline-block; border:1.5px solid rgba(0,0,0,0.12); }
+  .btn-row { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0 0; }
+</style>
+
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden">GPU设备生命周期流转动画：展示64台设备从采购入库到弹性服务、裸金属、内部自测、线下交付和库存冻结的分流过程</h2>
+
+<div style="padding:0 0 1rem">
+
+  <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; align-items:center">
+    <span style="font-size:12px;color:var(--color-text-secondary)">图例：</span>
+    <span class="legend-dot" style="background:#D3D1C7;border-color:#B4B2A9"></span><span style="font-size:12px;color:var(--color-text-secondary);margin-right:8px">待分配</span>
+    <span class="legend-dot" style="background:#7F77DD;border-color:#534AB7"></span><span style="font-size:12px;color:var(--color-text-secondary);margin-right:8px">弹性服务</span>
+    <span class="legend-dot" style="background:#D85A30;border-color:#993C1D"></span><span style="font-size:12px;color:var(--color-text-secondary);margin-right:8px">裸金属</span>
+    <span class="legend-dot" style="background:#1D9E75;border-color:#0F6E56"></span><span style="font-size:12px;color:var(--color-text-secondary);margin-right:8px">研发自测</span>
+    <span class="legend-dot" style="background:#EF9F27;border-color:#BA7517"></span><span style="font-size:12px;color:var(--color-text-secondary);margin-right:8px">线下交付</span>
+    <span class="legend-dot" style="background:#85B7EB;border-color:#378ADD"></span><span style="font-size:12px;color:var(--color-text-secondary)">库存冻结</span>
+  </div>
+
+  <div class="zone" style="margin-bottom:10px">
+    <div class="zone-title">商务采购 → 验收入库（64台）</div>
+    <div class="grid" id="pool"></div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px">
+    <div class="zone">
+      <div class="zone-title">k8s 集群上架</div>
+      <div class="grid" id="k8s"></div>
+    </div>
+    <div class="zone">
+      <div class="zone-title">线下交付（直接交付，不走k8s）</div>
+      <div class="grid" id="offline"></div>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px">
+    <div class="zone">
+      <div class="zone-title">弹性服务池</div>
+      <div class="grid" id="elastic"></div>
+    </div>
+    <div class="zone">
+      <div class="zone-title">裸金属池</div>
+      <div class="grid" id="bare"></div>
+    </div>
+    <div class="zone" style="grid-column:span 1">
+      <div class="zone-title">研发自测 / 库存冻结</div>
+      <div class="grid" id="misc"></div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button onclick="runDemo()" id="btn-run">播放流转动画 ↗</button>
+    <button onclick="resetDemo()" id="btn-reset">重置</button>
+    <span id="status" style="font-size:12px;color:var(--color-text-secondary);align-self:center;margin-left:4px"></span>
+  </div>
+</div>
+
+<script>
+const TOTAL = 64;
+const DIST = { elastic:28, bare:14, internal:8, offline:8, frozen:6 };
+const DELAY_ARRIVE = 30;
+const DELAY_K8S = 40;
+const DELAY_FINAL = 50;
+
+let machines = [];
+let running = false;
+
+function makeMachine(id, cls) {
+  const el = document.createElement('div');
+  el.className = 'machine pending arriving';
+  el.id = 'm' + id;
+  el.title = '设备 #' + (id+1);
+  el.style.animationDelay = (id * 18) + 'ms';
+  return el;
+}
+
+function resetDemo() {
+  if (running) return;
+  ['pool','k8s','offline','elastic','bare','misc'].forEach(id => {
+    document.getElementById(id).innerHTML = '';
+  });
+  machines = [];
+  document.getElementById('status').textContent = '';
+  for (let i = 0; i < TOTAL; i++) {
+    const el = makeMachine(i, 'pending');
+    document.getElementById('pool').appendChild(el);
+    machines.push({ el, state:'pending' });
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function moveEl(el, targetId, newClass) {
+  return new Promise(async (resolve) => {
+    const from = el.getBoundingClientRect();
+    const target = document.getElementById(targetId);
+    target.appendChild(el);
+    el.classList.remove('pending','elastic','bare','internal','offline','frozen','arriving');
+    void el.offsetWidth;
+    const to = el.getBoundingClientRect();
+    const dx = from.left - to.left;
+    const dy = from.top - to.top;
+    el.style.transform = `translate(${dx}px,${dy}px)`;
+    el.style.transition = 'none';
+    void el.offsetWidth;
+    el.style.transition = 'transform 0.45s cubic-bezier(.4,0,.2,1), opacity 0.3s';
+    el.style.transform = 'translate(0,0)';
+    await sleep(480);
+    el.classList.add(newClass);
+    el.style.transition = '';
+    el.style.transform = '';
+    resolve();
+  });
+}
+
+async function runDemo() {
+  if (running) return;
+  running = true;
+  document.getElementById('btn-run').disabled = true;
+
+  const setStatus = t => document.getElementById('status').textContent = t;
+
+  setStatus('入库中...');
+  await sleep(200);
+
+  const order = [...Array(TOTAL).keys()].sort(() => Math.random()-0.5);
+  const groups = { elastic:[], bare:[], internal:[], offline:[], frozen:[] };
+  const keys = Object.keys(DIST);
+  let idx = 0;
+  for (const k of keys) {
+    for (let n=0; n<DIST[k]; n++) groups[k].push(order[idx++]);
+  }
+
+  setStatus('分流中：线下交付不走k8s...');
+  const offlinePromises = groups.offline.map((i,j) =>
+    sleep(j * DELAY_K8S).then(() => moveEl(machines[i].el, 'offline', 'offline'))
+  );
+  const k8sBound = [...groups.elastic, ...groups.bare, ...groups.internal, ...groups.frozen];
+  const k8sPromises = k8sBound.map((i,j) =>
+    sleep(j * DELAY_K8S + 60).then(() => moveEl(machines[i].el, 'k8s', 'pending'))
+  );
+
+  await Promise.all([...offlinePromises, ...k8sPromises]);
+  setStatus('k8s集群上架完成，开始分配资源池...');
+  await sleep(400);
+
+  const finalMap = { elastic:'elastic', bare:'bare', internal:'misc', frozen:'misc' };
+  const allFinal = [];
+  for (const [grp, targetId] of Object.entries(finalMap)) {
+    groups[grp].forEach((i,j) => {
+      allFinal.push({ i, j: allFinal.length, targetId, cls: grp==='frozen'?'frozen': grp==='internal'?'internal': grp });
+    });
+  }
+  allFinal.sort(() => Math.random()-0.5);
+  await Promise.all(
+    allFinal.map(({i,j,targetId,cls}) =>
+      sleep(j * DELAY_FINAL).then(() => moveEl(machines[i].el, targetId, cls))
+    )
+  );
+
+  setStatus('流转完成 — 弹性:' + DIST.elastic + ' 裸金属:' + DIST.bare + ' 自测:' + DIST.internal + ' 线下:' + DIST.offline + ' 冻结:' + DIST.frozen);
+  running = false;
+  document.getElementById('btn-run').disabled = false;
+}
+
+resetDemo();
+</script>

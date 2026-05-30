@@ -1,35 +1,16 @@
 import { createHmac } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 
 export type ProjectActivityStorageDriver = 'local' | 'oss'
 
-const LOCAL_URI_PREFIX = 'local://'
 const OSS_URI_PREFIX = 'oss://'
-
-function sanitizeFileName(name: string): string {
-  return name.replace(/[^\w.\-()\u4e00-\u9fff]+/g, '_').slice(0, 200)
-}
 
 export function getProjectActivityStorageDriver(): ProjectActivityStorageDriver {
   const driver = process.env.PROJECT_ACTIVITY_STORAGE_DRIVER?.trim().toLowerCase()
   return driver === 'oss' ? 'oss' : 'local'
 }
 
-export function getProjectActivityStorageRoot(): string {
-  return (
-    process.env.PROJECT_ACTIVITY_STORAGE_ROOT ??
-    path.join(process.cwd(), '.data', 'project-activity-attachments')
-  )
-}
-
-function resolveLocalPath(relativePath: string): string {
-  const root = getProjectActivityStorageRoot()
-  const abs = path.resolve(root, relativePath)
-  if (!abs.startsWith(path.resolve(root))) {
-    throw new Error('非法存储路径')
-  }
-  return abs
+function sanitizeFileName(name: string): string {
+  return name.replace(/[^\w.\-()\u4e00-\u9fff]+/g, '_').slice(0, 200)
 }
 
 function getOssConfig() {
@@ -62,21 +43,6 @@ function buildOssAuthorization(
   const stringToSign = [method, '', contentType, date, resource].join('\n')
   const signature = createHmac('sha1', accessKeySecret).update(stringToSign).digest('base64')
   return `OSS ${accessKeyId}:${signature}`
-}
-
-async function saveToLocal(input: {
-  projectId: string
-  activityId: string
-  fileName: string
-  buffer: Buffer
-}): Promise<string> {
-  const rel = path
-    .join(input.projectId, input.activityId, `${crypto.randomUUID()}_${sanitizeFileName(input.fileName)}`)
-    .replace(/\\/g, '/')
-  const abs = resolveLocalPath(rel)
-  await mkdir(path.dirname(abs), { recursive: true })
-  await writeFile(abs, input.buffer)
-  return `${LOCAL_URI_PREFIX}${rel}`
 }
 
 async function saveToOss(input: {
@@ -135,13 +101,14 @@ export async function saveProjectActivityFile(input: {
   if (getProjectActivityStorageDriver() === 'oss') {
     return saveToOss(input)
   }
-  return saveToLocal(input)
+  const { saveLocalProjectActivityFile } = await import('./project-activity-local-storage')
+  return saveLocalProjectActivityFile(input)
 }
 
 export async function readProjectActivityFile(storageUri: string): Promise<Buffer> {
-  if (storageUri.startsWith(LOCAL_URI_PREFIX)) {
-    const rel = storageUri.slice(LOCAL_URI_PREFIX.length)
-    return readFile(resolveLocalPath(rel))
+  if (storageUri.startsWith('local://')) {
+    const { readLocalProjectActivityFile } = await import('./project-activity-local-storage')
+    return readLocalProjectActivityFile(storageUri)
   }
 
   if (storageUri.startsWith(OSS_URI_PREFIX)) {

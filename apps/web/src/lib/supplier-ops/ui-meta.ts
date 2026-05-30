@@ -54,19 +54,19 @@ export const OPS_KIND_UI: Record<
 > = {
   "online-tasks": {
     title: "设备上架",
-    description: "按供应商与机房批量登记上架主机（mock）；支持 CSV 模板导入。",
+    description: "按供应商与机房批量登记上架主机；支持 CSV 模板导入。",
     basePath: "/supplier/online-tasks",
     dialogTitle: "新建上架批次",
   },
   "order-access": {
     title: "订单接入",
-    description: "登记订单侧待接入机器清单（mock）；字段与上架一致，便于后续打通工单。",
+    description: "登记订单侧待接入机器清单；字段与上架一致，便于后续打通工单。",
     basePath: "/supplier/order-access",
     dialogTitle: "新建订单接入批次",
   },
   "fault-incidents": {
     title: "故障事件",
-    description: "故障排查涉及的机器清单导入（mock）；与故障单主数据流程独立演示。",
+    description: "故障排查涉及的机器清单导入；与故障单主数据流程独立。",
     basePath: "/supplier/fault-incidents",
     dialogTitle: "新建故障关联主机清单",
   },

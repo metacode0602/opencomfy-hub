@@ -8,11 +8,14 @@ import {
   billingPeriodTenantBillWindow,
   platformCostMonthly,
 } from '@workspace/db/schema'
-import { deleteStorageFile } from './import-storage'
 import { financeLog } from './logger'
 import { newId } from './operation-log'
 
 type CostDerivedDb = Pick<typeof db, 'delete'>
+
+async function importStorageLocal() {
+  return import('./import-storage-local')
+}
 
 export async function purgeCostDerived(tx: CostDerivedDb, periodId: string): Promise<void> {
   await tx.delete(platformCostMonthly).where(eq(platformCostMonthly.billingPeriodId, periodId))
@@ -47,6 +50,7 @@ export async function purgeCostImportsForRegenerate(periodId: string): Promise<v
         eq(billingPeriodImportBatch.fileType, 'tenant_bill'),
       ),
     })
+    const { deleteStorageFile } = await importStorageLocal()
     for (const batch of [...costBatches, ...tenantBillBatches]) {
       await deleteStorageFile(batch.storagePath)
       await deleteStorageFile(batch.errorReportPath)

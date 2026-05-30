@@ -11,7 +11,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { TooltipProps } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import {
   Select,
@@ -155,20 +154,27 @@ function buildTrendData(
   }
 }
 
+type ConsumptionTooltipEntry = {
+  payload?: ChartRow
+}
+
 function ConsumptionTrendTooltip({
   active,
   payload,
   label,
   breakdownByDate,
   trendCategories,
-}: TooltipProps<number, string> & {
+}: {
+  active?: boolean
+  payload?: ConsumptionTooltipEntry[]
+  label?: string | number
   breakdownByDate: Map<string, Map<TrendCategoryKey, CategoryBreakdown>>
   trendCategories: TrendCategoryKey[]
 }) {
   if (!active || !payload?.length) return null
 
   const usageDate =
-    (payload[0]?.payload as ChartRow | undefined)?.usageDate ??
+    payload[0]?.payload?.usageDate ??
     (typeof label === 'string' && label.includes('-') ? label : null)
 
   if (!usageDate) return null

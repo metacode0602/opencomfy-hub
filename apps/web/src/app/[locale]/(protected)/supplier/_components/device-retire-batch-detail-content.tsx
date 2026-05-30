@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft, FileSpreadsheet, Loader2 } from 'lucide-react'
+import { ArrowLeft, FileSpreadsheet, Loader2, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@workspace/ui/components/card'
@@ -17,6 +17,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@workspace/ui/componen
 import { trpc } from '@/lib/trpc/client'
 import { DEVICE_RETIRE_IMPORT_STATUS_LABELS } from '@/lib/types/device-retire'
 import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
+import { AdjustOnboardingBatchPlanDialog } from './adjust-onboarding-batch-plan-dialog'
+import { BatchLifecycleActions } from './batch-lifecycle-actions'
+import { BatchAdjustHistoryList, BatchProgressTimeline } from './batch-progress-timeline'
+import { useState } from 'react'
+
+const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
 
 const importStatusColor: Record<string, string> = {
   draft: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
@@ -57,7 +63,8 @@ function formatDt(iso: string | null | undefined) {
 }
 
 export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string }) {
-  const { data: batch, isLoading, isError } = trpc.supplier.deviceRetire.getBatchById.useQuery({
+  const [adjustOpen, setAdjustOpen] = useState(false)
+  const { data: batch, isLoading, isError, refetch } = trpc.supplier.deviceRetire.getBatchById.useQuery({
     id: batchId,
   })
 
@@ -99,9 +106,13 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
       ? Math.min(100, Math.round((batch.touchedDeviceCount / batch.plannedDeviceCount) * 100))
       : 0
   const flags = batch.progressFlags
+  const canAdjustPlan = !TERMINAL_BATCH_STATUSES.includes(
+    batch.batchStatus as (typeof TERMINAL_BATCH_STATUSES)[number],
+  )
 
   return (
     <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
       <div className="flex items-start gap-4">
         <Link href="/supplier/offline-tasks">
           <Button variant="ghost" size="icon" className="mt-1">
@@ -141,6 +152,34 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
           </p>
         </div>
       </div>
+        <div className="flex items-center gap-2 flex-wrap shrink-0 justify-end">
+          {canAdjustPlan && (
+            <Button variant="outline" className="gap-2" onClick={() => setAdjustOpen(true)}>
+              <SlidersHorizontal className="w-4 h-4" />
+              调整计划
+            </Button>
+          )}
+          <BatchLifecycleActions
+            batchId={batch.id}
+            batchStatus={batch.batchStatus}
+            touchedDeviceCount={batch.touchedDeviceCount}
+            batchKind="device_retire"
+            onSuccess={() => void refetch()}
+          />
+        </div>
+      </div>
+
+      <AdjustOnboardingBatchPlanDialog
+        batchId={batch.id}
+        open={adjustOpen}
+        onOpenChange={setAdjustOpen}
+        batchKind="device_retire"
+        plannedLinesJson={batch.plannedLines}
+        plannedReadyAt={batch.expectedCompletionDate}
+        touchedDeviceCount={batch.touchedDeviceCount}
+        plannedDeviceCount={batch.plannedDeviceCount}
+        onSuccess={() => void refetch()}
+      />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
@@ -181,6 +220,8 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
           <TabsTrigger value="devices">已执行设备 ({batch.devices.length})</TabsTrigger>
           <TabsTrigger value="import">建议清单 ({batch.parsedRows.length})</TabsTrigger>
           <TabsTrigger value="overview">批次概览</TabsTrigger>
+          <TabsTrigger value="timeline">进度时间轴</TabsTrigger>
+          <TabsTrigger value="audit">调整审计</TabsTrigger>
         </TabsList>
 
         <TabsContent value="devices" className="mt-4">
@@ -386,6 +427,14 @@ export function DeviceRetireBatchDetailContent({ batchId }: { batchId: string })
               </Link>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="timeline" className="mt-4">
+          <BatchProgressTimeline batchId={batch.id} />
+        </TabsContent>
+
+        <TabsContent value="audit" className="mt-4">
+          <BatchAdjustHistoryList batchId={batch.id} />
         </TabsContent>
       </Tabs>
     </div>

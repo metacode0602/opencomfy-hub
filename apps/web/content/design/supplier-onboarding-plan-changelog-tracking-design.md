@@ -230,7 +230,7 @@ erDiagram
 | `上架接入平台网关` |
 | `上架单机模式裸金属` |
 | `上架网关代理裸金属` |
-| `上架网关直连裸金属` |
+| `网关直连裸金属上架中` |
 | `下架裸金属` |
 | `线下裸金属交付` |
 | `集群角色增加` |
@@ -328,7 +328,7 @@ function resolveLifecycleStatus(ctx: {
 | `上架接入平台网关` | `网关节点上架中` | **`在线`** | 仅 elastic | |
 | `上架单机模式裸金属` | `网关直连裸金属上架中` | **`在线`** | 仅 `bare_metal` | |
 | `上架网关代理裸金属` | `网关代理裸金属上架中` | **`在线`** | 双 binding | 长期双池 |
-| `上架网关直连裸金属` | `网关直连裸金属上架中` | **`在线`** | 仅 `bare_metal` | |
+| `网关直连裸金属上架中` | `网关直连裸金属上架中` | **`在线`** | 仅 `bare_metal` | |
 | `下架裸金属` | `预留闲置中` | **`接入中`** | 清除 bare_metal | |
 | `线下裸金属交付` | `线下裸金属交付中` | **`在线`** | 仅 `bare_metal` | |
 | `集群角色增加` / `集群角色删除` | *不变* | *不变* | *不变* | 更新 `compute_node` |
@@ -396,7 +396,7 @@ function isDualPool(memberships: Set<PoolKind>): boolean {
 
 | 变更动作 / `ops_status` | 裸金属池 | 弹性用量池 |
 |-------------------------|---------|-----------|
-| `上架单机模式裸金属` / `上架网关直连裸金属` → `网关直连裸金属上架中` | ✓ | ✗ |
+| `上架单机模式裸金属` / `网关直连裸金属上架中` → `网关直连裸金属上架中` | ✓ | ✗ |
 | `上架网关代理裸金属` → `网关代理裸金属上架中` | ✓ | ✓ |
 | `线下裸金属交付` → `线下裸金属交付中` | ✓ | ✗ |
 | `在集群中` + 代理裸金属 binding | ✓ | ✓（长期双池） |
@@ -676,7 +676,7 @@ type OverviewKpiMetric = {
 |-----|------|----------|
 | GPU 总量 | `total` | L1：`SUM(inventory.quantity)` 设备数/卡数；或 L2 全量设备 |
 | 在线 | `online` | `lifecycle_status = '在线'` |
-| 待接入 | `pendingAccess` | `lifecycle_status = '待接入'` |
+| 待接入 | `pendingAccess` | Snapshot：实体 `lifecycle_status = '待接入'` **+ 进行中批次计划缺口**（见 [`supplier-overview-scenarios-from-zero.md`](./supplier-overview-scenarios-from-zero.md) §2.1）；Period **暂不**叠加计划 |
 | 接入中 | `onboarding` | `lifecycle_status = '接入中'` |
 | 维护中 | `maintenance` | `lifecycle_status = '维护中'`（=`in_maintenance=true` 为主） |
 | 可售 | `sellable` | §5.4.2 公式（卡数）；设备数为可售 GPU>0 的去重设备数 |
@@ -741,19 +741,30 @@ type OverviewKpis = {
 
 #### 5.4.3 物理机生命周期漏斗（左栏）
 
-按 CRM **`lifecycle_status`** 分桶（**5 段**，v2.4），与接入计划进度 **解耦**：
+按 CRM **`lifecycle_status`** 分桶（**5 段**，v2.4）；**Snapshot** 下 **「待接入」段** 叠加进行中批次计划缺口（v2.5，见 [`supplier-overview-scenarios-from-zero.md`](./supplier-overview-scenarios-from-zero.md) §2.1）；其余段 **仅** 实体设备。
 
-| 阶段 | 包含 `lifecycle_status` | 设备范围摘要 |
-|------|-------------------------|-------------|
-| 待接入 | `待接入` | 已创建 `online`/`order_access` 批次关联，未 `设备接收` |
-| 接入中 | `接入中` | 已 `设备接收`，通常 `ops=预留闲置中` |
+| 阶段 | 包含 `lifecycle_status` | Snapshot 设备范围摘要 |
+|------|-------------------------|----------------------|
+| 待接入 | `待接入` | **实体**（已 link、未 `设备接收` 等）**+ 计划缺口** `max(0, planned−touched)` |
+| 接入中 | `接入中` | 已 `设备接收`；由变更表更新 ops/lifecycle |
 | 在线 | `在线` | 集群 ops + 4 种上架/交付 ops + 其他部门使用中 |
 | 维护中 | `维护中` | `in_maintenance = true` |
 | 下线中 | `下线中` | 已创建 `device_retire` 下架批次 |
 
 每段展示：**`gpuCount`（卡）** + **`deviceCount`（台）**。`待接入` 或 `接入中` 数量 > 0 时 `warn=true`。
 
-> v2.4 漏斗 **移除** `离线` 段；未知 lifecycle 值 fallback → `待接入`（实现时打日志）。
+> v2.4 漏斗 **移除** `离线` 段；未知 lifecycle 值 fallback → `待接入`（实现时打日志）。  
+> **v2.5**：Global **待接入机房** = 实体待接入机房 ∪ `online_reason='new_idc'` 进行中 `online` 批次（严格枚举）。**Period 漏斗/KPI 暂不叠加计划**。
+
+#### 5.4.3.1 `onboarding_batch.planned_gpu_count`（方案 A，v2.5）
+
+创建/修订商务批次时持久化：
+
+```
+planned_gpu_count = Σ(planLine.plannedQuantity × default_gpu_per_device)
+```
+
+`default_gpu_per_device`：同供应商×机房×卡型已有设备 `gpu_count` 众数；无历史则 **8**。与 `planned_device_count` 同步维护。
 
 #### 5.4.4 运维状态管道（建议 v2.2 新增折叠区，可选）
 
@@ -1172,7 +1183,7 @@ type OnboardingBatchProgress = {
 |---|------|-----------|-----|
 | L1 | 创建 online 批次并 link，未接收 | 待接入 | — |
 | L2 | `设备接收` | 接入中 | 预留闲置中 |
-| L3 | `上架网关直连裸金属` | **在线** | 网关直连裸金属上架中 |
+| L3 | `网关直连裸金属上架中` | **在线** | 网关直连裸金属上架中 |
 | L4 | `在集群中` + `in_maintenance=true` | **维护中** | 在集群中 |
 | L5 | 创建 device_retire 批次 | **下线中** | 已退订或原 ops |
 | L6 | KPI 不可调度 | 在线 | 不可调度节点运行中 |

@@ -1,14 +1,17 @@
 /**
  * 运维设备状态 / 变更动作字典种子（与 lifecycle_state_definition 对齐）
  *
- * 设计：supplier-onboarding-plan-changelog-tracking-design.md §3.4
+ * 设计：supplier-device-ops-pool-masterdata-design.md v1.0
  * 落库：lifecycle_state_definition.domain = device_ops_status | device_change_action
  * 应用：device-import-utils.ts（OPS_STATUS_TO_LIFECYCLE、CHANGE_ACTION_DEFAULT_OPS）
  */
 
+export type PoolKind = 'bare_metal' | 'elastic_service'
+
 export type DeviceOpsStatusPayload = {
   lifecycle_status: string
   overview_bucket: string
+  pool_memberships?: PoolKind[]
   tags?: string[]
 }
 
@@ -17,7 +20,7 @@ export type DeviceChangeActionPayload = {
   updates_compute_node?: boolean
 }
 
-/** device_ops_status — 11 条，state_code 与 Excel 原文一致 */
+/** device_ops_status — 12 条，state_code 与 Excel 原文一致 */
 export const DEVICE_OPS_STATUS_SEEDS: Array<{
   stateCode: string
   displayName: string
@@ -28,7 +31,7 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     stateCode: "预留闲置中",
     displayName: "预留闲置中",
     sortOrder: 10,
-    payload: { lifecycle_status: "待接入", overview_bucket: "reserved" },
+    payload: { lifecycle_status: "接入中", overview_bucket: "reserved" },
   },
   {
     stateCode: "在集群中",
@@ -37,6 +40,7 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     payload: {
       lifecycle_status: "在线",
       overview_bucket: "in_cluster",
+      pool_memberships: ["elastic_service"],
       tags: ["sellable_candidate"],
     },
   },
@@ -47,6 +51,7 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     payload: {
       lifecycle_status: "在线",
       overview_bucket: "in_cluster",
+      pool_memberships: ["elastic_service"],
       tags: ["sellable_candidate"],
     },
   },
@@ -55,8 +60,9 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     displayName: "网关直连裸金属上架中",
     sortOrder: 40,
     payload: {
-      lifecycle_status: "接入中",
+      lifecycle_status: "在线",
       overview_bucket: "bare_metal_onboarding",
+      pool_memberships: ["bare_metal"],
       tags: ["bare_metal"],
     },
   },
@@ -65,8 +71,20 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     displayName: "网关代理裸金属上架中",
     sortOrder: 50,
     payload: {
-      lifecycle_status: "接入中",
+      lifecycle_status: "在线",
       overview_bucket: "bare_metal_onboarding",
+      pool_memberships: ["bare_metal", "elastic_service"],
+      tags: ["bare_metal"],
+    },
+  },
+  {
+    stateCode: "单机直连裸金属上架中",
+    displayName: "单机直连裸金属上架中",
+    sortOrder: 55,
+    payload: {
+      lifecycle_status: "在线",
+      overview_bucket: "bare_metal_onboarding",
+      pool_memberships: ["bare_metal"],
       tags: ["bare_metal"],
     },
   },
@@ -75,8 +93,9 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     displayName: "线下裸金属交付中",
     sortOrder: 60,
     payload: {
-      lifecycle_status: "接入中",
+      lifecycle_status: "在线",
       overview_bucket: "offline_delivery",
+      pool_memberships: ["bare_metal"],
       tags: ["bare_metal"],
     },
   },
@@ -85,9 +104,9 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     displayName: "其他部门使用中",
     sortOrder: 70,
     payload: {
-      lifecycle_status: "维护中",
+      lifecycle_status: "在线",
       overview_bucket: "other_dept",
-      tags: ["not_sellable"],
+      tags: ["internal_occupancy", "not_sellable"],
     },
   },
   {
@@ -104,13 +123,17 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     stateCode: "网关节点上架中",
     displayName: "网关节点上架中",
     sortOrder: 90,
-    payload: { lifecycle_status: "接入中", overview_bucket: "gateway_onboarding" },
+    payload: {
+      lifecycle_status: "在线",
+      overview_bucket: "gateway_onboarding",
+      pool_memberships: ["bare_metal", "elastic_service"],
+    },
   },
   {
     stateCode: "已退订",
     displayName: "已退订",
     sortOrder: 100,
-    payload: { lifecycle_status: "退订", overview_bucket: "retired" },
+    payload: { lifecycle_status: "下线中", overview_bucket: "retired" },
   },
 ]
 
@@ -139,7 +162,7 @@ export const DEVICE_CHANGE_ACTION_SEEDS: Array<{
     stateCode: "上架单机模式裸金属",
     displayName: "上架单机模式裸金属",
     sortOrder: 100,
-    payload: { default_ops_status: "网关直连裸金属上架中" },
+    payload: { default_ops_status: "单机直连裸金属上架中" },
   },
   {
     stateCode: "上架网关代理裸金属",
