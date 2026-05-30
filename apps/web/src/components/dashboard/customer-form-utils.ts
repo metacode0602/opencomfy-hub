@@ -1,10 +1,10 @@
-import { mockSalesManagers } from '@/lib/data/mock-data'
 import {
   emptyExpectedScale,
   isExpectedScaleEmpty,
   type Customer,
   type CustomerExpectedScale,
 } from '@/lib/data/types'
+import type { UserStaff } from '@/lib/types/crm'
 import type { CustomerFormValues } from './customer-form-fields'
 
 /** 兼容旧版 cardTypeIds 结构 */
@@ -38,6 +38,10 @@ function resolveCustomerNames(values: CustomerFormValues) {
   }
 }
 
+function getStaffDisplayName(staffId: string, staff: UserStaff[]): string | undefined {
+  return staff.find((m) => m.id === staffId)?.display_name
+}
+
 export function customerToFormValues(customer: Customer): CustomerFormValues {
   return {
     type: customer.type,
@@ -57,8 +61,11 @@ export function customerToFormValues(customer: Customer): CustomerFormValues {
 export function formValuesToCustomer(
   values: CustomerFormValues,
   base: Pick<Customer, 'id'> & Partial<Customer>,
+  staff: UserStaff[] = [],
 ): Customer {
-  const manager = mockSalesManagers.find((m) => m.id === values.salesManagerId)
+  const managerName = values.salesManagerId
+    ? getStaffDisplayName(values.salesManagerId, staff)
+    : undefined
   const scale = values.expectedScale
   const cards = scale.cards.filter((c) => c.cardTypeId && c.cardCount > 0)
 
@@ -77,7 +84,7 @@ export function formValuesToCustomer(
     address: values.address.trim(),
     certCode: values.certCode.trim() || undefined,
     salesManagerId: values.salesManagerId || undefined,
-    salesManagerName: manager?.name,
+    salesManagerName: managerName ?? base.salesManagerName,
     expectedScale: isExpectedScaleEmpty({ ...scale, cards })
       ? null
       : { ...scale, cards },

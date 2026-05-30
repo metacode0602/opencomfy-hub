@@ -529,6 +529,16 @@ export interface DataCenterStats {
   onlineGpu: number
 }
 
+/** 平台定价详情页 — 接入机房的摘要信息（来自 GPU 库存聚合） */
+export type PlatformPricingDatacenterContext = {
+  dataCenterId: string
+  dataCenterName: string
+  supplierId: string
+  supplierName: string
+  location: string
+  status: DataCenter['status']
+}
+
 export interface DataCenterDetail {
   dataCenter: DataCenter
   gpuInventory: DataCenterDevice[]

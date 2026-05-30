@@ -32,10 +32,12 @@ import {
 import { deviceRetireRequestSchema } from '@/lib/server/routers/supplier/device-retire-schemas'
 import {
   datacenterRetireContextSchema,
+  datacenterRetireListSampleSchema,
   datacenterRetireRequestSchema,
 } from '@/lib/server/routers/supplier/datacenter-device-retire-schemas'
 import { datacenterDeviceRetireDataAccess } from '@/lib/server/dataaccess/supplier/datacenter-device-retire'
 import { internalTestHoldDataAccess } from '@/lib/server/dataaccess/supplier/internal-test-hold'
+import { faultIncidentDataAccess } from '@/lib/server/dataaccess/supplier/fault-incident'
 import {
   onboardingBatchAdjustHistorySchema,
   onboardingBatchAdjustPlanSchema,
@@ -67,6 +69,11 @@ import {
   internalTestHoldListSchema,
   internalTestHoldUnlinkDeviceSchema,
 } from '@/lib/server/routers/supplier/internal-test-hold-schemas'
+import {
+  faultIncidentCloseSchema,
+  faultIncidentCreateSchema,
+  faultIncidentListSchema,
+} from '@/lib/server/routers/supplier/fault-incident-schemas'
 import { overviewFiltersSchema } from '@/lib/server/routers/supplier/overview-schemas'
 import { supplierListSchema, supplierCreateSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
 import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter-create-schemas'
@@ -355,6 +362,14 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
+  listAllContracts: protectedProcedure.query(async () => {
+    try {
+      return await suppliersDataAccess.listAllContracts()
+    } catch (e) {
+      mapImportError(e)
+    }
+  }),
+
   listBills: protectedProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
@@ -599,6 +614,19 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
+    getDatacenterRetireListSample: protectedProcedure
+      .input(datacenterRetireListSampleSchema)
+      .query(async ({ input }) => {
+        try {
+          return await datacenterDeviceRetireDataAccess.listRetireListSampleRows(
+            input.dataCenterId,
+            input.planLines,
+          )
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
     previewDatacenter: adminProcedure
       .input(datacenterRetireRequestSchema)
       .mutation(async ({ input }) => {
@@ -726,7 +754,7 @@ export const supplierRouter = createTRPCRouter({
           return await onboardingBatchDataAccess.adjustPlan({
             ...input,
             operatorStaffId: staffId,
-            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+            operatorName: staff?.display_name ?? ctx.user.name ?? '运营',
           })
         } catch (e) {
           mapImportError(e)
@@ -764,7 +792,7 @@ export const supplierRouter = createTRPCRouter({
           return await onboardingBatchDataAccess.completeBatch({
             ...input,
             operatorStaffId: staffId,
-            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+            operatorName: staff?.display_name ?? ctx.user.name ?? '运营',
           })
         } catch (e) {
           mapImportError(e)
@@ -782,12 +810,53 @@ export const supplierRouter = createTRPCRouter({
           return await onboardingBatchDataAccess.voidBatch({
             ...input,
             operatorStaffId: staffId,
-            operatorName: staff?.name ?? ctx.user.name ?? '运营',
+            operatorName: staff?.display_name ?? ctx.user.name ?? '运营',
           })
         } catch (e) {
           mapImportError(e)
         }
       }),
+  }),
+
+  faultIncident: createTRPCRouter({
+    list: protectedProcedure.input(faultIncidentListSchema).query(async ({ input }) => {
+      try {
+        if (input?.supplierId) {
+          await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        }
+        return await faultIncidentDataAccess.list(input ?? {})
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    create: adminProcedure.input(faultIncidentCreateSchema).mutation(async ({ input, ctx }) => {
+      try {
+        await suppliersDataAccess.assertSupplierExists(input.supplierId)
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await faultIncidentDataAccess.create({
+          ...input,
+          operatorStaffId: staffId,
+          operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    close: adminProcedure.input(faultIncidentCloseSchema).mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await faultIncidentDataAccess.close({
+          incidentId: input.incidentId,
+          resolution: input.resolution,
+          operatorStaffId: staffId,
+          operatorName: ctx.user.name ?? ctx.user.email ?? '运营',
+        })
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
   }),
 
   internalTestHold: createTRPCRouter({

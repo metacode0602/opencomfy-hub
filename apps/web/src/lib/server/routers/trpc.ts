@@ -56,7 +56,7 @@ export const createTRPCContext = async <NextRequest extends { headers: Headers }
   req?: NextRequest
   user?: UserWithRole | null
   session?: Session | null
-  // eslint-disable-next-line @typescript-eslint/require-await
+   
 }) => {
   const apiKey = opts.req?.headers.get('x-acme-api-key')
   return createInnerTRPCContext({

@@ -1,4 +1,4 @@
-/** B 端客户经营与 CRM 域 — 前端 mock 模型（v3.0 Customer / Project / PlatformTenant） */
+/** B 端客户经营与 CRM 域 — 类型定义（v3.0 Customer / Project / PlatformTenant） */
 
 export type JsonObject = Record<string, unknown>
 

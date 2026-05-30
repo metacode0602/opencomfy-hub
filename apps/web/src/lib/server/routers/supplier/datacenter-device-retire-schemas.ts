@@ -98,3 +98,8 @@ export const datacenterRetireRequestSchema = z
 export const datacenterRetireContextSchema = z.object({
   dataCenterId: z.string().min(1),
 })
+
+export const datacenterRetireListSampleSchema = z.object({
+  dataCenterId: z.string().min(1),
+  planLines: z.array(onboardingBatchPlanLineSchema).min(1, '请至少添加一行下架计划'),
+})

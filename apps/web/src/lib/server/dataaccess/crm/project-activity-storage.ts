@@ -19,7 +19,7 @@ export function getProjectActivityStorageDriver(): ProjectActivityStorageDriver 
 export function getProjectActivityStorageRoot(): string {
   return (
     process.env.PROJECT_ACTIVITY_STORAGE_ROOT ??
-    path.join(process.cwd(), '.data', 'project-activity-attachments')
+    path.join(/* turbopackIgnore: true */ process.cwd(), '.data', 'project-activity-attachments')
   )
 }
 

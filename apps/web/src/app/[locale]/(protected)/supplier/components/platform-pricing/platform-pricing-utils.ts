@@ -1,5 +1,4 @@
-import { mockDataCenterDevices, mockDataCenters } from '@/lib/data/mock-data'
-import type { GPUCardType } from '@/lib/data/types'
+import type { GPUCardType, PlatformPricingDatacenterContext } from '@/lib/data/types'
 import type {
   PlatformBillingUnit,
   PlatformCardPriceRecord,
@@ -63,25 +62,28 @@ export function formatDateTime(iso?: string) {
 export function getDatacentersForCardType(
   cardTypeId: string,
   sellRecords: SupplierDatacenterSellPrice[],
+  datacenters: PlatformPricingDatacenterContext[],
 ): DatacenterForCard[] {
   const dcIds = new Set<string>()
-  for (const d of mockDataCenterDevices) {
-    if (d.cardTypeId === cardTypeId) dcIds.add(d.dataCenterId)
+  for (const dc of datacenters) {
+    dcIds.add(dc.dataCenterId)
   }
   for (const r of sellRecords) {
     if (r.gpuCardTypeId === cardTypeId) dcIds.add(r.dataCenterId)
   }
 
+  const dcById = new Map(datacenters.map((dc) => [dc.dataCenterId, dc]))
+
   return [...dcIds]
     .map((id) => {
-      const dc = mockDataCenters.find((d) => d.id === id)
+      const dc = dcById.get(id)
       if (!dc) return null
       const priceEntryCount = sellRecords.filter(
         (r) => r.gpuCardTypeId === cardTypeId && r.dataCenterId === id,
       ).length
       return {
-        dataCenterId: dc.id,
-        dataCenterName: dc.name,
+        dataCenterId: dc.dataCenterId,
+        dataCenterName: dc.dataCenterName,
         supplierId: dc.supplierId,
         supplierName: dc.supplierName,
         location: dc.location,

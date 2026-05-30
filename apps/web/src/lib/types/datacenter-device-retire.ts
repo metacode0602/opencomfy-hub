@@ -21,7 +21,7 @@ export type DatacenterRetireAvailability = {
   gpuCardTypeCode: string
   gpuCardTypeName: string
   cooperationType: DeviceCooperationType
-  /** 已上架可下架数量（Mock 或 DB 聚合） */
+  /** 已上架可下架数量（ DB 聚合） */
   listedQuantity: number
 }
 
@@ -44,7 +44,7 @@ export type DatacenterRetirePlanLineDraft = {
 
 export type DatacenterRetireListParseStatus = 'ok' | 'error'
 
-/** 下架清单解析行（Mock / 阶段二 preview 共用） */
+/** 下架清单解析行（阶段二 preview 共用） */
 export type DatacenterRetireListRow = {
   rowNo: number
   gpuCardTypeCode: string
@@ -142,7 +142,7 @@ export type BuildAvailabilityInput = {
   gpuInventory: DataCenterDevice[]
 }
 
-/** 下架清单 CSV 表头（Mock 阶段） */
+/** 下架清单 CSV 表头（阶段） */
 export const DATACENTER_RETIRE_LIST_HEADERS = [
   '卡型',
   '合作类型',
@@ -151,3 +151,13 @@ export const DATACENTER_RETIRE_LIST_HEADERS = [
   '设备ID',
   '设备标识',
 ] as const
+
+/** 下架清单样例行（由 DB 在线设备填充） */
+export type DatacenterRetireListSampleRow = {
+  gpuCardTypeName: string
+  cooperationType: string
+  externalIp: string
+  internalIp: string
+  externalDeviceId: string
+  assetNo: string
+}

@@ -1,0 +1,13 @@
+
+> dashboard@0.0.1 typecheck /root/workspaces/work-suanleme/gongji-crm/apps/web
+> tsc --noEmit
+
+src/lib/server/aggregation/aggregate-composition-card-hours-from-snapshots.test.ts(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+src/lib/server/aggregation/aggregate-pipeline-card-hours.test.ts(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+src/lib/server/aggregation/batch-progress-events.test.ts(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+src/lib/server/aggregation/resource-composition-aggregation.test.ts(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+src/lib/server/jobs/dashboard-masterdata-snapshot/project-device-snapshot-row.test.ts(1,38): error TS2307: Cannot find module 'vitest' or its corresponding type declarations.
+src/lib/server/routers/supplier/index.ts(757,34): error TS2339: Property 'name' does not exist on type 'StaffDetail'.
+src/lib/server/routers/supplier/index.ts(795,34): error TS2339: Property 'name' does not exist on type 'StaffDetail'.
+src/lib/server/routers/supplier/index.ts(813,34): error TS2339: Property 'name' does not exist on type 'StaffDetail'.
+ ELIFECYCLE  Command failed with exit code 2.

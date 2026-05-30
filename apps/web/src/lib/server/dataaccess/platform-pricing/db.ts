@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import type { GPUCardType } from '@/lib/data/types'
+import type { GPUCardType, PlatformPricingDatacenterContext } from '@/lib/data/types'
 import { mapGpuCardTypeRow } from '@/lib/server/mappers/supply'
 import { platformPricingLog } from '@/lib/server/dataaccess/platform-pricing/logger'
 import type {
@@ -24,14 +24,16 @@ import {
   validatePeriodAgainstExisting,
 } from '@/lib/platform-pricing/periods'
 import {
+  dataCenter,
   gpuCardType,
   platformCardListPrice,
   platformCardPriceHistory,
   platformCardPriceRecord,
+  supplier,
   supplierGpuInventory,
   userStaff,
 } from '@workspace/db/schema'
-import { and, count, desc, eq, isNull, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -288,6 +290,61 @@ async function assertCardTypeExists(gpuCardTypeId: string) {
   return card
 }
 
+const DATACENTER_STATUSES = new Set<PlatformPricingDatacenterContext['status']>([
+  'online',
+  'offline',
+  'maintenance',
+])
+
+function normalizeDatacenterStatus(
+  status: string | null | undefined,
+): PlatformPricingDatacenterContext['status'] {
+  if (status && DATACENTER_STATUSES.has(status as PlatformPricingDatacenterContext['status'])) {
+    return status as PlatformPricingDatacenterContext['status']
+  }
+  return 'offline'
+}
+
+async function listDatacenterContextsForCardType(
+  gpuCardTypeId: string,
+): Promise<PlatformPricingDatacenterContext[]> {
+  const rows = await db
+    .select({
+      dataCenterId: dataCenter.id,
+      dataCenterName: dataCenter.name,
+      supplierId: supplier.id,
+      supplierName: supplier.shortName,
+      location: dataCenter.location,
+      status: dataCenter.status,
+    })
+    .from(supplierGpuInventory)
+    .innerJoin(dataCenter, eq(supplierGpuInventory.dataCenterId, dataCenter.id))
+    .innerJoin(supplier, eq(supplierGpuInventory.supplierId, supplier.id))
+    .where(
+      and(
+        eq(supplierGpuInventory.gpuCardTypeId, gpuCardTypeId),
+        gt(supplierGpuInventory.quantity, 0),
+      ),
+    )
+    .orderBy(dataCenter.name)
+
+  const seen = new Set<string>()
+  const datacenters: PlatformPricingDatacenterContext[] = []
+  for (const row of rows) {
+    if (seen.has(row.dataCenterId)) continue
+    seen.add(row.dataCenterId)
+    datacenters.push({
+      dataCenterId: row.dataCenterId,
+      dataCenterName: row.dataCenterName,
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      location: row.location ?? '',
+      status: normalizeDatacenterStatus(row.status),
+    })
+  }
+  return datacenters
+}
+
 
 export const platformPricingDbDataAccess = {
   async listRecordsForCardType(gpuCardTypeId: string): Promise<PlatformCardPriceRecord[]> {
@@ -323,6 +380,7 @@ export const platformPricingDbDataAccess = {
 
     const card = mapGpuCardTypeRow(cardRow)
     const platformRecords = await this.listRecordsForCardType(gpuCardTypeId)
+    const datacenters = await listDatacenterContextsForCardType(gpuCardTypeId)
 
     const [historyRow] = await db
       .select({ total: count() })
@@ -333,6 +391,7 @@ export const platformPricingDbDataAccess = {
       gpuCardTypeId,
       recordVersions: platformRecords.length,
       historyCount: Number(historyRow?.total ?? 0),
+      datacenterCount: datacenters.length,
     })
 
     return buildDetailPageDataForCard(
@@ -340,6 +399,7 @@ export const platformPricingDbDataAccess = {
       platformRecords,
       [],
       Number(historyRow?.total ?? 0),
+      datacenters,
     )
   },
 

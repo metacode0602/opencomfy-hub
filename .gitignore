@@ -38,3 +38,5 @@ npm-debug.log*
 # AI
 .claude/
 **/**/.data
+
+.env.production

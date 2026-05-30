@@ -1,7 +1,8 @@
 "use client"
 
-import { Suspense, useMemo } from "react"
+import { Suspense, useCallback, useMemo } from "react"
 import { Cell, Label, Pie, PieChart } from "recharts"
+import type { PieLabelRenderProps } from "recharts"
 
 import {
   Card,
@@ -17,6 +18,8 @@ import {
   type ChartConfig,
 } from "@workspace/ui/components/chart"
 
+import type { GlobalResourceCompositionSlice } from "@/lib/types/global-dashboard-api"
+
 import { DashboardCardLoading } from "../_lib/dashboard-card-states"
 import { useGlobalDashboard } from "../_lib/global-dashboard-context"
 import { formatCompactHours } from "../_lib/format-kpi"
@@ -28,6 +31,151 @@ const CHART_COLORS = [
   "var(--chart-4)",
   "var(--chart-5)",
 ] as const
+
+const RADIAN = Math.PI / 180
+const MIN_LABEL_PERCENT = 0.03
+const MAX_VISIBLE_LEGEND_SLICES = 7
+
+/** 仅扩大 SVG 画布留白，饼图与引导线 label 保持固定像素尺寸 */
+const CANVAS_BASE_SIZE = 480
+const CANVAS_SCALE = 1.25
+const CANVAS_SIZE = Math.round(CANVAS_BASE_SIZE * CANVAS_SCALE)
+const CANVAS_PADDING = (CANVAS_SIZE - CANVAS_BASE_SIZE) / 2
+const CHART_MARGIN = {
+  top: 16 + CANVAS_PADDING * 0.85,
+  right: 24 + CANVAS_PADDING,
+  bottom: 16 + CANVAS_PADDING * 0.85,
+  left: 24 + CANVAS_PADDING,
+}
+
+/** 上一版 480px 画布 + 70%/46% 半径下的实际像素尺寸 */
+const PIE_OUTER_RADIUS_PX = Math.round(CANVAS_BASE_SIZE * 0.5 * 0.7)
+const PIE_INNER_RADIUS_PX = Math.round(CANVAS_BASE_SIZE * 0.5 * 0.46)
+const LABEL_BASE_OUTER_RADIUS = PIE_OUTER_RADIUS_PX
+
+function getLabelMetrics(outerRadius: number) {
+  const scale = Math.max(0.95, Math.min(1.55, outerRadius / LABEL_BASE_OUTER_RADIUS))
+
+  return {
+    scale,
+    titleSize: 12 * scale,
+    metricSize: 10.5 * scale,
+    leaderGap: 14 * scale,
+    elbowOffset: 10 * scale,
+    textGap: 8 * scale,
+    dotRadius: 2.2 * scale,
+    strokeWidth: 1 * scale,
+    lineHeight: 1.15 * scale,
+  }
+}
+
+function getCenterLabelMetrics(viewBox: {
+  innerRadius?: number
+  outerRadius?: number
+  cx?: number
+  cy?: number
+}) {
+  const innerRadius = Number(viewBox.innerRadius ?? 0)
+  const scale =
+    innerRadius > 0 ? Math.max(0.95, Math.min(1.5, innerRadius / 52)) : 1
+
+  return {
+    primarySize: 16 * scale,
+    secondarySize: 11 * scale,
+    lineGap: 14 * scale,
+  }
+}
+
+type ResourcePoolPieDatum = {
+  name: string
+  value: number
+  key: string
+  kind: GlobalResourceCompositionSlice["kind"]
+  fill: string
+  slice: GlobalResourceCompositionSlice
+}
+
+function formatSlicePrimaryMetric(slice: GlobalResourceCompositionSlice, useCardHours: boolean) {
+  if (useCardHours) {
+    return `${(slice.cardHours ?? 0).toLocaleString()} 卡时`
+  }
+  return `${slice.gpuCount.toLocaleString()} 卡`
+}
+
+function ResourcePoolSliceLabel({
+  cx = 0,
+  cy = 0,
+  midAngle = 0,
+  outerRadius = 0,
+  percent = 0,
+  fill,
+  payload,
+  index = 0,
+  useCardHours,
+  sliceCount,
+}: PieLabelRenderProps & { useCardHours: boolean; sliceCount: number }) {
+  const slice = (payload as ResourcePoolPieDatum | undefined)?.slice
+  if (!slice) {
+    return null
+  }
+  if (sliceCount > MAX_VISIBLE_LEGEND_SLICES && index >= MAX_VISIBLE_LEGEND_SLICES) {
+    return null
+  }
+  if (sliceCount > MAX_VISIBLE_LEGEND_SLICES && percent < MIN_LABEL_PERCENT) {
+    return null
+  }
+
+  const color = fill ?? CHART_COLORS[0]
+  const cos = Math.cos(-midAngle * RADIAN)
+  const sin = Math.sin(-midAngle * RADIAN)
+  const radius = Number(outerRadius)
+  const {
+    titleSize,
+    metricSize,
+    leaderGap,
+    elbowOffset,
+    textGap,
+    dotRadius,
+    strokeWidth,
+    lineHeight,
+  } = getLabelMetrics(radius)
+  const sx = cx + radius * cos
+  const sy = cy + radius * sin
+  const mx = cx + (radius + leaderGap) * cos
+  const my = cy + (radius + leaderGap) * sin
+  const ex = mx + (cos >= 0 ? 1 : -1) * elbowOffset
+  const ey = my
+  const textAnchor = cos >= 0 ? "start" : "end"
+  const textX = ex + (cos >= 0 ? 1 : -1) * textGap
+
+  return (
+    <g className="recharts-pie-label-text">
+      <path
+        d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`}
+        stroke={color}
+        fill="none"
+        strokeWidth={strokeWidth}
+        opacity={0.55}
+      />
+      <circle cx={ex} cy={ey} r={dotRadius} fill={color} stroke="none" />
+      <text x={textX} y={ey} textAnchor={textAnchor} dominantBaseline="central">
+        <tspan fill={color} fontSize={titleSize} fontWeight={500}>
+          {slice.label}
+          {slice.kind === "pipeline_virtual" ? " · 计划" : ""}
+        </tspan>
+        <tspan
+          x={textX}
+          dy={`${lineHeight}em`}
+          className="fill-muted-foreground"
+          fontSize={metricSize}
+        >
+          {formatSlicePrimaryMetric(slice, useCardHours)}
+          {slice.netChangeLabel ? ` · ${slice.netChangeLabel}` : ""}
+        </tspan>
+      </text>
+    </g>
+  )
+}
 
 function ResourcePoolChartCardInner() {
   const { data, isLoading, isSnapshot } = useGlobalDashboard()
@@ -49,16 +197,37 @@ function ResourcePoolChartCardInner() {
 
   const useCardHours = composition?.displayUnit === "card_hours"
 
-  const pieData = slices.map((s) => ({
-    name: s.key,
-    value: useCardHours ? (s.cardHours ?? 0) : s.gpuCount,
-    key: s.key,
-    kind: s.kind,
-  }))
+  const pieData = useMemo<ResourcePoolPieDatum[]>(
+    () =>
+      slices.map((s, index) => ({
+        name: s.key,
+        value: useCardHours ? (s.cardHours ?? 0) : s.gpuCount,
+        key: s.key,
+        kind: s.kind,
+        fill: CHART_COLORS[index % CHART_COLORS.length]!,
+        slice: s,
+      })),
+    [slices, useCardHours],
+  )
+
+  const renderSliceLabel = useCallback(
+    (props: PieLabelRenderProps) => {
+      const { key, ...labelProps } = props as PieLabelRenderProps & { key?: React.Key }
+      return (
+        <ResourcePoolSliceLabel
+          key={key}
+          {...labelProps}
+          useCardHours={useCardHours}
+          sliceCount={slices.length}
+        />
+      )
+    },
+    [useCardHours, slices.length],
+  )
 
   return (
-    <Card className="border-border/80 lg:col-span-6">
-      <CardHeader>
+    <Card className="flex h-full min-h-0 flex-col border-border/80 lg:col-span-6">
+      <CardHeader className="shrink-0">
         <CardTitle className="text-base">资源构成</CardTitle>
         <CardDescription>
           {isSnapshot
@@ -71,151 +240,136 @@ function ResourcePoolChartCardInner() {
           )}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex min-h-0 flex-1 flex-col pb-3 pt-0">
         {isLoading ? (
           <DashboardCardLoading label="加载资源构成…" />
         ) : pieData.length === 0 || pieData.every((p) => p.value === 0) ? (
           <p className="py-12 text-center text-sm text-muted-foreground">暂无资源构成数据</p>
         ) : (
-          <div className="mx-auto max-w-md">
-            <ChartContainer config={chartConfig} className="mx-auto aspect-square w-full">
-              <PieChart>
-                <ChartTooltip
-                  cursor={false}
-                  content={
-                    <ChartTooltipContent
-                      hideLabel
-                      formatter={(value, name) => {
-                        const slice = slices.find((s) => s.key === name)
-                        const label = slice?.label ?? String(name)
-                        if (useCardHours) {
-                          const mh = slice?.machineHours
-                          return (
-                            <span className="font-medium">
+          <div
+            className="flex min-h-[450px] flex-1 items-center justify-center sm:min-h-[500px] lg:min-h-[550px]"
+            style={{ containerType: "size" }}
+          >
+            <ChartContainer
+              config={chartConfig}
+              initialDimension={{ width: CANVAS_SIZE, height: CANVAS_SIZE }}
+              className="aspect-square max-h-full max-w-full [height:min(100cqh,100cqw)] [width:min(100cqh,100cqw)] [&_.recharts-pie-label-text]:fill-foreground [&_.recharts-responsive-container]:!size-full"
+            >
+              <PieChart margin={CHART_MARGIN}>
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    hideLabel
+                    className="gap-2 px-3 py-2 text-sm"
+                    formatter={(value, name) => {
+                      const slice = slices.find((s) => s.key === name)
+                      const label = slice?.label ?? String(name)
+                      if (useCardHours) {
+                        const mh = slice?.machineHours
+                        return (
+                          <div className="grid gap-1.5">
+                            <span className="font-semibold">
                               {label}：{formatCompactHours(Number(value))} 卡时
                               {mh != null ? `（${formatCompactHours(mh)} 台时）` : ""}
                             </span>
-                          )
-                        }
-                        return (
-                          <span className="font-medium">
-                            {label}：{formatCompactHours(Number(value))} 卡
-                          </span>
-                        )
-                      }}
-                    />
-                  }
-                />
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius="48%"
-                  outerRadius="85%"
-                  paddingAngle={slices.length > 6 ? 1 : 2}
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell
-                      key={entry.key}
-                      fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      stroke={entry.kind === "pipeline_virtual" ? "var(--border)" : undefined}
-                      strokeDasharray={entry.kind === "pipeline_virtual" ? "4 3" : undefined}
-                    />
-                  ))}
-                  <Label
-                    content={({ viewBox }) => {
-                      if (viewBox && "cx" in viewBox && "cy" in viewBox) {
-                        return (
-                          <text
-                            x={viewBox.cx}
-                            y={viewBox.cy}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                          >
-                            <tspan
-                              x={viewBox.cx}
-                              y={composition?.centerSecondary ? (viewBox.cy ?? 0) - 8 : viewBox.cy}
-                              className="fill-foreground text-base font-bold"
-                            >
-                              {composition?.centerPrimary ?? "—"}
-                            </tspan>
-                            {composition?.centerSecondary && (
-                              <tspan
-                                x={viewBox.cx}
-                                y={(viewBox.cy ?? 0) + 14}
-                                className="fill-muted-foreground text-[10px]"
-                              >
-                                {composition.centerSecondary}
-                              </tspan>
+                            {slice?.gpuCount != null && (
+                              <span className="text-muted-foreground">
+                                期末 {slice.gpuCount.toLocaleString()} 卡
+                              </span>
                             )}
-                          </text>
+                            {slice?.breakdownByCardType?.map((row) => (
+                              <span key={row.cardType} className="text-muted-foreground">
+                                {row.cardType}
+                                {row.cardHours != null
+                                  ? ` · ${row.cardHours.toLocaleString()} 卡时`
+                                  : ` · ${row.gpuCount.toLocaleString()} 卡`}
+                              </span>
+                            ))}
+                          </div>
                         )
                       }
-                      return null
+                      return (
+                        <div className="grid gap-1.5">
+                          <span className="font-semibold">
+                            {label}：{formatCompactHours(Number(value))} 卡
+                          </span>
+                          {slice?.deviceCount != null && (
+                            <span className="text-muted-foreground">
+                              {slice.deviceCount.toLocaleString()} 台
+                            </span>
+                          )}
+                          {slice?.breakdownByCardType?.map((row) => (
+                            <span key={row.cardType} className="text-muted-foreground">
+                              {row.cardType} · {row.gpuCount.toLocaleString()} 卡
+                            </span>
+                          ))}
+                        </div>
+                      )
                     }}
                   />
-                </Pie>
-              </PieChart>
-            </ChartContainer>
-            <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-              {slices.map((s, index) => (
-                <div
-                  key={s.key}
-                  className="rounded-md border border-border/60 bg-muted/20 px-2 py-1.5"
-                  style={{
-                    borderLeftWidth: 3,
-                    borderLeftColor: CHART_COLORS[index % CHART_COLORS.length],
+                }
+              />
+              <Pie
+                data={pieData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={PIE_INNER_RADIUS_PX}
+                outerRadius={PIE_OUTER_RADIUS_PX}
+                paddingAngle={slices.length > 6 ? 1 : 2}
+                minAngle={2}
+                labelLine={false}
+                label={renderSliceLabel}
+              >
+                {pieData.map((entry) => (
+                  <Cell
+                    key={entry.key}
+                    fill={entry.fill}
+                    stroke={entry.kind === "pipeline_virtual" ? "var(--border)" : undefined}
+                    strokeDasharray={entry.kind === "pipeline_virtual" ? "4 3" : undefined}
+                  />
+                ))}
+                <Label
+                  content={({ viewBox }) => {
+                    if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                      const { primarySize, secondarySize, lineGap } = getCenterLabelMetrics(viewBox)
+                      const hasSecondary = Boolean(composition?.centerSecondary)
+
+                      return (
+                        <text
+                          x={viewBox.cx}
+                          y={viewBox.cy}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          <tspan
+                            x={viewBox.cx}
+                            y={hasSecondary ? (viewBox.cy ?? 0) - lineGap / 2 : viewBox.cy}
+                            className="fill-foreground"
+                            fontSize={primarySize}
+                            fontWeight={700}
+                          >
+                            {composition?.centerPrimary ?? "—"}
+                          </tspan>
+                          {composition?.centerSecondary && (
+                            <tspan
+                              x={viewBox.cx}
+                              y={(viewBox.cy ?? 0) + lineGap / 2}
+                              className="fill-muted-foreground"
+                              fontSize={secondarySize}
+                            >
+                              {composition.centerSecondary}
+                            </tspan>
+                          )}
+                        </text>
+                      )
+                    }
+                    return null
                   }}
-                >
-                  <div className="font-medium">
-                    {s.label}
-                    {s.kind === "pipeline_virtual" && (
-                      <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                        计划
-                      </span>
-                    )}
-                  </div>
-                  <div className="tabular-nums text-muted-foreground">
-                    {useCardHours ? (
-                      <>
-                        {(s.cardHours ?? 0).toLocaleString()} 卡时
-                        {s.machineHours != null && (
-                          <> · {s.machineHours.toLocaleString()} 台时</>
-                        )}
-                        <span className="text-[10px]">
-                          {" "}
-                          · 期末 {s.gpuCount.toLocaleString()} 卡
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        {s.gpuCount.toLocaleString()} 卡 · {s.deviceCount.toLocaleString()} 台
-                      </>
-                    )}
-                    {s.netChangeLabel && (
-                      <span className="ml-1 text-foreground/80">· {s.netChangeLabel}</span>
-                    )}
-                  </div>
-                  {s.breakdownByCardType && s.breakdownByCardType.length > 0 && (
-                    <div className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
-                      {s.breakdownByCardType.map((row) => (
-                        <div key={row.cardType}>
-                          {row.cardType}
-                          {useCardHours && row.cardHours != null
-                            ? ` · ${row.cardHours.toLocaleString()} 卡时`
-                            : ` · ${row.gpuCount.toLocaleString()} 卡`}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {composition?.footnote && (
-              <p className="mt-3 text-[10px] leading-relaxed text-muted-foreground">
-                {composition.footnote}
-              </p>
-            )}
+                />
+              </Pie>
+            </PieChart>
+          </ChartContainer>
           </div>
         )}
       </CardContent>

@@ -21,9 +21,9 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import { Textarea } from '@workspace/ui/components/textarea'
-import { mockDataCenters, mockSuppliers } from '@/lib/data/mock-data'
-import { getPlatformPrice } from '@/lib/data/platform-pricing-mock'
 import type { GPUCardType } from '@/lib/data/types'
+import { getCurrentPlatformRecords } from '@/lib/platform-pricing/periods'
+import { trpc } from '@/lib/trpc/client'
 import type {
   PlatformBillingUnit,
   PlatformProductLine,
@@ -83,10 +83,18 @@ export function DatacenterSellPriceDialog({
   const [effectiveFrom, setEffectiveFrom] = useState('')
   const [remark, setRemark] = useState('')
 
-  const dataCenterOptions = useMemo(
-    () => mockDataCenters.filter((dc) => dc.supplierId === supplierId),
-    [supplierId],
+  const { data: suppliers = [] } = trpc.supplier.list.useQuery(undefined, { enabled: open })
+
+  const { data: dataCenterOptions = [] } = trpc.supplier.listDataCenters.useQuery(
+    { supplierId },
+    { enabled: open && Boolean(supplierId) },
   )
+
+  const { data: platformRecords = [] } =
+    trpc.supplier.platformPricing.listRecordsForCardType.useQuery(
+      { cardTypeId },
+      { enabled: open && Boolean(cardTypeId) },
+    )
 
   const selectableCardTypes = useMemo(() => {
     const active = cardTypes.filter((c) => c.status === 'active')
@@ -96,8 +104,11 @@ export function DatacenterSellPriceDialog({
 
   const platformRef = useMemo(() => {
     if (!cardTypeId) return undefined
-    return getPlatformPrice(cardTypeId, productLine, billingUnit)
-  }, [cardTypeId, productLine, billingUnit])
+    const current = getCurrentPlatformRecords(platformRecords, cardTypeId)
+    return current.find(
+      (r) => r.productLine === productLine && r.billingUnit === billingUnit,
+    )
+  }, [platformRecords, cardTypeId, productLine, billingUnit])
 
   useEffect(() => {
     if (!open) return
@@ -112,7 +123,7 @@ export function DatacenterSellPriceDialog({
       setEffectiveFrom(editing.effectiveFrom)
       setRemark(editing.remark ?? '')
     } else {
-      setSupplierId(defaultSupplierId ?? mockSuppliers[0]?.id ?? '')
+      setSupplierId(defaultSupplierId ?? '')
       setDataCenterId(defaultDataCenterId ?? '')
       setCardTypeId(
         defaultCardTypeId && selectableCardTypes.some((c) => c.id === defaultCardTypeId)
@@ -126,7 +137,21 @@ export function DatacenterSellPriceDialog({
       setEffectiveFrom(new Date().toISOString().slice(0, 10))
       setRemark('')
     }
-  }, [open, editing, selectableCardTypes])
+  }, [
+    open,
+    editing,
+    selectableCardTypes,
+    defaultSupplierId,
+    defaultDataCenterId,
+    defaultCardTypeId,
+  ])
+
+  useEffect(() => {
+    if (!open || isEdit || editing || defaultSupplierId || supplierId) return
+    if (suppliers.length > 0) {
+      setSupplierId(suppliers[0]!.id)
+    }
+  }, [open, isEdit, editing, defaultSupplierId, supplierId, suppliers])
 
   useEffect(() => {
     if (productLine !== 'bare_metal') setBillingUnit('hour')
@@ -175,8 +200,8 @@ export function DatacenterSellPriceDialog({
 
   const handleSubmit = () => {
     if (!canSubmit) return
-    const supplier = mockSuppliers.find((s) => s.id === supplierId)
-    const dc = mockDataCenters.find((d) => d.id === dataCenterId)
+    const supplier = suppliers.find((s) => s.id === supplierId)
+    const dc = dataCenterOptions.find((d) => d.id === dataCenterId)
     const card = cardTypes.find((c) => c.id === cardTypeId)
     if (!supplier || !dc || !card) return
 
@@ -235,7 +260,7 @@ export function DatacenterSellPriceDialog({
                   <SelectValue placeholder="选择供应商" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockSuppliers.map((s) => (
+                  {suppliers.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.shortName}
                     </SelectItem>

@@ -22,7 +22,6 @@ import {
 } from '@workspace/ui/components/select'
 import { Label } from '@workspace/ui/components/label'
 import { RadioGroup, RadioGroupItem } from '@workspace/ui/components/radio-group'
-import { mockDataCenters, mockSuppliers } from '@/lib/data/mock-data'
 import type {
   ContractPricingMode,
   ContractPricingTier,
@@ -67,7 +66,7 @@ type CreateCardPricingDialogBaseProps = {
   listInput?: { supplierId: string }
   /** 创建成功后的额外回调（如刷新机房详情） */
   onSuccess?: (record: SupplierPricingRecord) => void | Promise<void>
-  /** 来自数据库的供应商列表（优先于 mock） */
+  /** 来自数据库的供应商列表（未传时在弹窗内拉取） */
   suppliers?: Supplier[]
   /** 来自数据库的机房列表（已按供应商筛选时可直接传入） */
   dataCenters?: DataCenter[]
@@ -139,7 +138,13 @@ export function CreateCardPricingDialog({
   lockedDataCenter,
 }: CreateCardPricingDialogProps) {
   const utils = trpc.useUtils()
-  const supplierOptions = suppliersProp ?? mockSuppliers
+  const needsSupplierPicker = !lockedSupplierProp && !lockedSupplierId
+
+  const { data: fetchedSuppliers = [] } = trpc.supplier.list.useQuery(undefined, {
+    enabled: open && needsSupplierPicker && !suppliersProp,
+  })
+
+  const supplierOptions = suppliersProp ?? fetchedSuppliers
   const lockedSupplier =
     lockedSupplierProp ??
     (lockedSupplierId ? supplierOptions.find((s) => s.id === lockedSupplierId) : undefined)
@@ -167,10 +172,6 @@ export function CreateCardPricingDialog({
   const isShare = category === 'revenue_share'
   const isTieredShare = isTiered && isShare
   const resolvedSupplierId = lockedSupplier?.id ?? supplierId
-  const isDbMode =
-    Boolean(suppliersProp?.length) ||
-    Boolean(lockedSupplierProp) ||
-    Boolean(lockedSupplierId)
 
   const invalidateInput = listInput ?? (resolvedSupplierId ? { supplierId: resolvedSupplierId } : undefined)
 
@@ -196,15 +197,15 @@ export function CreateCardPricingDialog({
   const { data: fetchedDataCenters = [], isLoading: dataCentersLoading } =
     trpc.supplier.listDataCenters.useQuery(
       { supplierId: resolvedSupplierId },
-      { enabled: isDbMode && Boolean(resolvedSupplierId) },
+      {
+        enabled: open && Boolean(resolvedSupplierId) && !(dataCentersProp && dataCentersProp.length > 0),
+      },
     )
 
   const dataCenterOptions = useMemo(() => {
-    if (isDbMode) return fetchedDataCenters
     if (dataCentersProp && dataCentersProp.length > 0) return dataCentersProp
-    if (!resolvedSupplierId) return []
-    return mockDataCenters.filter((dc) => dc.supplierId === resolvedSupplierId)
-  }, [isDbMode, fetchedDataCenters, dataCentersProp, resolvedSupplierId])
+    return fetchedDataCenters
+  }, [fetchedDataCenters, dataCentersProp])
 
   useEffect(() => {
     if (!open) {
@@ -285,11 +286,6 @@ export function CreateCardPricingDialog({
     )
     if (duplicate) {
       setSubmitError('该供应商 × 机房 × 卡型已存在配置，请勿重复创建')
-      return
-    }
-
-    if (!isDbMode) {
-      setSubmitError('当前为演示模式，无法保存到数据库')
       return
     }
 

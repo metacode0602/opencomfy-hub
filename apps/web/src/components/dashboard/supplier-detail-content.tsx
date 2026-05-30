@@ -50,7 +50,6 @@ import {
 import { SupplierActivityPanel } from '@/components/dashboard/supplier-activity-panel'
 import { PhysicalDevicesContent } from '@/app/[locale]/(protected)/supplier/_components/physical-devices-content'
 import { EditSupplierDialog } from '@/components/dashboard/supplier-form-dialog'
-import { resolveDomainSupplierId } from '@/lib/supplier/supplier-id-bridge'
 import {
   inventoryGpuQuantity,
   resolveGpuCardTypeRole,
@@ -81,7 +80,6 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
     tabFromUrl && VALID_TABS.has(tabFromUrl) ? tabFromUrl : 'overview',
   )
   const [editDialogOpen, setEditDialogOpen] = useState(false)
-  const domainSupplierId = resolveDomainSupplierId(supplier.id)
   const utils = trpc.useUtils()
 
   const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery()
@@ -629,11 +627,11 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
         </TabsContent>
 
         <TabsContent value="batches" className="space-y-4">
-          <SupplierOnboardingBatchesPanel supplierId={domainSupplierId} />
+          <SupplierOnboardingBatchesPanel supplierId={supplier.id} />
         </TabsContent>
 
         <TabsContent value="timeline" className="space-y-4">
-          <SupplierActivityPanel supplierId={domainSupplierId} />
+          <SupplierActivityPanel supplierId={supplier.id} />
         </TabsContent>
       </Tabs>
     </div>

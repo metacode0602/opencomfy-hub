@@ -1,10 +1,10 @@
 import { AppShell } from '@/components/dashboard/app-shell'
-import { WorkbenchContent } from '@/components/dashboard/workbench-content'
+import { DashboardContent } from '@/components/dashboard/dashboard-content'
 
 export default function WorkbenchPage() {
   return (
     <AppShell>
-      <WorkbenchContent />
+      <DashboardContent />
     </AppShell>
   )
 }

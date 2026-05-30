@@ -111,8 +111,8 @@ function buildRequestPayload(
 
   let dataStr = ""
   let requestBody: string | undefined
-  let queryParams = config.params ? { ...config.params } : undefined
-  let requestData = config.data ? { ...config.data } : undefined
+  const queryParams = config.params ? { ...config.params } : undefined
+  const requestData = config.data ? { ...config.data } : undefined
 
   if (method === "POST" && requestData) {
     dataStr = JSON.stringify(requestData)

@@ -1,17 +1,9 @@
-import { mockDataCenterDevices, mockDataCenters, mockGPUCardTypes } from '@/lib/data/mock-data'
-import {
-  mockPlatformCardPriceHistory,
-  mockPlatformCardPriceRecords,
-  mockSupplierDatacenterSellPriceHistory,
-  mockSupplierDatacenterSellPrices,
-} from '@/lib/data/platform-pricing-mock'
+import type { PlatformPricingDatacenterContext } from '@/lib/data/types'
 import type {
-  PlatformCardPriceHistory,
   PlatformCardPriceRecord,
   PlatformBillingUnit,
   PlatformProductLine,
   SupplierDatacenterSellPrice,
-  SupplierDatacenterSellPriceHistory,
 } from '@/lib/types/platform-pricing'
 import {
   platformBillingUnitNames,
@@ -30,11 +22,9 @@ import {
 } from '@/lib/platform-pricing/periods'
 import type {
   PlatformCardPricePeriodRow,
-  PlatformCardTypeListRow,
   PlatformDatacenterPriceGroupRow,
   PlatformDatacenterProductLinePriceRow,
   PlatformPricingDetailPageData,
-  PlatformPricingListPageData,
   PlatformProductLinePriceRow,
 } from '@/lib/types/platform-pricing-views'
 
@@ -47,6 +37,12 @@ const PRODUCT_LINES: PlatformProductLine[] = [
 ]
 
 const BARE_METAL_UNITS: PlatformBillingUnit[] = ['hour', 'day', 'week', 'month']
+
+const dcStatusNames: Record<string, string> = {
+  online: '在线',
+  offline: '离线',
+  maintenance: '维护中',
+}
 
 function billingUnitDisplay(
   productLine: PlatformProductLine,
@@ -132,31 +128,6 @@ function buildSellRecordMap(
   return map
 }
 
-function formatPriceSummary(prices: number[]): string {
-  if (prices.length === 0) return '未配置'
-  const min = Math.min(...prices)
-  const max = Math.max(...prices)
-  if (min === max) return `¥${min.toFixed(2)}/时`
-  return `¥${min.toFixed(0)}–${max.toFixed(0)}/时`
-}
-
-function datacenterIdsForCardType(cardTypeId: string): string[] {
-  const ids = new Set<string>()
-  for (const d of mockDataCenterDevices) {
-    if (d.cardTypeId === cardTypeId) ids.add(d.dataCenterId)
-  }
-  for (const r of mockSupplierDatacenterSellPrices) {
-    if (r.gpuCardTypeId === cardTypeId) ids.add(r.dataCenterId)
-  }
-  return [...ids]
-}
-
-const dcStatusNames: Record<string, string> = {
-  online: '在线',
-  offline: '离线',
-  maintenance: '维护中',
-}
-
 export function toPlatformProductLinePriceRows(
   cardTypeId: string,
   platformRecords: PlatformCardPriceRecord[],
@@ -224,20 +195,19 @@ export function toDatacenterGroupRows(
   cardTypeId: string,
   sellRecords: SupplierDatacenterSellPrice[],
   platformRecords: PlatformCardPriceRecord[],
+  datacenters: PlatformPricingDatacenterContext[],
 ): PlatformDatacenterPriceGroupRow[] {
-  return datacenterIdsForCardType(cardTypeId)
-    .map((id) => {
-      const dc = mockDataCenters.find((d) => d.id === id)
-      if (!dc) return null
+  return datacenters
+    .map((dc) => {
       const productLinePrices = toDatacenterProductLinePriceRows(
         cardTypeId,
-        id,
+        dc.dataCenterId,
         sellRecords,
         platformRecords,
       )
       return {
-        dataCenterId: dc.id,
-        dataCenterName: dc.name,
+        dataCenterId: dc.dataCenterId,
+        dataCenterName: dc.dataCenterName,
         supplierId: dc.supplierId,
         supplierName: dc.supplierName,
         location: dc.location,
@@ -247,72 +217,15 @@ export function toDatacenterGroupRows(
         productLinePrices,
       } satisfies PlatformDatacenterPriceGroupRow
     })
-    .filter((x): x is PlatformDatacenterPriceGroupRow => x != null)
     .sort((a, b) => a.dataCenterName.localeCompare(b.dataCenterName, 'zh-CN'))
-}
-
-export function toCardTypeListRow(
-  card: (typeof mockGPUCardTypes)[number],
-  platformRecords: PlatformCardPriceRecord[],
-  sellRecords: SupplierDatacenterSellPrice[],
-): PlatformCardTypeListRow {
-  const currentRecords = getCurrentPlatformRecords(platformRecords, card.id)
-  const cardPlatform = platformRecords.filter(
-    (r) => r.gpuCardTypeId === card.id && r.status !== 'archived',
-  )
-  const activePlatform = currentRecords.filter((r) => r.status === 'active')
-  const hourPrices = activePlatform
-    .filter((r) => r.billingUnit === 'hour' || r.productLine !== 'bare_metal')
-    .map((r) => r.sellPrice)
-
-  const configuredLines = new Set(
-    activePlatform.map((r) => platformProductLineNames[r.productLine]),
-  )
-
-  const dcCount = datacenterIdsForCardType(card.id).length
-
-  return {
-    cardTypeId: card.id,
-    cardTypeName: card.name,
-    manufacturer: card.manufacturer,
-    memoryGB: card.memoryGB,
-    platformPriceCount: cardPlatform.length,
-    activePlatformPriceCount: activePlatform.length,
-    priceSummary: formatPriceSummary(hourPrices.length ? hourPrices : cardPlatform.map((r) => r.sellPrice)),
-    productLinesLabel:
-      configuredLines.size > 0 ? [...configuredLines].join('、') : '未配置',
-    datacenterCount: dcCount,
-  }
-}
-
-export function buildListPageData(): PlatformPricingListPageData {
-  const activeCards = mockGPUCardTypes.filter((c) => c.status === 'active')
-  const rows = activeCards.map((card) =>
-    toCardTypeListRow(card, mockPlatformCardPriceRecords, mockSupplierDatacenterSellPrices),
-  )
-
-  const dcPairs = new Set(
-    mockSupplierDatacenterSellPrices.map((r) => `${r.gpuCardTypeId}:${r.dataCenterId}`),
-  )
-
-  return {
-    stats: {
-      cardTypeCount: activeCards.length,
-      activePlatformPriceCount: mockPlatformCardPriceRecords.filter(
-        (r) => r.status === 'active',
-      ).length,
-      datacenterCardPairCount: dcPairs.size,
-      sellPriceEntryCount: mockSupplierDatacenterSellPrices.length,
-    },
-    rows,
-  }
 }
 
 export function buildDetailPageDataForCard(
   card: { id: string; name: string; manufacturer: string; memoryGB: number },
-  platformRecords: PlatformCardPriceRecord[] = mockPlatformCardPriceRecords,
-  sellRecords: SupplierDatacenterSellPrice[] = mockSupplierDatacenterSellPrices,
-  platformHistoryCount = 0,
+  platformRecords: PlatformCardPriceRecord[],
+  sellRecords: SupplierDatacenterSellPrice[],
+  platformHistoryCount: number,
+  datacenters: PlatformPricingDatacenterContext[] = [],
 ): PlatformPricingDetailPageData {
   const periods = toPeriodRows(platformRecords, card.id)
   const currentPeriodId = findCurrentPeriodId(platformRecords, card.id) ?? null
@@ -327,28 +240,9 @@ export function buildDetailPageDataForCard(
     platformPrices: currentPeriodId
       ? toPlatformProductLinePriceRows(card.id, platformRecords, currentPeriodId)
       : [],
-    datacenters: toDatacenterGroupRows(card.id, sellRecords, platformRecords),
+    datacenters: toDatacenterGroupRows(card.id, sellRecords, platformRecords, datacenters),
     platformHistoryCount,
   }
-}
-
-export function buildDetailPageData(
-  cardTypeId: string,
-  platformRecords: PlatformCardPriceRecord[] = mockPlatformCardPriceRecords,
-  sellRecords: SupplierDatacenterSellPrice[] = mockSupplierDatacenterSellPrices,
-  platformHistoryCount = mockPlatformCardPriceHistory.filter(
-    (h) => h.gpuCardTypeId === cardTypeId,
-  ).length,
-): PlatformPricingDetailPageData | null {
-  const card = mockGPUCardTypes.find((c) => c.id === cardTypeId)
-  if (!card) return null
-
-  return buildDetailPageDataForCard(
-    card,
-    platformRecords,
-    sellRecords,
-    platformHistoryCount,
-  )
 }
 
 export function buildDetailPageDataForPeriod(
@@ -357,6 +251,7 @@ export function buildDetailPageDataForPeriod(
   platformRecords: PlatformCardPriceRecord[],
   sellRecords: SupplierDatacenterSellPrice[],
   platformHistoryCount: number,
+  datacenters: PlatformPricingDatacenterContext[] = [],
 ): Pick<
   PlatformPricingDetailPageData,
   'platformPrices' | 'datacenters' | 'periods' | 'currentPeriodId'
@@ -365,32 +260,9 @@ export function buildDetailPageDataForPeriod(
   return {
     periods,
     currentPeriodId: findCurrentPeriodId(platformRecords, cardTypeId) ?? null,
-    platformPrices: toPlatformProductLinePriceRows(
-      cardTypeId,
-      platformRecords,
-      periodId,
-    ),
-    datacenters: toDatacenterGroupRows(cardTypeId, sellRecords, platformRecords),
+    platformPrices: toPlatformProductLinePriceRows(cardTypeId, platformRecords, periodId),
+    datacenters: toDatacenterGroupRows(cardTypeId, sellRecords, platformRecords, datacenters),
   }
 }
 
 export { findCurrentPeriod, getRecordsForPeriod, groupPeriodsFromRecords }
-
-export function getPlatformHistoryForCardType(
-  cardTypeId: string,
-): PlatformCardPriceHistory[] {
-  return mockPlatformCardPriceHistory
-    .filter((h) => h.gpuCardTypeId === cardTypeId)
-    .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
-}
-
-export function getDatacenterHistoryForCardType(
-  cardTypeId: string,
-  dataCenterId: string,
-): SupplierDatacenterSellPriceHistory[] {
-  return mockSupplierDatacenterSellPriceHistory
-    .filter(
-      (h) => h.gpuCardTypeId === cardTypeId && h.dataCenterId === dataCenterId,
-    )
-    .sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime())
-}

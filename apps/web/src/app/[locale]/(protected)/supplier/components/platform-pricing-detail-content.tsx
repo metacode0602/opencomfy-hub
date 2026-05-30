@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { ArrowLeft, DollarSign } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
-import { DatacenterSellPriceDialog } from '@/components/dashboard/datacenter-sell-price-dialog'
 import {
   PlatformPriceDialog,
   type PlatformPriceFormValues,
@@ -14,24 +13,20 @@ import {
   PlatformPricePeriodDialog,
   type PlatformPricePeriodSavePayload,
 } from '@/components/dashboard/platform-price-period-dialog'
-import { mockDataCenterDevices, mockGPUCardTypes } from '@/lib/data/mock-data'
-import {
-  mockSupplierDatacenterSellPriceHistory,
-  mockSupplierDatacenterSellPrices,
-} from '@/lib/data/platform-pricing-mock'
-import { buildDetailPageDataForPeriod, toPeriodRows } from '@/lib/platform-pricing/transforms'
+import type { GPUCardType } from '@/lib/data/types'
+import { toPeriodRows, toPlatformProductLinePriceRows } from '@/lib/platform-pricing/transforms'
 import {
   formatPeriodRange,
   getPeriodPhase,
   parsePeriodDate,
   platformPricePeriodPhaseNames,
 } from '@/lib/platform-pricing/periods'
+import type { PlatformCardPriceRecord } from '@/lib/types/platform-pricing'
 import type {
-  PlatformCardPriceRecord,
-  SupplierDatacenterSellPrice,
-  SupplierDatacenterSellPriceHistory,
-} from '@/lib/types/platform-pricing'
-import type { PlatformCardPricePeriodRow } from '@/lib/types/platform-pricing-views'
+  PlatformCardPricePeriodRow,
+  PlatformDatacenterPriceGroupRow,
+  PlatformProductLinePriceRow,
+} from '@/lib/types/platform-pricing-views'
 import { trpc } from '@/lib/trpc/client'
 import { CardTypeDetailDatacenters } from './platform-pricing/card-type-detail-datacenters'
 import { CardTypeDetailPeriods } from './platform-pricing/card-type-detail-periods'
@@ -132,13 +127,6 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     { enabled: platformHistoryOpen },
   )
 
-  const [sellRecords, setSellRecords] = useState<SupplierDatacenterSellPrice[]>(
-    () => mockSupplierDatacenterSellPrices.map((r) => ({ ...r })),
-  )
-  const [sellHistory, setSellHistory] = useState<SupplierDatacenterSellPriceHistory[]>(
-    () => [...mockSupplierDatacenterSellPriceHistory],
-  )
-
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null)
 
   const [platformDialogOpen, setPlatformDialogOpen] = useState(false)
@@ -146,16 +134,6 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
 
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false)
   const [editingPeriod, setEditingPeriod] = useState<PlatformCardPricePeriodRow | null>(null)
-
-  const [sellDialogOpen, setSellDialogOpen] = useState(false)
-  const [editingSell, setEditingSell] = useState<SupplierDatacenterSellPrice | null>(null)
-  const [defaultSellDcId, setDefaultSellDcId] = useState<string>()
-
-  const [dcHistoryOpen, setDcHistoryOpen] = useState(false)
-  const [dcHistoryTarget, setDcHistoryTarget] = useState<{
-    id: string
-    name: string
-  } | null>(null)
 
   const mergedPeriods = useMemo(
     () => mergePeriodRows(platformRecords, cardTypeId, localEmptyPeriods),
@@ -225,51 +203,36 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     if (!detail) {
       return {
         periods: [] as PlatformCardPricePeriodRow[],
-        platformPrices: [] as NonNullable<typeof detail>['platformPrices'],
-        datacenters: [] as NonNullable<typeof detail>['datacenters'],
+        platformPrices: [] as PlatformProductLinePriceRow[],
+        datacenters: [] as PlatformDatacenterPriceGroupRow[],
       }
     }
-    if (!selectedPeriodId) {
-      return {
-        periods: mergedPeriods,
-        platformPrices: [],
-        datacenters: detail.datacenters,
-      }
+    return {
+      periods: mergedPeriods,
+      platformPrices: selectedPeriodId
+        ? toPlatformProductLinePriceRows(cardTypeId, platformRecords, selectedPeriodId)
+        : [],
+      datacenters: detail.datacenters,
     }
-    return buildDetailPageDataForPeriod(
-      cardTypeId,
-      selectedPeriodId,
-      platformRecords,
-      sellRecords,
-      platformHistoryOpen ? platformHistory.length : detail.platformHistoryCount,
-    )
-  }, [
-    detail,
-    selectedPeriodId,
-    cardTypeId,
-    platformRecords,
-    sellRecords,
-    platformHistoryOpen,
-    platformHistory.length,
-    mergedPeriods,
-  ])
+  }, [detail, selectedPeriodId, cardTypeId, platformRecords, mergedPeriods])
 
   const selectedPeriod = useMemo(
     () => mergedPeriods.find((p) => p.periodId === selectedPeriodId) ?? null,
     [mergedPeriods, selectedPeriodId],
   )
 
-  const dcHistoryRows = useMemo(() => {
-    if (!dcHistoryTarget) return []
-    return sellHistory.filter(
-      (h) => h.gpuCardTypeId === cardTypeId && h.dataCenterId === dcHistoryTarget.id,
-    )
-  }, [sellHistory, cardTypeId, dcHistoryTarget])
-
-  const card = useMemo(
-    () => cardTypes.find((c) => c.id === cardTypeId) ?? mockGPUCardTypes.find((c) => c.id === cardTypeId),
-    [cardTypes, cardTypeId],
-  )
+  const card = useMemo((): GPUCardType | undefined => {
+    const fromList = cardTypes.find((c) => c.id === cardTypeId)
+    if (fromList) return fromList
+    if (!detail) return undefined
+    return {
+      id: detail.cardTypeId,
+      name: detail.cardTypeName,
+      manufacturer: detail.manufacturer as GPUCardType['manufacturer'],
+      memoryGB: detail.memoryGB,
+      status: 'active',
+    }
+  }, [cardTypes, cardTypeId, detail])
 
   const resolvePlatformRecord = (
     row: {
@@ -284,19 +247,6 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         r.periodId === periodId &&
         r.productLine === row.productLine &&
         r.billingUnit === row.billingUnit,
-    )
-
-  const resolveSellRecord = (
-    dataCenterId: string,
-    productLine: SupplierDatacenterSellPrice['productLine'],
-    billingUnit: SupplierDatacenterSellPrice['billingUnit'],
-  ) =>
-    sellRecords.find(
-      (r) =>
-        r.gpuCardTypeId === cardTypeId &&
-        r.dataCenterId === dataCenterId &&
-        r.productLine === productLine &&
-        r.billingUnit === billingUnit,
     )
 
   const handlePeriodSaved = async (payload: PlatformPricePeriodSavePayload) => {
@@ -380,38 +330,8 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
     updateMutation.mutate({ recordId: record.id, ...form })
   }
 
-  const handleSellSaved = (record: SupplierDatacenterSellPrice, isNew: boolean) => {
-    const prev = isNew ? undefined : sellRecords.find((r) => r.id === record.id)
-
-    if (isNew) {
-      setSellRecords((list) => [...list, record])
-    } else {
-      setSellRecords((list) => list.map((r) => (r.id === record.id ? record : r)))
-    }
-
-    if (!isNew && prev && prev.sellPrice !== record.sellPrice) {
-      setSellHistory((h) => [
-        {
-          id: `sdsph-${Date.now()}`,
-          sellPriceId: record.id,
-          supplierId: record.supplierId,
-          supplierName: record.supplierName,
-          dataCenterId: record.dataCenterId,
-          dataCenterName: record.dataCenterName,
-          gpuCardTypeId: record.gpuCardTypeId,
-          cardTypeName: record.cardTypeName,
-          productLine: record.productLine,
-          billingUnit: record.billingUnit,
-          previousSellPrice: prev.sellPrice,
-          newSellPrice: record.sellPrice,
-          changedAt: record.updatedAt,
-          changedBy: record.updatedBy ?? '当前用户',
-          reason: record.remark,
-        },
-        ...h,
-      ])
-    }
-    setSellDialogOpen(false)
+  const handleSellPriceAction = () => {
+    toast.info('机房销售价维护接口尚未接入')
   }
 
   if (detailLoading) {
@@ -499,21 +419,10 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
 
       <CardTypeDetailDatacenters
         datacenters={periodSlice.datacenters}
-        onOpenDatacenterHistory={(id, name) => {
-          setDcHistoryTarget({ id, name })
-          setDcHistoryOpen(true)
-        }}
-        onEditSellPrice={(record) => {
-          setEditingSell(record)
-          setDefaultSellDcId(record.dataCenterId)
-          setSellDialogOpen(true)
-        }}
-        onAddSellPrice={(dataCenterId) => {
-          setEditingSell(null)
-          setDefaultSellDcId(dataCenterId)
-          setSellDialogOpen(true)
-        }}
-        resolveSellRecord={resolveSellRecord}
+        onOpenDatacenterHistory={handleSellPriceAction}
+        onEditSellPrice={handleSellPriceAction}
+        onAddSellPrice={handleSellPriceAction}
+        resolveSellRecord={() => undefined}
       />
 
       <PlatformPricePeriodDialog
@@ -542,18 +451,6 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         onSaved={handlePlatformSaved}
       />
 
-      <DatacenterSellPriceDialog
-        open={sellDialogOpen}
-        onOpenChange={setSellDialogOpen}
-        existingRecords={sellRecords}
-        cardTypes={cardTypes.length > 0 ? cardTypes : [card]}
-        availableCardTypeIds={[...new Set(mockDataCenterDevices.map((d) => d.cardTypeId))]}
-        editing={editingSell}
-        defaultDataCenterId={defaultSellDcId}
-        defaultCardTypeId={cardTypeId}
-        onSaved={handleSellSaved}
-      />
-
       <PricingHistoryDialog
         open={platformHistoryOpen}
         onOpenChange={setPlatformHistoryOpen}
@@ -564,19 +461,6 @@ export function PlatformPricingDetailContent({ cardTypeId }: PlatformPricingDeta
         isLoading={historyLoading}
         isError={historyError}
         onRetry={() => refetchHistory()}
-      />
-
-      <PricingHistoryDialog
-        open={dcHistoryOpen}
-        onOpenChange={setDcHistoryOpen}
-        mode="datacenter"
-        title={
-          dcHistoryTarget
-            ? `${detail.cardTypeName} @ ${dcHistoryTarget.name}`
-            : '机房调价历史'
-        }
-        description="L2 该机房该卡型销售价变更记录"
-        datacenterHistory={dcHistoryRows}
       />
     </div>
   )

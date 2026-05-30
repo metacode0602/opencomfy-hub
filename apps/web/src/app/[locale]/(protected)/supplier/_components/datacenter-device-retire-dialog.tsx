@@ -59,7 +59,7 @@ import {
   getListedQuantity,
   validateRetirePlanLineDrafts,
 } from '@/lib/supplier/datacenter-retire-plan-validation'
-import { downloadDatacenterRetireListSampleCsv } from '@/lib/data/datacenter-device-retire-list-sample'
+import { downloadDatacenterRetireListSampleCsv } from '@/lib/supplier/datacenter-retire-list-sample'
 import {
   getChangelogActionHint,
   getRetireScenarioLabel,
@@ -153,6 +153,7 @@ export function DatacenterDeviceRetireDialog({
   const [preview, setPreview] = useState<DatacenterRetirePreviewResult | null>(null)
   const [commitResult, setCommitResult] = useState<DatacenterRetireCommitResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sampleDownloading, setSampleDownloading] = useState(false)
 
   const {
     data: context,
@@ -274,6 +275,34 @@ export function DatacenterDeviceRetireDialog({
           })),
       uploadList: !isDatacenterClosure && uploadList,
       listFile,
+    }
+  }
+
+  const onDownloadSample = async () => {
+    if (!planValidation.ok) {
+      toast.error(planValidation.error ?? '请先填写有效的下架计划')
+      return
+    }
+    setSampleDownloading(true)
+    try {
+      const rows = await utils.supplier.deviceRetire.getDatacenterRetireListSample.fetch({
+        dataCenterId,
+        planLines: planValidation.normalized.map((line) => ({
+          gpuCardTypeId: line.gpuCardTypeId,
+          gpuCardTypeCode: line.gpuCardTypeCode,
+          cooperationType: line.cooperationType,
+          plannedQuantity: line.plannedQuantity,
+        })),
+      })
+      downloadDatacenterRetireListSampleCsv(
+        `下架清单-样例-${effectiveContext?.dataCenterName ?? dataCenterName}.csv`,
+        rows,
+      )
+      toast.success('已下载样例文件')
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      setSampleDownloading(false)
     }
   }
 
@@ -718,9 +747,14 @@ export function DatacenterDeviceRetireDialog({
               variant="outline"
               size="sm"
               className="gap-1"
-              onClick={() => downloadDatacenterRetireListSampleCsv()}
+              disabled={sampleDownloading}
+              onClick={() => void onDownloadSample()}
             >
-              <Download className="h-3.5 w-3.5" />
+              {sampleDownloading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
               下载样例
             </Button>
             <div

@@ -433,6 +433,21 @@ export const suppliersDataAccess = {
     return contractRows.map((row) => mapSupplierContractRow(row, supplierRow.name))
   },
 
+  async listAllContracts(): Promise<SupplierContract[]> {
+    const rows = await db
+      .select({
+        contract: supplierContract,
+        supplierShortName: supplier.shortName,
+      })
+      .from(supplierContract)
+      .innerJoin(supplier, eq(supplierContract.supplierId, supplier.id))
+      .orderBy(sql`${supplierContract.createdAt} DESC`)
+
+    return rows.map(({ contract, supplierShortName }) =>
+      mapSupplierContractRow(contract, supplierShortName),
+    )
+  },
+
   async listBillsBySupplier(supplierId: string): Promise<SupplierBill[]> {
     const supplierRow = await db.query.supplier.findFirst({
       where: eq(supplier.id, supplierId),
