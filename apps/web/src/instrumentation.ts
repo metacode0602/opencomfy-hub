@@ -6,5 +6,9 @@ export async function register() {
       './lib/server/jobs/register-balance-snapshot-cron'
     )
     registerBalanceSnapshotCron()
+    const { registerDashboardMasterdataSnapshotCron } = await import(
+      './lib/server/jobs/register-dashboard-masterdata-snapshot-cron'
+    )
+    registerDashboardMasterdataSnapshotCron()
   }
 }

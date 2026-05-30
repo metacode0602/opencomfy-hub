@@ -12,6 +12,7 @@
 - [supplier-onboarding-plan-changelog-tracking-design.md](./supplier-onboarding-plan-changelog-tracking-design.md) §3.4.5
 - [global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) — 大盘资源构成互斥分桶（优先于重叠池展示）
 - [global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) — Period 资源构成卡时/台时（已确认；D1/D2 在 Period 路径的落地）
+- [supplier-device-masterdata-integration-api-design.md](./supplier-device-masterdata-integration-api-design.md) — 第三方主数据/变更记录 REST API
 - [supplier-overview-scenarios-from-zero.md](./supplier-overview-scenarios-from-zero.md)
 
 **关联实现**（确认后修改）：
@@ -30,7 +31,7 @@
 
 | # | 决策 | 说明 |
 |---|------|------|
-| D1 | **设备主数据表为真源** | `device_inventory` Excel 的「设备状态」「维修中」决定 `ops_status`、`in_maintenance`、资源池归属与 CRM `lifecycle_status`（重算） |
+| D1 | **设备主数据表为真源** | `device_inventory` 导入；第三方 **主数据状态 REST API**（对齐 Excel 设备表「设备状态」「维修中」，**不得** 改 `gpu_count`，见 [integration API](./supplier-device-masterdata-integration-api-design.md) §3）。**变更记录 API**（§4）只写 `change_log`，不改 `supplier_device`（D2）。**ETL-MD-3/4** 即时当小时快照；**ETL-MD-1** **1 小时** Cron（[M2](./global-dashboard-period-composition-m2-masterdata-etl.md)） |
 | D2 | **变更表仅做工单与审计** | `device_changelog` commit **只**写 `supplier_device_change_log`、挂接业务批次、`refreshBatchProgress`；**不再**更新 `supplier_device` |
 | D3 | **`在集群中` 仅属弹性池** | 稳态弹性设备用 `在集群中`；代理裸金属完成后运维 **保持** `网关代理裸金属上架中`（双池），**不**改为 `在集群中` |
 | D4 | **内部占用统一口径** | `其他部门使用中` 与 L1 内部测试 / `internal_test_hold` **合并**计入「内部占用」KPI |

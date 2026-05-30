@@ -3,7 +3,7 @@
 **页面**：`/dashboard/global` — `ResourcePoolChartCard`（拟更名为「资源构成」或保留标题 + 副标题区分）  
 **文档性质**：产品设计 + 聚合口径 + API 契约；**确认后**再改代码，本文优先于 `resourcePools` 重叠口径的旧描述。  
 **版本**：v1.2（2026-05-29）  
-**状态**：**已确认 · Snapshot v1.0 已实施**；Period 卡时目标态见 [Period 卡时专篇](./global-dashboard-period-composition-card-hours-design.md)（M1–M7）
+**状态**：**已确认 · Snapshot v1.0 已实施**；Period 卡时目标态见 [Period 卡时专篇](./global-dashboard-period-composition-card-hours-design.md)（M1–M6 + M2/MD-3；**M7 不做**）
 
 **关联文档**：
 
@@ -435,7 +435,7 @@ type ResourceCompositionPayload = {
 | **Phase 1** | `classifyDeviceExclusiveBucket` + Snapshot `resourceComposition` + 卡片 UI          |
 | **Phase 2** | `mergeKpiMetric` 贯通 `pendingAccess`；`aggregateRetirePipelinePending`；**§14 批次历史** |
 | **Phase 3** | Period **过渡**：期末截面（现网）；与专篇 M5 对齐后切换卡时主值                              |
-| **Phase 4** | Period 卡时全量：**专篇 M1–M7**（实体快照 ETL + `progress_event` + 解耦 `global-period.ts`） |
+| **Phase 4** | Period 卡时：**专篇 M1–M6** + M2（ETL-MD-3）；M7 DWS **不做** |
 
 
 ---
@@ -772,10 +772,10 @@ type ResourceCompositionPeriodMeta = {
 | **M4** | Phase 1 `resourceComposition` Snapshot 接入 replay         | Phase 1 分类器  |
 | **M5** | `global-period`：专篇 M3–M5（快照实体卡时 + 事件计划卡时 + 解耦）     | M2 + 专篇 M2–M4 |
 | **M6** | 回填脚本 + H1/H2                                             | M1           |
-| **M7** | `pipeline_gap_daily/hourly` + ETL                        | M2（可延后 1 周）  |
+| **M7** | `pipeline_gap_daily/hourly` + ETL                        | **本期不实施**（见 [M7 专篇](./global-dashboard-period-composition-m7-dws-acceleration.md)） |
 
 
-**建议顺序**：M1 → M2 → M4（Snapshot 闭环）→ M3 → M5 → M6 → M7。
+**建议顺序（当前）**：M1 → M2（ETL-MD-3）→ M4（Snapshot 闭环）→ M3 → M5 → M6；~~M7~~ **关闭**。
 
 ### 14.12 测试用例（Period 专属）
 

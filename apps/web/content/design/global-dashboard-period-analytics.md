@@ -241,7 +241,7 @@ flowchart TB
 | `pool_codes[]` | 资源池归属 |
 | `gpu_count`, `card_type`, `data_center_id` | 维度 |
 
-Daily / Hourly 由 **主数据 ETL** 灌数（`device_inventory` 导入 + 定时扫描 → `supplier_device` → 快照）；Snapshot **资源构成** 仍直读 `supplier_device` 当前态。详见 Period 卡时专篇 §8.3。
+Daily / Hourly 由 **主数据 ETL** 灌数：导入 / **主数据状态 REST API**（[专文](./supplier-device-masterdata-integration-api-design.md)）→ `supplier_device` → **MD-3/4 即时小时桶** + **MD-1 每小时 / MD-2 每日** Cron（[M2](./global-dashboard-period-composition-m2-masterdata-etl.md)）。变更记录 API 不灌实体快照。
 
 #### `pool_binding_history`（SCD Type 2，可选）
 
@@ -593,7 +593,7 @@ GET /api/v1/dashboard/global?granularity=day&period_start=2026-05-01&period_end=
 3. **G2** — 主数据 ETL → `device_daily_snapshot`（**非** change_log 洗快照）  
 4. **G2+** — `device_hourly_snapshot` + Period 卡时聚合（专篇 M3–M5）  
 5. **G3** — `getPeriod` 与 Snapshot **解耦**；全卡片 + `compare` + P2b  
-6. **G4**（可选）— `pipeline_gap_*` / `resource_composition_*` DWS 加速（专篇 M7）  
+6. **G4** — ~~M7 DWS 加速~~ **本期不实施**（Period 永久在线聚合，见 [M7](./global-dashboard-period-composition-m7-dws-acceleration.md)）  
 
 ### 10.3 台时/卡时
 

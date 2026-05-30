@@ -2,8 +2,8 @@
 
 **页面**：`/dashboard/global` — `ResourcePoolChartCard`（Period：`view=daily` | `hourly`）  
 **文档性质**：Period 专篇实现方案（数据源、ETL、聚合、API、UI）；**已确认口径**，关联设计文档 v2.4+ 与之对齐。  
-**版本**：v1.3（2026-05-29）  
-**状态**：**已确认**（代码按 M1–M7 分期落地；现网仍为过渡态见 §16）
+**版本**：v1.6（2026-05-29）  
+**状态**：**已确认**（M1–M6 落地；**M7 本期不实施**；M2 = **MD-1/2 Cron + MD-3 导入即时小时桶 + MD-4 API 即时小时桶**；见 [M2](./global-dashboard-period-composition-m2-masterdata-etl.md) §0）
 
 **前置口径**（已实施 v1.0，本文不重复定义互斥分桶规则）：
 
@@ -22,7 +22,7 @@
 
 | #   | 决策                                       | 说明                                                                                      |
 | --- | ---------------------------------------- | --------------------------------------------------------------------------------------- |
-| P1  | **实体卡时/台时** 只来自 **设备主数据状态时序**            | 定时扫描 + `device_inventory` 导入写 `supplier_device` 时，同步写入 **状态时序/快照**                      |
+| P1  | **实体卡时/台时** 只来自 **设备主数据状态时序**            | `device_inventory`（**MD-3**）与第三方 **主数据状态 API**（**MD-4**，[专文](./supplier-device-masterdata-integration-api-design.md)）后 **立刻写当小时桶**；**MD-1 每小时** + **MD-2 每日** Cron 铺网格；变更记录 API **不写** 实体快照 |
 | P2  | **计划虚拟卡时/台时** 只来自 **计划批次进度时序**           | `onboarding_batch` + `onboarding_batch_progress_event`（+ `device_link.linked_at` 校验）    |
 | P3  | `**device_changelog` 不参与实体 Period**      | 变更表 commit **不** 作为 `ops_status` / `lifecycle` 回放源                                      |
 | P4  | **变更表只影响「待接入/下架」计划管道**                   | 仅通过 `refreshBatchProgress` → `touched` / `progress_synced` 事件 → 缩小 `planned−touched` 缺口 |
@@ -68,7 +68,7 @@
 | ------ | ---------- | ------------------------- | ------------------------------- |
 | **L0** | OLTP / ODS | 业务操作真源（主数据 D1、批次、变更审计 D2） | 只 **读**；写入由供应域作业触发              |
 | **L1** | DWD 明细     | 设备状态时序、批次进度时序（可回放）        | **实体 + 计划** 两条时序的权威载体           |
-| **L2** | DWS 汇总     | 按日/小时预聚合（读加速，可选）          | M7 可选；MVP 可在线聚合                 |
+| **L2** | DWS 汇总     | 按日/小时预聚合（读加速）              | **M7 本期不实施**；Period 永久 L3 在线聚合 |
 | **L3** | ADS / API  | 对前端的读模型                   | `getPeriod.resourceComposition` |
 
 
@@ -150,7 +150,7 @@ flowchart TB
 
 | 表 / 对象                                                                         | 职责                                                                                  | 数据来源（谁写）                                             | 本专篇消费方式                                                                          |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `**supplier_device`**                                                          | 设备主数据 **当前态**（D1 真源）：`lifecycle_status`、`ops_status`、`in_maintenance`、`gpu_count` 等 | `device_inventory` 导入 commit；定时扫描对比集群/库存后 **UPSERT** | **不直接** 做区间积分；供 ETL-MD 投影、期初无快照时的 `approximate` 回填、Snapshot 对照                   |
+| `**supplier_device`**                                                          | 设备主数据 **当前态**（D1 真源） | `device_inventory` 导入 commit；**主数据 Web API**（MD-4）；**非** changelog | 供 ETL-MD 投影；`approximate` 回填；Snapshot 对照                   |
 | `**onboarding_batch`**（`batch_kind=device_inventory`）                          | 主数据 Excel 导入批次元数据                                                                   | 供应域导入作业                                              | 触发 ETL-MD-3：导入完成时刻写对应 **小时/日快照**                                                 |
 | `**onboarding_batch`**（`batch_kind=online` | `order_access` | `device_retire`） | 商务 **业务批次** 当前计划/状态/触达缓存                                                            | 批次 CRUD、工单状态变更                                       | 读当前行 + **投影** 为 `progress_event`；**不** 单独做区间回放                                   |
 | `**onboarding_batch`**（`batch_kind=device_changelog`）                          | 变更表 Excel 导入批次                                                                      | 运维导入 commit                                          | commit → `refreshBatchProgress` → **仅** 右支事件；**不写** 实体快照                         |
@@ -169,8 +169,8 @@ flowchart TB
 
 | 表                                                     | 职责                                      | 数据来源                                                           | 消费方                                                   |
 | ----------------------------------------------------- | --------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------- |
-| `**device_hourly_snapshot**`                          | 设备 × **整点小时** 状态截面 + `onlineHours`（0~1） | ETL-MD-1：扫描；ETL-MD-3：inventory 导入；可选由 `masterdata_event` 分段    | Period `view=hourly`：**实体扇区** 阶梯积分（§8.4）              |
-| `**device_daily_snapshot`**                           | 设备 × **自然日** 末态 + 日 `onlineHours`（0~24） | ETL-MD-2：由小时表聚合或主数据日末投影                                        | Period `view=daily`：**实体扇区** 积分；hourly 的日 rollup 源    |
+| `**device_hourly_snapshot**`                          | 设备 × **整点小时** 状态截面 + `onlineHours`（0~1） | ETL-MD-1 Cron；ETL-MD-3 导入 / **MD-4 API** 即时写当小时；可选 `masterdata_event` | Period `view=hourly` 实体阶梯积分（§8.4）              |
+| `**device_daily_snapshot`**                           | 设备 × **自然日** 末态 + 日 `onlineHours`（0~24） | ETL-MD-2 由当日小时快照聚合；MD-3/4 更新日桶末态                                      | Period `view=daily`；hourly 的日 rollup 源    |
 | `**onboarding_batch_progress_event`**（**待建**，§5.4、M1） | 批次计划/触达/终态的 **不可变事件日志**                 | `appendBatchProgressEvent`：批次 CRUD、`refreshBatchProgress`、状态变更 | Period **计划虚拟扇区** 阶梯积分（§9.3）；Snapshot pipeline 缺口时点回放 |
 | `**supplier_device_masterdata_event`**（**可选**）        | 主数据每次导入/扫描的设备级状态变更                      | ETL-MD 旁路 append                                               | 提高分段积分精度；再投影到 `device_*_snapshot`                     |
 
@@ -185,13 +185,13 @@ flowchart TB
 | `onboarding_batch_progress_event` | `id`（时序按 `onboarding_batch_id, occurred_at`） | `planned_*`, `touched_*`, `batch_status`, `event_type`                                          |
 
 
-#### 3.2.3 L2 — DWS 汇总（可选，M7）
+#### 3.2.3 L2 — DWS 汇总（M7 本期不实施）
 
 
 | 表                                                                  | 职责                                                                   | 数据来源                                     | 消费方                        |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------- | ---------------------------------------- | -------------------------- |
-| `**pipeline_gap_daily` / `pipeline_gap_hourly`**（待建，见资源构成设计 §14.8） | 日/小时末 `**pending_access` / `retiring**` 缺口台数/GPU                     | 由 `progress_event` + `link` 日终回放 ETL     | 加速计划扇区积分；无表时在线算            |
-| `**resource_composition_daily` / `hourly**`（待建，可选）                 | 按 **互斥 `bucket_key` × card_type** 预聚合 `card_hours` / `machine_hours` | 由 `device_*_snapshot` + pipeline gap ETL | 加速 `getPeriod`；无表时 L3 在线聚合 |
+| `**pipeline_gap_daily` / `pipeline_gap_hourly`**（**本期不建**） | 日/小时末 `**pending_access` / `retiring**` 缺口台数/GPU                     | 远景：M7 ETL；**现网** 在线 `computePipelineGapsAt`     | 不改变口径，仅加速            |
+| `**resource_composition_daily` / `hourly**`（**本期不建**）                 | 按 **互斥 `bucket_key` × card_type** 预聚合 `card_hours` / `machine_hours` | 远景：M7 ETL；**现网** L3 在线聚合 | **权威读路径** |
 
 
 > **旧 DWS 表**（`resource_pool_daily/hourly`、`device_pool_*_snapshot`）：按 **六池重叠 + 在线卡时** 建模，服务于废止的 `resourcePools`。**本专篇不消费**；Period UI 只读 `resourceComposition`。
@@ -220,13 +220,16 @@ flowchart TB
 flowchart TB
   subgraph entityWrite [实体支 — 仅主数据]
     INV[device_inventory 导入]
-    SCAN[定时扫描任务]
+    API[主数据状态 REST API]
+    CRON[ETL-MD-1 每小时 / MD-2 每日]
     SD[supplier_device 当前态]
     SNAP[device_hourly_snapshot / device_daily_snapshot]
     INV --> SD
-    SCAN --> SD
-    SD --> ETL_M[ETL-MD: 写快照 + onlineHours]
-    ETL_M --> SNAP
+    API --> SD
+    SD --> ETL34[ETL-MD-3/4 即时当小时]
+    SD --> CRON
+    ETL34 --> SNAP
+    CRON --> SNAP
     SNAP --> AGG_E[Period: 互斥扇区 × 状态停留时长积分]
   end
 
@@ -357,7 +360,7 @@ device_changelog Excel commit
 ## 5. Schema 变更清单（新增 / 修改表与字段）
 
 > Schema 文件：`packages/db/src/supply-schema.ts`（OLTP）、`packages/db/src/dashboard-schema.ts`（DWD/DWS）。  
-> **MVP（M1–M6）** 必须项标 ★；**M7 可选** 标 ○。
+> **MVP（M1–M6 + M2：MD-1/2/3/4）** 必须项标 ★；**M7 本期不实施** 标 ○（归档）。
 
 ### 5.1 汇总
 
@@ -674,8 +677,11 @@ type ResourceCompositionPayload = {
 
 | 触发源                                       | 行为                                                         | `occurred_at` / 桶 |
 | ----------------------------------------- | ---------------------------------------------------------- | ----------------- |
-| **设备主数据导入**（`device_inventory` commit）    | 对变更设备写 **小时/日** 快照行；`onlineHours` 按桶规则填充                   | 导入完成时刻所在桶         |
-| **定时扫描**（cron，如每小时/每日）                    | 全量或增量对比 `supplier_device`，写快照；无状态变化时可写 `onlineHours=0` 或跳过 | 扫描时刻              |
+| **设备主数据导入**（`device_inventory` commit）    | **立刻**写 **当前小时桶**；更新日桶末态；`online_hours` 由 MD-2 聚合                   | 导入完成时刻         |
+| **主数据状态 REST API**（MD-4）                 | 同导入：**立刻**写当前小时桶 + 日桶末态；**禁止** 改 `gpu_count`（[专文](./supplier-device-masterdata-integration-api-design.md)） | `occurred_at` 可传 |
+| **变更记录 REST API**                         | 仅 `change_log` + 批次进度；**不** 写实体快照                                  | Excel §4.2 对齐     |
+| **ETL-MD-1**（每小时 Cron）                    | 读 `supplier_device` 写各整点小时桶（填满网格）                              | 整点              |
+| **ETL-MD-2**（每日 Cron）                      | 由当日小时快照聚合日 `online_hours` 与末态                                   | 00:15 上海         |
 | **可选** `supplier_device_masterdata_event` | 每次导入/扫描 append 一条事件（设备级状态变更），ETL 再投影到日/小时快照                | 精确到秒              |
 
 
@@ -830,16 +836,17 @@ cardHours_pending_pipeline([T₀,T₁]) = Σ_τ cardHours_pending_pipeline(τ)
 
 ## 10. 边界与未决
 
-### 10.1 主数据上传频率 vs 精度
+### 10.1 主数据变更与快照精度（本期已定）
 
+**写入组合**（见 [M2](./global-dashboard-period-composition-m2-masterdata-etl.md) §0）：**MD-1/2 Cron** + **导入/API 即时当小时桶**。
 
-| 扫描/导入频率 | 实体卡时精度                   |
-| ------- | ------------------------ |
-| 每小时     | 小时视图准确；日视图可聚合            |
-| 每日      | 日视图准确；小时视图需插值或禁止选 hourly |
+| 变更方式 | 实体时序精度 |
+| -------- | ------------ |
+| 导入 / API 当刻 | 变更所在 **整点小时** 立即有快照 |
+| 两次变更之间 | **MD-1** 每小时用当前末态铺桶 → 小时视图连续 |
+| 自然日 `online_hours` | **MD-2** 由 24 条小时快照阶梯聚合（非日表手填累加） |
 
-
-**产品约定**：若仅日扫，Period `hourly` 应提示「实体卡时按日快照分摊」或禁用 hourly。
+**产品约定**：`device_changelog` 仍不驱动实体快照；计划扇区不变。
 
 ### 10.2 计划修订无事件的历史
 
@@ -861,11 +868,12 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 ### 11.1 写入任务
 
 
-| 任务 ID    | 输入                             | 输出                                     | 频率       |
+| 任务 ID    | 输入                             | 输出                                     | 本期       |
 | -------- | ------------------------------ | -------------------------------------- | -------- |
-| ETL-MD-1 | `supplier_device` 当前态 + 上次快照   | `device_hourly_snapshot`               | 每小时 cron |
-| ETL-MD-2 | 小时表或主数据事件                      | `device_daily_snapshot`                | 每日 00:15 |
-| ETL-MD-3 | `device_inventory` commit 设备列表 | 触发 ETL-MD-1 对应桶                        | 实时       |
+| ETL-MD-1 | `supplier_device` 当前态          | `device_hourly_snapshot`               | **Cron 每小时** |
+| ETL-MD-2 | 当日小时快照                       | `device_daily_snapshot`                | **Cron 每日 00:15** |
+| ETL-MD-3 | `device_inventory` commit      | **当前小时桶** + 日桶末态                     | **实时** |
+| ETL-MD-4 | 主数据状态 REST API 成功            | 同 MD-3；不含 `gpu_count`                   | **实时** |
 | ETL-BE-1 | 批次 CRUD / refresh              | `onboarding_batch_progress_event`      | 实时       |
 | ETL-BE-2 | 历史批次 + link                    | 回填 `batch_created` / `progress_synced` | 一次性      |
 
@@ -921,7 +929,7 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 ## 13. 脚注（Period 卡时）
 
 ```
-实体卡时/台时：由设备主数据导入与定时扫描写入的快照/状态时序积分；互斥分桶规则与 Snapshot 一致。
+实体卡时/台时：由主数据导入、Web API 与 ETL 定时快照写入的时序积分；互斥分桶规则与 Snapshot 一致。
 计划缺口卡时/台时：由进行中批次的 planned−touched 对时间积分；设备变更表仅刷新批次进度，不驱动池/维护/下架等实体扇区。
 供应侧卡时非租户账单消费卡时。库存级 internal_test hold 可能未计入设备扇区。
 历史批次缺口在进度事件回填完成前，计划卡时可能标记为近似值。
@@ -936,15 +944,15 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 | ------ | ----------------------------------------------------------------------- | ------- |
 | **M0** | 确认本文                                                                    | —       |
 | **M1** | `onboarding_batch_progress_event` 表 + `appendBatchProgressEvent` + hook | —       |
-| **M2** | 主数据 ETL → `device_hourly_snapshot` / `device_daily_snapshot`            | 扫描或导入触发 |
+| **M2** | 主数据 ETL → `device_*_snapshot`（MD-1/2 Cron + MD-3 导入 + **MD-4 API**） | 见 M2 文档 |
 | **M3** | `aggregateCompositionCardHoursFromSnapshots` 纯函数 + 单测                   | M2      |
 | **M4** | `aggregatePipelineCardHoursFromEvents` + 单测                             | M1      |
 | **M5** | `global-period.ts` 切换读路径；移除实体 change_log 回放；落实 **§6** 解耦                | M3,M4   |
 | **M6** | `resource-pool-chart-card.tsx` Period 卡时展示                              | M5      |
-| **M7** | 历史回填 + `pipeline_gap_`* DWS（可选加速）                                       | M1,M2   |
+| **M7** | `pipeline_gap_*` / `resource_composition_*` DWS + H5                           | **本期不实施** |
 
 
-**建议顺序**：M1 → M2 → M3 → M4 → M5 → M6 → M7。
+**建议顺序（当前）**：M1 → M2（MD-1/2/3/4）→ M3 → M4 → M5 → M6；~~M7~~ **关闭**。
 
 ### 14.1 分阶段实施步骤（独立文档）
 
@@ -952,9 +960,10 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 |------|------|
 | **M1** | [global-dashboard-period-composition-m1-progress-event.md](./global-dashboard-period-composition-m1-progress-event.md) |
 | **M2** | [global-dashboard-period-composition-m2-masterdata-etl.md](./global-dashboard-period-composition-m2-masterdata-etl.md) |
-| **M7** | [global-dashboard-period-composition-m7-dws-acceleration.md](./global-dashboard-period-composition-m7-dws-acceleration.md) |
+| **集成 API** | [supplier-device-masterdata-integration-api-design.md](./supplier-device-masterdata-integration-api-design.md) |
+| **M7** | [global-dashboard-period-composition-m7-dws-acceleration.md](./global-dashboard-period-composition-m7-dws-acceleration.md)（**本期不实施**，归档） |
 
-> M3–M6 已并入主文档 §6–§12 与现网代码；M4 步骤见 M1 文档「步骤 5」与 resource-composition 设计 §14.7。
+> M3–M6 已并入主文档 §6–§12 与现网代码；M4 步骤见 M1 文档「步骤 5」与 resource-composition 设计 §14.7。M2 触发策略见 M2 文档 §0。
 
 ---
 
@@ -993,7 +1002,7 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 | #   | 问题                               | 建议默认                                         |
 | --- | -------------------------------- | -------------------------------------------- |
 | Q1  | 实体扇区卡时是否含非在线状态（维护/待接入）？          | **含**（状态占位时长）                                |
-| Q2  | 小时视图最低主数据频率？                     | 每小时扫描或导入写 hour 快照                            |
+| Q2  | 小时视图最低主数据频率？                     | **MD-1 每小时** + 导入/API **即时**写当小时桶 |
 | Q3  | 历史期初无快照时？                        | 用 `supplier_device` 当前态回填期初桶 + `approximate` |
 | Q4  | KPI 趋势是否仍用 change_log？           | 另议；资源构成 Period **不用**                        |
 | Q5  | 是否保留旧 `resourcePools` Period 卡时？ | 一期保留别名，UI 不读                                 |
@@ -1011,5 +1020,8 @@ M1 前：用 `batch_created` + 当前 `planned` + `link` 回填；`plan_revised`
 | v1.2 | 2026-05-29 | 新增 §4 change_log 职责、§5 Schema 清单、§6 Period/Snapshot 代码解耦；章节顺延                                                |
 | v1.3 | 2026-05-29 | 状态改为已确认；同步修订 period-analytics / resource-composition / kpi-caliber / implementation-plan / supplier-overview |
 | v1.4 | 2026-05-29 | 新增 §14.1：M1/M2/M7 分阶段实施步骤独立文档索引 |
+| v1.5 | 2026-05-29 | **M7 本期不实施**；M2 定为仅导入触发（ETL-MD-3），取消主数据定时扫描 Cron |
+| v1.6 | 2026-05-29 | M2 确认：**恢复 MD-1/2 Cron** + 导入/API **即时小时桶** + **MD-4 主数据 Web API** |
+| v1.7 | 2026-05-29 | MD-1 **维持 1 小时**；第三方 API 专文；禁止 API 改 `gpu_count`；变更 API 与 Excel 变更表对齐 |
 
 

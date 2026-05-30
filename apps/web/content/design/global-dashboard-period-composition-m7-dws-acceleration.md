@@ -1,13 +1,25 @@
 # 全局大盘 Period 卡时 — M7 实施步骤（DWS 预聚合与历史回填）
 
-**阶段**：M7（**可选加速**；MVP 可仅用 L1 在线聚合）  
-**目标**：通过 L2 DWS 表预计算 **计划缺口** 与 **互斥构成** 卡时/台时，缩短 `getPeriod` 延迟，并完成历史区间回填。  
-**依赖**：**M1**（`onboarding_batch_progress_event`）、**M2**（`device_*_snapshot` 有稳定灌数）  
+**阶段**：M7  
+**产品决策（2026-05-29）**：**本期不实施**。Period 资源构成 **永久走 L3 在线聚合**（`computePeriodResourceComposition`），不建 `pipeline_gap_*` / `resource_composition_*` 四张 DWS 表，不注册 `etl_pg_*` / `etl_rc_*` Cron，不执行 H5 DWS 历史回填。  
+**目标（归档）**：若未来性能不足再启动——通过 L2 DWS 预计算计划缺口与互斥构成卡时，缩短 `getPeriod` 延迟；**不改变口径**。  
+**依赖（若重启）**：**M1**（`onboarding_batch_progress_event`）、**M2**（`device_*_snapshot`，本期以 **ETL-MD-3 导入投影** 为主，见 [M2 文档](./global-dashboard-period-composition-m2-masterdata-etl.md)）  
 **权威口径**：[global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) §5.6、§3.2.3；[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) §14.8–§14.9  
 
-**现网说明**：`compute-period-resource-composition.ts` 在线积分已可用；M7 为 **读优化 + 运维回填**，不改变口径。
+**现网说明**：`compute-period-resource-composition.ts` 在线积分已满足业务；**不上 M7 对 Period 数值无影响**，仅无预聚合加速。下文步骤保留为 **远景实施手册**，非当前排期。
+
+### 不实施 M7 时的约定
+
+| 项 | 约定 |
+|----|------|
+| Period 数据正确性 | 与实施 M7 一致（在线路径为权威基准） |
+| `approximate` | 仅由 **M2 快照覆盖** 决定，与 M7 无关 |
+| 性能 | 长区间 / 按小时 Period 可能较慢；接受或优化在线 SQL/索引 |
+| 历史 | 依赖 M1 事件回填 + M2 导入投影 / `backfill-device-snapshots`（H4），**无** H5 |
+| 重启条件 | 例如：全局 filter 下 `getPeriod` P95 持续超阈值，或需日终 DWS 对账表 |
 
 ---
+
 
 ## 1. 交付物清单
 
@@ -199,7 +211,7 @@
 | M2 | H4 设备快照回填 |
 | M7 | Schema + ETL-PG/RC + 读路径 + H5 |
 
-**建议排期**：M1 → M2 → M3–M6（已完成）→ **M7**（按需，可延后 1 周，见 resource-composition §14 实施表）。
+**建议排期（已废止）**：~~M1 → M2 → M3–M6 → M7~~ → **当前**：M1 → M2（ETL-MD-3）→ M3–M6；**M7 关闭**。
 
 ---
 
@@ -208,3 +220,4 @@
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | v1.0 | 2026-05-29 | 初稿：M7 DWS + 历史回填可执行步骤 |
+| v1.1 | 2026-05-29 | **产品决策：本期不实施**；Period 永久在线聚合；文档改为远景手册 |

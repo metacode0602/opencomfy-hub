@@ -3,7 +3,8 @@
 **阶段**：M1  
 **目标**：建立 `onboarding_batch_progress_event` 权威时间轴，并在批次 CRUD / `refreshBatchProgress` 链路上自动落事件。  
 **依赖**：无（可先于 M2 启动）  
-**阻塞**：M4（`aggregatePipelineCardHoursFromEvents`）、M7 计划侧历史回填  
+**阻塞**：M4（`aggregatePipelineCardHoursFromEvents`）  
+**说明**：M7 DWS **本期不实施**；M1 历史事件回填（H1–H3）仍建议做，与 M7 H5 无关  
 **权威口径**：[global-dashboard-period-composition-card-hours-design.md](./global-dashboard-period-composition-card-hours-design.md) §5.4、§9、§11 ETL-BE-1/BE-2；[global-dashboard-resource-composition-chart-design.md](./global-dashboard-resource-composition-chart-design.md) §14.4–§14.9  
 
 **现网说明**：M3–M6 已落地时，计划卡时仍用 `computePipelineGapsAt`（batch+link）近似；M1 完成后需切换 M4 读路径并去掉 `approximate` 计划标记。
@@ -163,7 +164,7 @@ batch_status ∈ {已完成, 已取消} → 拒绝调整计划（HTTP 409）
 | 层 | 载体 | 用途 |
 |----|------|------|
 | **A. 运营时间线** | `supplier_activity` | 人读审计、供应商详情活动流 |
-| **B. 机器时间轴** | `onboarding_batch_progress_event` | Period `replayPipelineGapAt`、M7 DWS |
+| **B. 机器时间轴** | `onboarding_batch_progress_event` | Period `replayPipelineGapAt`（在线）；M7 DWS **本期不做** |
 | **C. 结构化 diff** | 两者 `metadata` / `payload` 对齐 | 对账、合规导出 |
 
 **A. `supplier_activity`（沿用供应域惯例）**
@@ -418,7 +419,7 @@ flowchart LR
 ## 7. 完成后衔接
 
 1. **M4**：实现 `aggregatePipelineCardHoursFromEvents`，在 `compute-period-resource-composition.ts` 中替换 `aggregatePipelineCardHoursFromGapSeries` + 逐桶 `computePipelineGapsAt`。
-2. **M7**：`pipeline_gap_*` DWS 的 ETL 输入改为 `progress_event` 阶梯（见 [M7 文档](./global-dashboard-period-composition-m7-dws-acceleration.md)）。
+2. **M7**：**本期不实施**；计划缺口保持在线 `computePipelineGapsAt` / `progress_event` 回放（远景见 [M7 文档](./global-dashboard-period-composition-m7-dws-acceleration.md)）。
 
 ---
 

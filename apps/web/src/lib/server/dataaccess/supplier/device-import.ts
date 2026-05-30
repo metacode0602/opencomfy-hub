@@ -379,6 +379,7 @@ export const deviceImportDataAccess = {
     const cardTypesByDataCenter = new Map<string, Set<string>>()
     const affectedDataCenterIds = new Set<string>([dc.id])
     const warnings: string[] = []
+    const affectedDeviceIds = new Set<string>()
     let insertedCount = 0
     let updatedCount = 0
     const existingDevices = await listSupplierDevicesForImport(params.supplierId)
@@ -485,6 +486,7 @@ export const deviceImportDataAccess = {
               .where(eq(supplierDevice.id, existing.id))
 
             updatedCount++
+            affectedDeviceIds.add(existing.id)
             const pricingDataCenterId = existing.data_center_id || dc.id
             affectedDataCenterIds.add(pricingDataCenterId)
             trackImportedCardType(cardTypesByDataCenter, pricingDataCenterId, gpuCardTypeId)
@@ -563,6 +565,7 @@ export const deviceImportDataAccess = {
             updatedAt: now,
           })
           insertedCount++
+          affectedDeviceIds.add(device.id)
           trackImportedCardType(cardTypesByDataCenter, dc.id, gpuCardTypeId)
           upsertDeviceInImportPool(devicesInImportPool, {
             ...device,
@@ -657,11 +660,31 @@ export const deviceImportDataAccess = {
 
     const committedCount = insertedCount + updatedCount
 
+    if (affectedDeviceIds.size > 0) {
+      try {
+        const { projectDeviceSnapshotsAfterInventoryImport } = await import(
+          '@/lib/server/jobs/dashboard-masterdata-snapshot/project-devices'
+        )
+        await projectDeviceSnapshotsAfterInventoryImport({
+          deviceIds: [...affectedDeviceIds],
+          occurredAt: now,
+          onboardingBatchId: batchId,
+        })
+      } catch (snapshotError) {
+        supplierError('device-import', 'masterdata snapshot projection failed', snapshotError, {
+          batchId,
+          deviceCount: affectedDeviceIds.size,
+        })
+        warnings.push('设备主数据快照写入失败，Period 可能标记为近似值，请稍后重试或联系运维')
+      }
+    }
+
     supplierLog('device-import', 'commitInventory done', {
       batchId,
       committedCount,
       insertedCount,
       updatedCount,
+      snapshotDevices: affectedDeviceIds.size,
     })
 
     return {
