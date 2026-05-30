@@ -200,7 +200,7 @@ export function AdjustOnboardingBatchPlanDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl min-w-[30vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -237,7 +237,7 @@ export function AdjustOnboardingBatchPlanDialog({
                     value={line.gpuCardTypeCode}
                     onValueChange={(v) => updatePlanLine(line.key, { gpuCardTypeCode: v })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="卡型" />
                     </SelectTrigger>
                     <SelectContent>
@@ -258,7 +258,7 @@ export function AdjustOnboardingBatchPlanDialog({
                       })
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="w-full">
                       <SelectValue placeholder="合作类型" />
                     </SelectTrigger>
                     <SelectContent>
