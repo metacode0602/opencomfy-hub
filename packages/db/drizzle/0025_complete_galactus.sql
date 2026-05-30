@@ -1,1 +1,0 @@
-ALTER TABLE "supplier_pricing_record" ADD COLUMN "config_status" varchar(32) DEFAULT 'active' NOT NULL;

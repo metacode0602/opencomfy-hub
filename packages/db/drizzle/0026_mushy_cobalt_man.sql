@@ -1,1 +1,0 @@
-ALTER TABLE "supplier_device" ADD COLUMN "device_purpose" varchar(255);

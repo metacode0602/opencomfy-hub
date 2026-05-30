@@ -1,8 +1,0 @@
-ALTER TABLE "billing_period_cost_pricing_snapshot" DROP CONSTRAINT "billing_period_cost_pricing_snapshot_supplier_unit_cost_id_supplier_unit_cost_id_fk";
---> statement-breakpoint
-ALTER TABLE "billing_period_cost_pricing_snapshot" ALTER COLUMN "supplier_unit_cost_id" DROP NOT NULL;--> statement-breakpoint
-ALTER TABLE "billing_period_cost_pricing_snapshot" ADD COLUMN "supplier_pricing_record_id" text;--> statement-breakpoint
-ALTER TABLE "billing_period_cost_source_line" ADD COLUMN "supplier_pricing_record_id" text;--> statement-breakpoint
-ALTER TABLE "billing_period_cost_pricing_snapshot" ADD CONSTRAINT "billing_period_cost_pricing_snapshot_supplier_pricing_record_id_supplier_pricing_record_id_fk" FOREIGN KEY ("supplier_pricing_record_id") REFERENCES "public"."supplier_pricing_record"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "billing_period_cost_pricing_snapshot" ADD CONSTRAINT "billing_period_cost_pricing_snapshot_supplier_unit_cost_id_supplier_unit_cost_id_fk" FOREIGN KEY ("supplier_unit_cost_id") REFERENCES "public"."supplier_unit_cost"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "billing_period_cost_source_line" ADD CONSTRAINT "billing_period_cost_source_line_supplier_pricing_record_id_supplier_pricing_record_id_fk" FOREIGN KEY ("supplier_pricing_record_id") REFERENCES "public"."supplier_pricing_record"("id") ON DELETE set null ON UPDATE no action;

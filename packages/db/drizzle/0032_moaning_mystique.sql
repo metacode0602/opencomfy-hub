@@ -1,1 +1,0 @@
-ALTER TABLE "tenant" ADD COLUMN "platform_registered_at" timestamp with time zone;

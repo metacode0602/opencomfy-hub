@@ -1,1 +1,0 @@
-ALTER TABLE "supplier" ADD COLUMN "external_tenant_id" text NOT NULL;

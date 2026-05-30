@@ -1,1 +1,0 @@
-ALTER TABLE "tenant" ADD COLUMN "type" varchar(32) DEFAULT 'external' NOT NULL;
