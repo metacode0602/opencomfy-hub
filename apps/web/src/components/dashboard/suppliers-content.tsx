@@ -129,7 +129,10 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
       supplier.shortName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       supplier.businessManager.includes(searchTerm) ||
       supplier.externalTenantId?.includes(searchTerm)
-    const matchesStatus = statusFilter === 'all' || supplier.status === statusFilter
+    const matchesStatus =
+      statusFilter === 'all'
+        ? supplier.status !== 'suspended'
+        : supplier.status === statusFilter
     const matchesMode = modeFilter === 'all' || supplier.cooperationMode === modeFilter
     return matchesSearch && matchesStatus && matchesMode
   })
@@ -276,7 +279,7 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
                 <SelectValue placeholder="合作状态" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="all">全部（不含已暂停）</SelectItem>
                 <SelectItem value="cooperating">合作中</SelectItem>
                 <SelectItem value="negotiating">洽谈中</SelectItem>
                 <SelectItem value="suspended">已暂停</SelectItem>
