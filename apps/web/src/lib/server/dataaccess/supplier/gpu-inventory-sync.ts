@@ -3,6 +3,14 @@ import { gpuCardType, supplierDevice, supplierGpuInventory } from '@workspace/db
 import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { and, eq, ne } from 'drizzle-orm'
 
+/** 参与 L1 库存聚合的有效设备（与 project-devices、构成图口径一致） */
+export function activeInventoryDeviceFilter() {
+  return and(
+    ne(supplierDevice.lifecycleStatus, '退订'),
+    ne(supplierDevice.opsStatus, '已退订'),
+  )
+}
+
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 export type AggregateInventoryStatus = 'online' | 'offline' | 'maintenance'
@@ -67,7 +75,7 @@ async function queryDeviceAggregates(
       and(
         eq(supplierDevice.supplierId, supplierId),
         eq(supplierDevice.dataCenterId, dataCenterId),
-        ne(supplierDevice.lifecycleStatus, '退订'),
+        activeInventoryDeviceFilter(),
       ),
     )
 

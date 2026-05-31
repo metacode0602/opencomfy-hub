@@ -93,6 +93,9 @@ function PlatformComparison({ cluster }: { cluster: GlobalClusterStatusRow }) {
 export function ClusterStatusCard() {
   const { data, isLoading } = useGlobalDashboard()
   const clusters = data?.clusters ?? []
+  const inconsistentClusters = clusters.filter(
+    (c) => c.onlineDevices !== c.totalDevices
+  )
 
   return (
     <Card className="border-border/80 lg:col-span-3">
@@ -121,8 +124,12 @@ export function ClusterStatusCard() {
           <DashboardCardLoading />
         ) : clusters.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">暂无机房数据</p>
+        ) : inconsistentClusters.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            所有机房在线设备数与设备总数一致
+          </p>
         ) : (
-          clusters.map((c) => (
+          inconsistentClusters.map((c) => (
             <div
               key={c.dataCenterId}
               className="flex gap-3 rounded-lg border border-border/60 bg-muted/10 p-3"

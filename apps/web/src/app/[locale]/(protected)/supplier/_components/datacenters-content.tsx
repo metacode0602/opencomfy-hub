@@ -380,10 +380,15 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Progress value={onlineRate} className="h-2 w-16" />
-                        <span className="text-sm text-foreground">
-                          {dc.onlineDeviceCount}/{dc.totalDeviceCount}
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-2">
+                          <Progress value={onlineRate} className="h-2 w-16" />
+                          <span className="text-sm text-foreground">
+                            {dc.onlineDeviceCount}/{dc.totalDeviceCount}
+                          </span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          CPU {(dc.cpuDeviceCount ?? 0).toLocaleString()} 台
                         </span>
                       </div>
                     </TableCell>

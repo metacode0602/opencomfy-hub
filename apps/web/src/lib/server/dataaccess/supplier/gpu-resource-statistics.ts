@@ -15,6 +15,8 @@ import type {
   GpuResourceTrendRegionPoint,
   GpuResourceTrendResult,
 } from '@/lib/types/supplier-overview-api'
+import { loadInternalHoldDeviceIds } from '@/lib/server/aggregation/pipeline-period-replay'
+import { isExcludedFromPlatformLedgerComparison } from '@/lib/server/aggregation/overview-aggregation'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { dataCenter, gpuCardType, supplierDevice, supplierGpuInventory } from '@workspace/db/schema'
 import { and, eq, isNotNull, ne, sql } from 'drizzle-orm'
@@ -220,11 +222,15 @@ function emptyCrmRegionStats(): CrmRegionStats {
   }
 }
 
-async function loadCrmRegionStats(): Promise<Map<string, CrmRegionStats>> {
+async function loadCrmRegionStats(
+  internalHoldDeviceIds: ReadonlySet<string>,
+): Promise<Map<string, CrmRegionStats>> {
   const deviceRows = await db
     .select({
+      id: supplierDevice.id,
       region: dataCenter.containerInstanceRegion,
       lifecycleStatus: supplierDevice.lifecycleStatus,
+      opsStatus: supplierDevice.opsStatus,
       gpuCount: supplierDevice.gpuCount,
       cardTypeName: gpuCardType.name,
       cardTypeCode: gpuCardType.code,
@@ -260,13 +266,20 @@ async function loadCrmRegionStats(): Promise<Map<string, CrmRegionStats>> {
       cardTypeRole,
     })
     const isComputeDevice = cardTypeRole !== 'infra'
+    const excludedFromPlatformLedger = isExcludedFromPlatformLedgerComparison({
+      opsStatus: row.opsStatus,
+      deviceId: row.id,
+      internalHoldDeviceIds,
+    })
 
     const bucket = byRegion.get(region) ?? emptyCrmRegionStats()
-    bucket.totalGpuCount += gpu
-    if (isComputeDevice) bucket.totalDeviceCount += 1
-    if (row.lifecycleStatus === '在线') {
-      bucket.onlineGpuCount += gpu
-      if (isComputeDevice) bucket.onlineDeviceCount += 1
+    if (!excludedFromPlatformLedger) {
+      bucket.totalGpuCount += gpu
+      if (isComputeDevice) bucket.totalDeviceCount += 1
+      if (row.lifecycleStatus === '在线') {
+        bucket.onlineGpuCount += gpu
+        if (isComputeDevice) bucket.onlineDeviceCount += 1
+      }
     }
     byRegion.set(region, bucket)
   }
@@ -379,11 +392,12 @@ export const gpuResourceStatisticsDataAccess = {
 
     try {
       const sourceParams = regions.length > 0 ? { regions: regions.join(',') } : {}
-      const [usageData, sourceData, crmByRegion] = await Promise.all([
+      const [usageData, sourceData, internalHoldDeviceIds] = await Promise.all([
         getGpuUsageAPI({ gpu_names: gpuNames.join(',') }) as Promise<ApiGpuUsageRow[]>,
         getSourceStatisticsByRegionAndGpuAPI(sourceParams) as Promise<ApiSourceStatsRow[]>,
-        loadCrmRegionStats(),
+        loadInternalHoldDeviceIds(),
       ])
+      const crmByRegion = await loadCrmRegionStats(internalHoldDeviceIds)
 
       const rows = buildRegionOverviewRows(
         usageData ?? [],

@@ -41,12 +41,85 @@ import {
   supplierPricingRecord,
   userStaff,
 } from '@workspace/db/schema'
-import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
+import { inventoryGpuQuantity, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { and, count, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm'
 import type { PhysicalDeviceRoleStats } from '@/lib/data/types'
 
 function emptyPhysicalDeviceRoleStats(): PhysicalDeviceRoleStats {
   return { total: 0, online: 0, maintenance: 0 }
+}
+
+type DataCenterInventoryCounts = { total: number; online: number; cpu: number }
+
+function emptyDataCenterInventoryCounts(): DataCenterInventoryCounts {
+  return { total: 0, online: 0, cpu: 0 }
+}
+
+function aggregateInventoryCountsByDataCenter(
+  rows: Array<{
+    dataCenterId: string
+    quantity: number | null
+    onlineQuantity: number | null
+    cardTypeName: string
+    cardTypeCode: string | null
+    cardTypeDeviceRole: string | null
+  }>,
+): Map<string, DataCenterInventoryCounts> {
+  const countMap = new Map<string, DataCenterInventoryCounts>()
+
+  for (const row of rows) {
+    const quantity = Number(row.quantity ?? 0)
+    const onlineQuantity = Number(row.onlineQuantity ?? 0)
+    const isCpuDevice =
+      resolveGpuCardTypeRole({
+        name: row.cardTypeName,
+        code: row.cardTypeCode,
+        deviceRole: row.cardTypeDeviceRole,
+      }) === 'infra'
+
+    const bucket = countMap.get(row.dataCenterId) ?? emptyDataCenterInventoryCounts()
+    if (isCpuDevice) {
+      bucket.cpu += quantity
+    } else {
+      bucket.total += quantity
+      bucket.online += onlineQuantity
+    }
+    countMap.set(row.dataCenterId, bucket)
+  }
+
+  return countMap
+}
+
+async function fetchInventoryCountsByDataCenter(params: {
+  supplierId?: string
+  supplierIds?: string[]
+  dataCenterId?: string
+}): Promise<Map<string, DataCenterInventoryCounts>> {
+  const conditions = []
+  if (params.dataCenterId) {
+    conditions.push(eq(supplierGpuInventory.dataCenterId, params.dataCenterId))
+  }
+  if (params.supplierId) {
+    conditions.push(eq(supplierGpuInventory.supplierId, params.supplierId))
+  }
+  if (params.supplierIds?.length) {
+    conditions.push(inArray(supplierGpuInventory.supplierId, params.supplierIds))
+  }
+
+  const invRows = await db
+    .select({
+      dataCenterId: supplierGpuInventory.dataCenterId,
+      quantity: supplierGpuInventory.quantity,
+      onlineQuantity: supplierGpuInventory.onlineQuantity,
+      cardTypeName: gpuCardType.name,
+      cardTypeCode: gpuCardType.code,
+      cardTypeDeviceRole: gpuCardType.deviceRole,
+    })
+    .from(supplierGpuInventory)
+    .innerJoin(gpuCardType, eq(supplierGpuInventory.gpuCardTypeId, gpuCardType.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+
+  return aggregateInventoryCountsByDataCenter(invRows)
 }
 
 function buildPhysicalDeviceStats(
@@ -193,25 +266,10 @@ export const suppliersDataAccess = {
       .where(eq(dataCenter.supplierId, supplierId))
       .orderBy(sql`${dataCenter.createdAt} DESC`)
 
-    const invCounts = await db
-      .select({
-        dataCenterId: supplierGpuInventory.dataCenterId,
-        total: sum(supplierGpuInventory.quantity),
-        online: sum(supplierGpuInventory.onlineQuantity),
-      })
-      .from(supplierGpuInventory)
-      .where(eq(supplierGpuInventory.supplierId, supplierId))
-      .groupBy(supplierGpuInventory.dataCenterId)
-
-    const countMap = new Map(
-      invCounts.map((r) => [
-        r.dataCenterId,
-        { total: Number(r.total ?? 0), online: Number(r.online ?? 0) },
-      ]),
-    )
+    const invCounts = await fetchInventoryCountsByDataCenter({ supplierId })
 
     return dcRows.map((row) =>
-      mapDataCenterRow(row, supplierRow.name, countMap.get(row.id)),
+      mapDataCenterRow(row, supplierRow.name, invCounts.get(row.id)),
     )
   },
 
@@ -230,25 +288,10 @@ export const suppliersDataAccess = {
       .where(inArray(dataCenter.supplierId, supplierIds))
       .orderBy(sql`${dataCenter.createdAt} DESC`)
 
-    const invCounts = await db
-      .select({
-        dataCenterId: supplierGpuInventory.dataCenterId,
-        total: sum(supplierGpuInventory.quantity),
-        online: sum(supplierGpuInventory.onlineQuantity),
-      })
-      .from(supplierGpuInventory)
-      .where(inArray(supplierGpuInventory.supplierId, supplierIds))
-      .groupBy(supplierGpuInventory.dataCenterId)
-
-    const countMap = new Map(
-      invCounts.map((r) => [
-        r.dataCenterId,
-        { total: Number(r.total ?? 0), online: Number(r.online ?? 0) },
-      ]),
-    )
+    const invCounts = await fetchInventoryCountsByDataCenter({ supplierIds })
 
     return dcRows.map((row) =>
-      mapDataCenterRow(row, nameMap.get(row.supplierId) ?? '', countMap.get(row.id)),
+      mapDataCenterRow(row, nameMap.get(row.supplierId) ?? '', invCounts.get(row.id)),
     )
   },
 
@@ -275,25 +318,23 @@ export const suppliersDataAccess = {
       .from(dataCenter)
       .where(dcConditions)
 
-    const invConditions = params?.supplierId
-      ? eq(supplierGpuInventory.supplierId, params.supplierId)
-      : undefined
-
-    const [gpuRow] = await db
-      .select({
-        total: sum(supplierGpuInventory.quantity),
-        online: sum(supplierGpuInventory.onlineQuantity),
-      })
-      .from(supplierGpuInventory)
-      .where(invConditions)
+    const invCounts = await fetchInventoryCountsByDataCenter(
+      params?.supplierId ? { supplierId: params.supplierId } : {},
+    )
+    let totalGpu = 0
+    let onlineGpu = 0
+    for (const counts of invCounts.values()) {
+      totalGpu += counts.total
+      onlineGpu += counts.online
+    }
 
     return {
       total: dcRows.length,
       online: dcRows.filter((r) => r.status === 'online').length,
       offline: dcRows.filter((r) => r.status === 'offline').length,
       maintenance: dcRows.filter((r) => r.status === 'maintenance').length,
-      totalGpu: Number(gpuRow?.total ?? 0),
-      onlineGpu: Number(gpuRow?.online ?? 0),
+      totalGpu,
+      onlineGpu,
     }
   },
 
@@ -310,18 +351,10 @@ export const suppliersDataAccess = {
 
     if (!hit) return null
 
-    const [invCount] = await db
-      .select({
-        total: sum(supplierGpuInventory.quantity),
-        online: sum(supplierGpuInventory.onlineQuantity),
-      })
-      .from(supplierGpuInventory)
-      .where(eq(supplierGpuInventory.dataCenterId, dataCenterId))
+    const invCounts = await fetchInventoryCountsByDataCenter({ dataCenterId })
+    const inventoryCounts = invCounts.get(dataCenterId) ?? emptyDataCenterInventoryCounts()
 
-    const mappedDataCenter = mapDataCenterRow(hit.dataCenter, hit.supplierName, {
-      total: Number(invCount?.total ?? 0),
-      online: Number(invCount?.online ?? 0),
-    })
+    const mappedDataCenter = mapDataCenterRow(hit.dataCenter, hit.supplierName, inventoryCounts)
 
     const gpuInventory = (await this.listGpuInventory({ supplierId: hit.dataCenter.supplierId }))
       .filter((row) => row.dataCenterId === dataCenterId)
@@ -342,8 +375,14 @@ export const suppliersDataAccess = {
 
     const inventoryStats = {
       cardTypeCount: gpuInventory.length,
-      totalGpu: gpuInventory.reduce((sum, row) => sum + row.quantity, 0),
-      onlineGpu: gpuInventory.reduce((sum, row) => sum + row.onlineQuantity, 0),
+      totalGpu: gpuInventory.reduce(
+        (sum, row) => sum + inventoryGpuQuantity(row.cardTypeRole ?? 'compute', row.quantity),
+        0,
+      ),
+      onlineGpu: gpuInventory.reduce(
+        (sum, row) => sum + inventoryGpuQuantity(row.cardTypeRole ?? 'compute', row.onlineQuantity),
+        0,
+      ),
     }
 
     return {

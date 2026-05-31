@@ -524,6 +524,7 @@ export function commitDatacenterImportMock(
       managementNodeFee: 0,
       totalDeviceCount: 0,
       onlineDeviceCount: 0,
+      cpuDeviceCount: 0,
       createdAt: row.source_created_at ?? new Date().toISOString().slice(0, 10),
       name: fields.name!,
       location: fields.location ?? '',

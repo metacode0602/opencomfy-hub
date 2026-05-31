@@ -503,6 +503,8 @@ export interface DataCenter {
   managementNodeFee: number // 管控节点费用 (月)
   totalDeviceCount: number
   onlineDeviceCount: number
+  /** infra / CPU 库存台数（不计入 GPU 在线率） */
+  cpuDeviceCount: number
   createdAt: string
   /** 入驻系统机房 ID（导入辅助，可空） */
   externalOnboardingId?: string

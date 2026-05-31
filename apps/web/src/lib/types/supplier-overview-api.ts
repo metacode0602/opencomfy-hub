@@ -192,13 +192,13 @@ export type GpuRegionUsageRow = {
   platformGpuFromUsage: number | null
   /** 开放平台 source_statistics 返回的 GPU 总量（无数据时为 null） */
   platformGpuFromSource: number | null
-  /** 接入台账：全量 GPU 卡数（不含 infra/CPU，不含退订） */
+  /** 接入台账：GPU 卡数（不含 infra/CPU、退订、线下裸金属交付、内部占用） */
   crmTotalGpuCount: number
-  /** 接入台账：全量算力设备台数（不含 infra/CPU，不含退订） */
+  /** 接入台账：算力设备台数（不含 infra/CPU、退订、线下裸金属交付、内部占用） */
   crmTotalDeviceCount: number
-  /** 接入台账：lifecycle=在线 的 GPU 卡数（不含 infra/CPU） */
+  /** 接入台账：lifecycle=在线 的 GPU 卡数（口径同 crmTotalGpuCount） */
   onlineGpuCount: number
-  /** 接入台账：lifecycle=在线 的算力设备台数（不含 infra/CPU） */
+  /** 接入台账：lifecycle=在线 的算力设备台数（口径同 crmTotalDeviceCount） */
   onlineDeviceCount: number
   /** gpu_usage 与 source_statistics 的 GPU 总量不一致 */
   platformApiGpuMismatch: boolean

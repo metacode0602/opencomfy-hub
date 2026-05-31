@@ -11,6 +11,8 @@ import {
   computePendingAccessDataCenterIds,
   GATEWAY_ONBOARDING_OPS,
   isHoldActive,
+  isComputeOverviewDevice,
+  isRetiredOverviewDevice,
   kpiFromDevices,
   LIFECYCLE_ORDER,
   NON_SCHEDULABLE_OPS,
@@ -737,21 +739,22 @@ export const supplierOverviewDataAccess = {
 
       const internalTestGpu = inventoryInternalTestGpu + otherDeptGpu
       const sellableGpu = Math.max(0, sellableGpuRaw - otherDeptGpu)
+      const onlineMetric = kpiFromDevices(
+        filteredDevices,
+        (d) => d.lifecycleStatus === '在线',
+        { computeDevicesOnly: true },
+      )
       const sellableRate =
-        kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线').gpuCount > 0
-          ? Math.round(
-              (sellableGpu /
-                kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线').gpuCount) *
-                100,
-            )
+        onlineMetric.gpuCount > 0
+          ? Math.round((sellableGpu / onlineMetric.gpuCount) * 100)
           : 0
 
       const kpis = {
         total: {
-          deviceCount: filteredDevices.length,
+          deviceCount: filteredDevices.filter((d) => !isRetiredOverviewDevice(d)).length,
           gpuCount: totalGpu,
         },
-        online: kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '在线'),
+        online: onlineMetric,
         pendingAccess: mergeKpiMetric(
           kpiFromDevices(filteredDevices, (d) => d.lifecycleStatus === '待接入'),
           pipelinePending,
@@ -767,7 +770,8 @@ export const supplierOverviewDataAccess = {
               d.lifecycleStatus === '在线' &&
               !d.inMaintenance &&
               !NON_SCHEDULABLE_OPS.includes(d.opsStatus as (typeof NON_SCHEDULABLE_OPS)[number]) &&
-              !isOtherDeptOpsStatus(d.opsStatus),
+              !isOtherDeptOpsStatus(d.opsStatus) &&
+              isComputeOverviewDevice(d),
           ).length,
           gpuCount: sellableGpu,
         },

@@ -42,6 +42,21 @@ export function isOtherDeptOpsStatus(opsStatus: string): boolean {
   return (OTHER_DEPT_OPS as readonly string[]).includes(normalizeDeviceOpsStatus(opsStatus))
 }
 
+/** 开放平台区域对比：台账不计入线下裸金属交付与内部占用设备 */
+export function isExcludedFromPlatformLedgerComparison(params: {
+  opsStatus: string
+  deviceId: string
+  internalHoldDeviceIds: ReadonlySet<string>
+}): boolean {
+  return (
+    OFFLINE_DELIVERY_OPS.includes(
+      params.opsStatus as (typeof OFFLINE_DELIVERY_OPS)[number],
+    ) ||
+    isOtherDeptOpsStatus(params.opsStatus) ||
+    params.internalHoldDeviceIds.has(params.deviceId)
+  )
+}
+
 export const DEFAULT_GPU_PER_DEVICE = 8
 
 /** §5.4.6 表底口径说明 */
@@ -297,13 +312,28 @@ export function isHoldActive(holdFrom: Date, holdUntil: Date | null, at = Date.n
   return true
 }
 
+export function isRetiredOverviewDevice(d: OverviewDeviceRow): boolean {
+  return d.lifecycleStatus === '退订' || d.opsStatus === '已退订'
+}
+
+export function isComputeOverviewDevice(d: OverviewDeviceRow): boolean {
+  const role =
+    d.cardTypeRole ??
+    resolveGpuCardTypeRole({ name: d.cardTypeName, code: d.cardTypeCode })
+  return role !== 'infra'
+}
+
 export function kpiFromDevices(
   devices: OverviewDeviceRow[],
   pred: (d: OverviewDeviceRow) => boolean,
+  options?: { computeDevicesOnly?: boolean },
 ): OverviewKpiMetric {
   const matched = devices.filter(pred)
+  const counted = options?.computeDevicesOnly
+    ? matched.filter(isComputeOverviewDevice)
+    : matched
   return {
-    deviceCount: matched.length,
+    deviceCount: counted.length,
     gpuCount: matched.reduce((sum, d) => sum + metricGpuCount(d), 0),
   }
 }

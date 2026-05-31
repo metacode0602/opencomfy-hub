@@ -116,7 +116,7 @@ export function mapSupplierRow(
 export function mapDataCenterRow(
   row: DataCenterRow,
   supplierName: string,
-  deviceCounts?: { total: number; online: number },
+  deviceCounts?: { total: number; online: number; cpu?: number },
 ): DataCenter {
   return {
     id: row.id,
@@ -131,6 +131,7 @@ export function mapDataCenterRow(
     managementNodeFee: toNumber(row.mgmtNodeFeeMonthly),
     totalDeviceCount: deviceCounts?.total ?? 0,
     onlineDeviceCount: deviceCounts?.online ?? 0,
+    cpuDeviceCount: deviceCounts?.cpu ?? 0,
     createdAt: toIsoDate(row.createdAt),
     updatedAt: toIsoDate(row.updatedAt),
     externalOnboardingId: row.externalOnboardingId ?? undefined,

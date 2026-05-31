@@ -248,7 +248,9 @@ function RegionCapacityTooltip({
           <span className="text-muted-foreground">GPU 卡数</span>
           <span className="tabular-nums font-medium">{row.totalGpuCount.toLocaleString()} 卡</span>
         </p>
-        <p className="mt-1 text-[10px] font-medium text-muted-foreground">接入台账</p>
+        <p className="mt-1 text-[10px] font-medium text-muted-foreground">
+          接入台账（不含线下交付、内部占用）
+        </p>
         <p className="flex justify-between gap-4">
           <span className="text-muted-foreground">设备总量（不含 CPU）</span>
           <span className="tabular-nums font-medium">
@@ -420,7 +422,7 @@ export function GpuRegionUsageChart() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">区域设备与卡总量</CardTitle>
           <CardDescription>
-            平台设备/GPU 总量与接入台账对比（不含 CPU）
+            平台设备/GPU 总量与接入台账对比（不含 CPU、线下交付、内部占用）
             {mismatchRegionCount > 0
               ? ` · ${mismatchRegionCount} 个区域数据不一致（轴标签 ⚠）`
               : ''}
