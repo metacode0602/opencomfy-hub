@@ -44,6 +44,8 @@ import type {
 } from '@/lib/types/supplier-overview-api'
 import { trpc } from '@/lib/trpc/client'
 import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
+import { GpuResourceTrendChart } from './gpu-resource-trend-chart'
+import { GpuRegionUsageChart } from './gpu-region-usage-chart'
 
 const statusColors: Record<string, string> = {
   online: 'bg-green-500/20 text-green-400 border-green-500/30',
@@ -161,6 +163,14 @@ export function SupplierOverviewContent() {
     error,
   } = trpc.supplier.overview.getStats.useQuery(filters)
 
+  const {
+    data: platformDataCount,
+    isLoading: platformDataCountLoading,
+    isError: platformDataCountError,
+  } = trpc.supplier.overview.getAdminStatisticsDataCount.useQuery({
+    region: filters.region,
+  })
+
   const kpis = normalizeOverviewKpis(stats?.kpis)
   const supplierRows = stats?.supplierRows ?? []
   const inventoryRows = stats?.inventoryRows ?? []
@@ -175,6 +185,7 @@ export function SupplierOverviewContent() {
   }
 
   const sellableRate = kpis.sellableRate
+  const platformTotal = platformDataCount ?? emptyMetric
 
   const suppliers = filterOptions?.suppliers ?? []
   const regions = filterOptions?.regions ?? []
@@ -259,7 +270,7 @@ export function SupplierOverviewContent() {
 
       <div
         className={cn(
-          'grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6',
+          'grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7',
           (isLoading || isError) && 'pointer-events-none opacity-50',
         )}
       >
@@ -272,13 +283,26 @@ export function SupplierOverviewContent() {
           accent="green"
           hint={`可售率 ${sellableRate}%`}
         />
+        <KpiCard
+          title="平台资源"
+          metric={platformTotal}
+          icon={Layers}
+          accent="primary"
+          hint={
+            platformDataCountLoading
+              ? '正在拉取平台统计…'
+              : platformDataCountError
+                ? '平台统计加载失败'
+                : '平台合计'
+          }
+        />
         <KpiCard title="不可调度" metric={kpis.nonSchedulable} icon={Server} accent="purple" />
         <KpiCard title="维修中" metric={kpis.inMaintenance} icon={Wrench} accent="yellow" />
         <KpiCard title="预留闲置" metric={kpis.reservedIdle} icon={FlaskConical} accent="primary" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-12">
-      <Card className="border-border/80 lg:col-span-4">
+        <Card className="border-border/80 lg:col-span-4">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
               <CardTitle className="text-base">活跃接入批次</CardTitle>
@@ -467,6 +491,11 @@ export function SupplierOverviewContent() {
         </Card>
       </div>
 
+
+
+      <GpuResourceTrendChart />
+
+      <GpuRegionUsageChart />
       <Card className="border-border/80">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
           <div>
@@ -558,11 +587,6 @@ export function SupplierOverviewContent() {
           </Table>
         </CardContent>
       </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-
-      </div>
-
       <Card className="border-border/60 bg-muted/10">
         <CardContent className="flex flex-wrap items-center gap-4 p-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
