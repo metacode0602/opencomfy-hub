@@ -547,18 +547,27 @@ export type PhysicalDeviceRoleStats = {
   maintenance: number
 }
 
+export type OpsStatusBreakdownItem = {
+  opsStatus: string
+  count: number
+}
+
+export type DatacenterPhysicalDeviceStats = {
+  total: number
+  online: number
+  maintenance: number
+  /** 算力卡型（compute）物理机台数 */
+  gpu: PhysicalDeviceRoleStats
+  /** infra / CPU 管控等基础设施台数 */
+  cpu: PhysicalDeviceRoleStats
+  /** 按运维设备状态（ops_status）汇总台数 */
+  opsStatusBreakdown: OpsStatusBreakdownItem[]
+}
+
 export interface DataCenterDetail {
   dataCenter: DataCenter
   gpuInventory: DataCenterDevice[]
-  physicalDeviceStats: {
-    total: number
-    online: number
-    maintenance: number
-    /** 算力卡型（compute）物理机台数 */
-    gpu: PhysicalDeviceRoleStats
-    /** infra / CPU 管控等基础设施台数 */
-    cpu: PhysicalDeviceRoleStats
-  }
+  physicalDeviceStats: DatacenterPhysicalDeviceStats
   inventoryStats: {
     cardTypeCount: number
     totalGpu: number
@@ -620,13 +629,7 @@ export interface DataCenterDevice {
 export interface GpuInventoryDetail {
   inventory: DataCenterDevice
   physicalDevices: PhysicalDevice[]
-  physicalDeviceStats: {
-    total: number
-    online: number
-    maintenance: number
-    gpu: PhysicalDeviceRoleStats
-    cpu: PhysicalDeviceRoleStats
-  }
+  physicalDeviceStats: DatacenterPhysicalDeviceStats
 }
 
 /** 设备合作类型（supplier_device.cooperation_type） */

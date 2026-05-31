@@ -42,8 +42,9 @@ import {
 } from '@workspace/ui/components/alert-dialog'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
-import type { DataCenterDevice } from '@/lib/data/types'
+import type { DataCenterDevice, OpsStatusBreakdownItem } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
+import { DEVICE_OPS_STATUS_SEEDS } from '@workspace/db/schema'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
@@ -58,6 +59,10 @@ const inventoryStatusColors: Record<DataCenterDevice['status'], string> = {
   offline: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   maintenance: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
 }
+
+const DEFAULT_OPS_STATUS_BREAKDOWN: OpsStatusBreakdownItem[] = DEVICE_OPS_STATUS_SEEDS.map(
+  (s) => ({ opsStatus: s.stateCode, count: 0 }),
+)
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -173,7 +178,10 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   }
 
   const { dataCenter, physicalDeviceStats, inventoryStats } = detail
-  const { gpu: gpuDeviceStats, cpu: cpuDeviceStats } = physicalDeviceStats
+  const gpuDeviceStats = physicalDeviceStats.gpu ?? { total: 0, online: 0, maintenance: 0 }
+  const cpuDeviceStats = physicalDeviceStats.cpu ?? { total: 0, online: 0, maintenance: 0 }
+  const opsStatusBreakdown =
+    physicalDeviceStats.opsStatusBreakdown ?? DEFAULT_OPS_STATUS_BREAKDOWN
   const nextStatus: 'online' | 'offline' | null =
     dataCenter.status === 'online'
       ? 'offline'
@@ -583,19 +591,44 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
                     {gpuDeviceStats.maintenance.toLocaleString()}
                   </p>
                 </div>
-                <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div className="rounded-lg bg-muted/30 p-4">
-                  <p className="text-sm text-muted-foreground">CPU设备台数</p>
+                  <p className="text-sm text-muted-foreground">CPU 设备台数</p>
                   <p className="mt-1 text-2xl font-semibold text-foreground">
                     {cpuDeviceStats.total.toLocaleString()}
                   </p>
                 </div>
               </div>
             </div>
+
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">按设备状态汇总</p>
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">设备状态</TableHead>
+                      <TableHead className="text-right text-muted-foreground">台数</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {opsStatusBreakdown.map((item) => (
+                      <TableRow key={item.opsStatus} className="border-border">
+                        <TableCell className="text-foreground">{item.opsStatus}</TableCell>
+                        <TableCell className="text-right font-medium tabular-nums text-foreground">
+                          {item.count.toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="border-border bg-muted/20 font-medium">
+                      <TableCell className="text-foreground">合计</TableCell>
+                      <TableCell className="text-right tabular-nums text-foreground">
+                        {physicalDeviceStats.total.toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
               </div>
             </div>
-
           </div>
           {physicalDeviceStats.total > 0 && (
             <div className="mt-4">

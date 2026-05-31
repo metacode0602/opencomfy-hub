@@ -381,7 +381,6 @@ export function GpuRegionUsageChart() {
                   tickFormatter={formatAxisTick}
                   width={44}
                 />
-                <Tooltip content={<RegionUsageTooltip />} />
                 <Legend
                   formatter={(value) =>
                     usageChartConfig[value as keyof typeof usageChartConfig]?.label ?? value
@@ -411,6 +410,10 @@ export function GpuRegionUsageChart() {
                   fill="var(--color-idleCount)"
                   maxBarSize={22}
                   radius={[2, 2, 0, 0]}
+                />
+                <Tooltip
+                  content={<RegionUsageTooltip />}
+                  wrapperStyle={{ zIndex: 20 }}
                 />
               </BarChart>
             </ChartContainer>
@@ -457,7 +460,6 @@ export function GpuRegionUsageChart() {
                   tickFormatter={formatAxisTick}
                   width={44}
                 />
-                <Tooltip content={<RegionCapacityTooltip />} />
                 <Legend
                   formatter={(value) =>
                     capacityChartConfig[value as keyof typeof capacityChartConfig]?.label ?? value
@@ -524,6 +526,10 @@ export function GpuRegionUsageChart() {
                     />
                   ))}
                 </Bar>
+                <Tooltip
+                  content={<RegionCapacityTooltip />}
+                  wrapperStyle={{ zIndex: 20 }}
+                />
               </BarChart>
             </ChartContainer>
           )}

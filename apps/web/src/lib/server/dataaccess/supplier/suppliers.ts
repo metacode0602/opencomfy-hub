@@ -42,8 +42,10 @@ import {
   userStaff,
 } from '@workspace/db/schema'
 import { inventoryGpuQuantity, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
+import { normalizeDeviceOpsStatus } from '@/lib/supplier/device-import-utils'
 import { and, count, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm'
-import type { PhysicalDeviceRoleStats } from '@/lib/data/types'
+import { DEVICE_OPS_STATUS_SEEDS } from '@workspace/db/schema'
+import type { OpsStatusBreakdownItem, PhysicalDeviceRoleStats } from '@/lib/data/types'
 
 function emptyPhysicalDeviceRoleStats(): PhysicalDeviceRoleStats {
   return { total: 0, online: 0, maintenance: 0 }
@@ -122,10 +124,40 @@ async function fetchInventoryCountsByDataCenter(params: {
   return aggregateInventoryCountsByDataCenter(invRows)
 }
 
+const KNOWN_DEVICE_OPS_STATUSES = DEVICE_OPS_STATUS_SEEDS.map((s) => s.stateCode)
+
+function buildOpsStatusBreakdown(
+  deviceRows: Array<{ opsStatus: string | null }>,
+): OpsStatusBreakdownItem[] {
+  const counts = new Map<string, number>()
+  for (const row of deviceRows) {
+    const normalized = normalizeDeviceOpsStatus(row.opsStatus ?? '预留闲置中')
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  }
+
+  const breakdown: OpsStatusBreakdownItem[] = KNOWN_DEVICE_OPS_STATUSES.map((opsStatus) => ({
+    opsStatus,
+    count: counts.get(opsStatus) ?? 0,
+  }))
+
+  let otherCount = 0
+  for (const [opsStatus, count] of counts) {
+    if (!KNOWN_DEVICE_OPS_STATUSES.includes(opsStatus)) {
+      otherCount += count
+    }
+  }
+  if (otherCount > 0) {
+    breakdown.push({ opsStatus: '其他', count: otherCount })
+  }
+
+  return breakdown
+}
+
 function buildPhysicalDeviceStats(
   deviceRows: Array<{
     lifecycleStatus: string | null
     inMaintenance: boolean | null
+    opsStatus: string | null
     cardTypeName: string
     cardTypeCode: string | null
     cardTypeDeviceRole: string | null
@@ -155,6 +187,7 @@ function buildPhysicalDeviceStats(
     ).length,
     gpu,
     cpu,
+    opsStatusBreakdown: buildOpsStatusBreakdown(deviceRows),
   }
 }
 
@@ -363,6 +396,7 @@ export const suppliersDataAccess = {
       .select({
         lifecycleStatus: supplierDevice.lifecycleStatus,
         inMaintenance: supplierDevice.inMaintenance,
+        opsStatus: supplierDevice.opsStatus,
         cardTypeName: gpuCardType.name,
         cardTypeCode: gpuCardType.code,
         cardTypeDeviceRole: gpuCardType.deviceRole,
@@ -489,6 +523,7 @@ export const suppliersDataAccess = {
       deviceRows.map(({ device, cardTypeName, cardTypeCode, cardTypeDeviceRole }) => ({
         lifecycleStatus: device.lifecycleStatus,
         inMaintenance: device.inMaintenance,
+        opsStatus: device.opsStatus,
         cardTypeName,
         cardTypeCode,
         cardTypeDeviceRole,
