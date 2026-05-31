@@ -15,7 +15,8 @@ import type {
   GpuResourceTrendRegionPoint,
   GpuResourceTrendResult,
 } from '@/lib/types/supplier-overview-api'
-import { dataCenter, gpuCardType, supplierGpuInventory } from '@workspace/db/schema'
+import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
+import { dataCenter, gpuCardType, supplierDevice, supplierGpuInventory } from '@workspace/db/schema'
 import { and, eq, isNotNull, ne, sql } from 'drizzle-orm'
 
 type ApiStatisticsRow = {
@@ -203,10 +204,81 @@ function buildTrendPoints(
     })
 }
 
+type CrmRegionStats = {
+  totalGpuCount: number
+  totalDeviceCount: number
+  onlineGpuCount: number
+  onlineDeviceCount: number
+}
+
+function emptyCrmRegionStats(): CrmRegionStats {
+  return {
+    totalGpuCount: 0,
+    totalDeviceCount: 0,
+    onlineGpuCount: 0,
+    onlineDeviceCount: 0,
+  }
+}
+
+async function loadCrmRegionStats(): Promise<Map<string, CrmRegionStats>> {
+  const deviceRows = await db
+    .select({
+      region: dataCenter.containerInstanceRegion,
+      lifecycleStatus: supplierDevice.lifecycleStatus,
+      gpuCount: supplierDevice.gpuCount,
+      cardTypeName: gpuCardType.name,
+      cardTypeCode: gpuCardType.code,
+      cardTypeDeviceRole: gpuCardType.deviceRole,
+    })
+    .from(supplierDevice)
+    .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+    .innerJoin(dataCenter, eq(supplierDevice.dataCenterId, dataCenter.id))
+    .where(
+      and(
+        eq(dataCenter.sourceDeleted, false),
+        isNotNull(dataCenter.containerInstanceRegion),
+        ne(dataCenter.containerInstanceRegion, ''),
+        ne(supplierDevice.lifecycleStatus, '退订'),
+      ),
+    )
+
+  const byRegion = new Map<string, CrmRegionStats>()
+
+  for (const row of deviceRows) {
+    const region = row.region?.trim()
+    if (!region) continue
+
+    const cardTypeRole = resolveGpuCardTypeRole({
+      name: row.cardTypeName,
+      code: row.cardTypeCode,
+      deviceRole: row.cardTypeDeviceRole,
+    })
+    const gpu = metricGpuCount({
+      gpuCount: row.gpuCount,
+      cardTypeName: row.cardTypeName,
+      cardTypeCode: row.cardTypeCode,
+      cardTypeRole,
+    })
+    const isComputeDevice = cardTypeRole !== 'infra'
+
+    const bucket = byRegion.get(region) ?? emptyCrmRegionStats()
+    bucket.totalGpuCount += gpu
+    if (isComputeDevice) bucket.totalDeviceCount += 1
+    if (row.lifecycleStatus === '在线') {
+      bucket.onlineGpuCount += gpu
+      if (isComputeDevice) bucket.onlineDeviceCount += 1
+    }
+    byRegion.set(region, bucket)
+  }
+
+  return byRegion
+}
+
 function buildRegionOverviewRows(
   usageRows: ApiGpuUsageRow[],
   sourceRows: ApiSourceStatsRow[],
   regionLabels: Map<string, string>,
+  crmByRegion: Map<string, CrmRegionStats>,
 ): GpuRegionUsageRow[] {
   const sourceByRegion = new Map<string, ApiSourceStatsRow>()
   for (const row of sourceRows) {
@@ -231,15 +303,34 @@ function buildRegionOverviewRows(
       const source = sourceByRegion.get(region)
       const elasticUsedCount = usage?.total_used_count ?? 0
       const spotUsedCount = usage?.total_spot_used_count ?? 0
-      const totalGpuCount = usage?.total_count ?? source?.total_gpu_count ?? 0
+      const platformGpuFromUsage = usage != null ? (usage.total_count ?? 0) : null
+      const platformGpuFromSource = source != null ? (source.total_gpu_count ?? 0) : null
+      const totalGpuCount = platformGpuFromUsage ?? platformGpuFromSource ?? 0
+      const totalDeviceCount = source?.total_device_count ?? 0
       const idleCount = Math.max(0, totalGpuCount - elasticUsedCount - spotUsedCount)
+
+      const crm = crmByRegion.get(region) ?? emptyCrmRegionStats()
+      const platformApiGpuMismatch =
+        platformGpuFromUsage != null &&
+        platformGpuFromSource != null &&
+        platformGpuFromUsage !== platformGpuFromSource
+      const platformLedgerMismatch =
+        totalDeviceCount !== crm.totalDeviceCount || totalGpuCount !== crm.totalGpuCount
 
       return {
         region,
         dataCenterName: regionLabels.get(region) ?? null,
         gpuName: source?.gpu_name ?? null,
         totalGpuCount,
-        totalDeviceCount: source?.total_device_count ?? 0,
+        totalDeviceCount,
+        platformGpuFromUsage,
+        platformGpuFromSource,
+        crmTotalGpuCount: crm.totalGpuCount,
+        crmTotalDeviceCount: crm.totalDeviceCount,
+        onlineGpuCount: crm.onlineGpuCount,
+        onlineDeviceCount: crm.onlineDeviceCount,
+        platformApiGpuMismatch,
+        platformLedgerMismatch,
         elasticUsedCount,
         spotUsedCount,
         idleCount,
@@ -282,22 +373,32 @@ export const gpuResourceStatisticsDataAccess = {
       supplierLog('gpuResourceRegionOverview', 'empty gpu names')
       return {
         rows: [],
-        meta: { regionCount: regions.length, gpuNameCount: 0 },
+        meta: { regionCount: regions.length, gpuNameCount: 0, mismatchRegionCount: 0 },
       }
     }
 
     try {
       const sourceParams = regions.length > 0 ? { regions: regions.join(',') } : {}
-      const [usageData, sourceData] = await Promise.all([
+      const [usageData, sourceData, crmByRegion] = await Promise.all([
         getGpuUsageAPI({ gpu_names: gpuNames.join(',') }) as Promise<ApiGpuUsageRow[]>,
         getSourceStatisticsByRegionAndGpuAPI(sourceParams) as Promise<ApiSourceStatsRow[]>,
+        loadCrmRegionStats(),
       ])
 
-      const rows = buildRegionOverviewRows(usageData ?? [], sourceData ?? [], regionLabels)
+      const rows = buildRegionOverviewRows(
+        usageData ?? [],
+        sourceData ?? [],
+        regionLabels,
+        crmByRegion,
+      )
+      const mismatchRegionCount = rows.filter(
+        (row) => row.platformApiGpuMismatch || row.platformLedgerMismatch,
+      ).length
 
       supplierLog('gpuResourceRegionOverview', 'getRegionOverview done', {
         regionCount: rows.length,
         gpuNameCount: gpuNames.length,
+        mismatchRegionCount,
       })
 
       return {
@@ -305,6 +406,7 @@ export const gpuResourceStatisticsDataAccess = {
         meta: {
           regionCount: rows.length,
           gpuNameCount: gpuNames.length,
+          mismatchRegionCount,
         },
       }
     } catch (e) {

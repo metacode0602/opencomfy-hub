@@ -1,17 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { Area, AreaChart, CartesianGrid, Legend, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
+import { ChartContainer, type ChartConfig } from '@workspace/ui/components/chart'
 import {
   Select,
   SelectContent,
@@ -67,6 +59,16 @@ const PRODUCT_LINE_TO_TREND_CATEGORY = new Map<string, TrendCategoryKey>(
 const TREND_CATEGORY_LABELS = Object.fromEntries(
   CONSUMPTION_TREND_CATEGORIES.map((c) => [c.key, c.label]),
 ) as Record<TrendCategoryKey, string>
+
+const consumptionChartConfig = Object.fromEntries(
+  CONSUMPTION_TREND_CATEGORIES.map((category, i) => [
+    category.key,
+    {
+      label: category.label,
+      color: LINE_COLORS[i % LINE_COLORS.length]!,
+    },
+  ]),
+) satisfies ChartConfig
 
 type CategoryBreakdown = {
   amount: number
@@ -312,19 +314,30 @@ export function ProjectConsumptionTrendChart({ projectId }: ProjectConsumptionTr
               该月暂无消费数据，请同步租户账单或选择其他月份
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartContainer
+              config={consumptionChartConfig}
+              className="aspect-auto h-full w-full min-w-0"
+              initialDimension={{ width: 800, height: 260 }}
+            >
             <AreaChart
               data={chartData}
               margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
             >
               <defs>
-                {trendCategories.map((category, i) => {
-                  const color = LINE_COLORS[i % LINE_COLORS.length]!
+                {trendCategories.map((category) => {
                   const id = safeGradientId(category)
                   return (
                     <linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={color} stopOpacity={0.35} />
-                      <stop offset="95%" stopColor={color} stopOpacity={0} />
+                      <stop
+                        offset="5%"
+                        stopColor={`var(--color-${category})`}
+                        stopOpacity={0.35}
+                      />
+                      <stop
+                        offset="95%"
+                        stopColor={`var(--color-${category})`}
+                        stopOpacity={0}
+                      />
                     </linearGradient>
                   )
                 })}
@@ -356,25 +369,22 @@ export function ProjectConsumptionTrendChart({ projectId }: ProjectConsumptionTr
                 formatter={(value) => trendCategoryLabel(String(value))}
                 wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
               />
-              {trendCategories.map((category, i) => {
-                const color = LINE_COLORS[i % LINE_COLORS.length]!
-                return (
+              {trendCategories.map((category) => (
                   <Area
                     key={category}
                     type="monotone"
                     dataKey={category}
                     name={category}
-                    stroke={color}
+                    stroke={`var(--color-${category})`}
                     strokeWidth={2}
                     fill={`url(#${safeGradientId(category)})`}
                     fillOpacity={1}
                     dot={false}
                     activeDot={{ r: 4 }}
                   />
-                )
-              })}
+              ))}
             </AreaChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           )}
         </div>
       </CardContent>

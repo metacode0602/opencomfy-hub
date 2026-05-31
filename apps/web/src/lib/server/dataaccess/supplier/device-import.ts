@@ -17,6 +17,7 @@ import {
   findDeviceByImportKeys,
   generateImportBatchCode,
   maskInventoryRowsForPreview,
+  type ChangelogBusinessBatchLinkInput,
 } from '@/lib/supplier/device-import-utils'
 import {
   buildGpuCardTypeIdByIpMap,
@@ -24,10 +25,7 @@ import {
   validateInventoryGpuCardTypes,
 } from '@/lib/supplier/gpu-card-type-import-match'
 import { refreshBatchProgress } from '@/lib/server/dataaccess/supplier/batch-progress'
-import {
-  resolveSingleBusinessBatchFromRows,
-  ticketRefsForBatch,
-} from '@/lib/server/dataaccess/supplier/changelog-business-batch-link'
+import { resolveBusinessBatchesByTicketNos } from '@/lib/server/dataaccess/supplier/changelog-business-batch-link'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
 import { ensurePricingRecordsForImportedCardTypes } from '@/lib/server/dataaccess/supplier/ensure-pricing-on-device-import'
@@ -726,37 +724,26 @@ export const deviceImportDataAccess = {
     const ticketNos = okRows
       .map((r) => r.ticket_no?.trim())
       .filter((t): t is string => Boolean(t))
-    const businessBatch = await resolveSingleBusinessBatchFromRows(
+    const resolvedBatches = await resolveBusinessBatchesByTicketNos(
       params.supplierId,
       ticketNos,
     )
 
-    if (businessBatch) {
-      if (businessBatch.dataCenterId !== dc.id) {
-        throw new Error(
-          `导入机房与业务批次 ${businessBatch.batchCode} 所在机房不一致，请选择该批次对应机房后重试`,
-        )
-      }
+    const businessBatchByTicket = new Map<string, ChangelogBusinessBatchLinkInput>()
+    for (const [ticket, batch] of resolvedBatches) {
+      businessBatchByTicket.set(ticket, {
+        businessBatchId: batch.id,
+        businessBatchCode: batch.batchCode,
+        businessDataCenterId: batch.dataCenterId,
+        batchKind: batch.batchKind,
+        retireActionType: batch.retireActionType,
+      })
     }
-
-    const unknownTicketNos =
-      businessBatch && ticketNos.length > 0
-        ? [...new Set(ticketNos)].filter((t) => !ticketRefsForBatch(businessBatch).has(t))
-        : []
 
     const supplierDevices = await listSupplierDevicesForImport(
       params.supplierId,
       dc.id,
     )
-    const businessBatchLink = businessBatch
-      ? {
-          businessBatchId: businessBatch.id,
-          businessDataCenterId: businessBatch.dataCenterId,
-          ticketRefs: ticketRefsForBatch(businessBatch),
-          batchKind: businessBatch.batchKind,
-          retireActionType: businessBatch.retireActionType,
-        }
-      : undefined
 
     const { logs, updatedDevices, deviceLinks, bindWarnings } =
       buildChangeLogsFromChangelogImport({
@@ -764,29 +751,40 @@ export const deviceImportDataAccess = {
         rows: params.rows,
         devices: supplierDevices,
         createId,
-        businessBatchLink,
+        businessBatchByTicket,
       })
 
     const notFoundCount = okRows.length - logs.length
     const warnings: string[] = [...bindWarnings]
-    if (ticketNos.length > 0 && !businessBatch) {
+    const uniqueTickets = [...new Set(ticketNos)]
+    const unmatchedTickets = uniqueTickets.filter((t) => !resolvedBatches.has(t))
+    if (unmatchedTickets.length > 0) {
       warnings.push(
-        '变更表工单号未匹配到上架/订单接入/下架/内部占用计划批次（请填写飞书工单号或批次号 ONB-/ORD-/RET-/IO-），仅写入变更审计',
-      )
-    }
-    if (unknownTicketNos.length > 0 && businessBatch) {
-      warnings.push(
-        `工单号 ${unknownTicketNos.join('、')} 与业务批次 ${businessBatch.batchCode} 不一致，对应行不会挂接设备`,
+        `工单号 ${unmatchedTickets.join('、')} 未匹配到上架/订单接入/下架/内部占用计划批次（请填写飞书工单号或批次号 ONB-/ORD-/RET-/IO-），对应行仅写入变更审计`,
       )
     }
     if (notFoundCount > 0) {
       warnings.push(`${notFoundCount} 行未匹配到本机房已有设备，已跳过`)
     }
-    if (businessBatch && ticketNos.length > 0 && deviceLinks.length === 0 && logs.length > 0) {
+
+    const linkedBatchIds = [...new Set(deviceLinks.map((l) => l.businessBatchId))]
+    const linkedBatchCodes = [
+      ...new Set(
+        [...resolvedBatches.values()]
+          .filter((b) => linkedBatchIds.includes(b.id))
+          .map((b) => b.batchCode),
+      ),
+    ]
+    if (linkedBatchIds.length > 0 && deviceLinks.length === 0 && logs.length > 0) {
       warnings.push(
-        `已识别业务批次 ${businessBatch.batchCode}，但无设备满足挂接条件（请检查工单号、机房或设备卡型）`,
+        `已识别业务批次 ${linkedBatchCodes.join('、')}，但无设备满足挂接条件（请检查工单号、机房或设备卡型）`,
       )
     }
+
+    const parentBatchId = linkedBatchIds.length === 1 ? linkedBatchIds[0]! : null
+    const hasActionMismatch = bindWarnings.some((w) => w.includes('不一致'))
+    const activityBatchLabel =
+      linkedBatchCodes.length > 0 ? linkedBatchCodes.join('、') : null
 
     try {
       await db.transaction(async (tx) => {
@@ -806,7 +804,7 @@ export const deviceImportDataAccess = {
           batchCode,
           batchStatus: '已完成',
           accessMethod: 'on_site',
-          parentBatchId: businessBatch?.id ?? null,
+          parentBatchId,
           importFileName: params.fileName,
           importStatus: 'committed',
           parsedRowCount: params.rows.length,
@@ -841,13 +839,12 @@ export const deviceImportDataAccess = {
           })
         }
 
-        if (businessBatch) {
-          for (const link of deviceLinks) {
-            await tx
-              .insert(onboardingBatchDeviceLink)
-              .values({
-                id: newId(),
-                businessOnboardingBatchId: businessBatch.id,
+        for (const link of deviceLinks) {
+          await tx
+            .insert(onboardingBatchDeviceLink)
+            .values({
+              id: newId(),
+              businessOnboardingBatchId: link.businessBatchId,
               supplierDeviceId: link.supplierDeviceId,
               linkKind: link.linkKind,
               sourceChangeLogId: link.sourceChangeLogId,
@@ -857,41 +854,39 @@ export const deviceImportDataAccess = {
               linkedAt: now,
               createdAt: now,
             })
-              .onConflictDoUpdate({
-                target: [
-                  onboardingBatchDeviceLink.businessOnboardingBatchId,
-                  onboardingBatchDeviceLink.supplierDeviceId,
-                ],
-                set: {
-                  linkKind: link.linkKind,
-                  sourceChangeLogId: link.sourceChangeLogId,
-                  sourceChangelogBatchId: batchId,
-                  linkedAt: now,
-                },
-              })
-          }
+            .onConflictDoUpdate({
+              target: [
+                onboardingBatchDeviceLink.businessOnboardingBatchId,
+                onboardingBatchDeviceLink.supplierDeviceId,
+              ],
+              set: {
+                linkKind: link.linkKind,
+                sourceChangeLogId: link.sourceChangeLogId,
+                sourceChangelogBatchId: batchId,
+                linkedAt: now,
+              },
+            })
         }
 
-        if (businessBatch && deviceLinks.length > 0) {
-          const hasActionMismatch = bindWarnings.some((w) => w.includes('不一致'))
+        for (const linkedBatchId of linkedBatchIds) {
           await refreshBatchProgress(
-            businessBatch.id,
+            linkedBatchId,
             tx,
             now,
             hasActionMismatch ? { has_action_mismatch: true } : undefined,
           )
         }
 
-        const activityDescription = businessBatch
-          ? `追加 ${logs.length} 条变更审计；${deviceLinks.length} 台设备已关联业务批次 ${businessBatch.batchCode}`
+        const activityDescription = activityBatchLabel
+          ? `追加 ${logs.length} 条变更审计；${deviceLinks.length} 条设备关联已写入业务批次 ${activityBatchLabel}`
           : `追加 ${logs.length} 条变更审计`
 
         await tx.insert(supplierActivity).values({
           id: newId(),
           supplierId: params.supplierId,
           type: 'device_change_imported',
-          title: businessBatch
-            ? `设备变更导入 ${batchCode}（关联 ${businessBatch.batchCode}）`
+          title: activityBatchLabel
+            ? `设备变更导入 ${batchCode}（关联 ${activityBatchLabel}）`
             : `设备变更导入 ${batchCode}`,
           description: activityDescription,
           authorStaffId: params.operatorStaffId ?? null,
@@ -899,9 +894,10 @@ export const deviceImportDataAccess = {
           authorRole: 'ops',
           refDomain: 'batch',
           refId: batchId,
-          metadata: businessBatch
+          metadata: linkedBatchIds.length > 0
             ? {
-                linked_business_batch_id: businessBatch.id,
+                linked_business_batch_ids: linkedBatchIds,
+                linked_business_batch_id: parentBatchId,
                 bound_device_count: deviceLinks.length,
               }
             : null,
@@ -917,7 +913,7 @@ export const deviceImportDataAccess = {
       batchId,
       logs: logs.length,
       deviceLinks: deviceLinks.length,
-      businessBatchId: businessBatch?.id,
+      linkedBatchIds,
     })
 
     return {
@@ -926,7 +922,7 @@ export const deviceImportDataAccess = {
       committedCount: logs.length,
       skippedCount: notFoundCount,
       warnings,
-      linkedBusinessBatchId: businessBatch?.id ?? null,
+      linkedBusinessBatchId: parentBatchId,
       boundDeviceCount: deviceLinks.length,
     }
   },

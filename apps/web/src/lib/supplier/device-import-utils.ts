@@ -62,13 +62,53 @@ export function validateDeviceChangelogRowFields(input: {
   return { parse_status, parse_message }
 }
 
+/** 合并必填项与字段校验（Excel 解析与预览页手工修正共用） */
+export function resolveDeviceChangelogRowValidation(input: {
+  occurred_at: string
+  change_action: string
+  raw_change_action?: string
+  external_device_id?: string
+  internal_ip?: string
+}): Pick<DeviceChangelogParsedRow, "parse_status" | "parse_message"> {
+  let parse_status: "ok" | "warning" | "error" = "ok"
+  let parse_message: string | null = null
+
+  if (!input.occurred_at?.trim()) {
+    parse_status = "error"
+    parse_message = "缺少操作时间"
+  }
+  if (!input.change_action?.trim() && !input.raw_change_action?.trim()) {
+    parse_status = "error"
+    parse_message = parse_message ? `${parse_message}；缺少变更动作` : "缺少变更动作"
+  }
+
+  const fieldValidation = validateDeviceChangelogRowFields({
+    change_action: input.change_action || input.raw_change_action || "",
+    raw_change_action: input.raw_change_action,
+    external_device_id: input.external_device_id,
+    internal_ip: input.internal_ip,
+  })
+
+  if (parse_status === "error") {
+    if (fieldValidation.parse_message) {
+      parse_message = parse_message
+        ? `${parse_message}；${fieldValidation.parse_message}`
+        : fieldValidation.parse_message
+    }
+    return { parse_status, parse_message }
+  }
+
+  return fieldValidation
+}
+
 export function applyDeviceChangelogRowValidation(
   row: DeviceChangelogParsedRow,
   changeAction: string,
   options?: { fromManualEdit?: boolean },
 ): DeviceChangelogParsedRow {
   const normalized = normalizeDeviceChangeAction(changeAction)
-  const validation = validateDeviceChangelogRowFields({
+  const validation = resolveDeviceChangelogRowValidation({
+    occurred_at: row.occurred_at,
     change_action: normalized,
     raw_change_action: options?.fromManualEdit ? normalized : changeAction,
     external_device_id: row.external_device_id,
@@ -332,13 +372,14 @@ export function buildDevicesFromInventoryImport(params: {
 
 export type ChangelogBusinessBatchLinkInput = {
   businessBatchId: string
+  businessBatchCode: string
   businessDataCenterId: string
-  ticketRefs: Set<string>
-  batchKind?: "online" | "order_access" | "device_retire" | "internal_occupancy"
-  retireActionType?: RetireActionType | null
+  batchKind: "online" | "order_access" | "device_retire" | "internal_occupancy"
+  retireActionType: RetireActionType | null
 }
 
 export type ChangelogDeviceLinkUpsert = {
+  businessBatchId: string
   supplierDeviceId: string
   gpuCardTypeId: string
   cooperationType: string
@@ -393,27 +434,22 @@ export function buildChangeLogsFromChangelogImport(params: {
   rows: DeviceChangelogParsedRow[]
   devices: SupplierDevice[]
   createId: (prefix: string) => string
-  businessBatchLink?: ChangelogBusinessBatchLinkInput
+  /** 工单号 → 业务批次（各行独立挂接） */
+  businessBatchByTicket?: Map<string, ChangelogBusinessBatchLinkInput>
 }): {
   logs: SupplierDeviceChangeLog[]
   updatedDevices: SupplierDevice[]
   deviceLinks: ChangelogDeviceLinkUpsert[]
   bindWarnings: string[]
 } {
-  const { batchId, rows, devices, createId, businessBatchLink } = params
+  const { batchId, rows, devices, createId, businessBatchByTicket } = params
   const now = new Date().toISOString()
   const logs: SupplierDeviceChangeLog[] = []
   const updatedDevices: SupplierDevice[] = []
   const deviceUpdates = new Map<string, SupplierDevice>()
   const deviceLinks: ChangelogDeviceLinkUpsert[] = []
-  const linkedDeviceIds = new Set<string>()
+  const linkedDeviceBatchKeys = new Set<string>()
   const bindWarnings: string[] = []
-
-  const ticketRefs = businessBatchLink?.ticketRefs
-  const businessDataCenterId = businessBatchLink?.businessDataCenterId
-  const businessBatchId = businessBatchLink?.businessBatchId
-  const businessBatchKind = businessBatchLink?.batchKind
-  const retireActionType = businessBatchLink?.retireActionType
 
   for (const row of rows.filter((r) => r.parse_status !== "error")) {
     const device = findDeviceByImportKeys(devices, row)
@@ -424,59 +460,61 @@ export function buildChangeLogsFromChangelogImport(params: {
     const prevLife = device.lifecycle_status
     const { newOps, newLife, statusChanged } = resolveOpsStatusFromChangelogRow(row, device)
 
-    const matchedTicket =
-      businessBatchLink &&
-      ticketRefs &&
-      rowTicketMatchesBatch(row.ticket_no, ticketRefs)
+    const ticketNo = row.ticket_no?.trim()
+    const rowBatch = ticketNo ? businessBatchByTicket?.get(ticketNo) : undefined
 
-    if (matchedTicket) {
+    if (rowBatch) {
       const deviceDc = device.data_center_id?.trim()
-      if (deviceDc && deviceDc !== businessDataCenterId) {
+      if (deviceDc && deviceDc !== rowBatch.businessDataCenterId) {
         bindWarnings.push(
-          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 所属机房与业务批次机房不一致，未写入批次关联`,
+          `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 所属机房与业务批次 ${rowBatch.businessBatchCode} 机房不一致，未写入批次关联`,
         )
       } else if (!device.gpu_card_type_id) {
         bindWarnings.push(
           `第 ${row.row_no} 行：设备 ${device.sn || device.internal_ip} 缺少卡型信息，未写入批次关联`,
         )
-      } else if (!linkedDeviceIds.has(device.id)) {
-        if (
-          businessBatchKind === "device_retire" &&
-          retireActionType &&
-          !isRetireActionCompatible(retireActionType, row.change_action)
-        ) {
-          bindWarnings.push(
-            `第 ${row.row_no} 行：变更动作「${row.change_action}」与下架计划类型「${expectedRetireActionLabel(retireActionType)}」不一致；已挂接批次，请复核`,
-          )
-        }
-        if (businessBatchKind === "internal_occupancy") {
-          const changeAction = normalizeDeviceChangeAction(row.change_action)
+      } else {
+        const linkKey = `${rowBatch.businessBatchId}:${device.id}`
+        if (!linkedDeviceBatchKeys.has(linkKey)) {
           if (
-            changeAction !== "交给其他部门使用" &&
-            !isOtherDeptOpsStatus(newOps) &&
-            !(row.change_content ?? "").includes("其他部门使用中")
+            rowBatch.batchKind === "device_retire" &&
+            rowBatch.retireActionType &&
+            !isRetireActionCompatible(rowBatch.retireActionType, row.change_action)
           ) {
             bindWarnings.push(
-              `第 ${row.row_no} 行：变更动作/内容与内部占用计划不一致，已挂接批次，请复核`,
+              `第 ${row.row_no} 行：变更动作「${row.change_action}」与下架计划 ${rowBatch.businessBatchCode} 类型「${expectedRetireActionLabel(rowBatch.retireActionType)}」不一致；已挂接批次，请复核`,
             )
           }
+          if (rowBatch.batchKind === "internal_occupancy") {
+            const changeAction = normalizeDeviceChangeAction(row.change_action)
+            if (
+              changeAction !== "交给其他部门使用" &&
+              !isOtherDeptOpsStatus(newOps) &&
+              !(row.change_content ?? "").includes("其他部门使用中")
+            ) {
+              bindWarnings.push(
+                `第 ${row.row_no} 行：变更动作/内容与内部占用计划 ${rowBatch.businessBatchCode} 不一致，已挂接批次，请复核`,
+              )
+            }
+          }
+          linkedDeviceBatchKeys.add(linkKey)
+          const linkKind =
+            rowBatch.batchKind === "device_retire"
+              ? resolveRetireLinkKind(row.change_action)
+              : rowBatch.batchKind === "internal_occupancy"
+                ? "internal_occupancy"
+                : newLife === "在线"
+                  ? "online"
+                  : "touched"
+          deviceLinks.push({
+            businessBatchId: rowBatch.businessBatchId,
+            supplierDeviceId: device.id,
+            gpuCardTypeId: device.gpu_card_type_id,
+            cooperationType: device.cooperation_type ?? "idle_time",
+            sourceChangeLogId: logId,
+            linkKind,
+          })
         }
-        linkedDeviceIds.add(device.id)
-        const linkKind =
-          businessBatchKind === "device_retire"
-            ? resolveRetireLinkKind(row.change_action)
-            : businessBatchKind === "internal_occupancy"
-              ? "internal_occupancy"
-              : newLife === "在线"
-                ? "online"
-                : "touched"
-        deviceLinks.push({
-          supplierDeviceId: device.id,
-          gpuCardTypeId: device.gpu_card_type_id,
-          cooperationType: device.cooperation_type ?? "idle_time",
-          sourceChangeLogId: logId,
-          linkKind,
-        })
       }
     }
 
@@ -484,7 +522,7 @@ export function buildChangeLogsFromChangelogImport(params: {
       id: logId,
       supplier_device_id: device.id,
       onboarding_batch_id: batchId,
-      business_onboarding_batch_id: matchedTicket ? businessBatchId ?? null : null,
+      business_onboarding_batch_id: rowBatch?.businessBatchId ?? null,
       internal_ip: row.internal_ip ?? null,
       occurred_at: row.occurred_at,
       change_action: row.change_action,
@@ -515,11 +553,6 @@ export function buildChangeLogsFromChangelogImport(params: {
     deviceLinks,
     bindWarnings,
   }
-}
-
-function rowTicketMatchesBatch(ticketNo: string | undefined | null, refs: Set<string>): boolean {
-  const t = ticketNo?.trim()
-  return Boolean(t && refs.has(t))
 }
 
 function KNOWN_OPS_FROM_CONTENT(s: string): boolean {

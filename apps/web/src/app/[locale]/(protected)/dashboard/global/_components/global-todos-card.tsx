@@ -19,7 +19,7 @@ import { useGlobalDashboard } from "../_lib/global-dashboard-context"
 
 export function GlobalTodosCard() {
   const { data, isLoading } = useGlobalDashboard()
-  const todos = data?.todos ?? []
+  const todos = (data?.todos ?? []).slice(0, 5)
 
   return (
     <Card className="border-border/80 lg:col-span-4">

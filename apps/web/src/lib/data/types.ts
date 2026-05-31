@@ -539,6 +539,12 @@ export type PlatformPricingDatacenterContext = {
   status: DataCenter['status']
 }
 
+export type PhysicalDeviceRoleStats = {
+  total: number
+  online: number
+  maintenance: number
+}
+
 export interface DataCenterDetail {
   dataCenter: DataCenter
   gpuInventory: DataCenterDevice[]
@@ -546,6 +552,10 @@ export interface DataCenterDetail {
     total: number
     online: number
     maintenance: number
+    /** 算力卡型（compute）物理机台数 */
+    gpu: PhysicalDeviceRoleStats
+    /** infra / CPU 管控等基础设施台数 */
+    cpu: PhysicalDeviceRoleStats
   }
   inventoryStats: {
     cardTypeCount: number
@@ -612,6 +622,8 @@ export interface GpuInventoryDetail {
     total: number
     online: number
     maintenance: number
+    gpu: PhysicalDeviceRoleStats
+    cpu: PhysicalDeviceRoleStats
   }
 }
 

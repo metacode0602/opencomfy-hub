@@ -41,7 +41,49 @@ import {
   supplierPricingRecord,
   userStaff,
 } from '@workspace/db/schema'
+import { resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { and, count, eq, gt, inArray, ne, sql, sum } from 'drizzle-orm'
+import type { PhysicalDeviceRoleStats } from '@/lib/data/types'
+
+function emptyPhysicalDeviceRoleStats(): PhysicalDeviceRoleStats {
+  return { total: 0, online: 0, maintenance: 0 }
+}
+
+function buildPhysicalDeviceStats(
+  deviceRows: Array<{
+    lifecycleStatus: string | null
+    inMaintenance: boolean | null
+    cardTypeName: string
+    cardTypeCode: string | null
+    cardTypeDeviceRole: string | null
+  }>,
+) {
+  const gpu = emptyPhysicalDeviceRoleStats()
+  const cpu = emptyPhysicalDeviceRoleStats()
+
+  for (const row of deviceRows) {
+    const isCpuDevice =
+      resolveGpuCardTypeRole({
+        name: row.cardTypeName,
+        code: row.cardTypeCode,
+        deviceRole: row.cardTypeDeviceRole,
+      }) === 'infra'
+    const bucket = isCpuDevice ? cpu : gpu
+    bucket.total += 1
+    if (row.lifecycleStatus === '在线') bucket.online += 1
+    if (row.lifecycleStatus === '维护中' || row.inMaintenance) bucket.maintenance += 1
+  }
+
+  return {
+    total: deviceRows.length,
+    online: deviceRows.filter((d) => d.lifecycleStatus === '在线').length,
+    maintenance: deviceRows.filter(
+      (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
+    ).length,
+    gpu,
+    cpu,
+  }
+}
 
 function newId() {
   return crypto.randomUUID()
@@ -288,17 +330,15 @@ export const suppliersDataAccess = {
       .select({
         lifecycleStatus: supplierDevice.lifecycleStatus,
         inMaintenance: supplierDevice.inMaintenance,
+        cardTypeName: gpuCardType.name,
+        cardTypeCode: gpuCardType.code,
+        cardTypeDeviceRole: gpuCardType.deviceRole,
       })
       .from(supplierDevice)
+      .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
       .where(eq(supplierDevice.dataCenterId, dataCenterId))
 
-    const physicalDeviceStats = {
-      total: deviceRows.length,
-      online: deviceRows.filter((d) => d.lifecycleStatus === '在线').length,
-      maintenance: deviceRows.filter(
-        (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
-      ).length,
-    }
+    const physicalDeviceStats = buildPhysicalDeviceStats(deviceRows)
 
     const inventoryStats = {
       cardTypeCount: gpuInventory.length,
@@ -384,6 +424,8 @@ export const suppliersDataAccess = {
         device: supplierDevice,
         supplierShortName: supplier.shortName,
         cardTypeName: gpuCardType.name,
+        cardTypeCode: gpuCardType.code,
+        cardTypeDeviceRole: gpuCardType.deviceRole,
         clusterName: computeNode.clusterName,
         nodeRole: computeNode.nodeRole,
         expectedService: computeNode.expectedService,
@@ -404,16 +446,20 @@ export const suppliersDataAccess = {
 
     const physicalDevices = mapPhysicalDeviceListRows(deviceRows)
 
+    const physicalDeviceStats = buildPhysicalDeviceStats(
+      deviceRows.map(({ device, cardTypeName, cardTypeCode, cardTypeDeviceRole }) => ({
+        lifecycleStatus: device.lifecycleStatus,
+        inMaintenance: device.inMaintenance,
+        cardTypeName,
+        cardTypeCode,
+        cardTypeDeviceRole,
+      })),
+    )
+
     return {
       inventory,
       physicalDevices,
-      physicalDeviceStats: {
-        total: physicalDevices.length,
-        online: physicalDevices.filter((d) => d.lifecycleStatus === '在线').length,
-        maintenance: physicalDevices.filter(
-          (d) => d.lifecycleStatus === '维护中' || d.inMaintenance,
-        ).length,
-      },
+      physicalDeviceStats,
     }
   },
 

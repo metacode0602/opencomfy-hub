@@ -188,6 +188,22 @@ export type GpuRegionUsageRow = {
   gpuName: string | null
   totalGpuCount: number
   totalDeviceCount: number
+  /** 开放平台 gpu_usage 返回的 GPU 总量（无数据时为 null） */
+  platformGpuFromUsage: number | null
+  /** 开放平台 source_statistics 返回的 GPU 总量（无数据时为 null） */
+  platformGpuFromSource: number | null
+  /** 接入台账：全量 GPU 卡数（不含 infra/CPU，不含退订） */
+  crmTotalGpuCount: number
+  /** 接入台账：全量算力设备台数（不含 infra/CPU，不含退订） */
+  crmTotalDeviceCount: number
+  /** 接入台账：lifecycle=在线 的 GPU 卡数（不含 infra/CPU） */
+  onlineGpuCount: number
+  /** 接入台账：lifecycle=在线 的算力设备台数（不含 infra/CPU） */
+  onlineDeviceCount: number
+  /** gpu_usage 与 source_statistics 的 GPU 总量不一致 */
+  platformApiGpuMismatch: boolean
+  /** 开放平台总量与接入台账总量（设备或 GPU）不一致 */
+  platformLedgerMismatch: boolean
   elasticUsedCount: number
   spotUsedCount: number
   idleCount: number
@@ -198,6 +214,7 @@ export type GpuRegionOverviewResult = {
   meta: {
     regionCount: number
     gpuNameCount: number
+    mismatchRegionCount: number
   }
 }
 

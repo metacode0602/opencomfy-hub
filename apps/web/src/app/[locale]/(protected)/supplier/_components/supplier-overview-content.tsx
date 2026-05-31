@@ -174,15 +174,8 @@ export function SupplierOverviewContent() {
   const kpis = normalizeOverviewKpis(stats?.kpis)
   const supplierRows = stats?.supplierRows ?? []
   const inventoryRows = stats?.inventoryRows ?? []
-  const funnel = stats?.lifecycleFunnel ?? []
-  const batchSummaries = stats?.batchSummaries ?? []
-  const faultSla = stats?.faultSla ?? {
-    openCount: 0,
-    p1Count: 0,
-    p2Count: 0,
-    avgResolutionHours: null,
-    recentOpen: [],
-  }
+  const batchSummaries = (stats?.batchSummaries ?? [])
+
 
   const sellableRate = kpis.sellableRate
   const platformTotal = platformDataCount ?? emptyMetric
@@ -190,7 +183,6 @@ export function SupplierOverviewContent() {
   const suppliers = filterOptions?.suppliers ?? []
   const regions = filterOptions?.regions ?? []
   const cardTypes = filterOptions?.cardTypes ?? []
-  const poolCodes = filterOptions?.poolCodes ?? []
 
   return (
     <div className="space-y-6">

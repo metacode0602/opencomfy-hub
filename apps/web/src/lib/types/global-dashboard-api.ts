@@ -97,6 +97,10 @@ export type GlobalClusterStatusRow = {
   dataCenterId: string
   name: string
   primaryCardType: string | null
+  /** 机房容器实例区域，对应平台 region */
+  containerInstanceRegion: string | null
+  totalDevices: number
+  onlineDevices: number
   totalGpu: number
   onlineGpu: number
   abnormalDevices: number
@@ -107,6 +111,12 @@ export type GlobalClusterStatusRow = {
   /** lifecycle = 下线中 */
   retiringGpu: number
   onlineRate: number
+  /** 平台侧该 region 设备台数（source_statistics） */
+  platformTotalDevices: number | null
+  /** 平台侧该 region GPU 总量（gpu_usage.total_count） */
+  platformTotalGpu: number | null
+  /** 平台侧该 region GPU 在用（弹性 + Spot） */
+  platformUsedGpu: number | null
   netOk: boolean
   owner: string | null
 }

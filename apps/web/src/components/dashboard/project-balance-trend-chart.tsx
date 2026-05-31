@@ -1,17 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
+import { ChartContainer, type ChartConfig } from '@workspace/ui/components/chart'
 import {
   Select,
   SelectContent,
@@ -145,6 +137,17 @@ export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChart
     [chartData, tenants],
   )
 
+  const chartConfig = useMemo(() => {
+    const config: ChartConfig = {}
+    tenants.forEach((tenant, i) => {
+      config[tenant.id] = {
+        label: tenant.name,
+        color: LINE_COLORS[i % LINE_COLORS.length]!,
+      }
+    })
+    return config
+  }, [tenants])
+
   const monthOptions = useMemo(() => {
     const months = new Set<string>()
     months.add(currentUsageMonth())
@@ -238,7 +241,11 @@ export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChart
               <p className="text-xs">请开启余额快照采集或在设置中手动采集</p>
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ChartContainer
+              config={chartConfig}
+              className="aspect-auto h-full w-full min-w-0"
+              initialDimension={{ width: 800, height: 260 }}
+            >
               <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
                 <XAxis
@@ -266,24 +273,21 @@ export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChart
                   formatter={(value) => tenants.find((t) => t.id === value)?.name ?? String(value)}
                   wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
                 />
-                {tenants.map((tenant, i) => {
-                  const color = LINE_COLORS[i % LINE_COLORS.length]!
-                  return (
-                    <Line
-                      key={tenant.id}
-                      type="monotone"
-                      dataKey={tenant.id}
-                      name={tenant.id}
-                      stroke={color}
-                      strokeWidth={2}
-                      dot={granularity === 'hour' ? { r: 2 } : false}
-                      activeDot={{ r: 4 }}
-                      connectNulls
-                    />
-                  )
-                })}
+                {tenants.map((tenant) => (
+                  <Line
+                    key={tenant.id}
+                    type="monotone"
+                    dataKey={tenant.id}
+                    name={tenant.id}
+                    stroke={`var(--color-${tenant.id})`}
+                    strokeWidth={2}
+                    dot={granularity === 'hour' ? { r: 2 } : false}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                  />
+                ))}
               </LineChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           )}
         </div>
         {tenants.length > 0 ? (

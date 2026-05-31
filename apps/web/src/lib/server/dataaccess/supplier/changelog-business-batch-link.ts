@@ -84,26 +84,18 @@ export async function resolveBusinessBatchByTicketNo(
   }
 }
 
-/**
- * 从变更表各行工单号解析唯一业务批次；若指向多个批次则抛错。
- */
-export async function resolveSingleBusinessBatchFromRows(
+/** 按工单号解析业务批次（同一导入可含多个不同批次） */
+export async function resolveBusinessBatchesByTicketNos(
   supplierId: string,
   ticketNos: Iterable<string>,
-): Promise<ResolvedBusinessBatch | null> {
+): Promise<Map<string, ResolvedBusinessBatch>> {
   const unique = [...new Set([...ticketNos].map((t) => t.trim()).filter(Boolean))]
-  if (unique.length === 0) return null
+  const resolved = new Map<string, ResolvedBusinessBatch>()
 
-  let resolved: ResolvedBusinessBatch | null = null
   for (const ticket of unique) {
     const batch = await resolveBusinessBatchByTicketNo(supplierId, ticket)
-    if (!batch) continue
-    if (resolved && resolved.id !== batch.id) {
-      throw new Error(
-        `变更表中工单号指向多个不同业务批次（${resolved.batchCode} 与 ${batch.batchCode}），请分批导入`,
-      )
-    }
-    resolved = batch
+    if (batch) resolved.set(ticket, batch)
   }
+
   return resolved
 }

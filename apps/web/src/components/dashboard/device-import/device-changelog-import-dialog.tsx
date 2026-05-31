@@ -155,11 +155,22 @@ export function DeviceChangelogImportDialog({
       const result = parseDeviceImportFile(buffer, file.name, 'device_changelog')
       if (!result.ok) {
         setParseError(result.error)
+        toast.error(result.error)
         return
       }
       setRows(result.rows)
       setWizardStep('preview')
-      toast.success(`解析 ${result.rows.length} 行`)
+      const errorCount = result.rows.filter((r) => r.parse_status === 'error').length
+      const warnCount = result.rows.filter((r) => r.parse_status === 'warning').length
+      if (errorCount > 0) {
+        toast.warning(
+          `解析 ${result.rows.length} 行，${errorCount} 行存在错误，请在下表查看并修正`,
+        )
+      } else if (warnCount > 0) {
+        toast.warning(`解析 ${result.rows.length} 行，${warnCount} 行存在警告，可在下表修正变更动作`)
+      } else {
+        toast.success(`解析 ${result.rows.length} 行`)
+      }
     } catch (e) {
       const message = getErrorMessage(e)
       setParseError(message)
@@ -171,6 +182,7 @@ export function DeviceChangelogImportDialog({
 
   const okCount = rows.filter((r) => r.parse_status === 'ok').length
   const warnCount = rows.filter((r) => r.parse_status === 'warning').length
+  const errorCount = rows.filter((r) => r.parse_status === 'error').length
   const committableCount = rows.filter((r) => r.parse_status !== 'error').length
 
   const changeActionOptionSet = useMemo(
@@ -349,9 +361,14 @@ export function DeviceChangelogImportDialog({
               <span className="text-muted-foreground">
                 文件 {fileName} · 共 {rows.length} 行 · 通过 {okCount}
                 {warnCount > 0 ? ` · 警告 ${warnCount}` : ''}
+                {errorCount > 0 ? ` · 错误 ${errorCount}` : ''}
               </span>
             </div>
-            {warnCount > 0 ? (
+            {errorCount > 0 ? (
+              <p className="shrink-0 text-xs text-destructive">
+                存在错误行时，请查看「校验」列说明；可在「变更动作」列修正后再入库（仅非错误行会入库）
+              </p>
+            ) : warnCount > 0 ? (
               <p className="shrink-0 text-xs text-yellow-600 dark:text-yellow-400">
                 存在警告行时，可在下方「变更动作」列直接修正后再入库
               </p>
@@ -372,10 +389,15 @@ export function DeviceChangelogImportDialog({
                 </TableHeader>
                 <TableBody>
                   {rows.map((r) => {
-                    const showActionEditor = r.parse_status === 'warning'
+                    const showActionEditor =
+                      r.parse_status !== 'ok' || !changeActionOptionSet.has(r.change_action)
                     const selectValue = changeActionOptionSet.has(r.change_action)
                       ? r.change_action
                       : undefined
+                    const actionEditorBorderClass =
+                      r.parse_status === 'error'
+                        ? 'border-destructive/50'
+                        : 'border-yellow-500/50'
                     return (
                     <TableRow key={r.row_no}>
                       <TableCell>{r.row_no}</TableCell>
@@ -389,7 +411,7 @@ export function DeviceChangelogImportDialog({
                             onValueChange={(value) => setRowChangeAction(r.row_no, value)}
                           >
                             <SelectTrigger
-                              className="h-8 border-yellow-500/50 text-xs"
+                              className={`h-8 text-xs ${actionEditorBorderClass}`}
                               title={r.parse_message ?? undefined}
                             >
                               <SelectValue

@@ -173,6 +173,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   }
 
   const { dataCenter, physicalDeviceStats, inventoryStats } = detail
+  const { gpu: gpuDeviceStats, cpu: cpuDeviceStats } = physicalDeviceStats
   const nextStatus: 'online' | 'offline' | null =
     dataCenter.status === 'online'
       ? 'offline'
@@ -557,28 +558,44 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
           <CardDescription>本机房下的物理机台账统计</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-lg bg-muted/30 p-4">
-              <p className="text-sm text-muted-foreground">物理机台数</p>
-              <p className="mt-1 text-2xl font-semibold text-foreground">
-                {physicalDeviceStats.total}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/30 p-4">
-              <p className="text-sm text-muted-foreground">在线台数</p>
-              <p className="mt-1 text-2xl font-semibold text-green-500">
-                {physicalDeviceStats.online}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/30 p-4">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Settings2 className="h-4 w-4" />
-                维护中台数
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">GPU 算力设备</p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                <div className="rounded-lg bg-muted/30 p-4">
+                  <p className="text-sm text-muted-foreground">设备台数</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">
+                    {gpuDeviceStats.total.toLocaleString()}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/30 p-4">
+                  <p className="text-sm text-muted-foreground">在线台数</p>
+                  <p className="mt-1 text-2xl font-semibold text-green-500">
+                    {gpuDeviceStats.online.toLocaleString()}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/30 p-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Settings2 className="h-4 w-4" />
+                    维护中台数
+                  </div>
+                  <p className="mt-1 text-2xl font-semibold text-yellow-500">
+                    {gpuDeviceStats.maintenance.toLocaleString()}
+                  </p>
+                </div>
+                <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="rounded-lg bg-muted/30 p-4">
+                  <p className="text-sm text-muted-foreground">CPU设备台数</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">
+                    {cpuDeviceStats.total.toLocaleString()}
+                  </p>
+                </div>
               </div>
-              <p className="mt-1 text-2xl font-semibold text-yellow-500">
-                {physicalDeviceStats.maintenance}
-              </p>
             </div>
+              </div>
+            </div>
+
           </div>
           {physicalDeviceStats.total > 0 && (
             <div className="mt-4">

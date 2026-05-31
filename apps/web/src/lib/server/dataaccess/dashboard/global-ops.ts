@@ -5,6 +5,8 @@ import {
   computeBatchProgressMetrics,
   resolveBatchDetailHref,
 } from '@/lib/server/aggregation/batch-summary-utils'
+import { gpuResourceStatisticsDataAccess } from '@/lib/server/dataaccess/supplier/gpu-resource-statistics'
+import { supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
@@ -253,14 +255,31 @@ export const globalOpsDataAccess = {
       .select({
         id: dataCenter.id,
         name: dataCenter.name,
+        containerInstanceRegion: dataCenter.containerInstanceRegion,
       })
       .from(dataCenter)
 
     const dcNameById = new Map(dcRows.map((r) => [r.id, r.name]))
+    const dcRegionById = new Map(
+      dcRows.map((r) => [r.id, r.containerInstanceRegion?.trim() || null]),
+    )
+
+    let platformByRegion = new Map<
+      string,
+      Awaited<ReturnType<typeof gpuResourceStatisticsDataAccess.getRegionOverview>>['rows'][number]
+    >()
+    try {
+      const platformOverview = await gpuResourceStatisticsDataAccess.getRegionOverview()
+      platformByRegion = new Map(platformOverview.rows.map((row) => [row.region, row]))
+    } catch (e) {
+      supplierError('globalOps', 'getRegionOverview for cluster comparison failed', e)
+    }
 
     type ClusterAgg = {
       dataCenterId: string
       name: string
+      totalDevices: number
+      onlineDevices: number
       totalGpu: number
       onlineGpu: number
       abnormalDevices: number
@@ -277,6 +296,8 @@ export const globalOpsDataAccess = {
       const row: ClusterAgg = {
         dataCenterId: dcId,
         name: dcNameById.get(dcId) ?? dcId,
+        totalDevices: 0,
+        onlineDevices: 0,
         totalGpu: 0,
         onlineGpu: 0,
         abnormalDevices: 0,
@@ -293,10 +314,14 @@ export const globalOpsDataAccess = {
       if (!d.dataCenterId) continue
       const row = ensureCluster(d.dataCenterId)
       const gpu = metricGpuCount(d)
+      row.totalDevices += 1
       row.totalGpu += gpu
       const ct = d.cardTypeName ?? '未知'
       row.cardTypeCounts.set(ct, (row.cardTypeCounts.get(ct) ?? 0) + gpu)
-      if (d.lifecycleStatus === '在线') row.onlineGpu += gpu
+      if (d.lifecycleStatus === '在线') {
+        row.onlineDevices += 1
+        row.onlineGpu += gpu
+      }
       if (d.lifecycleStatus === '待接入') row.pendingAccessGpu += gpu
       if (d.lifecycleStatus === '接入中') row.onboardingGpu += gpu
       if (d.lifecycleStatus === '下线中') row.retiringGpu += gpu
@@ -335,10 +360,20 @@ export const globalOpsDataAccess = {
         }
         const onlineRate =
           c.totalGpu > 0 ? Math.round((c.onlineGpu / c.totalGpu) * 100) : 0
+        const containerInstanceRegion = dcRegionById.get(c.dataCenterId) ?? null
+        const platform = containerInstanceRegion
+          ? platformByRegion.get(containerInstanceRegion)
+          : undefined
+        const platformUsedGpu = platform
+          ? platform.elasticUsedCount + platform.spotUsedCount
+          : null
         return {
           dataCenterId: c.dataCenterId,
           name: c.name,
           primaryCardType,
+          containerInstanceRegion,
+          totalDevices: c.totalDevices,
+          onlineDevices: c.onlineDevices,
           totalGpu: c.totalGpu,
           onlineGpu: c.onlineGpu,
           abnormalDevices: c.abnormalDevices,
@@ -346,6 +381,9 @@ export const globalOpsDataAccess = {
           onboardingGpu: c.onboardingGpu,
           retiringGpu: c.retiringGpu,
           onlineRate,
+          platformTotalDevices: platform?.totalDeviceCount ?? null,
+          platformTotalGpu: platform?.totalGpuCount ?? null,
+          platformUsedGpu,
           netOk: true,
           owner: null,
         }

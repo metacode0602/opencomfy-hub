@@ -19,6 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
+import { ListPagination } from '@/components/shared/list-pagination'
+import { useListPagination } from '@/hooks/use-list-pagination'
 import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
 import { LIFECYCLE_STATUS_COLORS } from '@/lib/supplier/onboarding-batch-utils'
@@ -48,9 +50,13 @@ export function OnboardingBatchProgressDevices({ batchId }: { batchId: string })
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
+  const devices = data?.devices ?? []
+
+  const pagination = useListPagination(devices)
+
   const linkedDeviceIds = useMemo(
-    () => data?.devices.filter((d) => d.linkedToBatch).map((d) => d.id) ?? [],
-    [data?.devices],
+    () => devices.filter((d) => d.linkedToBatch).map((d) => d.id),
+    [devices],
   )
 
   useEffect(() => {
@@ -119,7 +125,7 @@ export function OnboardingBatchProgressDevices({ batchId }: { batchId: string })
       </div>
 
       <div className="space-y-2">
-        {data.devices.map((device) => {
+        {pagination.items.map((device) => {
           const isOpen = expanded.has(device.id)
           const batchChangeCount = device.changeLogs.filter((l) => l.linkedToCurrentBatch).length
           return (
@@ -278,6 +284,16 @@ export function OnboardingBatchProgressDevices({ batchId }: { batchId: string })
           )
         })}
       </div>
+
+      {pagination.totalItems > 0 && (
+        <ListPagination
+          page={pagination.page}
+          totalPages={pagination.totalPages}
+          totalItems={pagination.totalItems}
+          pageSize={pagination.pageSize}
+          onPageChange={pagination.setPage}
+        />
+      )}
     </div>
   )
 }

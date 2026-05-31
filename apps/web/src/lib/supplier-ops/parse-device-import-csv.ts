@@ -7,7 +7,7 @@ import {
   mapDeviceCooperationType,
   normalizeDeviceChangeAction,
   normalizeDeviceOpsStatus,
-  validateDeviceChangelogRowFields,
+  resolveDeviceChangelogRowValidation,
 } from "@/lib/supplier/device-import-utils"
 import { DEVICE_OPS_STATUS_SEEDS } from "@workspace/db/schema"
 
@@ -208,7 +208,7 @@ export function parseDeviceChangelogTable(
     return { ok: false, error: "文件至少需要表头一行与一行数据" }
   }
   const headers = table[0]!
-  const iDeviceId = pickIndex(headers, ["设备id", "设备ID"])
+  const iDeviceId = pickIndex(headers, ["设备id", "设备ID", "记录ID", "记录id"])
   const iInternalIp = pickIndex(headers, ["内网ip", "内网IP", "ip地址", "IP地址"])
   const iOccurred = pickIndex(headers, ["操作时间", "occurred_at"])
   const iAction = pickIndex(headers, ["变更动作", "change_action"])
@@ -226,20 +226,20 @@ export function parseDeviceChangelogTable(
     const occurred_at = cell(cells, iOccurred)
     const rawChangeAction = cell(cells, iAction)
     const change_action = normalizeDeviceChangeAction(rawChangeAction)
-    if (!occurred_at && !change_action && !cell(cells, iDeviceId)) continue
-    if (!occurred_at || !change_action) {
-      return { ok: false, error: `第 ${li + 1} 行缺少操作时间或变更动作` }
-    }
-    const { parse_status, parse_message } = validateDeviceChangelogRowFields({
+    const external_device_id = cell(cells, iDeviceId) || undefined
+    const internal_ip = cell(cells, iInternalIp) || undefined
+    if (!occurred_at && !change_action && !external_device_id) continue
+    const { parse_status, parse_message } = resolveDeviceChangelogRowValidation({
+      occurred_at,
       change_action,
       raw_change_action: rawChangeAction,
-      external_device_id: cell(cells, iDeviceId) || undefined,
-      internal_ip: cell(cells, iInternalIp) || undefined,
+      external_device_id,
+      internal_ip,
     })
     rows.push({
       row_no: li + 1,
-      external_device_id: cell(cells, iDeviceId) || undefined,
-      internal_ip: cell(cells, iInternalIp) || undefined,
+      external_device_id,
+      internal_ip,
       occurred_at,
       change_action,
       change_content: cell(cells, iContent) || undefined,
