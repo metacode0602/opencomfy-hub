@@ -80,17 +80,13 @@ export function TestHoldsContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">内部占用</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             内部测试 GPU 占用台账，影响可售量计算
           </p>
         </div>
-        <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          登记占用
-        </Button>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

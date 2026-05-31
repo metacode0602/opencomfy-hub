@@ -115,13 +115,16 @@ export type GlobalDiscrepancyStatus = 'ok' | 'pending' | 'abnormal'
 
 export type GlobalDiscrepancyRow = {
   batchId: string
+  batchKind: string
   supplierName: string
   dataCenterName: string
   plannedDeviceCount: number
   touchedDeviceCount: number
   onlineDeviceCount: number
+  progressDoneLabel: string
   gapLabel: string
   status: GlobalDiscrepancyStatus
+  detailHref: string
 }
 
 export type GlobalAlertLevel = '严重' | '警告' | '提示'

@@ -55,6 +55,7 @@ import {
 } from '@/lib/supplier/onboarding-batch-utils'
 import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { OnboardingBatchWizardDialog } from './onboarding-batch-wizard-dialog'
+import { InternalOccupancyBatchCreateDialog } from './internal-occupancy-batch-create-dialog'
 import type { OnboardingBatchRow } from '@workspace/db/schema'
 
 const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
@@ -102,7 +103,7 @@ function countParsedErrors(parsedRowsJson: unknown): number {
 
 function parseBatchKindFilter(raw: string | null, fixed?: PlannedBatchKind): PlannedBatchKindFilter {
   if (fixed) return fixed
-  if (raw === 'online' || raw === 'order_access' || raw === 'device_retire' || raw === 'all') {
+  if (raw === 'online' || raw === 'order_access' || raw === 'device_retire' || raw === 'internal_occupancy' || raw === 'all') {
     return raw
   }
   return 'all'
@@ -120,6 +121,9 @@ function extraInfoLabel(batch: OnboardingBatchRow): string {
   if (batch.batchKind === 'order_access') return batch.orderNo ?? '—'
   if (batch.batchKind === 'device_retire' && batch.retireReason) {
     return getDeviceRetireReasonLabel(batch.retireReason as DeviceRetireReason)
+  }
+  if (batch.batchKind === 'internal_occupancy') {
+    return batch.remark?.trim() || '内部占用计划'
   }
   return '—'
 }
@@ -148,6 +152,7 @@ export function PlannedBatchesContent({
   const [importFilter, setImportFilter] = useState('all')
   const [supplierFilter, setSupplierFilter] = useState('all')
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [internalOccupancyOpen, setInternalOccupancyOpen] = useState(false)
   const [wizardRouteKind, setWizardRouteKind] = useState<
     Extract<SupplierOpsBatchKind, 'online-tasks' | 'order-access'>
   >('online-tasks')
@@ -254,9 +259,16 @@ export function PlannedBatchesContent({
         <div>
           <h1 className="text-2xl font-semibold text-foreground">计划批次</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            集中查看上架、订单接入与下架计划；进度由批次进度事件时间轴驱动。内部占用请从侧栏「内部占用」进入。
+            集中查看上架、订单接入、下架与内部占用计划；进度由批次进度事件时间轴驱动。
           </p>
         </div>
+        {!fixedBatchKind && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setInternalOccupancyOpen(true)}>
+              新建内部占用
+            </Button>
+          </div>
+        )}
       </div>
 
       {stats.mode === 'all' && (
@@ -367,6 +379,7 @@ export function PlannedBatchesContent({
                 <SelectItem value="online">设备上架</SelectItem>
                 <SelectItem value="order_access">订单接入</SelectItem>
                 <SelectItem value="device_retire">设备下架</SelectItem>
+                <SelectItem value="internal_occupancy">内部占用</SelectItem>
               </SelectContent>
             </Select>
           )}
@@ -378,6 +391,7 @@ export function PlannedBatchesContent({
               <SelectItem value="all">全部状态</SelectItem>
               <SelectItem value="待开始">待开始</SelectItem>
               <SelectItem value="接入中">接入中</SelectItem>
+              <SelectItem value="占用中">占用中</SelectItem>
               <SelectItem value="下架中">下架中</SelectItem>
               <SelectItem value="已完成">已完成</SelectItem>
               <SelectItem value="已取消">已取消</SelectItem>
@@ -457,6 +471,7 @@ export function PlannedBatchesContent({
                 const kind = b.batchKind as PlannedBatchKind
                 const badge = BATCH_KIND_BADGE[kind]
                 const isOnboard = kind === 'online' || kind === 'order_access'
+                const isInternalOccupancy = kind === 'internal_occupancy'
                 return (
                   <TableRow key={b.id}>
                     <TableCell className="font-medium">
@@ -496,6 +511,9 @@ export function PlannedBatchesContent({
                         <span className="text-xs text-muted-foreground block">
                           已上线 {b.onlineDeviceCount}
                         </span>
+                      )}
+                      {isInternalOccupancy && (
+                        <span className="text-xs text-muted-foreground block">已挂接</span>
                       )}
                       {kind === 'device_retire' && (b.retiredDeviceCount ?? 0) > 0 && (
                         <span className="text-xs text-muted-foreground block">
@@ -552,6 +570,10 @@ export function PlannedBatchesContent({
         </Table>
       </Card>
 
+      <InternalOccupancyBatchCreateDialog
+        open={internalOccupancyOpen}
+        onOpenChange={setInternalOccupancyOpen}
+      />
       <OnboardingBatchWizardDialog
         routeKind={wizardRouteKind}
         open={wizardOpen}

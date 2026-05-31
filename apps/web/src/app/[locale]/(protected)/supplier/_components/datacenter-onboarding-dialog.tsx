@@ -10,7 +10,7 @@ import {
   DialogTitle,
 } from '@workspace/ui/components/dialog'
 import { OnboardingBatchWizardDialog } from './onboarding-batch-wizard-dialog'
-import { TestHoldCreateDialog } from './test-hold-create-dialog'
+import { InternalOccupancyBatchCreateDialog } from './internal-occupancy-batch-create-dialog'
 
 type OnboardingMode = 'picker' | 'online' | 'order' | 'hold'
 
@@ -35,7 +35,7 @@ const MODE_OPTIONS: Array<{
   {
     mode: 'hold',
     title: '内部占用',
-    description: '登记内部测试 GPU 占用，影响可售量计算',
+    description: '创建内部占用计划批次，登记使用者/部门/结算与时间窗，并写入占用台账',
     icon: FlaskConical,
   },
 ]
@@ -134,7 +134,7 @@ export function DatacenterOnboardingDialog({
         onSuccess={handleSuccess}
       />
 
-      <TestHoldCreateDialog
+      <InternalOccupancyBatchCreateDialog
         open={open && mode === 'hold'}
         onOpenChange={(next) => {
           if (!next) closeSubDialog()

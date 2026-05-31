@@ -9,7 +9,7 @@ export type ResolvedBusinessBatch = {
   workOrderNo: string | null
   dataCenterId: string
   plannedDeviceCount: number
-  batchKind: 'online' | 'order_access' | 'device_retire'
+  batchKind: 'online' | 'order_access' | 'device_retire' | 'internal_occupancy'
   retireActionType: RetireActionType | null
   retirePlanMode: RetirePlanMode | null
 }
@@ -56,7 +56,12 @@ export async function resolveBusinessBatchByTicketNo(
     .where(
       and(
         eq(onboardingBatch.supplierId, supplierId),
-        inArray(onboardingBatch.batchKind, ['online', 'order_access', 'device_retire']),
+        inArray(onboardingBatch.batchKind, [
+          'online',
+          'order_access',
+          'device_retire',
+          'internal_occupancy',
+        ]),
         or(
           eq(onboardingBatch.workOrderNo, normalized),
           eq(onboardingBatch.batchCode, normalized),

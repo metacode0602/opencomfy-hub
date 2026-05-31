@@ -2,7 +2,7 @@ import type { OnboardingBatchKind, OnboardingParsedRow, SupplierDevice } from "@
 import type { OnboardingBatchRow } from "@workspace/db/schema"
 import type { SupplierOpsInventoryRow } from "@/lib/types/supplier-ops-batch"
 
-export type PlannedBatchKind = "online" | "order_access" | "device_retire"
+export type PlannedBatchKind = "online" | "order_access" | "device_retire" | "internal_occupancy"
 
 export type PlannedBatchKindFilter = PlannedBatchKind | "all"
 
@@ -10,6 +10,7 @@ export const PLANNED_BATCH_KINDS: PlannedBatchKind[] = [
   "online",
   "order_access",
   "device_retire",
+  "internal_occupancy",
 ]
 
 export function batchKindFromRoute(kind: "online-tasks" | "order-access"): OnboardingBatchKind {
@@ -40,6 +41,10 @@ export const BATCH_KIND_BADGE: Record<
     label: "设备下架",
     className: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   },
+  internal_occupancy: {
+    label: "内部占用",
+    className: "bg-teal-500/20 text-teal-400 border-teal-500/30",
+  },
 }
 
 export function onboardingBatchDetailPath(
@@ -48,6 +53,7 @@ export function onboardingBatchDetailPath(
   const kind = batch.batchKind
   if (kind === "device_retire") return `/supplier/offline-tasks/${batch.id}`
   if (kind === "order_access") return `/supplier/order-access/${batch.id}`
+  if (kind === "internal_occupancy") return `/supplier/online-tasks/${batch.id}`
   return `/supplier/online-tasks/${batch.id}`
 }
 
@@ -63,7 +69,9 @@ export function generateBatchCode(batchKind: OnboardingBatchKind): string {
           ? "DCHG"
           : batchKind === "device_retire"
             ? "RET"
-            : "BAT"
+            : batchKind === "internal_occupancy"
+              ? "IO"
+              : "BAT"
   const d = new Date()
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -103,6 +111,8 @@ export const IMPORT_STATUS_LABELS: Record<string, string> = {
 export const BATCH_STATUS_LABELS: Record<string, string> = {
   待开始: "待开始",
   接入中: "接入中",
+  占用中: "占用中",
+  下架中: "下架中",
   已完成: "已完成",
   已取消: "已取消",
 }

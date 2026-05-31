@@ -18,12 +18,12 @@ import {
   INTERNAL_TEST_HOLD_SETTLEMENT_LABELS,
 } from '@/lib/types/supplier-domain'
 import { supplierLog } from '@/lib/server/dataaccess/supplier/logger'
+import { assertSupplierWorkOrderUnique } from '@/lib/server/dataaccess/supplier/work-order-uniqueness'
 import {
   dataCenter,
   gpuCardType,
   internalTestHold,
   internalTestHoldDeviceLink,
-  onboardingBatch,
   supplier,
   supplierActivity,
   supplierDevice,
@@ -62,31 +62,7 @@ async function loadDataCenter(supplierId: string, dataCenterId: string) {
 }
 
 async function assertWorkOrderUnique(supplierId: string, workOrderNo: string) {
-  const normalized = workOrderNo.trim()
-
-  const [batchDup] = await db
-    .select({ id: onboardingBatch.id })
-    .from(onboardingBatch)
-    .where(and(eq(onboardingBatch.supplierId, supplierId), eq(onboardingBatch.workOrderNo, normalized)))
-    .limit(1)
-  if (batchDup) {
-    throw new Error(`该供应商下飞书工单号「${normalized}」已存在，请更换后重试`)
-  }
-
-  const [holdDup] = await db
-    .select({ id: internalTestHold.id })
-    .from(internalTestHold)
-    .where(
-      and(
-        eq(internalTestHold.supplierId, supplierId),
-        eq(internalTestHold.workOrderNo, normalized),
-        isNotNull(internalTestHold.supplierId),
-      ),
-    )
-    .limit(1)
-  if (holdDup) {
-    throw new Error(`该供应商下飞书工单号「${normalized}」已存在，请更换后重试`)
-  }
+  await assertSupplierWorkOrderUnique(supplierId, workOrderNo)
 }
 
 async function resolveGpuCardType(gpuCardTypeId: string) {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FileSpreadsheet, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
@@ -33,6 +33,8 @@ import { parseDeviceImportFile } from '@/lib/supplier-ops/parse-device-import-fi
 import {
   DEVICE_IMPORT_ACCEPT,
   DEVICE_IMPORT_MAX_BYTES,
+  DEVICE_CHANGE_ACTION_OPTIONS,
+  applyDeviceChangelogRowValidation,
   isDeviceImportFileName,
 } from '@/lib/supplier/device-import-utils'
 import type { DeviceChangelogParsedRow } from '@/lib/types/supplier-domain'
@@ -169,6 +171,22 @@ export function DeviceChangelogImportDialog({
 
   const okCount = rows.filter((r) => r.parse_status === 'ok').length
   const warnCount = rows.filter((r) => r.parse_status === 'warning').length
+  const committableCount = rows.filter((r) => r.parse_status !== 'error').length
+
+  const changeActionOptionSet = useMemo(
+    () => new Set<string>(DEVICE_CHANGE_ACTION_OPTIONS),
+    [],
+  )
+
+  const setRowChangeAction = (rowNo: number, changeAction: string) => {
+    setRows((prev) =>
+      prev.map((row) =>
+        row.row_no === rowNo
+          ? applyDeviceChangelogRowValidation(row, changeAction, { fromManualEdit: true })
+          : row,
+      ),
+    )
+  }
   const selectedDataCenterId = dataCenterId || defaultDataCenterId
   const canUpload =
     Boolean(selectedDataCenterId) || (lockDataCenter && Boolean(defaultDataCenterId))
@@ -178,8 +196,8 @@ export function DeviceChangelogImportDialog({
       toast.error('请选择机房')
       return
     }
-    if (okCount === 0) {
-      toast.error('没有通过校验的行可入库')
+    if (committableCount === 0) {
+      toast.error('没有可入库的有效行')
       return
     }
 
@@ -333,6 +351,11 @@ export function DeviceChangelogImportDialog({
                 {warnCount > 0 ? ` · 警告 ${warnCount}` : ''}
               </span>
             </div>
+            {warnCount > 0 ? (
+              <p className="shrink-0 text-xs text-yellow-600 dark:text-yellow-400">
+                存在警告行时，可在下方「变更动作」列直接修正后再入库
+              </p>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-auto rounded-md border">
               <Table>
                 <TableHeader>
@@ -348,13 +371,47 @@ export function DeviceChangelogImportDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => (
+                  {rows.map((r) => {
+                    const showActionEditor = r.parse_status === 'warning'
+                    const selectValue = changeActionOptionSet.has(r.change_action)
+                      ? r.change_action
+                      : undefined
+                    return (
                     <TableRow key={r.row_no}>
                       <TableCell>{r.row_no}</TableCell>
                       <TableCell className="font-mono text-xs">{r.external_device_id ?? '—'}</TableCell>
                       <TableCell className="font-mono text-xs">{r.internal_ip ?? '—'}</TableCell>
                       <TableCell className="text-xs">{r.occurred_at}</TableCell>
-                      <TableCell>{r.change_action}</TableCell>
+                      <TableCell className="min-w-[200px]">
+                        {showActionEditor ? (
+                          <Select
+                            value={selectValue}
+                            onValueChange={(value) => setRowChangeAction(r.row_no, value)}
+                          >
+                            <SelectTrigger
+                              className="h-8 border-yellow-500/50 text-xs"
+                              title={r.parse_message ?? undefined}
+                            >
+                              <SelectValue
+                                placeholder={
+                                  changeActionOptionSet.has(r.change_action)
+                                    ? '选择变更动作'
+                                    : r.change_action
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent position="popper" className="z-[110] max-h-64">
+                              {DEVICE_CHANGE_ACTION_OPTIONS.map((action) => (
+                                <SelectItem key={action} value={action}>
+                                  {action}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          r.change_action
+                        )}
+                      </TableCell>
                       <TableCell
                         className="max-w-[200px] truncate text-xs"
                         title={r.change_content ?? undefined}
@@ -363,10 +420,21 @@ export function DeviceChangelogImportDialog({
                       </TableCell>
                       <TableCell>{r.ticket_no ?? '—'}</TableCell>
                       <TableCell>
-                        <ParseStatusBadge status={r.parse_status} />
+                        <div className="space-y-1">
+                          <ParseStatusBadge status={r.parse_status} />
+                          {r.parse_message ? (
+                            <p
+                              className="max-w-[160px] text-[11px] leading-snug text-muted-foreground"
+                              title={r.parse_message}
+                            >
+                              {r.parse_message}
+                            </p>
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>
@@ -384,7 +452,7 @@ export function DeviceChangelogImportDialog({
                 重新上传
               </Button>
               <Button
-                disabled={commitMutation.isPending || okCount === 0}
+                disabled={commitMutation.isPending || committableCount === 0}
                 onClick={() => void commitImport()}
               >
                 {commitMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}

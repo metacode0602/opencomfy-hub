@@ -7,6 +7,7 @@ import type {
   OnboardingBatchCreateResult,
   OnboardingBatchDatacenterDevicesResult,
   OnboardingBatchDetailPage,
+  OnboardingBatchLinkedHold,
   OnboardingBatchListItem,
   OnboardingBatchParseListResult,
   OnboardingBatchPlannedLineJson,
@@ -16,6 +17,10 @@ import type {
   DeviceCooperationType,
   OnboardingParsedRow,
 } from '@/lib/types/supplier-domain'
+import {
+  INTERNAL_TEST_HOLD_DEPARTMENT_LABELS,
+  INTERNAL_TEST_HOLD_SETTLEMENT_LABELS,
+} from '@/lib/types/supplier-domain'
 import { ONBOARDING_LIFECYCLES } from '@/lib/server/dataaccess/supplier/batch-progress'
 import {
   appendBatchProgressEvent,
@@ -24,6 +29,7 @@ import {
 import { DEFAULT_GPU_PER_DEVICE, TERMINAL_BATCH_STATUSES } from '@/lib/server/aggregation/overview-aggregation'
 import { isInfraCardType, resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
+import { assertSupplierWorkOrderUnique } from '@/lib/server/dataaccess/supplier/work-order-uniqueness'
 import {
   accessConditionSheet,
   gpuCardType,
@@ -37,11 +43,12 @@ import {
   supplierContract,
   supplierDevice,
   supplierDeviceChangeLog,
+  internalTestHold,
   dataCenter,
   userStaff,
 } from '@workspace/db/schema'
 import { TRPCError } from '@trpc/server'
-import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, ilike, inArray, isNotNull, or, sql } from 'drizzle-orm'
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
@@ -177,6 +184,57 @@ function sumPlannedQuantity(lines: OnboardingBatchPlannedLineJson[]) {
   return lines.reduce((sum, line) => sum + line.plannedQuantity, 0)
 }
 
+function parseHoldWindow(input: { holdFrom: string; holdUntil?: string | null }) {
+  const holdFrom = new Date(input.holdFrom)
+  if (Number.isNaN(holdFrom.getTime())) {
+    throw new Error('开始时间无效')
+  }
+  const holdUntil = input.holdUntil ? new Date(input.holdUntil) : null
+  if (holdUntil && Number.isNaN(holdUntil.getTime())) {
+    throw new Error('结束时间无效')
+  }
+  return { holdFrom, holdUntil }
+}
+
+async function insertInternalOccupancyHolds(
+  tx: DbTx,
+  params: {
+    batchId: string
+    supplierId: string
+    dataCenterId: string
+    workOrderNo: string
+    userName: string
+    department: NonNullable<OnboardingBatchCreateInput['department']>
+    settlementMode: NonNullable<OnboardingBatchCreateInput['settlementMode']>
+    holdFrom: Date
+    holdUntil: Date | null
+    remark?: string | null
+    plannedLines: OnboardingBatchPlannedLineJson[]
+    now: Date
+  },
+) {
+  for (const line of params.plannedLines) {
+    await tx.insert(internalTestHold).values({
+      id: newId(),
+      supplierId: params.supplierId,
+      dataCenterId: params.dataCenterId,
+      workOrderNo: params.workOrderNo,
+      userName: params.userName.trim(),
+      department: params.department,
+      settlementMode: params.settlementMode,
+      gpuCardTypeId: line.gpuCardTypeId,
+      unitCount: line.plannedQuantity,
+      remark: params.remark?.trim() || null,
+      scope: `planned:${line.plannedQuantity}`,
+      holdFrom: params.holdFrom,
+      holdUntil: params.holdUntil,
+      onboardingBatchId: params.batchId,
+      createdAt: params.now,
+      updatedAt: params.now,
+    })
+  }
+}
+
 async function resolveDefaultGpuPerDevice(
   supplierId: string,
   dataCenterId: string,
@@ -285,7 +343,7 @@ function parseEffectiveAt(
 async function loadBatchForAdjust(batchId: string) {
   const [row] = await db.select().from(onboardingBatch).where(eq(onboardingBatch.id, batchId)).limit(1)
   if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: '批次不存在' })
-  if (!['online', 'order_access', 'device_retire'].includes(row.batchKind)) {
+  if (!['online', 'order_access', 'device_retire', 'internal_occupancy'].includes(row.batchKind)) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: '该批次类型不支持调整计划' })
   }
   return row
@@ -343,7 +401,9 @@ async function applyBatchLifecycleStatus(input: {
       ? '下架'
       : batch.batchKind === 'order_access'
         ? '订单接入'
-        : '上架'
+        : batch.batchKind === 'internal_occupancy'
+          ? '内部占用'
+          : '上架'
 
   await db.transaction(async (tx) => {
     await tx
@@ -353,6 +413,13 @@ async function applyBatchLifecycleStatus(input: {
         updatedAt: now,
       })
       .where(eq(onboardingBatch.id, batch.id))
+
+    if (!isComplete && batch.batchKind === 'internal_occupancy') {
+      await tx
+        .update(internalTestHold)
+        .set({ onboardingBatchId: null, updatedAt: now })
+        .where(eq(internalTestHold.onboardingBatchId, batch.id))
+    }
 
     await appendBatchProgressEvent({
       batchId: batch.id,
@@ -434,7 +501,7 @@ async function getBusinessBatch(batchId: string, batchKind?: 'online' | 'order_a
     .where(and(...conditions))
     .limit(1)
   if (!row) throw new Error('批次不存在')
-  if (row.batchKind !== 'online' && row.batchKind !== 'order_access') {
+  if (!['online', 'order_access', 'internal_occupancy'].includes(row.batchKind)) {
     throw new Error('该批次类型不支持此操作')
   }
   return row
@@ -466,22 +533,37 @@ export const onboardingBatchDataAccess = {
     const workOrderNo = input.workOrderNo.trim()
     const now = new Date()
 
-    const [dupWo] = await db
-      .select({ id: onboardingBatch.id })
-      .from(onboardingBatch)
-      .where(
-        and(
-          eq(onboardingBatch.supplierId, input.supplierId),
-          eq(onboardingBatch.workOrderNo, workOrderNo),
-        ),
-      )
-      .limit(1)
-    if (dupWo) {
-      throw new Error(`该供应商下飞书工单号「${workOrderNo}」已存在，请更换后重试`)
+    await assertSupplierWorkOrderUnique(input.supplierId, workOrderNo)
+
+    const isInternalOccupancy = input.batchKind === 'internal_occupancy'
+    let holdWindow: { holdFrom: Date; holdUntil: Date | null } | null = null
+    if (isInternalOccupancy) {
+      if (
+        !input.userName?.trim() ||
+        !input.department ||
+        !input.settlementMode ||
+        !input.holdFrom?.trim()
+      ) {
+        throw new Error('内部占用计划需填写使用者、使用部门、结算方式与开始时间')
+      }
+      holdWindow = parseHoldWindow({
+        holdFrom: input.holdFrom,
+        holdUntil: input.holdUntil,
+      })
     }
-    const listUploadMode = input.uploadList ? 'simplified_csv' : 'none'
-    const importStatus = input.uploadList ? 'draft' : 'none'
-    const batchStatus = input.uploadList ? '待开始' : '接入中'
+    const listUploadMode = input.uploadList && !isInternalOccupancy ? 'simplified_csv' : 'none'
+    const importStatus = input.uploadList && !isInternalOccupancy ? 'draft' : 'none'
+    const batchStatus = isInternalOccupancy
+      ? '待开始'
+      : input.uploadList
+        ? '待开始'
+        : '接入中'
+    const kindLabel =
+      input.batchKind === 'online'
+        ? '设备上架'
+        : input.batchKind === 'order_access'
+          ? '订单接入'
+          : '内部占用计划'
 
     try {
       await db.transaction(async (tx) => {
@@ -523,12 +605,31 @@ export const onboardingBatchDataAccess = {
 
         await replacePlanLines(tx, batchId, plannedLines)
 
+        if (isInternalOccupancy && holdWindow) {
+          await insertInternalOccupancyHolds(tx, {
+            batchId,
+            supplierId: input.supplierId,
+            dataCenterId: dc.id,
+            workOrderNo,
+            userName: input.userName!.trim(),
+            department: input.department!,
+            settlementMode: input.settlementMode!,
+            holdFrom: holdWindow.holdFrom,
+            holdUntil: holdWindow.holdUntil,
+            remark: input.remark,
+            plannedLines,
+            now,
+          })
+        }
+
         await tx.insert(supplierActivity).values({
           id: newId(),
           supplierId: input.supplierId,
           type: 'batch_started',
-          title: `${input.batchKind === 'online' ? '设备上架' : '订单接入'}批次 ${batchCode} 已创建`,
-          description: `计划上架 ${plannedDeviceCount} 台；工单号 ${workOrderNo}`,
+          title: `${kindLabel}批次 ${batchCode} 已创建`,
+          description: isInternalOccupancy
+            ? `计划占用 ${plannedDeviceCount} 台；工单号 ${workOrderNo} · ${input.userName!.trim()} · ${INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[input.department!]} · ${INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[input.settlementMode!]}`
+            : `计划上架 ${plannedDeviceCount} 台；工单号 ${workOrderNo}`,
           authorStaffId: input.operatorStaffId ?? null,
           authorName: '运营',
           authorRole: 'ops',
@@ -557,7 +658,7 @@ export const onboardingBatchDataAccess = {
   },
 
   async list(params: {
-    batchKind: 'all' | 'online' | 'order_access' | 'device_retire'
+    batchKind: 'all' | 'online' | 'order_access' | 'device_retire' | 'internal_occupancy'
     search?: string
     batchStatus?: string
     importStatus?: string
@@ -566,7 +667,7 @@ export const onboardingBatchDataAccess = {
   }): Promise<{ items: OnboardingBatchListItem[]; total: number }> {
     const kinds =
       params.batchKind === 'all'
-        ? (['online', 'order_access', 'device_retire'] as const)
+        ? (['online', 'order_access', 'device_retire', 'internal_occupancy'] as const)
         : ([params.batchKind] as const)
 
     const conditions = [inArray(onboardingBatch.batchKind, [...kinds])]
@@ -776,12 +877,49 @@ export const onboardingBatchDataAccess = {
         .where(eq(onboardingTask.onboardingBatchId, batchId))
         .orderBy(desc(onboardingTask.createdAt))
 
+      let linkedHolds: OnboardingBatchLinkedHold[] = []
+      if (batchRow.batchKind === 'internal_occupancy') {
+        const holdRows = await db
+          .select({
+            id: internalTestHold.id,
+            userName: internalTestHold.userName,
+            department: internalTestHold.department,
+            settlementMode: internalTestHold.settlementMode,
+            gpuCardTypeId: internalTestHold.gpuCardTypeId,
+            cardTypeCode: gpuCardType.code,
+            cardTypeName: gpuCardType.name,
+            unitCount: internalTestHold.unitCount,
+            holdFrom: internalTestHold.holdFrom,
+            holdUntil: internalTestHold.holdUntil,
+            remark: internalTestHold.remark,
+          })
+          .from(internalTestHold)
+          .innerJoin(gpuCardType, eq(internalTestHold.gpuCardTypeId, gpuCardType.id))
+          .where(eq(internalTestHold.onboardingBatchId, batchId))
+          .orderBy(desc(internalTestHold.createdAt))
+
+        linkedHolds = holdRows.map((row) => ({
+          id: row.id,
+          userName: row.userName ?? '—',
+          department: (row.department ?? 'test') as OnboardingBatchLinkedHold['department'],
+          settlementMode: (row.settlementMode ?? 'whole_rent') as OnboardingBatchLinkedHold['settlementMode'],
+          gpuCardTypeId: row.gpuCardTypeId!,
+          cardTypeCode: row.cardTypeCode ?? '—',
+          cardTypeName: row.cardTypeName ?? row.cardTypeCode ?? '—',
+          unitCount: row.unitCount ?? 0,
+          holdFrom: row.holdFrom,
+          holdUntil: row.holdUntil,
+          remark: row.remark,
+        }))
+      }
+
       const detail: OnboardingBatchDetailPage = {
         batch: batchRow,
         contractNo,
         progress,
         devices: deviceRows,
         tasks: taskRows,
+        linkedHolds,
       }
 
       supplierLog('onboarding-batch', 'getDetailPage done', {

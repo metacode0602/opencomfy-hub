@@ -9,7 +9,7 @@ export const onboardingBatchPlanLineSchema = z.object({
 
 export const onboardingBatchCreateSchema = z
   .object({
-    batchKind: z.enum(['online', 'order_access']),
+    batchKind: z.enum(['online', 'order_access', 'internal_occupancy']),
     supplierId: z.string().min(1),
     dataCenterId: z.string().min(1),
     contractId: z.string().optional(),
@@ -21,6 +21,11 @@ export const onboardingBatchCreateSchema = z
     uploadList: z.boolean().default(false),
     workOrderNo: z.string().trim().min(1, '请填写飞书审批工单号'),
     planLines: z.array(onboardingBatchPlanLineSchema).min(1, '请至少添加一行上架计划'),
+    userName: z.string().trim().min(1, '请填写使用者').optional(),
+    department: z.enum(['product', 'rd', 'test']).optional(),
+    settlementMode: z.enum(['whole_rent', 'idle_time']).optional(),
+    holdFrom: z.string().min(1).optional(),
+    holdUntil: z.string().optional().nullable(),
   })
   .superRefine((data, ctx) => {
     const seen = new Set<string>()
@@ -59,6 +64,43 @@ export const onboardingBatchCreateSchema = z
         })
       }
     }
+    if (data.batchKind === 'internal_occupancy' && data.uploadList) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '内部占用计划不支持上传设备清单',
+        path: ['uploadList'],
+      })
+    }
+    if (data.batchKind === 'internal_occupancy') {
+      if (!data.userName?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '请填写使用者',
+          path: ['userName'],
+        })
+      }
+      if (!data.department) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '请选择使用部门',
+          path: ['department'],
+        })
+      }
+      if (!data.settlementMode) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '请选择结算方式',
+          path: ['settlementMode'],
+        })
+      }
+      if (!data.holdFrom?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: '请填写开始时间',
+          path: ['holdFrom'],
+        })
+      }
+    }
   })
 
 export const plannedBatchKindFilterSchema = z.enum([
@@ -66,6 +108,7 @@ export const plannedBatchKindFilterSchema = z.enum([
   'online',
   'order_access',
   'device_retire',
+  'internal_occupancy',
 ])
 
 export const onboardingBatchListSchema = z.object({

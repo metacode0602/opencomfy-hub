@@ -771,7 +771,7 @@ export const deviceImportDataAccess = {
     const warnings: string[] = [...bindWarnings]
     if (ticketNos.length > 0 && !businessBatch) {
       warnings.push(
-        '变更表工单号未匹配到上架/订单接入/下架批次（请填写飞书工单号或批次号 ONB-/ORD-/RET-），仅写入变更审计',
+        '变更表工单号未匹配到上架/订单接入/下架/内部占用计划批次（请填写飞书工单号或批次号 ONB-/ORD-/RET-/IO-），仅写入变更审计',
       )
     }
     if (unknownTicketNos.length > 0 && businessBatch) {

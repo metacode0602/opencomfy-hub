@@ -3,11 +3,13 @@ import type {
   DeviceInventoryParsedRow,
   FaultRecordsParsedRow,
 } from "@/lib/types/supplier-domain"
-import { mapDeviceCooperationType, normalizeDeviceChangeAction, normalizeDeviceOpsStatus } from "@/lib/supplier/device-import-utils"
 import {
-  DEVICE_CHANGE_ACTION_SEEDS,
-  DEVICE_OPS_STATUS_SEEDS,
-} from "@workspace/db/schema"
+  mapDeviceCooperationType,
+  normalizeDeviceChangeAction,
+  normalizeDeviceOpsStatus,
+  validateDeviceChangelogRowFields,
+} from "@/lib/supplier/device-import-utils"
+import { DEVICE_OPS_STATUS_SEEDS } from "@workspace/db/schema"
 
 export type ParseCsvResult<T> = { ok: true; rows: T[] } | { ok: false; error: string }
 
@@ -91,8 +93,6 @@ function parseBool(v: string): boolean {
 }
 
 const KNOWN_OPS_STATUS = new Set(DEVICE_OPS_STATUS_SEEDS.map((s) => s.stateCode))
-
-const KNOWN_CHANGE_ACTIONS = new Set(DEVICE_CHANGE_ACTION_SEEDS.map((s) => s.stateCode))
 
 /** 设备主数据表：supplier_device + compute_node */
 export function parseDeviceInventoryTable(
@@ -230,22 +230,12 @@ export function parseDeviceChangelogTable(
     if (!occurred_at || !change_action) {
       return { ok: false, error: `第 ${li + 1} 行缺少操作时间或变更动作` }
     }
-    let parse_status: "ok" | "warning" | "error" = "ok"
-    let parse_message: string | null = null
-    if (rawChangeAction !== change_action) {
-      parse_status = "warning"
-      parse_message = `变更动作「${rawChangeAction}」已归一化为「${change_action}」`
-    }
-    if (!KNOWN_CHANGE_ACTIONS.has(change_action)) {
-      parse_status = "warning"
-      parse_message = parse_message
-        ? `${parse_message}；未知变更动作，入库时将仍记录原文`
-        : `未知变更动作「${change_action}」，入库时将仍记录原文`
-    }
-    if (!cell(cells, iDeviceId) && !cell(cells, iInternalIp)) {
-      parse_status = "warning"
-      parse_message = "缺少设备ID与内网IP，commit 时可能无法匹配设备"
-    }
+    const { parse_status, parse_message } = validateDeviceChangelogRowFields({
+      change_action,
+      raw_change_action: rawChangeAction,
+      external_device_id: cell(cells, iDeviceId) || undefined,
+      internal_ip: cell(cells, iInternalIp) || undefined,
+    })
     rows.push({
       row_no: li + 1,
       external_device_id: cell(cells, iDeviceId) || undefined,

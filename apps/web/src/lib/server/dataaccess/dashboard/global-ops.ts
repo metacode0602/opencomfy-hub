@@ -1,5 +1,10 @@
 import { db } from '@/lib/db'
 import { normalizeCardKey } from '@/lib/server/aggregation/overview-aggregation'
+import {
+  batchTodoTitle,
+  computeBatchProgressMetrics,
+  resolveBatchDetailHref,
+} from '@/lib/server/aggregation/batch-summary-utils'
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type {
@@ -349,18 +354,33 @@ export const globalOpsDataAccess = {
       .slice(0, 8)
 
     const discrepancies: GlobalDiscrepancyRow[] = stats.batchSummaries.map((b) => {
-      const gap = Math.max(0, b.plannedDeviceCount - b.onlineDeviceCount)
+      const metrics = computeBatchProgressMetrics({
+        batchKind: b.batchKind,
+        plannedDeviceCount: b.plannedDeviceCount,
+        touchedDeviceCount: b.touchedDeviceCount,
+        onlineDeviceCount: b.onlineDeviceCount,
+        retiredDeviceCount: b.retiredDeviceCount ?? 0,
+      })
+      const gap = b.progressGap ?? metrics.progressGap
+      const gapDoneLabel = b.gapDoneLabel ?? metrics.gapDoneLabel
+      const progressDoneCount = b.progressDoneCount ?? metrics.progressDoneCount
+      const progressDoneLabel = b.progressDoneLabel ?? metrics.progressDoneLabel
       const plannedAt = b.plannedReadyAt ? new Date(b.plannedReadyAt) : null
       const status = discrepancyStatus(gap, plannedAt, now.getTime())
+      const detailHref =
+        b.detailHref ?? resolveBatchDetailHref({ id: b.id, batchKind: b.batchKind })
       return {
         batchId: b.id,
+        batchKind: b.batchKind,
         supplierName: b.supplierName,
         dataCenterName: b.dataCenterName,
         plannedDeviceCount: b.plannedDeviceCount,
         touchedDeviceCount: b.touchedDeviceCount,
-        onlineDeviceCount: b.onlineDeviceCount,
-        gapLabel: gap > 0 ? `计划 − 在线 = ${gap}` : '一致',
+        onlineDeviceCount: progressDoneCount,
+        progressDoneLabel,
+        gapLabel: gap > 0 ? `计划 − ${gapDoneLabel} = ${gap}` : '一致',
         status,
+        detailHref,
       }
     })
 
@@ -380,7 +400,14 @@ export const globalOpsDataAccess = {
     const todos: GlobalTodoRow[] = []
 
     for (const b of stats.batchSummaries) {
-      const gap = Math.max(0, b.plannedDeviceCount - b.onlineDeviceCount)
+      const metrics = computeBatchProgressMetrics({
+        batchKind: b.batchKind,
+        plannedDeviceCount: b.plannedDeviceCount,
+        touchedDeviceCount: b.touchedDeviceCount,
+        onlineDeviceCount: b.onlineDeviceCount,
+        retiredDeviceCount: b.retiredDeviceCount ?? 0,
+      })
+      const gap = b.progressGap ?? metrics.progressGap
       if (gap <= 0) continue
       const plannedAt = b.plannedReadyAt ? new Date(b.plannedReadyAt) : null
       const msToDue = plannedAt ? plannedAt.getTime() - now.getTime() : null
@@ -388,14 +415,16 @@ export const globalOpsDataAccess = {
         plannedAt != null &&
         (plannedAt.getTime() < now.getTime() || (msToDue != null && msToDue < 24 * 60 * 60 * 1000))
       if (!urgent) continue
+      const detailHref =
+        b.detailHref ?? resolveBatchDetailHref({ id: b.id, batchKind: b.batchKind })
       todos.push({
         id: `batch-${b.id}`,
-        title: `接入缺口 · ${b.supplierName} / ${b.dataCenterName}`,
+        title: batchTodoTitle(b.batchKind, b.supplierName, b.dataCenterName),
         priority: 'P2',
         assignee: null,
         due: relativeDueLabel(plannedAt, now.getTime()),
         overdue: plannedAt != null && plannedAt.getTime() < now.getTime(),
-        href: `/supplier/online-tasks/${b.id}`,
+        href: detailHref,
       })
     }
 
@@ -419,7 +448,7 @@ export const globalOpsDataAccess = {
         assignee: null,
         due: '需立即核对',
         overdue: true,
-        href: `/supplier/online-tasks/${d.batchId}`,
+        href: d.detailHref || `/supplier/online-tasks/${d.batchId}`,
       })
     }
 

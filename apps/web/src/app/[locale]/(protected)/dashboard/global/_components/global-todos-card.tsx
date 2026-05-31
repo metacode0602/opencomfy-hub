@@ -51,8 +51,8 @@ export function GlobalTodosCard() {
                   </div>
                 </div>
               </div>
-              <Button size="sm" className="shrink-0" asChild>
-                <Link href={t.href}>去处理</Link>
+              <Button size="sm" className="shrink-0" asChild disabled={!t.href}>
+                <Link href={t.href || "/supplier/overview"}>去处理</Link>
               </Button>
             </div>
           ))

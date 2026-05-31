@@ -941,6 +941,10 @@ export const internalTestHold = pgTable(
     scope: varchar("scope", { length: 255 }).notNull().default("planned"),
     holdFrom: timestamp("hold_from", { withTimezone: true }).notNull(),
     holdUntil: timestamp("hold_until", { withTimezone: true }),
+    /** 关联 internal_occupancy 计划批次；独立登记时为 NULL */
+    onboardingBatchId: text("onboarding_batch_id").references(() => onboardingBatch.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -950,6 +954,7 @@ export const internalTestHold = pgTable(
     index("internal_test_hold_supplier_id_idx").on(table.supplierId),
     index("internal_test_hold_data_center_id_idx").on(table.dataCenterId),
     index("internal_test_hold_work_order_no_idx").on(table.workOrderNo),
+    index("internal_test_hold_onboarding_batch_id_idx").on(table.onboardingBatchId),
   ],
 )
 

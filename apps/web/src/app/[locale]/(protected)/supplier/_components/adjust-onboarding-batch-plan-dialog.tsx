@@ -196,7 +196,13 @@ export function AdjustOnboardingBatchPlanDialog({
   }
 
   const title =
-    batchKind === 'device_retire' ? '调整下架计划' : batchKind === 'order_access' ? '调整订单接入计划' : '调整上架计划'
+    batchKind === 'device_retire'
+      ? '调整下架计划'
+      : batchKind === 'order_access'
+        ? '调整订单接入计划'
+        : batchKind === 'internal_occupancy'
+          ? '调整内部占用计划'
+          : '调整上架计划'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

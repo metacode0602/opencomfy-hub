@@ -1,4 +1,8 @@
 import type { DeviceCooperationType, OnboardingParsedRow } from '@/lib/types/supplier-domain'
+import type {
+  InternalTestHoldDepartment,
+  InternalTestHoldSettlement,
+} from '@/lib/types/supplier-domain'
 import type { OnboardingBatchRow } from '@workspace/db/schema'
 
 /** `planned_lines_json` 存储结构，字段与 `onboarding_batch_plan_line` 表一致 */
@@ -10,7 +14,7 @@ export type OnboardingBatchPlannedLineJson = {
 }
 
 export type OnboardingBatchCreateInput = {
-  batchKind: 'online' | 'order_access'
+  batchKind: 'online' | 'order_access' | 'internal_occupancy'
   supplierId: string
   dataCenterId: string
   contractId?: string
@@ -29,6 +33,12 @@ export type OnboardingBatchCreateInput = {
   /** 飞书审批工单号（商务手动录入，supplier 内唯一） */
   workOrderNo: string
   operatorStaffId?: string | null
+  /** internal_occupancy：占用登记字段，写入 internal_test_hold */
+  userName?: string
+  department?: InternalTestHoldDepartment
+  settlementMode?: InternalTestHoldSettlement
+  holdFrom?: string
+  holdUntil?: string | null
 }
 
 export type OnboardingBatchCreateResult = {
@@ -92,12 +102,27 @@ export type OnboardingBatchDetailTask = {
   finishedAt: Date | null
 }
 
+export type OnboardingBatchLinkedHold = {
+  id: string
+  userName: string
+  department: InternalTestHoldDepartment
+  settlementMode: InternalTestHoldSettlement
+  gpuCardTypeId: string
+  cardTypeCode: string
+  cardTypeName: string
+  unitCount: number
+  holdFrom: Date
+  holdUntil: Date | null
+  remark: string | null
+}
+
 export type OnboardingBatchDetailPage = {
   batch: OnboardingBatchListItem
   contractNo: string | null
   progress: OnboardingBatchProgress
   devices: OnboardingBatchDetailDevice[]
   tasks: OnboardingBatchDetailTask[]
+  linkedHolds: OnboardingBatchLinkedHold[]
 }
 
 export type OnboardingBatchDatacenterDeviceChangeLog = {

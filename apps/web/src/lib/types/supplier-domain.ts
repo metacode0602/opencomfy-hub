@@ -61,6 +61,7 @@ export type OnboardingBatchKind =
   | "device_inventory"
   | "device_changelog"
   | "device_retire"
+  | "internal_occupancy"
 
 export type OnboardingImportStatus =
   | "draft"

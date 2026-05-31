@@ -56,6 +56,10 @@ export async function refreshBatchProgress(
       return refreshDeviceRetireBatchProgress(runner, batch, syncedAt, progressFlagsPatch)
     }
 
+    if (batch.batchKind === 'internal_occupancy') {
+      return refreshInternalOccupancyBatchProgress(runner, batch, syncedAt)
+    }
+
     if (!['online', 'order_access'].includes(batch.batchKind)) {
       supplierWarn('batch-progress', 'refresh skipped: unsupported batch kind', {
         businessBatchId,
@@ -225,6 +229,82 @@ async function refreshDeviceRetireBatchProgress(
   })
 
   return { touched, online: 0, onboarding: 0, retired }
+}
+
+async function refreshInternalOccupancyBatchProgress(
+  runner: DbTx,
+  batch: {
+    id: string
+    batchStatus: string
+    plannedDeviceCount: number
+  },
+  syncedAt: Date,
+): Promise<BatchProgressResult> {
+  const [counts] = await runner
+    .select({
+      touched: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId})::int`.mapWith(
+        Number,
+      ),
+    })
+    .from(onboardingBatchDeviceLink)
+    .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batch.id))
+
+  const touched = counts?.touched ?? 0
+  const planned = batch.plannedDeviceCount
+
+  const prevStatus = batch.batchStatus
+  let batchStatus = batch.batchStatus
+  if (planned > 0 && touched >= planned) {
+    batchStatus = '已完成'
+  } else if (touched > 0 && batchStatus === '待开始') {
+    batchStatus = '占用中'
+  }
+
+  await runner
+    .update(onboardingBatch)
+    .set({
+      touchedDeviceCount: touched,
+      progressSyncedAt: syncedAt,
+      updatedAt: syncedAt,
+      batchStatus,
+    })
+    .where(eq(onboardingBatch.id, batch.id))
+
+  if (batchStatus !== prevStatus) {
+    await appendBatchProgressEvent({
+      batchId: batch.id,
+      eventType: 'status_changed',
+      occurredAt: syncedAt,
+      tx: runner,
+      payload: { source: 'system', from: prevStatus, to: batchStatus },
+    })
+    if (batchStatus === '已完成') {
+      await appendBatchProgressEvent({
+        batchId: batch.id,
+        eventType: 'batch_completed',
+        occurredAt: syncedAt,
+        tx: runner,
+        payload: { source: 'system' },
+      })
+    }
+  }
+
+  await appendBatchProgressEvent({
+    batchId: batch.id,
+    eventType: 'progress_synced',
+    occurredAt: syncedAt,
+    tx: runner,
+    payload: { source: 'system' },
+  })
+
+  supplierLog('batch-progress', 'refresh done (internal_occupancy)', {
+    businessBatchId: batch.id,
+    touched,
+    planned,
+    batchStatus,
+  })
+
+  return { touched, online: 0, onboarding: 0 }
 }
 
 export { ONBOARDING_LIFECYCLES }

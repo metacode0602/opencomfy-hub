@@ -30,6 +30,10 @@ import { ACCESS_METHOD_OPTIONS, OPS_KIND_UI, onlineReasonLabel } from '@/lib/sup
 import type { SupplierOpsBatchKind } from '@/lib/types/supplier-ops-batch'
 import type { OnboardingParsedRow } from '@/lib/types/supplier-domain'
 import { DEVICE_COOPERATION_TYPE_LABELS } from '@/lib/types/supplier-domain'
+import {
+  INTERNAL_TEST_HOLD_DEPARTMENT_LABELS,
+  INTERNAL_TEST_HOLD_SETTLEMENT_LABELS,
+} from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
 import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import {
@@ -43,7 +47,6 @@ import { AdjustOnboardingBatchPlanDialog } from './adjust-onboarding-batch-plan-
 import { BatchLifecycleActions } from './batch-lifecycle-actions'
 import { BatchAdjustHistoryList, BatchProgressTimeline } from './batch-progress-timeline'
 import { OnboardingBatchProgressDevices } from './onboarding-batch-progress-devices'
-import { DatacenterPlannedBatchesPanel } from './datacenter-planned-batches-panel'
 
 const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
 
@@ -126,6 +129,7 @@ export function OnboardingBatchDetailContent({
   const progress = detail?.progress
   const devices = detail?.devices ?? []
   const tasks = detail?.tasks ?? []
+  const linkedHolds = detail?.linkedHolds ?? []
 
   const parsedRows = useMemo(() => {
     const rows = batch?.parsedRowsJson
@@ -210,7 +214,10 @@ export function OnboardingBatchDetailContent({
     )
   }
 
-  if (batch.batchKind !== expectedKind) {
+  if (
+    batch.batchKind !== expectedKind &&
+    !(routeKind === 'online-tasks' && batch.batchKind === 'internal_occupancy')
+  ) {
     const correctPath = onboardingBatchDetailPath(batch)
     return (
       <div className="space-y-4">
@@ -232,6 +239,10 @@ export function OnboardingBatchDetailContent({
     )
   }
 
+  const isInternalOccupancy = batch.batchKind === 'internal_occupancy'
+  const progressDone = isInternalOccupancy ? progress!.touched : progress!.online
+  const progressRate =
+    progress!.planned > 0 ? Math.min(100, (progressDone / progress!.planned) * 100) : 0
   const hasImport = batch.importStatus !== 'none'
   const canAdjustPlan = !TERMINAL_BATCH_STATUSES.includes(
     batch.batchStatus as (typeof TERMINAL_BATCH_STATUSES)[number],
@@ -306,22 +317,34 @@ export function OnboardingBatchDetailContent({
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">计划上架</p>
-            <p className="text-2xl font-semibold mt-1">{progress.planned}</p>
+            <p className="text-sm text-muted-foreground">
+              {isInternalOccupancy ? '计划占用' : '计划上架'}
+            </p>
+            <p className="text-2xl font-semibold mt-1">{progress!.planned}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">已关联</p>
-            <p className="text-2xl font-semibold mt-1">{progress.linked}</p>
+            <p className="text-2xl font-semibold mt-1">{progress!.linked}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm text-muted-foreground">已上线</p>
-            <p className="text-2xl font-semibold mt-1">{progress.online}</p>
-          </CardContent>
-        </Card>
+        {!isInternalOccupancy && (
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">已上线</p>
+              <p className="text-2xl font-semibold mt-1">{progress!.online}</p>
+            </CardContent>
+          </Card>
+        )}
+        {isInternalOccupancy && (
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">已挂接</p>
+              <p className="text-2xl font-semibold mt-1">{progress!.touched}</p>
+            </CardContent>
+          </Card>
+        )}
         <Card>
           <CardContent className="p-4">
             <p className="text-sm text-muted-foreground">计划完成</p>
@@ -333,23 +356,24 @@ export function OnboardingBatchDetailContent({
       <Card>
         <CardContent className="p-4 space-y-2">
           <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">上线进度</span>
+            <span className="text-muted-foreground">
+              {isInternalOccupancy ? '占用进度' : '上线进度'}
+            </span>
             <span className="font-medium">
-              {progress.online} / {progress.planned} 台（{onlineRate.toFixed(0)}%）
+              {progressDone} / {progress!.planned} 台（{progressRate.toFixed(0)}%）
             </span>
           </div>
-          <Progress value={onlineRate} className="h-2" />
+          <Progress value={progressRate} className="h-2" />
         </CardContent>
       </Card>
 
       <Tabs value={currentTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="progress">上架进度</TabsTrigger>
-          <TabsTrigger value="planned">计划批次</TabsTrigger>
           {hasImport && <TabsTrigger value="import">导入明细</TabsTrigger>}
           <TabsTrigger value="overview">批次概览</TabsTrigger>
           <TabsTrigger value="devices">已入库设备 ({devices.length})</TabsTrigger>
-          <TabsTrigger value="tasks">关联任务 ({tasks.length})</TabsTrigger>
+          {/* <TabsTrigger value="tasks">关联任务 ({tasks.length})</TabsTrigger> */}
           <TabsTrigger value="timeline">进度时间轴</TabsTrigger>
           <TabsTrigger value="audit">调整审计</TabsTrigger>
         </TabsList>
@@ -404,14 +428,6 @@ export function OnboardingBatchDetailContent({
           )}
 
           <OnboardingBatchProgressDevices batchId={batch.id} />
-        </TabsContent>
-
-        <TabsContent value="planned" className="mt-4">
-          <DatacenterPlannedBatchesPanel
-            dataCenterId={batch.dataCenterId}
-            highlightBatchId={batch.id}
-            compact
-          />
         </TabsContent>
 
         {hasImport && (
@@ -588,6 +604,41 @@ export function OnboardingBatchDetailContent({
                     </div>
                   </>
                 )}
+                {batch.batchKind === 'internal_occupancy' && linkedHolds.length > 0 && (
+                  <>
+                    <div>
+                      <p className="text-muted-foreground">使用者</p>
+                      <p className="font-medium mt-1">{linkedHolds[0]?.userName ?? '—'}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">使用部门</p>
+                      <p className="font-medium mt-1">
+                        {INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[linkedHolds[0]!.department]}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">结算方式</p>
+                      <p className="font-medium mt-1">
+                        {INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[linkedHolds[0]!.settlementMode]}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">占用时间</p>
+                      <p className="font-medium mt-1">
+                        {formatDt(linkedHolds[0]?.holdFrom)}
+                        {linkedHolds[0]?.holdUntil
+                          ? ` → ${formatDt(linkedHolds[0].holdUntil)}`
+                          : ' → 无固定结束'}
+                      </p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-muted-foreground">备注</p>
+                      <p className="font-medium mt-1 whitespace-pre-wrap">
+                        {batch.remark?.trim() || linkedHolds[0]?.remark?.trim() || '—'}
+                      </p>
+                    </div>
+                  </>
+                )}
                 <div>
                   <p className="text-muted-foreground">创建时间</p>
                   <p className="font-medium mt-1">{formatDt(batch.createdAt)}</p>
@@ -612,6 +663,42 @@ export function OnboardingBatchDetailContent({
               </Link>
             </CardContent>
           </Card>
+
+          {isInternalOccupancy && linkedHolds.length > 0 && (
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle className="text-base">占用登记</CardTitle>
+                <CardDescription>关联 internal_test_hold 登记行（与计划占用同源）</CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>卡型</TableHead>
+                      <TableHead className="text-right">台数</TableHead>
+                      <TableHead>开始</TableHead>
+                      <TableHead>计划结束</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {linkedHolds.map((hold) => (
+                      <TableRow key={hold.id}>
+                        <TableCell className="font-medium">
+                          {hold.cardTypeName}
+                          <span className="text-muted-foreground text-xs ml-1">
+                            ({hold.cardTypeCode})
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">{hold.unitCount}</TableCell>
+                        <TableCell>{formatDt(hold.holdFrom)}</TableCell>
+                        <TableCell>{hold.holdUntil ? formatDt(hold.holdUntil) : '—'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="devices" className="mt-4">
@@ -674,7 +761,7 @@ export function OnboardingBatchDetailContent({
           )}
         </TabsContent>
 
-        <TabsContent value="tasks" className="mt-4 space-y-3">
+        {/* <TabsContent value="tasks" className="mt-4 space-y-3">
           {tasks.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center text-muted-foreground">
@@ -684,7 +771,7 @@ export function OnboardingBatchDetailContent({
           ) : (
             tasks.map((t) => <OnboardingTaskCard key={t.id} task={t} />)
           )}
-        </TabsContent>
+        </TabsContent> */}
 
         <TabsContent value="timeline" className="mt-4">
           <BatchProgressTimeline batchId={batch.id} />

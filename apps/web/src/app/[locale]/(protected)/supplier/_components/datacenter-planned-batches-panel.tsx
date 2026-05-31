@@ -92,6 +92,9 @@ function extraBatchInfo(batch: OnboardingBatchRow): string {
   if (batch.batchKind === 'device_retire' && batch.retireReason) {
     return getDeviceRetireReasonLabel(batch.retireReason as DeviceRetireReason)
   }
+  if (batch.batchKind === 'internal_occupancy') {
+    return batch.remark?.trim() || '内部占用计划'
+  }
   return '—'
 }
 
@@ -128,8 +131,17 @@ export function DatacenterPlannedBatchesPanel({
     { enabled: activeTab === 'internal' },
   )
 
+  const {
+    data: occupancyBatchesData,
+    isLoading: occupancyLoading,
+  } = trpc.supplier.onboardingBatch.list.useQuery(
+    { batchKind: 'internal_occupancy', dataCenterId },
+    { enabled: activeTab === 'internal' },
+  )
+
   const plannedBatches = batchesData?.items ?? []
   const holds = holdsData?.items ?? []
+  const occupancyBatches = occupancyBatchesData?.items ?? []
 
   const batchPagination = useListPagination(plannedBatches)
   const holdsPagination = useListPagination(holds)
@@ -155,7 +167,7 @@ export function DatacenterPlannedBatchesPanel({
     : '暂无计划批次，可点击右上角「设备上架」或「设备下架 / 裁撤」创建'
   const emptyHoldHint = compact
     ? '暂无内部占用记录'
-    : '暂无内部占用记录，请从侧栏「内部占用」登记'
+    : '暂无内部占用记录，可点击「设备上架 / 接入」→ 内部占用创建'
 
   return (
     <Card className="overflow-x-auto border-border bg-card">
@@ -247,6 +259,21 @@ export function DatacenterPlannedBatchesPanel({
           </TabsContent>
 
           <TabsContent value="internal" className="mt-0">
+            {occupancyLoading ? (
+              <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                加载内部占用计划...
+              </div>
+            ) : occupancyBatches.length > 0 ? (
+              <div className="mb-6 space-y-2">
+                <p className="px-4 text-sm font-medium">内部占用计划批次</p>
+                <PlannedBatchTable
+                  batches={occupancyBatches}
+                  emptyHint=""
+                  highlightBatchId={highlightBatchId}
+                />
+              </div>
+            ) : null}
             {holdsLoading ? (
               <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -365,6 +392,9 @@ function PlannedBatchTable({
                       <span className="ml-1 block text-xs text-muted-foreground">
                         退订 {batch.retiredDeviceCount}
                       </span>
+                    )}
+                    {kind === 'internal_occupancy' && (
+                      <span className="ml-1 block text-xs text-muted-foreground">已挂接</span>
                     )}
                   </TableCell>
                   <TableCell>

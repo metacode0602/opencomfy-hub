@@ -28,6 +28,10 @@ import {
   type OverviewDeviceRow,
 } from '@/lib/server/aggregation/overview-aggregation'
 import {
+  ACTIVE_BUSINESS_BATCH_KINDS,
+  buildBatchSummary,
+} from '@/lib/server/aggregation/batch-summary-utils'
+import {
   aggregateRetirePipelinePending,
   buildResourceCompositionFromDevices,
 } from '@/lib/server/aggregation/resource-composition-aggregation'
@@ -353,7 +357,7 @@ export const supplierOverviewDataAccess = {
         )
 
       const batchConditions = [
-        inArray(onboardingBatch.batchKind, ['online', 'order_access']),
+        inArray(onboardingBatch.batchKind, [...ACTIVE_BUSINESS_BATCH_KINDS]),
         notInArray(onboardingBatch.batchStatus, [...TERMINAL_BATCH_STATUSES]),
       ]
       if (filters.supplierId !== 'all') {
@@ -377,6 +381,7 @@ export const supplierOverviewDataAccess = {
           plannedLinesJson: onboardingBatch.plannedLinesJson,
           touchedDeviceCount: onboardingBatch.touchedDeviceCount,
           onlineDeviceCount: onboardingBatch.onlineDeviceCount,
+          retiredDeviceCount: onboardingBatch.retiredDeviceCount,
           plannedReadyAt: onboardingBatch.plannedReadyAt,
           workOrderNo: onboardingBatch.workOrderNo,
           idcRegion: onboardingBatch.idcRegion,
@@ -389,6 +394,11 @@ export const supplierOverviewDataAccess = {
       const activeBatches = activeBatchesRaw.filter((b) =>
         batchMatchesRegionFilter(b.idcRegion, b.dataCenterName, filters.region),
       )
+
+      const accessActiveBatches = activeBatches.filter(
+        (b) => b.batchKind === 'online' || b.batchKind === 'order_access',
+      )
+      const retireActiveBatches = activeBatches.filter((b) => b.batchKind === 'device_retire')
 
       const touchedGpuByBatchId = new Map<string, number>()
       if (activeBatches.length > 0) {
@@ -430,7 +440,7 @@ export const supplierOverviewDataAccess = {
 
       const cardFilterKey =
         filters.cardType !== 'all' ? normalizeCardKey(filters.cardType) : null
-      const pipelineBatchInputs: PipelineBatchInput[] = activeBatches
+      const pipelineBatchInputs: PipelineBatchInput[] = accessActiveBatches
         .map((batch) =>
           toPipelineBatchInput(batch, touchedGpuByBatchId.get(batch.id) ?? 0),
         )
@@ -442,75 +452,9 @@ export const supplierOverviewDataAccess = {
         aggregatePipelinePendingByDataCenter(pipelineBatchInputs),
       )
 
-      const retireBatchConditions = [
-        eq(onboardingBatch.batchKind, 'device_retire'),
-        notInArray(onboardingBatch.batchStatus, [...TERMINAL_BATCH_STATUSES]),
-      ]
-      if (filters.supplierId !== 'all') {
-        retireBatchConditions.push(eq(onboardingBatch.supplierId, filters.supplierId))
-      }
-
-      const activeRetireBatchesRaw = await db
-        .select({
-          id: onboardingBatch.id,
-          dataCenterId: onboardingBatch.dataCenterId,
-          dataCenterName: onboardingBatch.dataCenterName,
-          batchKind: onboardingBatch.batchKind,
-          onlineReason: onboardingBatch.onlineReason,
-          plannedDeviceCount: onboardingBatch.plannedDeviceCount,
-          plannedGpuCount: onboardingBatch.plannedGpuCount,
-          plannedLinesJson: onboardingBatch.plannedLinesJson,
-          touchedDeviceCount: onboardingBatch.touchedDeviceCount,
-          idcRegion: onboardingBatch.idcRegion,
-        })
-        .from(onboardingBatch)
-        .where(and(...retireBatchConditions))
-
-      const activeRetireBatches = activeRetireBatchesRaw.filter((b) =>
-        batchMatchesRegionFilter(b.idcRegion, b.dataCenterName, filters.region),
-      )
-
-      const retireTouchedGpuByBatchId = new Map<string, number>()
-      if (activeRetireBatches.length > 0) {
-        const retireBatchIds = activeRetireBatches.map((b) => b.id)
-        const retireLinkGpuRows = await db
-          .select({
-            batchId: onboardingBatchDeviceLink.businessOnboardingBatchId,
-            gpuCount: supplierDevice.gpuCount,
-            cardTypeName: gpuCardType.name,
-            cardTypeCode: gpuCardType.code,
-            cardTypeDeviceRole: gpuCardType.deviceRole,
-          })
-          .from(onboardingBatchDeviceLink)
-          .innerJoin(
-            supplierDevice,
-            eq(onboardingBatchDeviceLink.supplierDeviceId, supplierDevice.id),
-          )
-          .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
-          .where(inArray(onboardingBatchDeviceLink.businessOnboardingBatchId, retireBatchIds))
-
-        for (const row of retireLinkGpuRows) {
-          if (!row.batchId) continue
-          const gpu = metricGpuCount({
-            gpuCount: row.gpuCount,
-            cardTypeName: row.cardTypeName,
-            cardTypeCode: row.cardTypeCode,
-            cardTypeRole: resolveGpuCardTypeRole({
-              name: row.cardTypeName,
-              code: row.cardTypeCode,
-              deviceRole: row.cardTypeDeviceRole,
-            }),
-          })
-          retireTouchedGpuByBatchId.set(
-            row.batchId,
-            (retireTouchedGpuByBatchId.get(row.batchId) ?? 0) + gpu,
-          )
-        }
-      }
-
-      const retirePipelineBatchInputs: PipelineBatchInput[] = activeRetireBatches
+      const retirePipelineBatchInputs: PipelineBatchInput[] = retireActiveBatches
         .map((batch) =>
-          toPipelineBatchInput(batch, retireTouchedGpuByBatchId.get(batch.id) ?? 0),
+          toPipelineBatchInput(batch, touchedGpuByBatchId.get(batch.id) ?? 0),
         )
         .filter((batch) =>
           cardFilterKey ? batchMatchesCardFilter(batch, cardFilterKey) : true,
@@ -890,20 +834,7 @@ export const supplierOverviewDataAccess = {
           })),
       }
 
-      const batchSummaries = activeBatches.map((b) => ({
-        id: b.id,
-        batchCode: b.batchCode,
-        batchKind: b.batchKind,
-        supplierName: b.supplierShortName ?? b.supplierName,
-        dataCenterName: b.dataCenterName,
-        importStatus: b.importStatus,
-        batchStatus: b.batchStatus,
-        plannedDeviceCount: b.plannedDeviceCount,
-        touchedDeviceCount: b.touchedDeviceCount ?? 0,
-        onlineDeviceCount: b.onlineDeviceCount ?? 0,
-        plannedReadyAt: b.plannedReadyAt?.toISOString() ?? null,
-        workOrderNo: b.workOrderNo,
-      }))
+      const batchSummaries = activeBatches.map((b) => buildBatchSummary(b))
 
       const gpuTargetGpu = await resolveGpuTargetGpu(filters, new Date())
 

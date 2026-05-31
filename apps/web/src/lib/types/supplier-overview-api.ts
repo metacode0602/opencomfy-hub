@@ -98,8 +98,15 @@ export type OnboardingBatchSummaryDto = {
   plannedDeviceCount: number
   touchedDeviceCount: number
   onlineDeviceCount: number
+  retiredDeviceCount: number
+  progressDoneCount: number
+  progressGap: number
+  progressMidLabel: string
+  progressDoneLabel: string
+  gapDoneLabel: string
   plannedReadyAt: string | null
   workOrderNo: string | null
+  detailHref: string
 }
 
 export type FaultSlaSummaryDto = {

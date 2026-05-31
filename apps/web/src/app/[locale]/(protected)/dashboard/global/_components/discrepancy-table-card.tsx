@@ -37,24 +37,24 @@ export function DiscrepancyTableCard() {
   return (
     <Card className="border-border/80 lg:col-span-4">
       <CardHeader>
-        <CardTitle className="text-base">资源差异校验中心</CardTitle>
+        <CardTitle className="text-base">批次进度校验</CardTitle>
         <CardDescription>
-          进行中接入批次：计划 / 接收 / 在线（批次在线 ≠ 供应商表在线 GPU）
+          进行中计划批次：计划 / 中间进度 / 完成进度（按类型列含义不同）
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {isLoading ? (
           <DashboardCardLoading />
         ) : rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">暂无进行中接入批次</p>
+          <p className="py-6 text-center text-sm text-muted-foreground">暂无活跃批次</p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>对象</TableHead>
                 <TableHead className="text-right">计划</TableHead>
-                <TableHead className="text-right">接收</TableHead>
-                <TableHead className="text-right">在线</TableHead>
+                <TableHead className="text-right">接收/挂接</TableHead>
+                <TableHead className="text-right">完成</TableHead>
                 <TableHead>差异</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="w-[72px]" />
@@ -70,8 +70,12 @@ export function DiscrepancyTableCard() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{r.plannedDeviceCount}</TableCell>
-                  <TableCell className="text-right tabular-nums">{r.touchedDeviceCount}</TableCell>
-                  <TableCell className="text-right tabular-nums">{r.onlineDeviceCount}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {r.batchKind === "internal_occupancy" ? "—" : r.touchedDeviceCount}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    <span title={r.progressDoneLabel}>{r.onlineDeviceCount}</span>
+                  </TableCell>
                   <TableCell
                     className={cn(
                       "max-w-[120px] truncate text-xs",
@@ -95,7 +99,7 @@ export function DiscrepancyTableCard() {
                   </TableCell>
                   <TableCell>
                     <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-                      <Link href={`/supplier/online-tasks/${r.batchId}`}>处理</Link>
+                      <Link href={r.detailHref || `/supplier/online-tasks/${r.batchId}`}>处理</Link>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -104,7 +108,7 @@ export function DiscrepancyTableCard() {
           </Table>
         )}
         <Link href="/supplier/online-tasks" className="text-xs text-primary hover:underline">
-          查看全部接入批次
+          查看全部计划批次
         </Link>
       </CardContent>
     </Card>

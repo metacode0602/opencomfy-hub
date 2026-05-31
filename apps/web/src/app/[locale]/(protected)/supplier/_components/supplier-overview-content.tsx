@@ -43,7 +43,7 @@ import type {
   OverviewKpisDto,
 } from '@/lib/types/supplier-overview-api'
 import { trpc } from '@/lib/trpc/client'
-import { IMPORT_STATUS_LABELS } from '@/lib/supplier/onboarding-batch-utils'
+import { BATCH_KIND_BADGE, IMPORT_STATUS_LABELS, onboardingBatchDetailPath } from '@/lib/supplier/onboarding-batch-utils'
 import { GpuResourceTrendChart } from './gpu-resource-trend-chart'
 import { GpuRegionUsageChart } from './gpu-region-usage-chart'
 
@@ -305,8 +305,8 @@ export function SupplierOverviewContent() {
         <Card className="border-border/80 lg:col-span-4">
           <CardHeader className="flex flex-row items-center justify-between pb-3">
             <div>
-              <CardTitle className="text-base">活跃接入批次</CardTitle>
-              <CardDescription>接入中 / 待开始批次，催办上架进度</CardDescription>
+              <CardTitle className="text-base">活跃批次</CardTitle>
+              <CardDescription>进行中计划批次：接入、下架、内部占用</CardDescription>
             </div>
             <Button variant="ghost" size="sm" asChild>
               <Link href="/supplier/online-tasks">批次列表</Link>
@@ -314,10 +314,16 @@ export function SupplierOverviewContent() {
           </CardHeader>
           <CardContent>
             {batchSummaries.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">暂无活跃接入批次</p>
+              <p className="py-8 text-center text-sm text-muted-foreground">暂无活跃批次</p>
             ) : (
               <div className="space-y-3">
-                {batchSummaries.map((batch) => (
+                {batchSummaries.map((batch) => {
+                  const kind = batch.batchKind as keyof typeof BATCH_KIND_BADGE
+                  const badge = BATCH_KIND_BADGE[kind]
+                  const showMid =
+                    batch.progressMidLabel !== '—' &&
+                    (batch.batchKind === 'online' || batch.batchKind === 'order_access' || batch.batchKind === 'device_retire')
+                  return (
                   <div
                     key={batch.id}
                     className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-muted/10 p-3"
@@ -325,9 +331,11 @@ export function SupplierOverviewContent() {
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-sm font-medium">{batch.batchCode}</span>
-                        <Badge variant="outline" className="text-xs">
-                          {batch.batchKind === 'online' ? '设备上架' : '订单接入'}
-                        </Badge>
+                        {badge && (
+                          <Badge variant="outline" className={`text-xs ${badge.className}`}>
+                            {badge.label}
+                          </Badge>
+                        )}
                         <Badge variant="outline">{batch.batchStatus}</Badge>
                       </div>
                       <p className="text-sm text-muted-foreground">
@@ -335,24 +343,34 @@ export function SupplierOverviewContent() {
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {batch.workOrderNo ? `工单 ${batch.workOrderNo} · ` : ''}
-                        导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 接收{' '}
-                        {batch.touchedDeviceCount}/{batch.plannedDeviceCount} · 在线{' '}
-                        {batch.onlineDeviceCount} · 计划就绪 {formatDt(batch.plannedReadyAt)}
+                        {showMid && (
+                          <>
+                            {batch.progressMidLabel} {batch.touchedDeviceCount}/{batch.plannedDeviceCount} ·{' '}
+                          </>
+                        )}
+                        {batch.progressDoneLabel} {batch.progressDoneCount}
+                        {(batch.batchKind === 'online' || batch.batchKind === 'order_access') && (
+                          <>
+                            {' '}
+                            · 导入 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus} · 计划就绪{' '}
+                            {formatDt(batch.plannedReadyAt)}
+                          </>
+                        )}
                       </p>
                     </div>
                     <Button variant="outline" size="sm" asChild>
                       <Link
                         href={
-                          batch.batchKind === 'online'
-                            ? `/supplier/online-tasks/${batch.id}`
-                            : `/supplier/order-access/${batch.id}`
+                          batch.detailHref ??
+                          onboardingBatchDetailPath({ id: batch.id, batchKind: batch.batchKind })
                         }
                       >
                         查看
                       </Link>
                     </Button>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </CardContent>

@@ -19,10 +19,67 @@ import {
   resolveLifecycleFromChangelog,
   resolveRetireLinkKind,
 } from "@/lib/supplier/retire-changelog-utils"
+import { isOtherDeptOpsStatus } from "@/lib/server/aggregation/overview-aggregation"
 import {
   CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
+  DEVICE_CHANGE_ACTION_SEEDS,
   OPS_STATUS_TO_LIFECYCLE_FROM_SEEDS,
 } from "@workspace/db/schema"
+
+const KNOWN_CHANGE_ACTIONS = new Set(DEVICE_CHANGE_ACTION_SEEDS.map((s) => s.stateCode))
+
+export const DEVICE_CHANGE_ACTION_OPTIONS = DEVICE_CHANGE_ACTION_SEEDS.map((s) => s.stateCode)
+
+/** 校验设备变更表单行（Excel 解析与预览页手工修正共用） */
+export function validateDeviceChangelogRowFields(input: {
+  change_action: string
+  /** Excel 原文；手工修正时传与 change_action 相同以跳过归一化警告 */
+  raw_change_action?: string
+  external_device_id?: string
+  internal_ip?: string
+}): Pick<DeviceChangelogParsedRow, "parse_status" | "parse_message"> {
+  const change_action = normalizeDeviceChangeAction(input.change_action)
+  const raw = (input.raw_change_action ?? input.change_action).trim()
+
+  let parse_status: "ok" | "warning" | "error" = "ok"
+  let parse_message: string | null = null
+
+  if (raw !== change_action) {
+    parse_status = "warning"
+    parse_message = `变更动作「${raw}」已归一化为「${change_action}」`
+  }
+  if (!KNOWN_CHANGE_ACTIONS.has(change_action)) {
+    parse_status = "warning"
+    parse_message = parse_message
+      ? `${parse_message}；未知变更动作，入库时将仍记录原文`
+      : `未知变更动作「${change_action}」，入库时将仍记录原文`
+  }
+  if (!input.external_device_id?.trim() && !input.internal_ip?.trim()) {
+    parse_status = "warning"
+    parse_message = "缺少设备ID与内网IP，commit 时可能无法匹配设备"
+  }
+
+  return { parse_status, parse_message }
+}
+
+export function applyDeviceChangelogRowValidation(
+  row: DeviceChangelogParsedRow,
+  changeAction: string,
+  options?: { fromManualEdit?: boolean },
+): DeviceChangelogParsedRow {
+  const normalized = normalizeDeviceChangeAction(changeAction)
+  const validation = validateDeviceChangelogRowFields({
+    change_action: normalized,
+    raw_change_action: options?.fromManualEdit ? normalized : changeAction,
+    external_device_id: row.external_device_id,
+    internal_ip: row.internal_ip,
+  })
+  return {
+    ...row,
+    change_action: normalized,
+    ...validation,
+  }
+}
 
 /** Excel 设备状态 → CRM lifecycle_status（与 DB 种子一致） */
 export const OPS_STATUS_TO_LIFECYCLE: Record<string, string> = {
@@ -56,6 +113,7 @@ export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
   device_inventory: "设备主数据",
   device_changelog: "设备变更",
   device_retire: "设备下架",
+  internal_occupancy: "内部占用计划",
 }
 
 export const DEVICE_IMPORT_ACCEPT = '.xlsx,.xls,.csv,.tsv,.txt'
@@ -104,9 +162,11 @@ export function generateImportBatchCode(batchKind: OnboardingBatchKind): string 
         ? "DCHG"
         : batchKind === "device_retire"
           ? "RET"
-          : batchKind === "online"
-            ? "ONB"
-            : "ORD"
+          : batchKind === "internal_occupancy"
+            ? "IO"
+            : batchKind === "online"
+              ? "ONB"
+              : "ORD"
   const d = new Date()
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, "0")
@@ -274,7 +334,7 @@ export type ChangelogBusinessBatchLinkInput = {
   businessBatchId: string
   businessDataCenterId: string
   ticketRefs: Set<string>
-  batchKind?: "online" | "order_access" | "device_retire"
+  batchKind?: "online" | "order_access" | "device_retire" | "internal_occupancy"
   retireActionType?: RetireActionType | null
 }
 
@@ -389,13 +449,27 @@ export function buildChangeLogsFromChangelogImport(params: {
             `第 ${row.row_no} 行：变更动作「${row.change_action}」与下架计划类型「${expectedRetireActionLabel(retireActionType)}」不一致；已挂接批次，请复核`,
           )
         }
+        if (businessBatchKind === "internal_occupancy") {
+          const changeAction = normalizeDeviceChangeAction(row.change_action)
+          if (
+            changeAction !== "交给其他部门使用" &&
+            !isOtherDeptOpsStatus(newOps) &&
+            !(row.change_content ?? "").includes("其他部门使用中")
+          ) {
+            bindWarnings.push(
+              `第 ${row.row_no} 行：变更动作/内容与内部占用计划不一致，已挂接批次，请复核`,
+            )
+          }
+        }
         linkedDeviceIds.add(device.id)
         const linkKind =
           businessBatchKind === "device_retire"
             ? resolveRetireLinkKind(row.change_action)
-            : newLife === "在线"
-              ? "online"
-              : "touched"
+            : businessBatchKind === "internal_occupancy"
+              ? "internal_occupancy"
+              : newLife === "在线"
+                ? "online"
+                : "touched"
         deviceLinks.push({
           supplierDeviceId: device.id,
           gpuCardTypeId: device.gpu_card_type_id,
