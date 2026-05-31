@@ -2,9 +2,73 @@
 
 **用途**：清理测试/历史环境中的 **上架批次、导入批次、下架批次** 及 **全部物理设备台账**，便于从零重新导入。
 
-**依据**：`packages/db/src/supply-schema.ts` 外键与 `onDelete` 规则。
+**依据**：
 
-**版本**：v1.0（2026-05-27）
+- `packages/db/src/supply-schema.ts` — 供应商域主数据、批次、设备、库存、活动
+- `packages/db/src/dashboard-schema.ts` — `device_*_snapshot`、`device_lifecycle_event`（FK → `supplier_device`，`ON DELETE CASCADE`）
+
+**版本**：v2.0（2026-05-31）
+
+---
+
+## 0. 一键全量清理（推荐）
+
+> **复制下面整段**，在目标库执行即可完成 **方案 A 全量重置**。默认 `ROLLBACK` 预览；确认行数与影响后，将最后一行改为 `COMMIT;`。
+
+```sql
+-- =============================================================================
+-- 供应商设备域 · 一键全量清理
+-- 范围：全部物理机 + 全部 onboarding 批次 + L1 库存 + 相关活动/审计/快照
+-- 保留：supplier / data_center / 合同 / 刊例价 / 账单 / lifecycle 字典
+-- =============================================================================
+BEGIN;
+
+-- ---------- 1. 可选：解除故障单与设备/节点关联（device 删除也会 SET NULL，此处便于预览）----------
+UPDATE fault_incident
+SET supplier_device_id = NULL,
+    compute_node_id = NULL
+WHERE supplier_device_id IS NOT NULL
+   OR compute_node_id IS NOT NULL;
+
+-- ---------- 2. 活动时间线（device / batch / ops_upload_batch）----------
+DELETE FROM supplier_activity_attachment
+WHERE activity_id IN (
+  SELECT id FROM supplier_activity
+  WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch')
+);
+
+DELETE FROM supplier_activity
+WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch');
+
+-- ---------- 3. UI 手动状态审计（无 FK，须显式删）----------
+DELETE FROM entity_state_transition_log
+WHERE entity_type IN ('device', 'compute_node', 'batch');
+
+-- ---------- 4. 内部测试占用（无设备绑定的台账行；有 inventory_id 的随步骤 6 级联）----------
+DELETE FROM internal_test_hold
+WHERE supplier_device_id IS NULL
+  AND supplier_gpu_inventory_id IS NULL;
+
+-- ---------- 5. 物理设备（级联见 §6；含 dashboard 日/小时快照、lifecycle_event）----------
+DELETE FROM supplier_device;
+
+-- ---------- 6. L1 聚合库存（级联 internal_test_hold.supplier_gpu_inventory_id）----------
+DELETE FROM supplier_gpu_inventory;
+
+-- ---------- 7. 批次树（级联 plan_line / import_row / task / device_link / progress_event）----------
+UPDATE onboarding_batch SET parent_batch_id = NULL;
+
+DELETE FROM onboarding_batch;
+
+-- ---------- 8. 运维 Excel 上传批次 ----------
+DELETE FROM supplier_ops_upload_batch;
+
+-- ---------- 预览：改为 COMMIT; 后生效 ----------
+ROLLBACK;
+-- COMMIT;
+```
+
+**局部一键**（仅某供应商或机房）：见 [§4 参数化一键清理](#4-参数化一键清理供应商--机房)。
 
 ---
 
@@ -12,35 +76,46 @@
 
 | 项 | 说明 |
 |----|------|
-| **不可逆** | 以下 SQL 会永久删除数据，生产环境务必先备份 |
-| **保留范围** | 默认 **不删除** 供应商、机房、合同、刊例价、卡型字典、账单等主数据 |
-| **建议方式** | 在事务中先 `SELECT` 预览行数，确认后再 `COMMIT`；异常则 `ROLLBACK` |
+| **不可逆** | 以下 SQL 会永久删除数据，生产环境务必先备份（[§8](#8-备份建议生产环境)） |
+| **保留范围** | 默认 **不删除** 供应商、机房、合同、刊例价、卡型字典、账单、财务域表 |
+| **建议方式** | 一键脚本默认 `ROLLBACK`；先跑 [§1 预览](#1-清理前预览建议先执行)，再改 `COMMIT` |
 | **权限** | 需要 PostgreSQL 写权限（通常 `admin` / DBA 角色） |
+| **环境** | 仅测试 / 预发 / 明确授权的重置；生产须变更审批 |
 
 ### 将删除的数据域
 
-| 表 | 说明 |
-|----|------|
-| `supplier_device` | 物理机台账（SN、IP、生命周期等） |
-| `compute_node` | 计算/管控节点（随设备 `CASCADE`） |
-| `resource_pool_binding` | 资源池绑定（随设备 `CASCADE`） |
-| `internal_test_hold` | 内部测试占用（随设备 `CASCADE`） |
-| `supplier_device_change_log` | 设备变更审计（随设备 `CASCADE`） |
-| `onboarding_batch_device_link` | 设备 ↔ 业务批次关联（随设备/批次 `CASCADE`） |
-| `supplier_gpu_inventory` | 机房×卡型 L1 聚合库存 |
-| `onboarding_batch` | 全部批次（含 `online` / `order_access` / `device_inventory` / `device_changelog` / `device_retire`） |
-| `onboarding_batch_plan_line` | 计划行（随批次 `CASCADE`） |
-| `onboarding_batch_import_row` | 导入解析行（随批次 `CASCADE`） |
-| `onboarding_task` | 接入施工任务（随批次 `CASCADE`） |
-| `supplier_ops_upload_batch` | 运维上传批次（可选，见方案 B） |
-| `supplier_activity` | 与 `device` / `batch` / `ops_upload_batch` 关联的活动（可选） |
+| 表 | 说明 | 删除方式 |
+|----|------|----------|
+| `supplier_device` | 物理机台账 | 显式 `DELETE` |
+| `compute_node` | 计算/管控节点 | 随设备 `CASCADE` |
+| `resource_pool_binding` | 资源池绑定 | 随设备 `CASCADE` |
+| `internal_test_hold` | 内部测试占用 | 设备/库存 `CASCADE`；无绑定的行显式删 |
+| `internal_test_hold_device_link` | 占用 ↔ 设备 | 随设备或 hold `CASCADE` |
+| `supplier_device_change_log` | 设备变更审计 | 随设备 `CASCADE` |
+| `onboarding_batch_device_link` | 设备 ↔ 业务批次 | 随设备/批次 `CASCADE` |
+| `onboarding_batch_import_row` | 导入解析行 | 随批次 `CASCADE`（`supplier_device_id` → `SET NULL`） |
+| `onboarding_batch_plan_line` | 上架计划明细行 | 随批次 `CASCADE` |
+| `onboarding_batch_progress_event` | 批次进度不可变事件（Period 积分时序） | 随批次 `CASCADE` |
+| `onboarding_task` | 接入施工任务 | 随批次 `CASCADE`（`supplier_device_id` → `SET NULL`） |
+| `supplier_gpu_inventory` | 机房×卡型 L1 库存 | 显式 `DELETE` |
+| `onboarding_batch` | 全部批次（`online` / `order_access` / `device_inventory` / `device_changelog` / `device_retire`） | 显式 `DELETE` |
+| `supplier_ops_upload_batch` | 运维上传批次 | 显式 `DELETE`（一键脚本含） |
+| `supplier_activity` | `ref_domain` ∈ device / batch / ops_upload_batch | 显式 `DELETE` |
+| `entity_state_transition_log` | `entity_type` ∈ device / compute_node / batch | 显式 `DELETE`（无 FK） |
+| `device_daily_snapshot` | 设备日快照（dashboard-schema） | 随设备 `CASCADE` |
+| `device_hourly_snapshot` | 设备小时快照 | 随设备 `CASCADE` |
+| `device_lifecycle_event` | 生命周期事件（由 change_log 清洗） | 随设备 `CASCADE` |
 
 ### 不会删除的数据
 
 - `supplier`、`data_center`、`supplier_contract`、`gpu_card_type`
-- `supplier_card_list_price`、`supplier_unit_cost`、`supplier_pricing_record` 等商务定价
-- `supplier_bill`、`fault_incident` 主记录（仅解除设备 FK，见方案说明）
-- `lifecycle_state_definition` 字典
+- `supplier_card_list_price`、`supplier_unit_cost`、`supplier_pricing_record`、`supplier_pricing_history` 等商务定价
+- `access_condition_sheet`、`supplier_pricing_tier`、`supplier_terms_version`
+- `supplier_bill`、`supplier_bill_detail`
+- `fault_incident` 主记录（设备/节点 FK 置 `NULL`）
+- `lifecycle_state_definition`、`supplier_activity_type_definition`
+- 财务域、CRM 域、平台定价域表
+- `global_kpi_daily` 等 **不** 挂 `supplier_device` 的全局 KPI 表（若需一并清零须另写脚本）
 
 ---
 
@@ -56,110 +131,94 @@ UNION ALL SELECT 'onboarding_batch (order_access)', COUNT(*) FROM onboarding_bat
 UNION ALL SELECT 'onboarding_batch (device_inventory)', COUNT(*) FROM onboarding_batch WHERE batch_kind = 'device_inventory'
 UNION ALL SELECT 'onboarding_batch (device_changelog)', COUNT(*) FROM onboarding_batch WHERE batch_kind = 'device_changelog'
 UNION ALL SELECT 'onboarding_batch (device_retire)', COUNT(*) FROM onboarding_batch WHERE batch_kind = 'device_retire'
+UNION ALL SELECT 'onboarding_batch_plan_line', COUNT(*) FROM onboarding_batch_plan_line
+UNION ALL SELECT 'onboarding_batch_progress_event', COUNT(*) FROM onboarding_batch_progress_event
 UNION ALL SELECT 'onboarding_batch_device_link', COUNT(*) FROM onboarding_batch_device_link
+UNION ALL SELECT 'onboarding_batch_import_row', COUNT(*) FROM onboarding_batch_import_row
 UNION ALL SELECT 'supplier_device_change_log', COUNT(*) FROM supplier_device_change_log
 UNION ALL SELECT 'onboarding_task', COUNT(*) FROM onboarding_task
 UNION ALL SELECT 'compute_node', COUNT(*) FROM compute_node
+UNION ALL SELECT 'internal_test_hold', COUNT(*) FROM internal_test_hold
+UNION ALL SELECT 'internal_test_hold_device_link', COUNT(*) FROM internal_test_hold_device_link
+UNION ALL SELECT 'resource_pool_binding', COUNT(*) FROM resource_pool_binding
 UNION ALL SELECT 'supplier_ops_upload_batch', COUNT(*) FROM supplier_ops_upload_batch
-UNION ALL SELECT 'supplier_activity (device/batch)', COUNT(*) FROM supplier_activity
-  WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch');
+UNION ALL SELECT 'supplier_activity (device/batch/ops)', COUNT(*) FROM supplier_activity
+  WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch')
+UNION ALL SELECT 'entity_state_transition_log (device/batch/node)', COUNT(*) FROM entity_state_transition_log
+  WHERE entity_type IN ('device', 'compute_node', 'batch')
+UNION ALL SELECT 'device_daily_snapshot', COUNT(*) FROM device_daily_snapshot
+UNION ALL SELECT 'device_hourly_snapshot', COUNT(*) FROM device_hourly_snapshot
+UNION ALL SELECT 'device_lifecycle_event', COUNT(*) FROM device_lifecycle_event
+UNION ALL SELECT 'fault_incident (linked device)', COUNT(*) FROM fault_incident
+  WHERE supplier_device_id IS NOT NULL OR compute_node_id IS NOT NULL;
 ```
 
-按供应商/机房缩小范围时，可先查：
+按供应商/机房缩小范围：
 
 ```sql
--- 替换为实际 ID
--- :supplier_id  / :data_center_id
+-- 替换 :supplier_id / :data_center_id（psql: \set supplier_id 'sup_xxx'）
 
 SELECT batch_kind, batch_status, COUNT(*)
 FROM onboarding_batch
-WHERE supplier_id = :supplier_id   -- 可选
-  AND data_center_id = :data_center_id  -- 可选
+WHERE supplier_id = :'supplier_id'   -- 去掉本行即全库
+  AND data_center_id = :'data_center_id'  -- 可选
 GROUP BY batch_kind, batch_status;
 
 SELECT lifecycle_status, COUNT(*)
 FROM supplier_device
-WHERE supplier_id = :supplier_id
-  AND data_center_id = :data_center_id
+WHERE supplier_id = :'supplier_id'
+  AND data_center_id = :'data_center_id'
 GROUP BY lifecycle_status;
 ```
 
 ---
 
-## 2. 方案 A — 全量清理（推荐：测试环境重置）
+## 2. 方案 A — 全量清理（与 §0 等价）
 
-**效果**：删除 **所有** 批次种类 + **全部** 物理设备 + L1 库存；故障单保留但解除设备关联。
+**效果**：删除 **所有** 批次种类 + **全部** 物理设备 + L1 库存 + 相关活动/审计/快照；故障单保留但解除设备关联。
 
-**删除顺序说明**：
+**删除顺序**（与 `supply-schema.ts` 外键一致）：
 
-1. 先删 `supplier_device` → 级联清除 `change_log`、`device_link`、`compute_node` 等  
-2. 再删 `supplier_gpu_inventory`  
-3. 最后删 `onboarding_batch` → 级联清除 `plan_line`、`import_row`、`task`  
-   - `supplier_device_change_log.onboarding_batch_id` 为 `RESTRICT`，必须在删批次前已无 change_log（步骤 1 已满足）
+1. `fault_incident` 解除设备/节点（可选，设备删时亦 `SET NULL`）
+2. `supplier_activity`（附件 → 活动）
+3. `entity_state_transition_log`（无 FK，必须显式删）
+4. 无设备/库存绑定的 `internal_test_hold`
+5. `supplier_device` → 级联子表 + dashboard 快照/事件
+6. `supplier_gpu_inventory` → 级联库存维度的 `internal_test_hold`
+7. `onboarding_batch`（先 `parent_batch_id` 置空）→ 级联 `plan_line`、`import_row`、`task`、`device_link`、`progress_event`
+8. `supplier_ops_upload_batch`
 
-```sql
-BEGIN;
-
--- （可选）解除故障单与设备/节点的关联，避免孤儿引用
-UPDATE fault_incident
-SET supplier_device_id = NULL,
-    compute_node_id = NULL
-WHERE supplier_device_id IS NOT NULL
-   OR compute_node_id IS NOT NULL;
-
--- （可选）删除与设备/批次相关的活动时间线
-DELETE FROM supplier_activity_attachment
-WHERE activity_id IN (
-  SELECT id FROM supplier_activity
-  WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch')
-);
-
-DELETE FROM supplier_activity
-WHERE ref_domain IN ('device', 'batch', 'ops_upload_batch');
-
--- 1. 物理设备（级联：compute_node, resource_pool_binding, internal_test_hold,
---    supplier_device_change_log, onboarding_batch_device_link 等）
-DELETE FROM supplier_device;
-
--- 2. L1 聚合库存
-DELETE FROM supplier_gpu_inventory;
-
--- 3. 解除批次自引用 parent_batch_id（可选，DELETE 时也会 SET NULL）
-UPDATE onboarding_batch SET parent_batch_id = NULL;
-
--- 4. 全部接入/导入/下架批次（级联：plan_line, import_row, task, 剩余 device_link）
-DELETE FROM onboarding_batch;
-
--- 5. （可选）运维 Excel 上传批次
-DELETE FROM supplier_ops_upload_batch;
-
-COMMIT;
-```
+日常操作请直接使用 [§0 一键脚本](#0-一键全量清理推荐)；需要分步注释时可展开 §0 各步骤单独执行。
 
 ---
 
 ## 3. 方案 B — 仅清理上架/订单接入批次（保留物理机）
 
-> 若只想删 **商务计划批次**（`online` / `order_access`），**不删** 已入库设备，使用本方案。  
-> 进度关联 `onboarding_batch_device_link` 会随批次删除而清除，**设备本身保留**。
+> 只删 **商务计划批次**（`online` / `order_access`），**不删** 已入库设备。  
+> `onboarding_batch_device_link` 随批次 `CASCADE`；`onboarding_batch_progress_event` 随批次 `CASCADE`。
 
 ```sql
 BEGIN;
 
--- 仅删除指向 online/order_access 的设备关联（不删设备）
 DELETE FROM onboarding_batch_device_link
 WHERE business_onboarding_batch_id IN (
   SELECT id FROM onboarding_batch
   WHERE batch_kind IN ('online', 'order_access')
 );
 
--- 变更日志中「业务批次」引用置空（changelog 导入批次本身保留）
 UPDATE supplier_device_change_log
 SET business_onboarding_batch_id = NULL
 WHERE business_onboarding_batch_id IN (
   SELECT id FROM onboarding_batch
   WHERE batch_kind IN ('online', 'order_access')
 );
+
+DELETE FROM entity_state_transition_log
+WHERE entity_type = 'batch'
+  AND entity_id IN (
+    SELECT id::text FROM onboarding_batch
+    WHERE batch_kind IN ('online', 'order_access')
+  );
 
 DELETE FROM supplier_activity_attachment
 WHERE activity_id IN (
@@ -178,7 +237,6 @@ WHERE ref_domain = 'batch'
     WHERE batch_kind IN ('online', 'order_access')
   );
 
--- 子表随 CASCADE 删除：plan_line, import_row, task
 DELETE FROM onboarding_batch
 WHERE batch_kind IN ('online', 'order_access');
 
@@ -187,16 +245,12 @@ COMMIT;
 
 ---
 
-## 4. 方案 C — 按供应商或机房局部清理
+## 4. 参数化一键清理（供应商 / 机房）
 
-在 **方案 A** 基础上增加 `WHERE` 条件。示例：仅清理某机房。
+在 §0 各 `DELETE` / `UPDATE` 上增加作用域。示例：**仅某机房**（将 `'dc_xxxxxxxx'` 换成实际 ID）。
 
 ```sql
 BEGIN;
-
--- 目标机房 ID
--- SET LOCAL 或直接在 WHERE 中写 literal
--- 例：'dc_xxxxxxxx'
 
 UPDATE fault_incident fi
 SET supplier_device_id = NULL,
@@ -230,15 +284,33 @@ WHERE sa.ref_domain = 'batch'
   AND sa.ref_id = ob.id
   AND ob.data_center_id = 'dc_xxxxxxxx';
 
--- 设备（级联子表）
+DELETE FROM entity_state_transition_log est
+WHERE (
+  est.entity_type = 'device'
+  AND est.entity_id IN (SELECT id FROM supplier_device WHERE data_center_id = 'dc_xxxxxxxx')
+) OR (
+  est.entity_type = 'compute_node'
+  AND est.entity_id IN (
+    SELECT cn.id FROM compute_node cn
+    INNER JOIN supplier_device sd ON cn.supplier_device_id = sd.id
+    WHERE sd.data_center_id = 'dc_xxxxxxxx'
+  )
+) OR (
+  est.entity_type = 'batch'
+  AND est.entity_id IN (SELECT id::text FROM onboarding_batch WHERE data_center_id = 'dc_xxxxxxxx')
+);
+
+DELETE FROM internal_test_hold
+WHERE data_center_id = 'dc_xxxxxxxx'
+  AND supplier_device_id IS NULL
+  AND supplier_gpu_inventory_id IS NULL;
+
 DELETE FROM supplier_device
 WHERE data_center_id = 'dc_xxxxxxxx';
 
--- 库存
 DELETE FROM supplier_gpu_inventory
 WHERE data_center_id = 'dc_xxxxxxxx';
 
--- 批次（含该机房的导入/上架/下架批次）
 UPDATE onboarding_batch
 SET parent_batch_id = NULL
 WHERE data_center_id = 'dc_xxxxxxxx';
@@ -249,7 +321,7 @@ WHERE data_center_id = 'dc_xxxxxxxx';
 COMMIT;
 ```
 
-将 `'dc_xxxxxxxx'` 换为 `supplier_id = 'sup_xxxxxxxx'` 可改为按供应商清理（注意 `supplier_gpu_inventory`、`onboarding_batch` 同样加 `supplier_id` 条件）。
+按 **供应商** 清理：将 `data_center_id = 'dc_xxxxxxxx'` 改为 `supplier_id = 'sup_xxxxxxxx'`（`supplier_gpu_inventory`、`onboarding_batch`、`internal_test_hold` 同步加 `supplier_id` 条件）。
 
 ---
 
@@ -259,14 +331,20 @@ COMMIT;
 -- 应为 0
 SELECT COUNT(*) AS devices FROM supplier_device;
 SELECT COUNT(*) AS batches FROM onboarding_batch;
+SELECT COUNT(*) AS progress_events FROM onboarding_batch_progress_event;
 SELECT COUNT(*) AS gpu_inventory FROM supplier_gpu_inventory;
 SELECT COUNT(*) AS change_logs FROM supplier_device_change_log;
 SELECT COUNT(*) AS device_links FROM onboarding_batch_device_link;
+SELECT COUNT(*) AS daily_snapshots FROM device_daily_snapshot;
+SELECT COUNT(*) AS hourly_snapshots FROM device_hourly_snapshot;
+SELECT COUNT(*) AS lifecycle_events FROM device_lifecycle_event;
+SELECT COUNT(*) AS hold_links FROM internal_test_hold_device_link;
 
 -- 主数据应仍在
 SELECT COUNT(*) AS suppliers FROM supplier;
 SELECT COUNT(*) AS datacenters FROM data_center;
 SELECT COUNT(*) AS contracts FROM supplier_contract;
+SELECT COUNT(*) AS list_prices FROM supplier_card_list_price;
 ```
 
 ---
@@ -275,34 +353,52 @@ SELECT COUNT(*) AS contracts FROM supplier_contract;
 
 ```
 supplier_device
-  ├─ CASCADE → compute_node, resource_pool_binding, internal_test_hold
-  ├─ CASCADE → supplier_device_change_log (按 device_id)
-  ├─ CASCADE → onboarding_batch_device_link (按 supplier_device_id)
-  └─ SET NULL → fault_incident.supplier_device_id, onboarding_task.supplier_device_id
+  ├─ CASCADE → compute_node, resource_pool_binding
+  ├─ CASCADE → internal_test_hold (supplier_device_id), internal_test_hold_device_link
+  ├─ CASCADE → supplier_device_change_log, onboarding_batch_device_link
+  ├─ CASCADE → device_daily_snapshot, device_hourly_snapshot, device_lifecycle_event (dashboard-schema)
+  └─ SET NULL → fault_incident.supplier_device_id, onboarding_task.supplier_device_id,
+                onboarding_batch_import_row.supplier_device_id
 
 supplier_device_change_log
   ├─ RESTRICT → onboarding_batch (onboarding_batch_id)  ← 删批次前必须先无 change_log
-  └─ SET NULL → business_onboarding_batch_id (删业务批次时)
+  └─ SET NULL → business_onboarding_batch_id
+
+supplier_gpu_inventory
+  └─ CASCADE → internal_test_hold (supplier_gpu_inventory_id)
 
 onboarding_batch
-  ├─ CASCADE → plan_line, import_row, task, device_link (business side)
+  ├─ CASCADE → plan_line, import_row, task, device_link, progress_event
   ├─ SET NULL → supplier_device.onboarding_batch_id, parent_batch_id
   └─ SET NULL → supplier_ops_upload_batch.onboarding_batch_id
+
+entity_state_transition_log / supplier_activity
+  └─ 无 FK → 须显式 DELETE（按 entity_type / ref_domain 过滤）
 ```
 
-**结论**：全量清理时 **必须先 `DELETE supplier_device`，再 `DELETE onboarding_batch`**，否则会因 `supplier_device_change_log → onboarding_batch` 的 `RESTRICT` 约束失败。
+**结论**：全量清理时 **必须先 `DELETE supplier_device`，再 `DELETE onboarding_batch`**，否则会因 `supplier_device_change_log → onboarding_batch` 的 `RESTRICT` 失败。
 
 ---
 
-## 7. 备份建议（生产环境）
+## 7. 运维封装（可选）
+
+| 方式 | 说明 |
+|------|------|
+| **psql 文件** | 将 [§0](#0-一键全量清理推荐) 存为 `scripts/cleanup-supplier-device-domain.sql`，`psql "$DATABASE_URL" -f ...` |
+| **默认预览** | 保持末尾 `ROLLBACK`；确认后 `sed` 或手工改为 `COMMIT` |
+| **局部清理** | 使用 [§4](#4-参数化一键清理供应商--机房)，勿与 §0 混跑 |
+
+---
+
+## 8. 备份建议（生产环境）
 
 ```bash
-# 仅导出将被清理的表（示例）
 pg_dump "$DATABASE_URL" \
   -t supplier_device \
   -t supplier_gpu_inventory \
   -t onboarding_batch \
   -t onboarding_batch_plan_line \
+  -t onboarding_batch_progress_event \
   -t onboarding_batch_device_link \
   -t onboarding_batch_import_row \
   -t onboarding_task \
@@ -310,16 +406,20 @@ pg_dump "$DATABASE_URL" \
   -t compute_node \
   -t resource_pool_binding \
   -t internal_test_hold \
+  -t internal_test_hold_device_link \
   -t supplier_ops_upload_batch \
+  -t device_daily_snapshot \
+  -t device_hourly_snapshot \
+  -t device_lifecycle_event \
   -Fc -f supplier-device-batch-backup.dump
 ```
 
 ---
 
-## 8. 与全景文档的关系
+## 9. 与全景文档的关系
 
-清理完成后，可按 [`supplier-device-management-ops-panorama.md`](./supplier-device-management-ops-panorama.md) 中的 SOP 重新：
+清理完成后（T0），可按 [`supplier-overview-scenarios-from-zero.md`](./supplier-overview-scenarios-from-zero.md) 与 [`supplier-device-management-ops-panorama.md`](./supplier-device-management-ops-panorama.md) 重新：
 
-1. 创建上架/订单接入批次  
-2. 在机房详情导入设备主数据表  
-3. 导入设备变更表刷新进度  
+1. 创建上架/订单接入批次（`work_order_no` 在供应商内唯一，见 `onboarding_batch` 部分唯一索引）
+2. 在机房详情导入设备主数据（`device_inventory`）
+3. 导入设备变更表（`device_changelog`）刷新进度与 `onboarding_batch_progress_event`

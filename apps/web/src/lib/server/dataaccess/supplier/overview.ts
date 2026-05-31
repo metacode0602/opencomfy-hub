@@ -17,7 +17,7 @@ import {
   normalizeCardKey,
   normalizeLifecycleStage,
   OFFLINE_DELIVERY_OPS,
-  OTHER_DEPT_OPS,
+  isOtherDeptOpsStatus,
   parseGpuScopeCount,
   mergeKpiMetric,
   type PipelineBatchInput,
@@ -786,7 +786,7 @@ export const supplierOverviewDataAccess = {
 
       let otherDeptGpu = 0
       for (const d of filteredDevices) {
-        if (OTHER_DEPT_OPS.includes(d.opsStatus as (typeof OTHER_DEPT_OPS)[number])) {
+        if (isOtherDeptOpsStatus(d.opsStatus)) {
           otherDeptGpu += metricGpuCount(d)
         }
       }
@@ -823,7 +823,7 @@ export const supplierOverviewDataAccess = {
               d.lifecycleStatus === '在线' &&
               !d.inMaintenance &&
               !NON_SCHEDULABLE_OPS.includes(d.opsStatus as (typeof NON_SCHEDULABLE_OPS)[number]) &&
-              !OTHER_DEPT_OPS.includes(d.opsStatus as (typeof OTHER_DEPT_OPS)[number]),
+              !isOtherDeptOpsStatus(d.opsStatus),
           ).length,
           gpuCount: sellableGpu,
         },

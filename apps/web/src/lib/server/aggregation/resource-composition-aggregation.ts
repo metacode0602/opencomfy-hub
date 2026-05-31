@@ -16,7 +16,7 @@ import type {
 
 import {
   NON_SCHEDULABLE_OPS,
-  OTHER_DEPT_OPS,
+  isOtherDeptOpsStatus,
   RESERVED_IDLE_OPS,
   TERMINAL_BATCH_STATUSES,
   type OverviewDeviceRow,
@@ -108,7 +108,7 @@ export function classifyDeviceExclusiveBucket(
     return 'reserved_idle'
   }
   if (
-    OTHER_DEPT_OPS.includes(device.opsStatus as (typeof OTHER_DEPT_OPS)[number]) ||
+    isOtherDeptOpsStatus(device.opsStatus) ||
     internalHoldDeviceIds.has(device.id)
   ) {
     return 'internal_occupancy'

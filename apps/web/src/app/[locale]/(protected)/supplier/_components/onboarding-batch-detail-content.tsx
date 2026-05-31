@@ -42,6 +42,8 @@ import type { OnboardingBatchDetailTask } from '@/lib/types/onboarding-batch-api
 import { AdjustOnboardingBatchPlanDialog } from './adjust-onboarding-batch-plan-dialog'
 import { BatchLifecycleActions } from './batch-lifecycle-actions'
 import { BatchAdjustHistoryList, BatchProgressTimeline } from './batch-progress-timeline'
+import { OnboardingBatchProgressDevices } from './onboarding-batch-progress-devices'
+import { DatacenterPlannedBatchesPanel } from './datacenter-planned-batches-panel'
 
 const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
 
@@ -343,6 +345,7 @@ export function OnboardingBatchDetailContent({
       <Tabs value={currentTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="progress">上架进度</TabsTrigger>
+          <TabsTrigger value="planned">计划批次</TabsTrigger>
           {hasImport && <TabsTrigger value="import">导入明细</TabsTrigger>}
           <TabsTrigger value="overview">批次概览</TabsTrigger>
           <TabsTrigger value="devices">已入库设备 ({devices.length})</TabsTrigger>
@@ -399,6 +402,16 @@ export function OnboardingBatchDetailContent({
               </CardContent>
             </Card>
           )}
+
+          <OnboardingBatchProgressDevices batchId={batch.id} />
+        </TabsContent>
+
+        <TabsContent value="planned" className="mt-4">
+          <DatacenterPlannedBatchesPanel
+            dataCenterId={batch.dataCenterId}
+            highlightBatchId={batch.id}
+            compact
+          />
         </TabsContent>
 
         {hasImport && (

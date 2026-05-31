@@ -99,3 +99,46 @@ export type OnboardingBatchDetailPage = {
   devices: OnboardingBatchDetailDevice[]
   tasks: OnboardingBatchDetailTask[]
 }
+
+export type OnboardingBatchDatacenterDeviceChangeLog = {
+  id: string
+  occurredAt: Date
+  changeAction: string
+  changeContent: string | null
+  description: string | null
+  ticketNo: string | null
+  importRowNo: number | null
+  previousLifecycleStatus: string | null
+  newLifecycleStatus: string | null
+  previousOpsStatus: string | null
+  newOpsStatus: string | null
+  businessOnboardingBatchId: string | null
+  linkedToCurrentBatch: boolean
+}
+
+export type OnboardingBatchDatacenterDevice = {
+  id: string
+  sn: string
+  externalDeviceId: string | null
+  assetNo: string | null
+  internalIp: string | null
+  externalIp: string | null
+  gpuCount: number
+  cardTypeCode: string
+  cardTypeName: string
+  opsStatus: string
+  lifecycleStatus: string
+  cooperationType: string
+  devicePurpose: string | null
+  inMaintenance: boolean
+  linkedToBatch: boolean
+  changeLogs: OnboardingBatchDatacenterDeviceChangeLog[]
+}
+
+export type OnboardingBatchDatacenterDevicesResult = {
+  dataCenterName: string
+  idcCode: string
+  totalDevices: number
+  linkedDevices: number
+  devices: OnboardingBatchDatacenterDevice[]
+}

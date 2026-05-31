@@ -34,6 +34,22 @@ export const CHANGE_ACTION_DEFAULT_OPS: Record<string, string> = {
   ...CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
 }
 
+/**
+ * 设备字典文案归一化：Excel 常见「其它」与标准「其他」对齐。
+ * 应用于设备状态、变更动作及变更内容中的状态片段。
+ */
+export function normalizeDeviceDictionaryText(raw: string): string {
+  return raw.trim().replace(/其它/g, "其他")
+}
+
+export function normalizeDeviceOpsStatus(raw: string): string {
+  return normalizeDeviceDictionaryText(raw)
+}
+
+export function normalizeDeviceChangeAction(raw: string): string {
+  return normalizeDeviceDictionaryText(raw)
+}
+
 export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
   online: "设备上架",
   order_access: "订单接入",
@@ -65,7 +81,7 @@ export const FAULT_IMPORT_STATUS_LABELS: Record<string, string> = {
 
 export function resolveLifecycleStatus(opsStatus: string, inMaintenance: boolean): string {
   if (inMaintenance) return "维护中"
-  return OPS_STATUS_TO_LIFECYCLE[opsStatus] ?? "待接入"
+  return OPS_STATUS_TO_LIFECYCLE[normalizeDeviceOpsStatus(opsStatus)] ?? "待接入"
 }
 
 export function mapDeviceCooperationType(raw: string | undefined): {
@@ -200,7 +216,8 @@ export function buildDevicesFromInventoryImport(params: {
 
   okRows.forEach((row, idx) => {
     const inMaint = row.in_maintenance ?? false
-    const lifecycle = resolveLifecycleStatus(row.ops_status, inMaint)
+    const opsStatus = normalizeDeviceOpsStatus(row.ops_status)
+    const lifecycle = resolveLifecycleStatus(opsStatus, inMaint)
     const cooperationType = row.cooperation_type ?? "idle_time"
     const { sn, assetNo: asset } = resolveImportDeviceIdentity(row, idcCode, idx)
     const deviceId = createId("dev")
@@ -222,7 +239,7 @@ export function buildDevicesFromInventoryImport(params: {
       internal_ip: row.internal_ip ?? "",
       platform_resource_id: null,
       external_device_id: row.external_device_id ?? null,
-      ops_status: row.ops_status,
+      ops_status: opsStatus,
       in_maintenance: inMaint,
       bandwidth_group: row.bandwidth_group ?? null,
       rate_limit: row.rate_limit ?? null,
@@ -278,10 +295,12 @@ function resolveOpsStatusFromChangelogRow(
   const inMaint = device.in_maintenance ?? false
   const content = row.change_content ?? ""
 
-  if (content.includes("设备状态") || row.change_action.includes("状态")) {
+  const changeAction = normalizeDeviceChangeAction(row.change_action)
+
+  if (content.includes("设备状态") || changeAction.includes("状态")) {
     const match = content.match(/[为改为：:]\s*([^\s,，]+)/)
     if (match?.[1] && KNOWN_OPS_FROM_CONTENT(match[1])) {
-      const newOps = match[1]
+      const newOps = normalizeDeviceOpsStatus(match[1])
       const newLife = resolveLifecycleStatus(newOps, inMaint)
       return {
         newOps,
@@ -291,11 +310,11 @@ function resolveOpsStatusFromChangelogRow(
     }
   }
 
-  const defaultOps = CHANGE_ACTION_DEFAULT_OPS[row.change_action]
+  const defaultOps = CHANGE_ACTION_DEFAULT_OPS[changeAction]
   if (defaultOps) {
-    const newOps = defaultOps
+    const newOps = normalizeDeviceOpsStatus(defaultOps)
     const newLife = resolveLifecycleFromChangelog({
-      changeAction: row.change_action,
+      changeAction,
       newOps,
       inMaintenance: inMaint,
     })
@@ -430,7 +449,7 @@ function rowTicketMatchesBatch(ticketNo: string | undefined | null, refs: Set<st
 }
 
 function KNOWN_OPS_FROM_CONTENT(s: string): boolean {
-  return s in OPS_STATUS_TO_LIFECYCLE
+  return normalizeDeviceOpsStatus(s) in OPS_STATUS_TO_LIFECYCLE
 }
 
 export function buildFaultIncidentsFromRecordsImport(params: {

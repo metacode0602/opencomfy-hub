@@ -8,6 +8,7 @@ import {
   inventoryGpuQuantity,
   resolveGpuCardTypeRole,
 } from '@/lib/supplier/gpu-card-type-metrics'
+import { normalizeDeviceOpsStatus } from '@/lib/supplier/device-import-utils'
 import type { GpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import type { OverviewKpiMetric, LifecycleFunnelStageDto } from '@/lib/types/supplier-overview-api'
 
@@ -35,6 +36,11 @@ export const GATEWAY_ONBOARDING_OPS = ['网关节点上架中'] as const
 export const NON_SCHEDULABLE_OPS = ['不可调度节点运行中'] as const
 export const RESERVED_IDLE_OPS = ['预留闲置中'] as const
 export const OTHER_DEPT_OPS = ['其他部门使用中'] as const
+
+/** 兼容历史/Excel 中「其它部门使用中」等别名 */
+export function isOtherDeptOpsStatus(opsStatus: string): boolean {
+  return (OTHER_DEPT_OPS as readonly string[]).includes(normalizeDeviceOpsStatus(opsStatus))
+}
 
 export const DEFAULT_GPU_PER_DEVICE = 8
 

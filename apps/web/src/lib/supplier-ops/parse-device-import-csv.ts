@@ -3,7 +3,7 @@ import type {
   DeviceInventoryParsedRow,
   FaultRecordsParsedRow,
 } from "@/lib/types/supplier-domain"
-import { mapDeviceCooperationType } from "@/lib/supplier/device-import-utils"
+import { mapDeviceCooperationType, normalizeDeviceChangeAction, normalizeDeviceOpsStatus } from "@/lib/supplier/device-import-utils"
 import {
   DEVICE_CHANGE_ACTION_SEEDS,
   DEVICE_OPS_STATUS_SEEDS,
@@ -137,7 +137,8 @@ export function parseDeviceInventoryTable(
   const rows: DeviceInventoryParsedRow[] = []
   for (let li = 1; li < table.length; li++) {
     const cells = table[li]!
-    const ops_status = cell(cells, iOpsStatus)
+    const rawOpsStatus = cell(cells, iOpsStatus)
+    const ops_status = normalizeDeviceOpsStatus(rawOpsStatus)
     if (!ops_status && !cell(cells, iInternalIp) && !cell(cells, iDeviceId)) continue
     if (!ops_status) {
       return { ok: false, error: `第 ${li + 1} 行缺少设备状态` }
@@ -145,9 +146,15 @@ export function parseDeviceInventoryTable(
     const in_maintenance = iMaint === -1 ? false : parseBool(cell(cells, iMaint))
     let parse_status: "ok" | "warning" | "error" = "ok"
     let parse_message: string | null = null
+    if (rawOpsStatus !== ops_status) {
+      parse_status = "warning"
+      parse_message = `设备状态「${rawOpsStatus}」已归一化为「${ops_status}」`
+    }
     if (!KNOWN_OPS_STATUS.has(ops_status)) {
       parse_status = "warning"
-      parse_message = `未知设备状态「${ops_status}」，入库时将尝试映射`
+      parse_message = parse_message
+        ? `${parse_message}；未知设备状态，入库时将尝试映射`
+        : `未知设备状态「${ops_status}」，入库时将尝试映射`
     }
     const coopRaw = cell(cells, iCoop)
     const cooperation = mapDeviceCooperationType(coopRaw || undefined)
@@ -217,16 +224,23 @@ export function parseDeviceChangelogTable(
   for (let li = 1; li < table.length; li++) {
     const cells = table[li]!
     const occurred_at = cell(cells, iOccurred)
-    const change_action = cell(cells, iAction)
+    const rawChangeAction = cell(cells, iAction)
+    const change_action = normalizeDeviceChangeAction(rawChangeAction)
     if (!occurred_at && !change_action && !cell(cells, iDeviceId)) continue
     if (!occurred_at || !change_action) {
       return { ok: false, error: `第 ${li + 1} 行缺少操作时间或变更动作` }
     }
     let parse_status: "ok" | "warning" | "error" = "ok"
     let parse_message: string | null = null
+    if (rawChangeAction !== change_action) {
+      parse_status = "warning"
+      parse_message = `变更动作「${rawChangeAction}」已归一化为「${change_action}」`
+    }
     if (!KNOWN_CHANGE_ACTIONS.has(change_action)) {
       parse_status = "warning"
-      parse_message = `未知变更动作「${change_action}」，入库时将仍记录原文`
+      parse_message = parse_message
+        ? `${parse_message}；未知变更动作，入库时将仍记录原文`
+        : `未知变更动作「${change_action}」，入库时将仍记录原文`
     }
     if (!cell(cells, iDeviceId) && !cell(cells, iInternalIp)) {
       parse_status = "warning"

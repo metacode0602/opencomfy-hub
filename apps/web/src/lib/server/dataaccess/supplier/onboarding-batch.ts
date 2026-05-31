@@ -5,6 +5,7 @@ import type {
   OnboardingBatchCommitListResult,
   OnboardingBatchCreateInput,
   OnboardingBatchCreateResult,
+  OnboardingBatchDatacenterDevicesResult,
   OnboardingBatchDetailPage,
   OnboardingBatchListItem,
   OnboardingBatchParseListResult,
@@ -35,6 +36,7 @@ import {
   supplierActivity,
   supplierContract,
   supplierDevice,
+  supplierDeviceChangeLog,
   dataCenter,
   userStaff,
 } from '@workspace/db/schema'
@@ -560,6 +562,7 @@ export const onboardingBatchDataAccess = {
     batchStatus?: string
     importStatus?: string
     supplierId?: string
+    dataCenterId?: string
   }): Promise<{ items: OnboardingBatchListItem[]; total: number }> {
     const kinds =
       params.batchKind === 'all'
@@ -570,6 +573,9 @@ export const onboardingBatchDataAccess = {
 
     if (params.supplierId && params.supplierId !== 'all') {
       conditions.push(eq(onboardingBatch.supplierId, params.supplierId))
+    }
+    if (params.dataCenterId) {
+      conditions.push(eq(onboardingBatch.dataCenterId, params.dataCenterId))
     }
     if (params.batchStatus && params.batchStatus !== 'all') {
       conditions.push(eq(onboardingBatch.batchStatus, params.batchStatus))
@@ -787,6 +793,129 @@ export const onboardingBatchDataAccess = {
       return detail
     } catch (e) {
       supplierError('onboarding-batch', 'getDetailPage failed', e, { batchId })
+      throw e
+    }
+  },
+
+  async listDatacenterUploadedDevices(
+    batchId: string,
+  ): Promise<OnboardingBatchDatacenterDevicesResult | null> {
+    supplierLog('onboarding-batch', 'listDatacenterUploadedDevices start', { batchId })
+    try {
+      const [batchRow] = await db
+        .select()
+        .from(onboardingBatch)
+        .where(eq(onboardingBatch.id, batchId))
+        .limit(1)
+      if (!batchRow) {
+        supplierWarn('onboarding-batch', 'listDatacenterUploadedDevices batch not found', {
+          batchId,
+        })
+        return null
+      }
+
+      const deviceRows = await db
+        .select({
+          id: supplierDevice.id,
+          sn: supplierDevice.sn,
+          externalDeviceId: supplierDevice.externalDeviceId,
+          assetNo: supplierDevice.assetNo,
+          internalIp: supplierDevice.internalIp,
+          externalIp: supplierDevice.externalIp,
+          gpuCount: supplierDevice.gpuCount,
+          opsStatus: supplierDevice.opsStatus,
+          lifecycleStatus: supplierDevice.lifecycleStatus,
+          cooperationType: supplierDevice.cooperationType,
+          devicePurpose: supplierDevice.devicePurpose,
+          inMaintenance: supplierDevice.inMaintenance,
+          cardTypeCode: gpuCardType.code,
+          cardTypeName: gpuCardType.name,
+        })
+        .from(supplierDevice)
+        .innerJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+        .where(
+          and(
+            eq(supplierDevice.supplierId, batchRow.supplierId),
+            eq(supplierDevice.dataCenterId, batchRow.dataCenterId),
+          ),
+        )
+        .orderBy(supplierDevice.sn)
+
+      const linkRows = await db
+        .select({ supplierDeviceId: onboardingBatchDeviceLink.supplierDeviceId })
+        .from(onboardingBatchDeviceLink)
+        .where(eq(onboardingBatchDeviceLink.businessOnboardingBatchId, batchId))
+
+      const linkedIds = new Set(linkRows.map((r) => r.supplierDeviceId))
+      const deviceIds = deviceRows.map((d) => d.id)
+
+      const changeLogRows =
+        deviceIds.length > 0
+          ? await db
+              .select({
+                id: supplierDeviceChangeLog.id,
+                supplierDeviceId: supplierDeviceChangeLog.supplierDeviceId,
+                occurredAt: supplierDeviceChangeLog.occurredAt,
+                changeAction: supplierDeviceChangeLog.changeAction,
+                changeContent: supplierDeviceChangeLog.changeContent,
+                description: supplierDeviceChangeLog.description,
+                ticketNo: supplierDeviceChangeLog.ticketNo,
+                importRowNo: supplierDeviceChangeLog.importRowNo,
+                previousLifecycleStatus: supplierDeviceChangeLog.previousLifecycleStatus,
+                newLifecycleStatus: supplierDeviceChangeLog.newLifecycleStatus,
+                previousOpsStatus: supplierDeviceChangeLog.previousOpsStatus,
+                newOpsStatus: supplierDeviceChangeLog.newOpsStatus,
+                businessOnboardingBatchId: supplierDeviceChangeLog.businessOnboardingBatchId,
+              })
+              .from(supplierDeviceChangeLog)
+              .where(inArray(supplierDeviceChangeLog.supplierDeviceId, deviceIds))
+              .orderBy(desc(supplierDeviceChangeLog.occurredAt))
+          : []
+
+      const logsByDevice = new Map<string, OnboardingBatchDatacenterDevicesResult['devices'][0]['changeLogs']>()
+      for (const log of changeLogRows) {
+        const entry = {
+          id: log.id,
+          occurredAt: log.occurredAt,
+          changeAction: log.changeAction,
+          changeContent: log.changeContent,
+          description: log.description,
+          ticketNo: log.ticketNo,
+          importRowNo: log.importRowNo,
+          previousLifecycleStatus: log.previousLifecycleStatus,
+          newLifecycleStatus: log.newLifecycleStatus,
+          previousOpsStatus: log.previousOpsStatus,
+          newOpsStatus: log.newOpsStatus,
+          businessOnboardingBatchId: log.businessOnboardingBatchId,
+          linkedToCurrentBatch: log.businessOnboardingBatchId === batchId,
+        }
+        const list = logsByDevice.get(log.supplierDeviceId) ?? []
+        list.push(entry)
+        logsByDevice.set(log.supplierDeviceId, list)
+      }
+
+      const devices = deviceRows.map((d) => ({
+        ...d,
+        linkedToBatch: linkedIds.has(d.id),
+        changeLogs: logsByDevice.get(d.id) ?? [],
+      }))
+
+      const result: OnboardingBatchDatacenterDevicesResult = {
+        dataCenterName: batchRow.dataCenterName,
+        idcCode: batchRow.idcCode,
+        totalDevices: devices.length,
+        linkedDevices: linkedIds.size,
+        devices,
+      }
+
+      supplierLog('onboarding-batch', 'listDatacenterUploadedDevices done', {
+        batchId,
+        totalDevices: result.totalDevices,
+        linkedDevices: result.linkedDevices,
+      })
+      return result
+    } catch (e) {
+      supplierError('onboarding-batch', 'listDatacenterUploadedDevices failed', e, { batchId })
       throw e
     }
   },

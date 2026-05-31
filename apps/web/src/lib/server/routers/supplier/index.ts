@@ -48,6 +48,7 @@ import {
   onboardingBatchListSchema,
   onboardingBatchParseListSchema,
   onboardingBatchProgressEventsSchema,
+  onboardingBatchDatacenterDevicesSchema,
   onboardingBatchVoidSchema,
 } from '@/lib/server/routers/supplier/onboarding-batch-schemas'
 import { supplierActivityListSchema, supplierActivityCreateSchema } from '@/lib/server/routers/supplier/supplier-activity-schemas'
@@ -87,6 +88,11 @@ import {
   unitCostUpdateSchema,
   unitCostUpsertSchema,
 } from '@/lib/server/routers/supplier/unit-costs-schemas'
+import { supplierDataCleanupDataAccess } from '@/lib/server/dataaccess/supplier/data-cleanup'
+import {
+  supplierDataCleanupExecuteSchema,
+  supplierDataCleanupPreviewSchema,
+} from '@/lib/server/routers/supplier/data-cleanup-schemas'
 import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -712,6 +718,22 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
+    listDatacenterUploadedDevices: protectedProcedure
+      .input(onboardingBatchDatacenterDevicesSchema)
+      .query(async ({ input }) => {
+        try {
+          const result = await onboardingBatchDataAccess.listDatacenterUploadedDevices(
+            input.batchId,
+          )
+          if (!result) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '接入批次不存在' })
+          }
+          return result
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
     create: adminProcedure.input(onboardingBatchCreateSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
@@ -1322,6 +1344,36 @@ export const supplierRouter = createTRPCRouter({
             gpuCardTypeId: input.gpuCardTypeId,
             periodId: input.periodId,
           })
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  dataCleanup: createTRPCRouter({
+    getCapabilities: adminProcedure.query(() => {
+      return supplierDataCleanupDataAccess.getCapabilities()
+    }),
+
+    preview: adminProcedure.input(supplierDataCleanupPreviewSchema).query(async ({ input }) => {
+      try {
+        return await supplierDataCleanupDataAccess.preview(input)
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        mapImportError(e)
+      }
+    }),
+
+    execute: adminProcedure
+      .input(supplierDataCleanupExecuteSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await supplierDataCleanupDataAccess.execute(input, ctx.user.id)
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
           mapImportError(e)
         }
       }),

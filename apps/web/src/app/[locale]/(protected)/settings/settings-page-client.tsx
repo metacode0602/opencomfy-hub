@@ -2,11 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Settings, User, Key, Bell, Palette, Globe, RefreshCw } from "lucide-react"
+import { Settings, User, Key, Bell, Palette, Globe, RefreshCw, Eraser } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { cn } from "@workspace/ui/lib/utils"
+import { authClient } from "@/lib/auth-client"
 import { BillingSyncSettingsContent } from "@/components/settings/billing-sync-settings-content"
+import { SupplierDataCleanupSettingsContent } from "@/components/settings/supplier-data-cleanup-settings-content"
 
 const settingsSections = [
   { id: "account", label: "账户设置", icon: User },
@@ -15,6 +17,7 @@ const settingsSections = [
   { id: "appearance", label: "外观设置", icon: Palette },
   { id: "language", label: "语言设置", icon: Globe },
   { id: "billing-sync", label: "账单同步", icon: RefreshCw },
+  { id: "supplier-data-cleanup", label: "供应商数据清理", icon: Eraser, adminOnly: true },
 ] as const
 
 type SettingsSectionId = (typeof settingsSections)[number]["id"]
@@ -25,6 +28,12 @@ function isSettingsSection(id: string | null): id is SettingsSectionId {
 
 export function SettingsPageClient() {
   const searchParams = useSearchParams()
+  const { data: session } = authClient.useSession()
+  const userRole = (session?.user as { role?: string } | undefined)?.role
+  const canAccessAdminSettings = userRole !== 'user'
+  const visibleSections = settingsSections.filter(
+    (s) => !('adminOnly' in s && s.adminOnly) || canAccessAdminSettings,
+  )
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("account")
   const [apiKey, setApiKey] = useState("")
   const [notifications, setNotifications] = useState({
@@ -55,7 +64,7 @@ export function SettingsPageClient() {
 
         <div className="flex gap-8">
           <nav className="w-48 flex-shrink-0 space-y-1">
-            {settingsSections.map((section) => (
+            {visibleSections.map((section) => (
               <button
                 key={section.id}
                 onClick={() => setActiveSection(section.id)}
@@ -219,6 +228,16 @@ export function SettingsPageClient() {
             {activeSection === "billing-sync" && (
               <div className="p-6 rounded-xl border border-border bg-card">
                 <BillingSyncSettingsContent />
+              </div>
+            )}
+
+            {activeSection === "supplier-data-cleanup" && (
+              <div className="p-6 rounded-xl border border-border bg-card">
+                {canAccessAdminSettings ? (
+                  <SupplierDataCleanupSettingsContent />
+                ) : (
+                  <p className="text-sm text-muted-foreground">仅管理员可访问供应商数据清理。</p>
+                )}
               </div>
             )}
           </div>

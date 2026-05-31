@@ -74,6 +74,7 @@ export const onboardingBatchListSchema = z.object({
   batchStatus: z.string().optional(),
   importStatus: z.string().optional(),
   supplierId: z.string().optional(),
+  dataCenterId: z.string().optional(),
 })
 
 export const onboardingBatchListBySupplierSchema = z.object({
@@ -100,6 +101,10 @@ export const onboardingBatchAdjustPlanSchema = z.object({
 })
 
 export const onboardingBatchProgressEventsSchema = z.object({
+  batchId: z.string().min(1),
+})
+
+export const onboardingBatchDatacenterDevicesSchema = z.object({
   batchId: z.string().min(1),
 })
 
