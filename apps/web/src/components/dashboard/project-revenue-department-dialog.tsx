@@ -22,6 +22,7 @@ import {
 } from '@workspace/ui/components/select'
 import { Textarea } from '@workspace/ui/components/textarea'
 import type { Project } from '@/lib/data/types'
+import type { AppRouter, inferRouterOutputs } from '@/lib/server/routers'
 import { STAFF_DEPARTMENTS, type StaffDepartment } from '@/lib/crm/staff-constants'
 import { todayShanghaiDateString } from '@/lib/crm/project-effective-dates'
 import { trpc } from '@/lib/trpc/client'
@@ -33,9 +34,8 @@ export type ProjectRevenueDepartmentDialogProps = {
   onSaved?: () => void
 }
 
-type RevenueDepartmentAssignment = NonNullable<
-  ReturnType<typeof trpc.crm.projects.getRevenueDepartmentAssignment.useQuery>['data']
->
+type RevenueDepartmentAssignment =
+  inferRouterOutputs<AppRouter>['crm']['projects']['getRevenueDepartmentAssignment']
 
 function resolveInitialDepartment(
   project: Project,
