@@ -19,7 +19,7 @@ function GlobalOpsDashboardContent() {
       {/* <GlobalDashboardHeader /> */}
       <GlobalKpiSection />
 
-      <div className="grid gap-4 lg:grid-cols-12">
+      <div className="grid items-stretch gap-4 lg:grid-cols-12">
         <LifecycleFlowCard />
         <ResourcePoolChartCard />
         <ClusterStatusCard />

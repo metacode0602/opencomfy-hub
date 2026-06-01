@@ -98,8 +98,8 @@ export function ClusterStatusCard() {
   )
 
   return (
-    <Card className="border-border/80 lg:col-span-3">
-      <CardHeader>
+    <Card className="flex h-full min-h-0 flex-col border-border/80 lg:col-span-3">
+      <CardHeader className="shrink-0">
         <CardTitle className="flex items-center gap-1.5 text-base">
           机房集群实时状态
           <Tooltip>
@@ -119,9 +119,11 @@ export function ClusterStatusCard() {
           </Tooltip>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex min-h-0 flex-1 flex-col space-y-3 pb-3 pt-0">
         {isLoading ? (
-          <DashboardCardLoading />
+          <div className="flex flex-1 items-center justify-center">
+            <DashboardCardLoading />
+          </div>
         ) : clusters.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">暂无机房数据</p>
         ) : inconsistentClusters.length === 0 ? (

@@ -423,7 +423,7 @@ function ImportPreCheckAlerts({
           )}
           {regionIssues && regionIssues.length > 0 && (
             <div className="mt-2">
-              <p className="font-medium">机房匹配问题（请维护机房 bare_metal_region 或修正 Excel 机房名称）：</p>
+              <p className="font-medium">机房匹配问题（请维护机房名称或修正 Excel 机房名称）：</p>
               <ul className="mt-1 list-inside list-disc">
                 {regionIssues.map((p) => (
                   <li key={`region-${p.regionCode}-${p.gpuModel}`}>

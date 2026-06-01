@@ -13,6 +13,7 @@ import {
   resolveCardTimeUnitPrice,
   type SupplierBillingUnit,
 } from '@/lib/supplier/monthly-rent-pricing'
+import { normalizeDatacenterName } from '@/lib/supplier/datacenter-import-utils'
 import {
   billingPeriodImportBatch,
   billingPeriodRawBaremetalOrder,
@@ -25,7 +26,6 @@ import {
 } from '@workspace/db/schema'
 import { and, desc, eq, lte, or, sql } from 'drizzle-orm'
 import {
-  normalizeBaremetalRegion,
   parseDeviceModel,
   parsePurchaseQty,
 } from './baremetal-order-parse'
@@ -76,7 +76,7 @@ export type ResolvedUnitCost = ResolvedPricingFields & {
 
 type GpuCardRef = { id: string; code: string }
 type DataCenterRef = { id: string; containerInstanceRegion: string }
-type BareMetalDataCenterRef = { id: string; bareMetalRegion: string }
+type DataCenterNameRef = { id: string; name: string }
 
 type PricingRecordRow = {
   id: string
@@ -210,20 +210,20 @@ async function loadDataCentersByRegion(): Promise<Map<string, DataCenterRef[]>> 
   return map
 }
 
-async function loadDataCentersByBareMetalRegion(): Promise<Map<string, BareMetalDataCenterRef[]>> {
+async function loadDataCentersByName(): Promise<Map<string, DataCenterNameRef[]>> {
   const rows = await db
     .select({
       id: dataCenter.id,
-      bareMetalRegion: dataCenter.bareMetalRegion,
+      name: dataCenter.name,
     })
     .from(dataCenter)
-  const map = new Map<string, BareMetalDataCenterRef[]>()
+  const map = new Map<string, DataCenterNameRef[]>()
   for (const row of rows) {
-    const region = row.bareMetalRegion?.trim()
-    if (!region) continue
-    const key = normalizeBaremetalRegion(region)
+    const name = row.name?.trim()
+    if (!name) continue
+    const key = normalizeDatacenterName(name)
     const list = map.get(key) ?? []
-    list.push({ id: row.id, bareMetalRegion: region })
+    list.push({ id: row.id, name })
     map.set(key, list)
   }
   return map
@@ -486,19 +486,19 @@ async function resolvePricingSnapshotForDcCard(input: {
 export type PricingResolveContext = {
   gpuByCode: Map<string, GpuCardRef>
   dataCentersByRegion: Map<string, DataCenterRef[]>
-  dataCentersByBareMetalRegion: Map<string, BareMetalDataCenterRef[]>
+  dataCentersByName: Map<string, DataCenterNameRef[]>
   recordsByDcCard: Map<string, PricingRecordRow[]>
 }
 
 export async function loadPricingResolveContext(): Promise<PricingResolveContext> {
-  const [gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard] =
+  const [gpuByCode, dataCentersByRegion, dataCentersByName, recordsByDcCard] =
     await Promise.all([
       loadGpuCardByCode(),
       loadDataCentersByRegion(),
-      loadDataCentersByBareMetalRegion(),
+      loadDataCentersByName(),
       loadAllPricingRecords(),
     ])
-  return { gpuByCode, dataCentersByRegion, dataCentersByBareMetalRegion, recordsByDcCard }
+  return { gpuByCode, dataCentersByRegion, dataCentersByName, recordsByDcCard }
 }
 
 /** 按机房×卡型 ID 解析成本定价（与导入前校验 tenant-bill-pricing 同源） */
@@ -808,14 +808,14 @@ export async function findMissingBaremetalPlatformListPrice(input: {
   for (const order of orders) {
     const parsedDevice = parseDeviceModel(order.deviceModel)
     const parsedPurchase = parsePurchaseQty(order.purchaseQtyText)
-    const regionCode = normalizeBaremetalRegion(order.idcName)
+    const idcNameKey = normalizeDatacenterName(order.idcName ?? '')
     const asOfDate = asOfFromOrderedAt(order.orderedAt)
 
-    if (!parsedDevice || !parsedPurchase || !regionCode) continue
+    if (!parsedDevice || !parsedPurchase || !idcNameKey) continue
 
     const { cardCode } = parsedDevice
     const { billingUnit } = parsedPurchase
-    const dedupeKey = `${regionCode}::${cardCode}::${billingUnit}::${asOfDate}`
+    const dedupeKey = `${idcNameKey}::${cardCode}::${billingUnit}::${asOfDate}`
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
 
@@ -823,7 +823,7 @@ export async function findMissingBaremetalPlatformListPrice(input: {
     const gpu = ctx.gpuByCode.get(gpuNorm)
     if (!gpu) {
       missing.push({
-        regionCode,
+        regionCode: order.idcName?.trim() ?? idcNameKey,
         gpuModel: cardCode,
         failureReason: 'card_type_not_found',
         orderId: order.orderId,
@@ -833,10 +833,10 @@ export async function findMissingBaremetalPlatformListPrice(input: {
       continue
     }
 
-    const dcs = ctx.dataCentersByBareMetalRegion.get(regionCode) ?? []
+    const dcs = ctx.dataCentersByName.get(idcNameKey) ?? []
     if (dcs.length === 0) {
       missing.push({
-        regionCode,
+        regionCode: order.idcName?.trim() ?? idcNameKey,
         gpuModel: cardCode,
         failureReason: 'region_not_found',
         matchedGpuCardTypeCode: gpu.code,
@@ -856,7 +856,7 @@ export async function findMissingBaremetalPlatformListPrice(input: {
     })
     if (!platform) {
       missing.push({
-        regionCode,
+        regionCode: order.idcName?.trim() ?? idcNameKey,
         gpuModel: cardCode,
         failureReason: 'platform_list_price_not_found',
         matchedGpuCardTypeCode: gpu.code,

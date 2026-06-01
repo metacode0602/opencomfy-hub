@@ -12,7 +12,7 @@ import { computeBaremetalCardHours } from './baremetal-card-hours'
 import { parseDeviceModel, parsePurchaseQty } from './baremetal-order-parse'
 import {
   loadCostMasterDataContext,
-  resolveDataCenterByBareMetalRegion,
+  resolveDataCenterByName,
   resolveDataCenterByContainerRegion,
   resolveGpuCardType,
   type CostMasterDataContext,
@@ -166,7 +166,7 @@ function buildBaremetalSourceLines(input: {
       continue
     }
 
-    const dc = resolveDataCenterByBareMetalRegion(input.masterCtx, row.idcName ?? '')
+    const dc = resolveDataCenterByName(input.masterCtx, row.idcName ?? '')
     const card = resolveGpuCardType(input.masterCtx, device.cardCode)
     if (!dc) {
       input.issues.push(`裸金属订单 ${row.orderId} 机房 ${row.idcName ?? ''} 无法匹配`)
@@ -302,7 +302,7 @@ export async function persistCostSourceLines(input: {
     for (const row of baremetalRows) {
       const device = parseDeviceModel(row.deviceModel)
       if (!device) continue
-      const dc = resolveDataCenterByBareMetalRegion(masterCtx, row.idcName ?? '')
+      const dc = resolveDataCenterByName(masterCtx, row.idcName ?? '')
       const card = resolveGpuCardType(masterCtx, device.cardCode)
       if (dc && card) {
         unitCostPairs.push({

@@ -1,5 +1,9 @@
 "use client"
 
+import {
+  MissingPricingAlerts,
+  type MissingPricingIssue,
+} from "@/app/[locale]/(protected)/finance/_components/missing-pricing-alerts"
 import { fileToBase64 } from "@/lib/utils/file-to-base64"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
@@ -60,11 +64,15 @@ export function CostRegenerateDialog({
   const [preparing, setPreparing] = useState(false)
   const [baremetal, setBaremetal] = useState<SlotState>(emptySlot())
   const [tenantBill, setTenantBill] = useState<SlotState>(emptySlot())
+  const [regenerateError, setRegenerateError] = useState<string | null>(null)
+  const [missingPricing, setMissingPricing] = useState<MissingPricingIssue[]>([])
 
   const resetSlots = useCallback(() => {
     setBaremetal(emptySlot())
     setTenantBill(emptySlot())
     setWindowId(null)
+    setRegenerateError(null)
+    setMissingPricing([])
   }, [])
 
   useEffect(() => {
@@ -157,6 +165,8 @@ export function CostRegenerateDialog({
 
   const handleConfirm = async () => {
     if (!canConfirm) return
+    setRegenerateError(null)
+    setMissingPricing([])
     try {
       const result = await regenerateCost.mutateAsync({ billingPeriodId })
       await utils.finance.periods.getBundle.invalidate({ id: billingPeriodId })
@@ -164,7 +174,17 @@ export function CostRegenerateDialog({
       onOpenChange(false)
       onSuccess?.()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "重新生成成本失败")
+      const msg = e instanceof Error ? e.message : "重新生成成本失败"
+      setRegenerateError(msg)
+      try {
+        const validation = await utils.finance.periods.validate.fetch({
+          billingPeriodId,
+          costMode: "regenerate",
+        })
+        setMissingPricing(validation.missingPricing)
+      } catch {
+        // 校验接口失败时仍展示上方错误摘要
+      }
     }
   }
 
@@ -186,6 +206,10 @@ export function CostRegenerateDialog({
           </div>
         ) : (
           <div className="space-y-3 py-2">
+            <MissingPricingAlerts
+              message={regenerateError}
+              missingPricing={missingPricing}
+            />
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>

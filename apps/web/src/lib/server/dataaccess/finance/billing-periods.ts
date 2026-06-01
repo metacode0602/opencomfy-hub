@@ -5,7 +5,11 @@ import {
   platformIncomeMonthly,
 } from '@workspace/db/schema'
 import { desc, eq } from 'drizzle-orm'
-import { computeBillingPeriodCost, collectCostTenantPlatformIds } from './compute-cost'
+import {
+  computeBillingPeriodCost,
+  collectCostTenantPlatformIds,
+  type ComputeCostMode,
+} from './compute-cost'
 import { computeBillingPeriodIncome } from './compute-billing-period-income'
 import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { FinanceError } from './errors'
@@ -25,6 +29,7 @@ import {
 import {
   findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
+  findMissingTenantBillPricingAtPeriodEnd,
   readErrorReportBySlot,
   validateCrossFileImports,
 } from './validate-import'
@@ -204,9 +209,13 @@ export const financeBillingPeriodsDataAccess = {
   listTenantProjectBindings,
   validateSingleIncome,
 
-  async validatePeriod(periodId: string) {
+  async validatePeriod(
+    periodId: string,
+    options?: { costMode?: ComputeCostMode },
+  ) {
     const period = await this.getById(periodId)
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+    const costMode = options?.costMode ?? 'create'
     const windows = await listTenantBillWindows(periodId)
     const priceWindowInfo = await detectPlatformListPriceWindows({
       periodStart: period.period_start,
@@ -214,7 +223,13 @@ export const financeBillingPeriodsDataAccess = {
     })
     const slots = await getImportSlotStatuses(periodId)
     const cross = await validateCrossFileImports(periodId)
-    const missingTenantBill = await findMissingTenantBillPricing({ periodId })
+    const missingTenantBill =
+      costMode === 'regenerate'
+        ? await findMissingTenantBillPricingAtPeriodEnd({
+            periodId,
+            periodEnd: period.period_end,
+          })
+        : await findMissingTenantBillPricing({ periodId })
     const missingBaremetal = await findMissingBaremetalPlatformListPrice({ periodId })
     const missingPricing = [...missingTenantBill, ...missingBaremetal]
     const tenantBillReady =

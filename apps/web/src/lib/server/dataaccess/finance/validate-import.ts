@@ -13,6 +13,7 @@ import { parseWorkbookDetailed } from './excel-parser'
 export {
   findMissingBaremetalPlatformListPrice,
   findMissingTenantBillPricing,
+  findMissingTenantBillPricingAtPeriodEnd,
   type MissingPricingIssue,
   type MissingPricingPair,
   type PricingFailureReason,

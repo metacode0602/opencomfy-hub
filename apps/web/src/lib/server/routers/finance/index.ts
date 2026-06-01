@@ -300,10 +300,18 @@ export const financeRouter = createTRPCRouter({
       }),
 
     validate: protectedProcedure
-      .input(z.object({ billingPeriodId: z.string() }))
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          costMode: z.enum(['create', 'regenerate']).optional(),
+        }),
+      )
       .query(async ({ input }) => {
         try {
-          return await financeBillingPeriodsDataAccess.validatePeriod(input.billingPeriodId)
+          return await financeBillingPeriodsDataAccess.validatePeriod(
+            input.billingPeriodId,
+            { costMode: input.costMode },
+          )
         } catch (e) {
           mapFinanceError(e)
         }

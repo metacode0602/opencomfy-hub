@@ -1,9 +1,9 @@
 import { db } from '@/lib/db'
 import type { ContractPricingMode, ContractPricingTier } from '@/lib/data/types'
 import { parsePricingTiers } from '@/lib/finance/cost-pricing-utils'
+import { normalizeDatacenterName } from '@/lib/supplier/datacenter-import-utils'
 import { dataCenter, gpuCardType, supplierUnitCost } from '@workspace/db/schema'
 import { and, eq } from 'drizzle-orm'
-import { normalizeBaremetalRegion } from './baremetal-order-parse'
 import {
   normalizeBillingRegion,
   normalizeGpuCodeForMatch,
@@ -22,7 +22,7 @@ export type CostMasterDataContext = {
   gpuByCode: Map<string, GpuCardRef>
   dataCenters: DataCenterRef[]
   dataCentersByContainerRegion: Map<string, DataCenterRef[]>
-  dataCentersByBareMetalRegion: Map<string, DataCenterRef[]>
+  dataCentersByName: Map<string, DataCenterRef[]>
 }
 
 export async function loadCostMasterDataContext(): Promise<CostMasterDataContext> {
@@ -45,7 +45,7 @@ export async function loadCostMasterDataContext(): Promise<CostMasterDataContext
   }
 
   const dataCentersByContainerRegion = new Map<string, DataCenterRef[]>()
-  const dataCentersByBareMetalRegion = new Map<string, DataCenterRef[]>()
+  const dataCentersByName = new Map<string, DataCenterRef[]>()
   for (const row of dcRows) {
     const containerRegion = row.containerInstanceRegion?.trim()
     if (containerRegion) {
@@ -54,12 +54,11 @@ export async function loadCostMasterDataContext(): Promise<CostMasterDataContext
       list.push(row)
       dataCentersByContainerRegion.set(key, list)
     }
-    const bareMetalRegion = row.bareMetalRegion?.trim()
-    if (bareMetalRegion) {
-      const key = normalizeBaremetalRegion(bareMetalRegion)
-      const list = dataCentersByBareMetalRegion.get(key) ?? []
+    const nameKey = normalizeDatacenterName(row.name)
+    if (nameKey) {
+      const list = dataCentersByName.get(nameKey) ?? []
       list.push(row)
-      dataCentersByBareMetalRegion.set(key, list)
+      dataCentersByName.set(nameKey, list)
     }
   }
 
@@ -67,7 +66,7 @@ export async function loadCostMasterDataContext(): Promise<CostMasterDataContext
     gpuByCode,
     dataCenters: dcRows,
     dataCentersByContainerRegion,
-    dataCentersByBareMetalRegion,
+    dataCentersByName,
   }
 }
 
@@ -79,11 +78,12 @@ export function resolveDataCenterByContainerRegion(
   return list[0] ?? null
 }
 
-export function resolveDataCenterByBareMetalRegion(
+/** 裸金属订单「机房名称」按 data_center.name 匹配 */
+export function resolveDataCenterByName(
   ctx: CostMasterDataContext,
   idcName: string,
 ): DataCenterRef | null {
-  const list = ctx.dataCentersByBareMetalRegion.get(normalizeBaremetalRegion(idcName)) ?? []
+  const list = ctx.dataCentersByName.get(normalizeDatacenterName(idcName)) ?? []
   return list[0] ?? null
 }
 

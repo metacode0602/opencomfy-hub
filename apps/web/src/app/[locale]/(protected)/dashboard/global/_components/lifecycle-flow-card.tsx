@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { ArrowDown } from "lucide-react"
 
 import {
@@ -21,8 +20,8 @@ export function LifecycleFlowCard() {
   const stages = data?.lifecycleFunnel ?? []
 
   return (
-    <Card className="border-border/80 lg:col-span-3">
-      <CardHeader>
+    <Card className="flex h-full min-h-0 flex-col border-border/80 lg:col-span-3">
+      <CardHeader className="shrink-0">
         <CardTitle className="text-base">物理机生命周期漏斗</CardTitle>
         <CardDescription>
           {isSnapshot
@@ -30,59 +29,65 @@ export function LifecycleFlowCard() {
             : "期末存量 + 本期首次进入各阶段的设备吞吐"}
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-0">
+      <CardContent className="flex min-h-0 flex-1 flex-col pb-3 pt-0">
         {isLoading ? (
-          <DashboardCardLoading />
+          <div className="flex flex-1 items-center justify-center">
+            <DashboardCardLoading />
+          </div>
         ) : stages.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">暂无生命周期数据</p>
+          <p className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            暂无生命周期数据
+          </p>
         ) : (
-          stages.map((row, idx) => {
-            const periodRow = row as {
-              secondaryLabel?: string
-              secondaryValue?: string
-              throughputDeviceCount?: number
-            }
-            return (
-              <React.Fragment key={row.stage}>
-                {idx > 0 && (
-                  <div className="flex justify-center py-0.5 text-muted-foreground">
-                    <ArrowDown className="size-3" />
-                  </div>
-                )}
-                <div
-                  className={cn(
-                    "flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 py-2 transition-colors hover:bg-muted/40",
-                    row.warn && "border-destructive/40 bg-destructive/5",
+          <div className="flex min-h-0 flex-1 flex-col">
+            {stages.map((row, idx) => {
+              const periodRow = row as {
+                secondaryLabel?: string
+                secondaryValue?: string
+                throughputDeviceCount?: number
+              }
+              return (
+                <React.Fragment key={row.stage}>
+                  {idx > 0 && (
+                    <div className="flex shrink-0 justify-center py-0.5 text-muted-foreground">
+                      <ArrowDown className="size-3" />
+                    </div>
                   )}
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "size-2 shrink-0 rounded-full",
-                        row.warn ? "bg-destructive" : "bg-chart-2",
-                      )}
-                    />
-                    <span className="text-sm font-medium">{row.stage}</span>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold tabular-nums">
-                      {row.gpuCount.toLocaleString()} 卡 · {row.deviceCount.toLocaleString()} 台
-                      {!isSnapshot && (
-                        <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                          期末
-                        </span>
+                  <div
+                    className={cn(
+                      "flex min-h-[2.25rem] flex-1 items-center justify-between rounded-md border border-border/60 bg-muted/20 px-3 transition-colors hover:bg-muted/40",
+                      row.warn && "border-destructive/40 bg-destructive/5",
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "size-2 shrink-0 rounded-full",
+                          row.warn ? "bg-destructive" : "bg-chart-2",
+                        )}
+                      />
+                      <span className="text-sm font-medium">{row.stage}</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold tabular-nums">
+                        {row.gpuCount.toLocaleString()} 卡 · {row.deviceCount.toLocaleString()} 台
+                        {!isSnapshot && (
+                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                            期末
+                          </span>
+                        )}
+                      </div>
+                      {!isSnapshot && periodRow.secondaryValue && (
+                        <div className="text-xs text-muted-foreground">
+                          {periodRow.secondaryLabel} {periodRow.secondaryValue}
+                        </div>
                       )}
                     </div>
-                    {!isSnapshot && periodRow.secondaryValue && (
-                      <div className="text-xs text-muted-foreground">
-                        {periodRow.secondaryLabel} {periodRow.secondaryValue}
-                      </div>
-                    )}
                   </div>
-                </div>
-              </React.Fragment>
-            )
-          })
+                </React.Fragment>
+              )
+            })}
+          </div>
         )}
       </CardContent>
     </Card>

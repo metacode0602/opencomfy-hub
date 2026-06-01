@@ -104,13 +104,12 @@ async function assertCostComputePreconditions(
   if (period.status === 'import_error') {
     throw new FinanceError('PRECONDITION_FAILED', '导入存在错误，请修正 Excel 后重新上传')
   }
-  if (period.status === 'pending_pricing') {
-    throw new FinanceError(
-      'UNPROCESSABLE',
-      '账单区域×卡型缺少机房卡型成本配置，请先维护供应商单价',
-    )
-  }
-  if (period.status !== 'imported' && period.status !== 'computed' && period.status !== 'draft') {
+  if (
+    period.status !== 'imported' &&
+    period.status !== 'computed' &&
+    period.status !== 'draft' &&
+    period.status !== 'pending_pricing'
+  ) {
     throw new FinanceError('PRECONDITION_FAILED', '当前账期状态不允许计算成本')
   }
 
