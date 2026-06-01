@@ -174,7 +174,7 @@ export function SupplierOverviewContent() {
   const kpis = normalizeOverviewKpis(stats?.kpis)
   const supplierRows = stats?.supplierRows ?? []
   const inventoryRows = stats?.inventoryRows ?? []
-  const batchSummaries = (stats?.batchSummaries ?? [])
+  const batchSummaries = (stats?.batchSummaries ?? []).slice(0, 5)
 
 
   const sellableRate = kpis.sellableRate
@@ -533,6 +533,7 @@ export function SupplierOverviewContent() {
                 <TableHead className="text-right">在线</TableHead>
                 <TableHead className="text-right">维护</TableHead>
                 <TableHead className="text-right">内部占用</TableHead>
+                <TableHead className="text-right">线下交付</TableHead>
                 <TableHead className="text-right">可售</TableHead>
                 <TableHead className="text-right">裸金属池</TableHead>
                 <TableHead className="text-right">弹性池</TableHead>
@@ -553,6 +554,9 @@ export function SupplierOverviewContent() {
                   <TableCell className="text-right tabular-nums">{row.maintenanceQuantity}</TableCell>
                   <TableCell className="text-right tabular-nums">
                     {row.internalTestGpu > 0 ? row.internalTestGpu : '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {row.offlineDeliveryGpu > 0 ? row.offlineDeliveryGpu : '—'}
                   </TableCell>
                   <TableCell className="text-right tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {row.sellableQuantity}
@@ -588,7 +592,7 @@ export function SupplierOverviewContent() {
               ))}
               {inventoryRows.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={14} className="h-24 text-center text-muted-foreground">
                     当前筛选条件下无库存数据
                   </TableCell>
                 </TableRow>

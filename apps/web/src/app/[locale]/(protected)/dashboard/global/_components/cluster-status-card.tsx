@@ -92,7 +92,7 @@ function PlatformComparison({ cluster }: { cluster: GlobalClusterStatusRow }) {
 
 export function ClusterStatusCard() {
   const { data, isLoading } = useGlobalDashboard()
-  const clusters = data?.clusters ?? []
+  const clusters = data?.clusters.slice(0, 5) ?? []
   const inconsistentClusters = clusters.filter(
     (c) => c.onlineDevices !== c.totalDevices
   )
@@ -129,7 +129,7 @@ export function ClusterStatusCard() {
             所有机房在线设备数与设备总数一致
           </p>
         ) : (
-          inconsistentClusters.map((c) => (
+          clusters.map((c) => (
             <div
               key={c.dataCenterId}
               className="flex gap-3 rounded-lg border border-border/60 bg-muted/10 p-3"

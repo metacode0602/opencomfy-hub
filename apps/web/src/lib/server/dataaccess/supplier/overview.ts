@@ -515,6 +515,7 @@ export const supplierOverviewDataAccess = {
         let bareMetalPoolGpu = 0
         let elasticServiceGpu = 0
         let dualPoolGpu = 0
+        let offlineDeliveryGpu = 0
         const poolCodes = new Set<string>()
 
         for (const d of filteredDevices) {
@@ -529,6 +530,13 @@ export const supplierOverviewDataAccess = {
           if (memberships.has('bare_metal')) bareMetalPoolGpu += deviceGpu
           if (memberships.has('elastic_service')) elasticServiceGpu += deviceGpu
           if (isDualPool(memberships)) dualPoolGpu += deviceGpu
+          if (
+            OFFLINE_DELIVERY_OPS.includes(
+              d.opsStatus as (typeof OFFLINE_DELIVERY_OPS)[number],
+            )
+          ) {
+            offlineDeliveryGpu += deviceGpu
+          }
         }
 
         const sellableQuantity = isInfra
@@ -551,6 +559,7 @@ export const supplierOverviewDataAccess = {
           faultDownGpu,
           sellableQuantity,
           offlineQuantity: Math.max(0, row.quantity - row.onlineQuantity),
+          offlineDeliveryGpu,
           bareMetalPoolGpu,
           elasticServiceGpu,
           dualPoolGpu,

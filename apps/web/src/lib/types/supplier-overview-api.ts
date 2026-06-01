@@ -80,6 +80,7 @@ export type InventoryOverviewRowDto = {
   internalTestGpu: number
   sellableQuantity: number
   offlineQuantity: number
+  offlineDeliveryGpu: number
   bareMetalPoolGpu: number
   elasticServiceGpu: number
   dualPoolGpu: number
