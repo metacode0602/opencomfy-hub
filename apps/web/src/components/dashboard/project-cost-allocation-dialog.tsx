@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import type { Project } from '@/lib/data/types'
+import type { AppRouter, inferRouterOutputs } from '@/lib/server/routers'
 import { trpc } from '@/lib/trpc/client'
 
 export type ProjectCostAllocationDialogProps = {
@@ -86,9 +87,8 @@ function buildInitialAllocations(
   return result
 }
 
-type TenantProjectCostContext = NonNullable<
-  ReturnType<typeof trpc.crm.tenantProjectCost.getByProjectId.useQuery>['data']
->
+type TenantProjectCostContext =
+  inferRouterOutputs<AppRouter>['crm']['tenantProjectCost']['getByProjectId']
 
 function allocationContextKey(context: TenantProjectCostContext): string {
   const projectKey = context.projects
