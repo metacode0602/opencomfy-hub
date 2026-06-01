@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@workspace/ui/components/badge'
@@ -86,22 +86,33 @@ function buildInitialAllocations(
   return result
 }
 
-export function ProjectCostAllocationDialog({
-  open,
-  onOpenChange,
+type TenantProjectCostContext = NonNullable<
+  ReturnType<typeof trpc.crm.tenantProjectCost.getByProjectId.useQuery>['data']
+>
+
+function allocationContextKey(context: TenantProjectCostContext): string {
+  const projectKey = context.projects
+    .map((p) => `${p.projectId}:${p.allocationPercent ?? ''}`)
+    .join('|')
+  return `${context.tenantId}:${projectKey}`
+}
+
+function ProjectCostAllocationForm({
+  context,
   project,
+  onOpenChange,
   onSaved,
-}: ProjectCostAllocationDialogProps) {
-  const [allocations, setAllocations] = useState<Record<string, string>>({})
+}: {
+  context: TenantProjectCostContext
+  project: Project
+  onOpenChange: (open: boolean) => void
+  onSaved?: () => void
+}) {
+  const tenantProjects = context.projects
+  const [allocations, setAllocations] = useState(() => buildInitialAllocations(context.projects))
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const utils = trpc.useUtils()
-  const { data: context, isLoading, error: loadError } =
-    trpc.crm.tenantProjectCost.getByProjectId.useQuery(
-      { projectId: project?.id ?? '' },
-      { enabled: open && !!project?.id },
-    )
-
   const saveMutation = trpc.crm.tenantProjectCost.savePresets.useMutation({
     onSuccess: () => {
       void utils.crm.tenantProjectCost.getByProjectId.invalidate()
@@ -111,14 +122,6 @@ export function ProjectCostAllocationDialog({
     },
     onError: (e) => setSubmitError(e.message),
   })
-
-  const tenantProjects = context?.projects ?? []
-
-  useEffect(() => {
-    if (!open || !context) return
-    setAllocations(buildInitialAllocations(context.projects))
-    setSubmitError(null)
-  }, [open, context])
 
   const { totalPercent, isComplete, hasInvalidInput } = useMemo(() => {
     let total = 0
@@ -163,8 +166,6 @@ export function ProjectCostAllocationDialog({
   }
 
   const handleSubmit = () => {
-    if (!context) return
-
     if (tenantProjects.length === 0) {
       setSubmitError('未找到同租户项目')
       return
@@ -190,41 +191,24 @@ export function ProjectCostAllocationDialog({
   }
 
   const progressValue = Math.min(totalPercent, 100)
-  const tenantLabel = context?.platformTenantId ?? context?.tenantName ?? project?.platformTenantId
+  const tenantLabel = context.platformTenantId ?? context.tenantName ?? project.platformTenantId
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[640px]">
+    <>
         <DialogHeader>
           <DialogTitle>项目成本分成</DialogTitle>
           <DialogDescription>
-            {project ? (
-              <>
-                租户{' '}
-                <span className="font-mono text-foreground">{tenantLabel ?? '—'}</span>
-                {context?.tenantName && context.platformTenantId ? (
-                  <span className="text-muted-foreground">（{context.tenantName}）</span>
-                ) : null}{' '}
-                下共 {tenantProjects.length} 个项目，请配置各项目成本分成比例（合计须为 100%）。
-              </>
-            ) : (
-              '配置同租户下各项目的成本分成比例'
-            )}
+            租户{' '}
+            <span className="font-mono text-foreground">{tenantLabel ?? '—'}</span>
+            {context.tenantName && context.platformTenantId ? (
+              <span className="text-muted-foreground">（{context.tenantName}）</span>
+            ) : null}{' '}
+            下共 {tenantProjects.length} 个项目，请配置各项目成本分成比例（合计须为 100%）。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">加载中…</p>
-          ) : loadError ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {loadError.message}
-            </div>
-          ) : !context ? (
-            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-              当前项目未关联计费租户，无法配置成本分成。
-            </div>
-          ) : tenantProjects.length === 0 ? (
+          {tenantProjects.length === 0 ? (
             <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
               未找到同租户下的项目
             </div>
@@ -274,7 +258,7 @@ export function ProjectCostAllocationDialog({
                   </TableHeader>
                   <TableBody>
                     {tenantProjects.map((p) => {
-                      const isCurrent = p.projectId === project?.id
+                      const isCurrent = p.projectId === project.id
                       const raw = allocations[p.projectId] ?? ''
                       const parsed = parsePercent(raw)
                       const invalid = raw.trim() !== '' && parsed == null
@@ -328,24 +312,118 @@ export function ProjectCostAllocationDialog({
           {submitError ? <p className="text-sm text-destructive">{submitError}</p> : null}
         </div>
 
+      <DialogFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          取消
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={
+            tenantProjects.length === 0 || !isComplete || saveMutation.isPending
+          }
+        >
+          {saveMutation.isPending ? '保存中…' : '保存'}
+        </Button>
+      </DialogFooter>
+    </>
+  )
+}
+
+function ProjectCostAllocationDialogBody({
+  project,
+  onOpenChange,
+  onSaved,
+}: {
+  project: Project
+  onOpenChange: (open: boolean) => void
+  onSaved?: () => void
+}) {
+  const { data: context, isLoading, error: loadError } =
+    trpc.crm.tenantProjectCost.getByProjectId.useQuery({ projectId: project.id })
+
+  if (isLoading) {
+    return (
+      <DialogContent className="sm:max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle>项目成本分成</DialogTitle>
+          <DialogDescription>配置同租户下各项目的成本分成比例</DialogDescription>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground py-6 text-center">加载中…</p>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              !context ||
-              tenantProjects.length === 0 ||
-              !isComplete ||
-              saveMutation.isPending ||
-              isLoading
-            }
-          >
-            {saveMutation.isPending ? '保存中…' : '保存'}
+            关闭
           </Button>
         </DialogFooter>
       </DialogContent>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <DialogContent className="sm:max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle>项目成本分成</DialogTitle>
+          <DialogDescription>配置同租户下各项目的成本分成比例</DialogDescription>
+        </DialogHeader>
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {loadError.message}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    )
+  }
+
+  if (!context) {
+    return (
+      <DialogContent className="sm:max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle>项目成本分成</DialogTitle>
+          <DialogDescription>配置同租户下各项目的成本分成比例</DialogDescription>
+        </DialogHeader>
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+          当前项目未关联计费租户，无法配置成本分成。
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    )
+  }
+
+  return (
+    <DialogContent className="sm:max-w-[640px]">
+      <ProjectCostAllocationForm
+        key={allocationContextKey(context)}
+        context={context}
+        project={project}
+        onOpenChange={onOpenChange}
+        onSaved={onSaved}
+      />
+    </DialogContent>
+  )
+}
+
+export function ProjectCostAllocationDialog({
+  open,
+  onOpenChange,
+  project,
+  onSaved,
+}: ProjectCostAllocationDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && project ? (
+        <ProjectCostAllocationDialogBody
+          project={project}
+          onOpenChange={onOpenChange}
+          onSaved={onSaved}
+        />
+      ) : null}
     </Dialog>
   )
 }

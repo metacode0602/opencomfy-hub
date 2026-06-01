@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -68,6 +68,27 @@ import { CopyToClipboard } from '@/components/shared/copy-to-clipboard'
 
 interface ProjectDetailContentProps {
   project: Project
+}
+
+function runningHoursSince(startTime: string, nowMs: number): number {
+  return Math.floor((nowMs - new Date(startTime).getTime()) / 3_600_000)
+}
+
+function RunningTaskElapsedHours({ startTime }: { startTime: string }) {
+  const [nowMs, setNowMs] = useState<number | null>(null)
+
+  useEffect(() => {
+    const tick = () => setNowMs(Date.now())
+    tick()
+    const id = window.setInterval(tick, 60_000)
+    return () => window.clearInterval(id)
+  }, [startTime])
+
+  if (nowMs === null) {
+    return <span className="text-muted-foreground">—</span>
+  }
+
+  return <>{runningHoursSince(startTime, nowMs)}h</>
 }
 
 export function ProjectDetailContent({ project: initialProject }: ProjectDetailContentProps) {
@@ -460,10 +481,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
                         </TableCell>
                         <TableCell>{task.gpuCount || '-'}</TableCell>
                         <TableCell className="text-muted-foreground">
-                          {Math.floor(
-                            (Date.now() - new Date(task.startTime).getTime()) / 3600000,
-                          )}
-                          h
+                          <RunningTaskElapsedHours startTime={task.startTime} />
                         </TableCell>
                         <TableCell>¥{task.cost.toLocaleString()}</TableCell>
                         <TableCell>

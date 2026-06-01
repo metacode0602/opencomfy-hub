@@ -120,8 +120,8 @@ function CapacityAxisTick({
   payload,
   rows,
 }: {
-  x?: number
-  y?: number
+  x?: number | string
+  y?: number | string
   payload?: { value?: string }
   rows: ChartRow[]
 }) {
@@ -130,7 +130,7 @@ function CapacityAxisTick({
   const mismatch = row?.hasDataMismatch ?? false
 
   return (
-    <g transform={`translate(${x ?? 0},${y ?? 0})`}>
+    <g transform={`translate(${Number(x ?? 0)},${Number(y ?? 0)})`}>
       <text
         x={0}
         y={0}
@@ -451,7 +451,9 @@ export function GpuRegionUsageChart() {
                   tickLine={false}
                   interval={0}
                   height={52}
-                  tick={(props) => <CapacityAxisTick {...props} rows={chartData} />}
+                  tick={({ x, y, payload }) => (
+                    <CapacityAxisTick x={x} y={y} payload={payload} rows={chartData} />
+                  )}
                 />
                 <YAxis
                   axisLine={false}

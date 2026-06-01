@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { IconCloudDownload, IconLoader2 } from '@tabler/icons-react'
 import { toast } from 'sonner'
 import {
@@ -43,28 +43,20 @@ type ProjectBillingSyncDialogProps = {
   onSynced?: () => void
 }
 
-export function ProjectBillingSyncDialog({
-  open,
+function ProjectBillingSyncDialogBody({
   onOpenChange,
   projectId,
   projectName,
   onSynced,
-}: ProjectBillingSyncDialogProps) {
+}: Omit<ProjectBillingSyncDialogProps, 'open'>) {
   const utils = trpc.useUtils()
   const [startDate, setStartDate] = useState(defaultBillingStartDate)
   const [endDate, setEndDate] = useState(defaultBillingEndDate)
 
   const { data: billingTenants = [], isLoading: tenantsLoading } =
-    trpc.crm.projects.listBillingTenants.useQuery({ projectId }, { enabled: open })
+    trpc.crm.projects.listBillingTenants.useQuery({ projectId })
 
   const syncBilling = trpc.crm.projects.syncBilling.useMutation()
-
-  useEffect(() => {
-    if (open) {
-      setStartDate(defaultBillingStartDate())
-      setEndDate(defaultBillingEndDate())
-    }
-  }, [open])
 
   const dateRangeError = useMemo(() => {
     try {
@@ -131,8 +123,7 @@ export function ProjectBillingSyncDialog({
   const isBusy = syncBilling.isPending
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-lg">
+    <AlertDialogContent className="max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>确认同步账单？</AlertDialogTitle>
           <AlertDialogDescription asChild>
@@ -263,6 +254,26 @@ export function ProjectBillingSyncDialog({
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
+  )
+}
+
+export function ProjectBillingSyncDialog({
+  open,
+  onOpenChange,
+  projectId,
+  projectName,
+  onSynced,
+}: ProjectBillingSyncDialogProps) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      {open ? (
+        <ProjectBillingSyncDialogBody
+          onOpenChange={onOpenChange}
+          projectId={projectId}
+          projectName={projectName}
+          onSynced={onSynced}
+        />
+      ) : null}
     </AlertDialog>
   )
 }

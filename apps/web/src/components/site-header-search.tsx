@@ -102,14 +102,20 @@ export function SiteHeaderSearch() {
   )
 
   const groupedResults = React.useMemo(() => groupResults(results), [results])
-  const groupedResultsWithOffset = React.useMemo(() => {
-    let offset = 0
-    return groupedResults.map((group) => {
-      const startIndex = offset
-      offset += group.items.length
-      return { ...group, startIndex }
-    })
-  }, [groupedResults])
+  const groupedResultsWithOffset = React.useMemo(
+    () =>
+      groupedResults.reduce<{
+        groups: Array<(typeof groupedResults)[number] & { startIndex: number }>
+        offset: number
+      }>(
+        (acc, group) => ({
+          groups: [...acc.groups, { ...group, startIndex: acc.offset }],
+          offset: acc.offset + group.items.length,
+        }),
+        { groups: [], offset: 0 },
+      ).groups,
+    [groupedResults],
+  )
   const flatResults = React.useMemo(
     () => groupedResults.flatMap((group) => group.items),
     [groupedResults],

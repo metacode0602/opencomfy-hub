@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -383,29 +383,24 @@ export type EditSupplierDialogProps = {
   onUpdated: (supplier: Supplier) => void | Promise<void>
 }
 
-export function EditSupplierDialog({
-  open,
-  onOpenChange,
+function editSupplierFormKey(supplier: Supplier, activeStaff: UserStaff[]) {
+  return `${supplier.id}:${activeStaff.map((s) => s.id).join(',')}`
+}
+
+function EditSupplierDialogContent({
   supplier,
   activeStaff,
+  onOpenChange,
   onUpdated,
-}: EditSupplierDialogProps) {
-  const [form, setForm] = useState<SupplierFormValues>(emptySupplierForm)
-
-  useEffect(() => {
-    if (open && supplier) {
-      setForm(supplierToFormValues(supplier, activeStaff))
-    }
-  }, [open, supplier, activeStaff])
-
-  useEffect(() => {
-    if (!open) {
-      setForm(emptySupplierForm)
-    }
-  }, [open])
+}: {
+  supplier: Supplier
+  activeStaff: UserStaff[]
+  onOpenChange: (open: boolean) => void
+  onUpdated: (supplier: Supplier) => void | Promise<void>
+}) {
+  const [form, setForm] = useState(() => supplierToFormValues(supplier, activeStaff))
 
   const handleSubmit = async () => {
-    if (!supplier) return
     const result = validateSupplierForm(form, activeStaff)
     if (!result.ok) return
 
@@ -422,29 +417,45 @@ export function EditSupplierDialog({
   }
 
   return (
+    <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
+      <DialogHeader>
+        <DialogTitle>编辑供应商</DialogTitle>
+        <DialogDescription>修改「{supplier.name}」的基本信息</DialogDescription>
+      </DialogHeader>
+      <SupplierFormFields
+        form={form}
+        onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+        activeStaff={activeStaff}
+        idPrefix="edit-supplier"
+      />
+      <DialogFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          取消
+        </Button>
+        <Button onClick={handleSubmit}>保存修改</Button>
+      </DialogFooter>
+    </DialogContent>
+  )
+}
+
+export function EditSupplierDialog({
+  open,
+  onOpenChange,
+  supplier,
+  activeStaff,
+  onUpdated,
+}: EditSupplierDialogProps) {
+  return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[540px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>编辑供应商</DialogTitle>
-          <DialogDescription>
-            {supplier ? `修改「${supplier.name}」的基本信息` : '修改供应商基本信息'}
-          </DialogDescription>
-        </DialogHeader>
-        <SupplierFormFields
-          form={form}
-          onChange={(patch) => setForm((prev) => ({ ...prev, ...patch }))}
+      {open && supplier ? (
+        <EditSupplierDialogContent
+          key={editSupplierFormKey(supplier, activeStaff)}
+          supplier={supplier}
           activeStaff={activeStaff}
-          idPrefix="edit-supplier"
+          onOpenChange={onOpenChange}
+          onUpdated={onUpdated}
         />
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={handleSubmit} disabled={!supplier}>
-            保存修改
-          </Button>
-        </DialogFooter>
-      </DialogContent>
+      ) : null}
     </Dialog>
   )
 }

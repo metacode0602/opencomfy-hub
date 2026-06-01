@@ -189,22 +189,22 @@ function ConsumptionTrendTooltip({
     day: 'numeric',
   })
 
-  let dayTotal = 0
-  let dayVoucher = 0
-  let dayBalance = 0
+  const categoryEntries = trendCategories.flatMap((category) => {
+    const b = byCategory.get(category)
+    if (!b || b.amount === 0) return []
+    const colorIndex = trendCategories.indexOf(category) % LINE_COLORS.length
+    return [{ category, b, colorIndex }]
+  })
+
+  const dayTotal = categoryEntries.reduce((sum, { b }) => sum + b.amount, 0)
+  const dayVoucher = categoryEntries.reduce((sum, { b }) => sum + b.voucherAmount, 0)
+  const dayBalance = categoryEntries.reduce((sum, { b }) => sum + b.balanceAmount, 0)
 
   return (
     <div className="rounded-lg border border-border bg-popover px-3 py-2 text-popover-foreground shadow-md text-xs min-w-[200px]">
       <p className="font-medium mb-2">{displayDate}</p>
       <div className="space-y-2">
-        {trendCategories.map((category) => {
-          const b = byCategory.get(category)
-          if (!b || b.amount === 0) return null
-          dayTotal += b.amount
-          dayVoucher += b.voucherAmount
-          dayBalance += b.balanceAmount
-          const colorIndex = trendCategories.indexOf(category) % LINE_COLORS.length
-          return (
+        {categoryEntries.map(({ category, b, colorIndex }) => (
             <div key={category} className="border-t border-border/60 pt-1.5 first:border-0 first:pt-0">
               <p className="font-medium flex items-center gap-1.5">
                 <span
@@ -217,8 +217,7 @@ function ConsumptionTrendTooltip({
               <p className="text-muted-foreground">算力券 {formatMoney(b.voucherAmount)}</p>
               <p className="text-muted-foreground">余额消费 {formatMoney(b.balanceAmount)}</p>
             </div>
-          )
-        })}
+          ))}
       </div>
       {trendCategories.length > 1 && dayTotal > 0 ? (
         <div className="mt-2 pt-2 border-t border-border font-medium">

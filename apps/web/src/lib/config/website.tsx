@@ -14,7 +14,7 @@ export const websiteConfig = {
     gonganIcpNumber: '京公网安备11010502059490号',
     description:
       '共绩CRM 是一个用于构建和部署 AI 应用的平台。',
-    base_url: 'https://crm.gongjiyun.com',
+    base_url: 'https://crm.suanlene.cn:3000',
     theme: {
       defaultTheme: 'default',
       enableSwitch: false,
@@ -33,8 +33,8 @@ export const websiteConfig = {
       wechatId: 'qijianbin001',
       phoneNumber: '13681332236',
       email: 'service@gongjiyun.com',
-      address: '北京市朝阳区东三环南路46号富顿中心A座20层',
-      websiteUrl: 'https://www.gongjiyun.com',
+      address: '北京市海淀区东升大厦A座608',
+      websiteUrl: 'https://www.suanlene.cn',
       github: '',
       twitter: '',
       blueSky: '',
@@ -62,11 +62,11 @@ export const websiteConfig = {
   },
   auth: {
     emailSuffix: 'gongjiyun.com', // 邮箱后缀
-    cookieDomain: process.env.NODE_ENV === 'production' ? '.gongjiyun.com' : undefined,
+    cookieDomain: process.env.NODE_ENV === 'production' ? '.suanlene.cn' : undefined,
     trustedOrigins:
       process.env.NODE_ENV === 'production'
-        ? ['https://www.gongjiyun.com', 'https://gongjiyun.com']
-        : ['http://localhost:30041', 'http://192.168.110.16:30041'], // 信任的来源列表，允许跨域请求
+        ? ['https://crm.suanlene.cn', 'https://suanlene.cn']
+        : ['http://localhost:30041'], // 信任的来源列表，允许跨域请求
     enableGoogleLogin: false,
     enableGithubLogin: false,
     requireEmailVerification: false,

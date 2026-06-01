@@ -13,51 +13,66 @@ import { Routes } from '@/lib/routes'
 import { ArrowUpRightIcon, ChevronDownIcon, ChevronRightIcon, MenuIcon, XIcon } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import * as React from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { RemoveScroll } from 'react-remove-scroll'
 import { Skeleton } from '@workspace/ui/components/skeleton'
 import { UserButtonMobile } from './user-button-mobile'
 
+const LG_MEDIA_QUERY = '(min-width: 1024px)'
+
+function useIsClient() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
+}
+
+function useMediaQuery(query: string) {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      const mediaQueryList = window.matchMedia(query)
+      mediaQueryList.addEventListener('change', onStoreChange)
+      return () => mediaQueryList.removeEventListener('change', onStoreChange)
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  )
+}
+
 export function NavbarMobile({ className, ...other }: React.HTMLAttributes<HTMLDivElement>) {
-  const [open, setOpen] = React.useState<boolean>(false)
+  const isClient = useIsClient()
+  const isLargeScreen = useMediaQuery(LG_MEDIA_QUERY)
+  const [openPath, setOpenPath] = useState<string | null>(null)
   const localePathname = useLocalePathname()
-  const [mounted, setMounted] = useState(false)
+  const menuOpen = openPath === localePathname && !isLargeScreen
   const { data: session, isPending } = authClient.useSession()
   const currentUser = session?.user
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
-
-  useEffect(() => {
-    const handleRouteChangeStart = () => {
-      if (document.activeElement instanceof HTMLInputElement) {
-        document.activeElement.blur()
-      }
-
-      setOpen(false)
+    if (document.activeElement instanceof HTMLInputElement) {
+      document.activeElement.blur()
     }
-
-    handleRouteChangeStart()
   }, [localePathname])
 
-  const handleChange = () => {
-    const mediaQueryList = window.matchMedia('(min-width: 1024px)')
-    setOpen((open) => (open ? !mediaQueryList.matches : false))
-  }
-
   useEffect(() => {
-    handleChange()
-    const mediaQueryList = window.matchMedia('(min-width: 1024px)')
-    mediaQueryList.addEventListener('change', handleChange)
-    return () => mediaQueryList.removeEventListener('change', handleChange)
+    const mediaQueryList = window.matchMedia(LG_MEDIA_QUERY)
+    const closeOnDesktop = () => {
+      if (mediaQueryList.matches) {
+        setOpenPath(null)
+      }
+    }
+    mediaQueryList.addEventListener('change', closeOnDesktop)
+    return () => mediaQueryList.removeEventListener('change', closeOnDesktop)
   }, [])
 
   const handleToggleMobileMenu = (): void => {
-    setOpen((open) => !open)
+    setOpenPath((current) =>
+      current === localePathname ? null : localePathname,
+    )
   }
 
-  if (!mounted) {
+  if (!isClient) {
     return null
   }
 
@@ -82,18 +97,18 @@ export function NavbarMobile({ className, ...other }: React.HTMLAttributes<HTMLD
           <Button
             variant='ghost'
             size='icon'
-            aria-expanded={open}
+            aria-expanded={menuOpen}
             aria-label='Toggle Mobile Menu'
             onClick={handleToggleMobileMenu}
             className='flex aspect-square size-8 h-fit cursor-pointer select-none items-center justify-center rounded-md border'
           >
-            {open ? <XIcon className='size-4' /> : <MenuIcon className='size-4' />}
+            {menuOpen ? <XIcon className='size-4' /> : <MenuIcon className='size-4' />}
           </Button>
         </div>
       </div>
 
       {/* mobile menu */}
-      {open && (
+      {menuOpen && (
         <div>
           {/* if we don't add RemoveScroll component, the underlying 
             page will scroll when we scroll the mobile menu */}

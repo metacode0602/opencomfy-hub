@@ -4,7 +4,6 @@ import type { NestedMenuItem } from '@/lib/types/index'
 import {
   BrainIcon,
   DollarSignIcon,
-  SparklesIcon,
   Package2,
   BookOpenIcon,
 } from 'lucide-react'
