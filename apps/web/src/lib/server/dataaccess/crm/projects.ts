@@ -28,6 +28,8 @@ export type ProjectListFilters = {
   status?: string
   tagIds?: string[]
   staffId?: string
+  accountManagerStaffId?: string
+  revenueDepartment?: string
 }
 
 export type ProjectStaffFilterOption = {
@@ -102,6 +104,21 @@ async function loadProjectIdsWithStaff(staffId: string): Promise<Set<string>> {
       and(
         eq(projectStaffAssignment.userStaffId, staffId),
         inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+        isNull(projectStaffAssignment.effectiveTo),
+      ),
+    )
+
+  return new Set(rows.map((r) => r.projectId))
+}
+
+async function loadProjectIdsWithAccountManager(staffId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ projectId: projectStaffAssignment.projectId })
+    .from(projectStaffAssignment)
+    .where(
+      and(
+        eq(projectStaffAssignment.userStaffId, staffId),
+        eq(projectStaffAssignment.roleType, 'account_manager'),
         isNull(projectStaffAssignment.effectiveTo),
       ),
     )
@@ -436,6 +453,16 @@ export const projectsDataAccess = {
       if (projectIdsWithStaff.size === 0) return []
       conditions.push(inArray(crmProject.id, [...projectIdsWithStaff]))
     }
+    if (filters.accountManagerStaffId) {
+      const projectIdsWithAccountManager = await loadProjectIdsWithAccountManager(
+        filters.accountManagerStaffId,
+      )
+      if (projectIdsWithAccountManager.size === 0) return []
+      conditions.push(inArray(crmProject.id, [...projectIdsWithAccountManager]))
+    }
+    if (filters.revenueDepartment && filters.revenueDepartment !== 'all') {
+      conditions.push(eq(crmProject.revenueDepartment, filters.revenueDepartment))
+    }
 
     const rows = await db
       .select({ project: crmProject })
@@ -584,6 +611,25 @@ export const projectsDataAccess = {
       .where(
         and(
           inArray(projectStaffAssignment.roleType, [...PROJECT_STAFF_FILTER_ROLES]),
+          isNull(projectStaffAssignment.effectiveTo),
+        ),
+      )
+      .orderBy(asc(userStaff.displayName))
+
+    return rows
+  },
+
+  async listAccountManagerFilterOptions(): Promise<ProjectStaffFilterOption[]> {
+    const rows = await db
+      .selectDistinct({
+        id: userStaff.id,
+        displayName: userStaff.displayName,
+      })
+      .from(projectStaffAssignment)
+      .innerJoin(userStaff, eq(projectStaffAssignment.userStaffId, userStaff.id))
+      .where(
+        and(
+          eq(projectStaffAssignment.roleType, 'account_manager'),
           isNull(projectStaffAssignment.effectiveTo),
         ),
       )

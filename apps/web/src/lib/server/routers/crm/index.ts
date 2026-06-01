@@ -15,6 +15,7 @@ import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-te
 import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant-billing-lists'
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
+import { conversionQueryDataAccess } from '@/lib/server/dataaccess/crm/conversion-query'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import { projectAccountManagerDataAccess } from '@/lib/server/dataaccess/crm/project-account-manager'
@@ -36,6 +37,7 @@ import {
   projectUpsertSchema,
   changeProjectAccountManagerSchema,
   changeProjectRevenueDepartmentSchema,
+  staffDepartmentSchema,
   staffUpsertSchema,
   staffListSchema,
   tenantProjectImportFormSchema,
@@ -103,6 +105,8 @@ const projectFilterSchema = z.object({
   status: z.string().optional(),
   tagIds: z.array(z.string()).optional(),
   staffId: z.string().optional(),
+  accountManagerStaffId: z.string().optional(),
+  revenueDepartment: z.union([staffDepartmentSchema, z.literal('all')]).optional(),
 })
 
 export const crmRouter = createTRPCRouter({
@@ -215,6 +219,13 @@ export const crmRouter = createTRPCRouter({
     listStaffFilterOptions: protectedProcedure.query(async ({ ctx }) => {
       const [staff, currentUserStaffId] = await Promise.all([
         projectsDataAccess.listStaffFilterOptions(),
+        staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
+      ])
+      return { staff, currentUserStaffId }
+    }),
+    listAccountManagerFilterOptions: protectedProcedure.query(async ({ ctx }) => {
+      const [staff, currentUserStaffId] = await Promise.all([
+        projectsDataAccess.listAccountManagerFilterOptions(),
         staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
       ])
       return { staff, currentUserStaffId }
@@ -405,6 +416,32 @@ export const crmRouter = createTRPCRouter({
             throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
           }
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '导入租户项目失败' })
+        }
+      }),
+    queryConversion: adminProcedure
+      .input(z.object({ rawTenantIds: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          return await conversionQueryDataAccess.query(input.rawTenantIds)
+        } catch (e) {
+          mapPlatformImportError(e)
+        }
+      }),
+    commitConversion: adminProcedure
+      .input(
+        z.object({
+          projectIds: z.array(z.string().min(1)).min(1),
+          conversionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await conversionQueryDataAccess.commit(input)
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '批量转正失败' })
         }
       }),
     listBillingTenants: protectedProcedure

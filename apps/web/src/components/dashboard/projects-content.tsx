@@ -61,6 +61,7 @@ import {
 } from '@workspace/ui/components/alert-dialog'
 import type { Project } from '@/lib/data/types'
 import { TENANT_PROJECT_IMPORT_TAG_NAMES } from '@/lib/crm/tenant-project-import-utils'
+import { STAFF_DEPARTMENTS, type StaffDepartment } from '@/lib/crm/staff-constants'
 import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
@@ -71,12 +72,14 @@ import { ProjectRevenueDepartmentDialog } from './project-revenue-department-dia
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
-import { IconUpload } from '@tabler/icons-react'
+import { ConversionQueryDialog } from './conversion-query-dialog'
+import { IconUpload, IconClipboardSearch } from '@tabler/icons-react'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 
 const STAFF_FILTER_ALL = 'all'
 const STAFF_FILTER_ME = '__me__'
+const DEPARTMENT_FILTER_ALL = 'all'
 
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
@@ -84,6 +87,8 @@ export function ProjectsContent() {
   const [stageFilter, setStageFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [staffFilter, setStaffFilter] = useState<string>(STAFF_FILTER_ALL)
+  const [accountManagerFilter, setAccountManagerFilter] = useState<string>(STAFF_FILTER_ALL)
+  const [departmentFilter, setDepartmentFilter] = useState<string>(DEPARTMENT_FILTER_ALL)
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -98,6 +103,7 @@ export function ProjectsContent() {
   const [deptProject, setDeptProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
+  const [conversionQueryOpen, setConversionQueryOpen] = useState(false)
   const [pausingProject, setPausingProject] = useState<Project | null>(null)
 
   const utils = trpc.useUtils()
@@ -109,6 +115,8 @@ export function ProjectsContent() {
   }, [allTags])
 
   const { data: staffFilterOptions } = trpc.crm.projects.listStaffFilterOptions.useQuery()
+  const { data: accountManagerFilterOptions } =
+    trpc.crm.projects.listAccountManagerFilterOptions.useQuery()
 
   const effectiveStaffId =
     staffFilter === STAFF_FILTER_ME
@@ -117,12 +125,24 @@ export function ProjectsContent() {
         ? undefined
         : staffFilter
 
+  const effectiveAccountManagerStaffId =
+    accountManagerFilter === STAFF_FILTER_ME
+      ? (accountManagerFilterOptions?.currentUserStaffId ?? undefined)
+      : accountManagerFilter === STAFF_FILTER_ALL
+        ? undefined
+        : accountManagerFilter
+
   const { data: projects = [], isLoading, refetch } = trpc.crm.projects.list.useQuery({
     search: search || undefined,
     stage: stageFilter,
     status: statusFilter,
     tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
     staffId: effectiveStaffId,
+    accountManagerStaffId: effectiveAccountManagerStaffId,
+    revenueDepartment:
+      departmentFilter === DEPARTMENT_FILTER_ALL
+        ? undefined
+        : (departmentFilter as StaffDepartment),
   })
 
   const pauseMutation = trpc.crm.projects.updateStatus.useMutation({
@@ -138,7 +158,15 @@ export function ProjectsContent() {
   const { data: stageCounts } = trpc.crm.projects.stageCounts.useQuery()
 
   const pagination = useListPagination(projects, {
-    resetDeps: [search, stageFilter, statusFilter, staffFilter, selectedTagIds.join(',')],
+    resetDeps: [
+      search,
+      stageFilter,
+      statusFilter,
+      staffFilter,
+      accountManagerFilter,
+      departmentFilter,
+      selectedTagIds.join(','),
+    ],
   })
 
   const staffFilterLabel =
@@ -146,7 +174,16 @@ export function ProjectsContent() {
       ? '全部负责人'
       : staffFilter === STAFF_FILTER_ME
         ? '我'
-        : (staffFilterOptions?.staff.find((staff) => staff.id === staffFilter)?.displayName ?? '负责人')
+        : (staffFilterOptions?.staff.find((staff) => staff.id === staffFilter)?.displayName ??
+          '负责人')
+
+  const accountManagerFilterLabel =
+    accountManagerFilter === STAFF_FILTER_ALL
+      ? '全部客户经理'
+      : accountManagerFilter === STAFF_FILTER_ME
+        ? '我'
+        : (accountManagerFilterOptions?.staff.find((staff) => staff.id === accountManagerFilter)
+            ?.displayName ?? '客户经理')
 
   const toggleTagFilter = (tagId: string, checked: boolean) => {
     setSelectedTagIds((prev) =>
@@ -203,6 +240,16 @@ export function ProjectsContent() {
           <p className="text-muted-foreground">管理所有项目，跟踪项目阶段和进度</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            type="button"
+            onClick={() => setConversionQueryOpen(true)}
+          >
+            <IconClipboardSearch className="size-4" />
+            转正查询
+          </Button>
           <Button
             size="sm"
             variant="outline"
@@ -283,6 +330,15 @@ export function ProjectsContent() {
         onOpenChange={setTenantProjectImportOpen}
         businessLines={businessLines}
         onSuccess={() => void refetch()}
+      />
+
+      <ConversionQueryDialog
+        open={conversionQueryOpen}
+        onOpenChange={setConversionQueryOpen}
+        onSuccess={() => {
+          void refetch()
+          void utils.crm.projects.stageCounts.invalidate()
+        }}
       />
 
       <AlertDialog
@@ -369,7 +425,7 @@ export function ProjectsContent() {
                 className="pl-10"
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Select value={stageFilter} onValueChange={setStageFilter}>
                 <SelectTrigger className="w-[140px]">
                   <SelectValue placeholder="项目阶段" />
@@ -404,6 +460,35 @@ export function ProjectsContent() {
                   {staffFilterOptions?.staff.map((staff) => (
                     <SelectItem key={staff.id} value={staff.id}>
                       {staff.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={accountManagerFilter} onValueChange={setAccountManagerFilter}>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="客户经理">{accountManagerFilterLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={STAFF_FILTER_ALL}>全部客户经理</SelectItem>
+                  {accountManagerFilterOptions?.currentUserStaffId ? (
+                    <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
+                  ) : null}
+                  {accountManagerFilterOptions?.staff.map((staff) => (
+                    <SelectItem key={staff.id} value={staff.id}>
+                      {staff.displayName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="归属部门" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={DEPARTMENT_FILTER_ALL}>全部部门</SelectItem>
+                  {STAFF_DEPARTMENTS.map((dept) => (
+                    <SelectItem key={dept} value={dept}>
+                      {dept}
                     </SelectItem>
                   ))}
                 </SelectContent>

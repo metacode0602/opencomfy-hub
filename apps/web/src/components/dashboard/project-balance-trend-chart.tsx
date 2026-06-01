@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/componen
 import { ChartContainer, type ChartConfig } from '@workspace/ui/components/chart'
 import { Input } from '@workspace/ui/components/input'
 import { Tabs, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
-import { shanghaiUsageMonth } from '@/lib/crm/balance-snapshot-utils'
 import { trpc } from '@/lib/trpc/client'
 import type {
   BalanceSnapshotGranularity,
@@ -26,7 +25,11 @@ function currentUsageDate(): string {
 
 function defaultDateRange(): { from: string; to: string } {
   const to = currentUsageDate()
-  return { from: `${shanghaiUsageMonth()}-01`, to }
+  const [y, m, d] = to.split('-').map(Number)
+  const fromDate = new Date(Date.UTC(y!, m! - 1, d!))
+  fromDate.setUTCDate(fromDate.getUTCDate() - 30)
+  const from = fromDate.toISOString().slice(0, 10)
+  return { from, to }
 }
 
 function normalizeDateRange(from: string, to: string) {
