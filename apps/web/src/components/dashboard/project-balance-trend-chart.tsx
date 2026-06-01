@@ -4,14 +4,9 @@ import { useMemo, useState } from 'react'
 import { CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { ChartContainer, type ChartConfig } from '@workspace/ui/components/chart'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@workspace/ui/components/select'
+import { Input } from '@workspace/ui/components/input'
 import { Tabs, TabsList, TabsTrigger } from '@workspace/ui/components/tabs'
+import { shanghaiUsageMonth } from '@/lib/crm/balance-snapshot-utils'
 import { trpc } from '@/lib/trpc/client'
 import type {
   BalanceSnapshotGranularity,
@@ -20,17 +15,6 @@ import type {
 
 const LINE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4', '#a855f7'] as const
 
-function currentUsageMonth(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-  }).formatToParts(new Date())
-  const y = parts.find((p) => p.type === 'year')?.value
-  const m = parts.find((p) => p.type === 'month')?.value
-  return y && m ? `${y}-${m}` : new Date().toISOString().slice(0, 7)
-}
-
 function currentUsageDate(): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai',
@@ -38,6 +22,15 @@ function currentUsageDate(): string {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date())
+}
+
+function defaultDateRange(): { from: string; to: string } {
+  const to = currentUsageDate()
+  return { from: `${shanghaiUsageMonth()}-01`, to }
+}
+
+function normalizeDateRange(from: string, to: string) {
+  return from <= to ? { from, to } : { from: to, to: from }
 }
 
 function formatMoney(n: number) {
@@ -112,15 +105,21 @@ interface ProjectBalanceTrendChartProps {
 }
 
 export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChartProps) {
+  const initialRange = defaultDateRange()
   const [granularity, setGranularity] = useState<BalanceSnapshotGranularity>('day')
-  const [usageMonth, setUsageMonth] = useState(currentUsageMonth)
-  const [usageDate, setUsageDate] = useState(currentUsageDate)
+  const [usageDateFrom, setUsageDateFrom] = useState(initialRange.from)
+  const [usageDateTo, setUsageDateTo] = useState(initialRange.to)
+
+  const dateRange = useMemo(
+    () => normalizeDateRange(usageDateFrom, usageDateTo),
+    [usageDateFrom, usageDateTo],
+  )
 
   const { data, isLoading } = trpc.crm.projects.listBalanceSnapshots.useQuery({
     projectId,
     granularity,
-    usageMonth: granularity === 'day' ? usageMonth : undefined,
-    usageDate: granularity === 'hour' ? usageDate : undefined,
+    usageDateFrom: dateRange.from,
+    usageDateTo: dateRange.to,
   })
 
   const tenants = data?.tenants ?? []
@@ -148,36 +147,15 @@ export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChart
     return config
   }, [tenants])
 
-  const monthOptions = useMemo(() => {
-    const months = new Set<string>()
-    months.add(currentUsageMonth())
-    months.add(usageMonth)
-    return [...months].sort((a, b) => b.localeCompare(a))
-  }, [usageMonth])
-
-  const dateOptions = useMemo(() => {
-    const dates = new Set<string>()
-    dates.add(currentUsageDate())
-    dates.add(usageDate)
-    for (let i = 1; i <= 6; i++) {
-      const d = new Date()
-      d.setDate(d.getDate() - i)
-      dates.add(
-        new Intl.DateTimeFormat('en-CA', {
-          timeZone: 'Asia/Shanghai',
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-        }).format(d),
-      )
-    }
-    return [...dates].sort((a, b) => b.localeCompare(a))
-  }, [usageDate])
+  const rangeLabel =
+    dateRange.from === dateRange.to
+      ? dateRange.from
+      : `${dateRange.from} ~ ${dateRange.to}`
 
   const subtitle =
     granularity === 'day'
-      ? `按天展示关联租户账户余额 · ${usageMonth}`
-      : `按小时展示关联租户账户余额 · ${usageDate}`
+      ? `按天展示关联租户账户余额 · ${rangeLabel}`
+      : `按小时展示关联租户账户余额 · ${rangeLabel}`
 
   return (
     <Card>
@@ -196,33 +174,23 @@ export function ProjectBalanceTrendChart({ projectId }: ProjectBalanceTrendChart
               <TabsTrigger value="hour">按小时</TabsTrigger>
             </TabsList>
           </Tabs>
-          {granularity === 'day' ? (
-            <Select value={usageMonth} onValueChange={setUsageMonth}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="月份" />
-              </SelectTrigger>
-              <SelectContent>
-                {monthOptions.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Select value={usageDate} onValueChange={setUsageDate}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="日期" />
-              </SelectTrigger>
-              <SelectContent>
-                {dateOptions.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Input
+              type="date"
+              className="h-9 w-[150px] text-sm"
+              value={usageDateFrom}
+              max={usageDateTo}
+              onChange={(e) => setUsageDateFrom(e.target.value)}
+            />
+            <span className="text-xs text-muted-foreground">~</span>
+            <Input
+              type="date"
+              className="h-9 w-[150px] text-sm"
+              value={usageDateTo}
+              min={usageDateFrom}
+              onChange={(e) => setUsageDateTo(e.target.value)}
+            />
+          </div>
         </div>
       </CardHeader>
       <CardContent>

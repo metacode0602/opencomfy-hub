@@ -2,8 +2,8 @@ import {
   currentHourBucket,
   formatDayLabel,
   formatHourLabel,
+  formatHourLabelWithDate,
   formatShanghaiDate,
-  monthDateRange,
   previousDayBucket,
   snapshotRowId,
 } from '@/lib/crm/balance-snapshot-utils'
@@ -508,18 +508,19 @@ export const balanceSnapshotDataAccess = {
     projectId: string,
     input: {
       granularity: BalanceSnapshotGranularity
-      usageMonth?: string
-      usageDate?: string
+      usageDateFrom?: string
+      usageDateTo?: string
     },
   ): Promise<ProjectBalanceSnapshotSeries> {
     const tenantRows = await projectsDataAccess.listBillingTenantsForProject(projectId)
     const tenantIds = tenantRows.map((t) => t.id)
 
     if (tenantIds.length === 0) {
+      const range = normalizeUsageDateRange(input.usageDateFrom, input.usageDateTo)
       return {
         granularity: input.granularity,
-        usageMonth: input.usageMonth,
-        usageDate: input.usageDate,
+        usageDateFrom: range.from,
+        usageDateTo: range.to,
         tenants: [],
         points: [],
       }
@@ -542,15 +543,9 @@ export const balanceSnapshotDataAccess = {
       eq(tenantBalanceSnapshot.granularity, input.granularity),
     ]
 
-    if (input.granularity === 'day') {
-      const usageMonth = input.usageMonth ?? formatShanghaiDate(new Date()).slice(0, 7)
-      const { from, to } = monthDateRange(usageMonth)
-      conditions.push(gte(tenantBalanceSnapshot.bucketDate, from))
-      conditions.push(lte(tenantBalanceSnapshot.bucketDate, to))
-    } else {
-      const usageDate = input.usageDate ?? formatShanghaiDate(new Date())
-      conditions.push(eq(tenantBalanceSnapshot.bucketDate, usageDate))
-    }
+    const { from, to } = normalizeUsageDateRange(input.usageDateFrom, input.usageDateTo)
+    conditions.push(gte(tenantBalanceSnapshot.bucketDate, from))
+    conditions.push(lte(tenantBalanceSnapshot.bucketDate, to))
 
     const snapshots = await db
       .select({
@@ -565,6 +560,9 @@ export const balanceSnapshotDataAccess = {
 
     const pointMap = new Map<string, ProjectBalanceSnapshotSeries['points'][number]>()
 
+    const hourLabel: (iso: string) => string =
+      input.granularity === 'hour' && from !== to ? formatHourLabelWithDate : formatHourLabel
+
     for (const row of snapshots) {
       const bucketStart = row.bucketStart.toISOString()
       if (!pointMap.has(bucketStart)) {
@@ -572,7 +570,7 @@ export const balanceSnapshotDataAccess = {
           bucketStart,
           label:
             input.granularity === 'hour'
-              ? formatHourLabel(bucketStart)
+              ? hourLabel(bucketStart)
               : formatDayLabel(String(row.bucketDate).slice(0, 10)),
           values: {},
         })
@@ -582,18 +580,22 @@ export const balanceSnapshotDataAccess = {
 
     return {
       granularity: input.granularity,
-      usageMonth:
-        input.granularity === 'day'
-          ? (input.usageMonth ?? formatShanghaiDate(new Date()).slice(0, 7))
-          : undefined,
-      usageDate:
-        input.granularity === 'hour'
-          ? (input.usageDate ?? formatShanghaiDate(new Date()))
-          : undefined,
+      usageDateFrom: from,
+      usageDateTo: to,
       tenants,
       points: [...pointMap.values()],
     }
   },
+}
+
+function normalizeUsageDateRange(
+  usageDateFrom?: string,
+  usageDateTo?: string,
+): { from: string; to: string } {
+  const today = formatShanghaiDate(new Date())
+  const start = usageDateFrom ?? today
+  const end = usageDateTo ?? start
+  return start <= end ? { from: start, to: end } : { from: end, to: start }
 }
 
 function shanghaiDateTimeToUtcFromDate(dateStr: string): Date {

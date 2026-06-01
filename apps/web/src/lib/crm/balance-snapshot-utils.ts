@@ -132,6 +132,17 @@ export function formatHourLabel(iso: string): string {
   return `${pad2(p.hour)}:00`
 }
 
+export function formatHourLabelWithDate(iso: string): string {
+  const d = new Date(iso)
+  const p = shanghaiParts(d)
+  return `${pad2(p.month)}-${pad2(p.day)} ${pad2(p.hour)}:00`
+}
+
+export function usageMonthToDate(usageMonth: string): Date {
+  const [y, m] = usageMonth.split('-').map(Number)
+  return shanghaiDateTimeToUtc(y!, m!, 1)
+}
+
 export function formatDayLabel(dateStr: string): string {
   return dateStr.slice(5)
 }

@@ -339,15 +339,15 @@ export const crmRouter = createTRPCRouter({
         z.object({
           projectId: z.string(),
           granularity: z.enum(['hour', 'day']),
-          usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-          usageDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          usageDateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+          usageDateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         }),
       )
       .query(({ input }) =>
         balanceSnapshotDataAccess.listForProject(input.projectId, {
           granularity: input.granularity,
-          usageMonth: input.usageMonth,
-          usageDate: input.usageDate,
+          usageDateFrom: input.usageDateFrom,
+          usageDateTo: input.usageDateTo,
         }),
       ),
     listDailyConsumptionDetails: protectedProcedure

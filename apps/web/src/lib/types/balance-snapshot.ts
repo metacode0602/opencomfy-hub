@@ -56,8 +56,8 @@ export type ProjectBalanceSnapshotPoint = {
 
 export type ProjectBalanceSnapshotSeries = {
   granularity: BalanceSnapshotGranularity
-  usageMonth?: string
-  usageDate?: string
+  usageDateFrom?: string
+  usageDateTo?: string
   tenants: ProjectBalanceSnapshotTenant[]
   points: ProjectBalanceSnapshotPoint[]
 }
