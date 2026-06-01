@@ -19,6 +19,8 @@ function newId() {
 }
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
 import type { ProjectTag } from '@/lib/data/types'
+import type { StaffDepartment } from '@/lib/crm/staff-constants'
+import { projectRevenueDepartmentDataAccess } from './project-revenue-department'
 
 export type ProjectListFilters = {
   search?: string
@@ -58,6 +60,7 @@ export type ProjectUpsertInput = {
   monthlyBudget?: number
   startDate: string
   endDate?: string
+  revenueDepartment: StaffDepartment
   staff: ProjectStaffInput
 }
 
@@ -297,8 +300,11 @@ async function upsertStaffAssignments(
   projectId: string,
   staff: ProjectStaffInput,
   effectiveFrom: Date,
+  options?: { skipRoles?: string[] },
 ) {
+  const skip = new Set(options?.skipRoles ?? [])
   for (const { key, role } of STAFF_ROLES) {
+    if (skip.has(role)) continue
     const userStaffId = staff[key]
     await db
       .update(projectStaffAssignment)
@@ -485,7 +491,14 @@ export const projectsDataAccess = {
         endDate: input.endDate ?? null,
         monthlyBudget: input.monthlyBudget != null ? String(input.monthlyBudget) : null,
         balance: '0',
+        revenueDepartment: input.revenueDepartment,
         createdAt: now,
+      })
+
+      await projectRevenueDepartmentDataAccess.assignInitial(tx, {
+        projectId: id,
+        department: input.revenueDepartment,
+        effectiveFrom: input.startDate,
       })
 
       for (const { key, role } of STAFF_ROLES) {
@@ -536,7 +549,9 @@ export const projectsDataAccess = {
         })
         .where(eq(crmProject.id, id))
 
-      await upsertStaffAssignments(id, input.staff, new Date())
+      await upsertStaffAssignments(id, input.staff, new Date(), {
+        skipRoles: ['account_manager'],
+      })
     })
 
     const updated = await this.getById(id)

@@ -10,10 +10,15 @@ import {
   GitBranch,
   Edit,
   Eye,
-  Trash,
   Tag,
   ChevronDown,
   DollarSignIcon,
+  UserCircle,
+  Building2,
+  FlaskConical,
+  CircleCheck,
+  Receipt,
+  Pause,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
@@ -61,6 +66,8 @@ import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
 import { ProjectTagsDialog } from './project-tags-dialog'
 import { ProjectCostAllocationDialog } from './project-cost-allocation-dialog'
+import { ProjectAccountManagerDialog } from './project-account-manager-dialog'
+import { ProjectRevenueDepartmentDialog } from './project-revenue-department-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
@@ -85,6 +92,10 @@ export function ProjectsContent() {
   const [taggingProject, setTaggingProject] = useState<Project | null>(null)
   const [allocationOpen, setAllocationOpen] = useState(false)
   const [allocatingProject, setAllocatingProject] = useState<Project | null>(null)
+  const [amOpen, setAmOpen] = useState(false)
+  const [amProject, setAmProject] = useState<Project | null>(null)
+  const [deptOpen, setDeptOpen] = useState(false)
+  const [deptProject, setDeptProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
   const [pausingProject, setPausingProject] = useState<Project | null>(null)
@@ -169,6 +180,16 @@ export function ProjectsContent() {
     setAllocationOpen(true)
   }
 
+  const openAccountManager = (project: Project) => {
+    setAmProject(project)
+    setAmOpen(true)
+  }
+
+  const openRevenueDepartment = (project: Project) => {
+    setDeptProject(project)
+    setDeptOpen(true)
+  }
+
   const handleConfirmPause = () => {
     if (!pausingProject) return
     pauseMutation.mutate({ id: pausingProject.id, status: 'paused' })
@@ -235,6 +256,20 @@ export function ProjectsContent() {
         open={allocationOpen}
         onOpenChange={setAllocationOpen}
         project={allocatingProject}
+      />
+
+      <ProjectAccountManagerDialog
+        open={amOpen}
+        onOpenChange={setAmOpen}
+        project={amProject}
+        onSaved={() => void refetch()}
+      />
+
+      <ProjectRevenueDepartmentDialog
+        open={deptOpen}
+        onOpenChange={setDeptOpen}
+        project={deptProject}
+        onSaved={() => void refetch()}
       />
 
       <CrmProjectImportDialog
@@ -415,6 +450,7 @@ export function ProjectsContent() {
                 <TableHead>业务线</TableHead>
                 <TableHead>标签</TableHead>
                 <TableHead>阶段</TableHead>
+                <TableHead>归属部门</TableHead>
                 <TableHead>售前</TableHead>
                 <TableHead>客户经理</TableHead>
                 <TableHead>充值</TableHead>
@@ -427,13 +463,13 @@ export function ProjectsContent() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                  <TableCell colSpan={14} className="text-muted-foreground py-8 text-center text-sm">
                     加载中…
                   </TableCell>
                 </TableRow>
               ) : projects.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                  <TableCell colSpan={14} className="text-muted-foreground py-8 text-center text-sm">
                     暂无数据
                   </TableCell>
                 </TableRow>
@@ -484,6 +520,9 @@ export function ProjectsContent() {
                   <TableCell>
                     <StatusBadge status={project.stage} />
                   </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">
+                    {project.revenueDepartment ?? '—'}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {project.preSalesManager}
                   </TableCell>
@@ -515,37 +554,60 @@ export function ProjectsContent() {
                           <MoreHorizontal className="w-4 h-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent
+                        align="end"
+                        className="w-auto min-w-44 whitespace-nowrap"
+                      >
                         <DropdownMenuItem asChild>
-                          <Link href={`/crm/projects/${project.id}`}>
-                            <Eye className="w-4 h-4 mr-2" />
+                          <Link
+                            href={`/crm/projects/${project.id}`}
+                            className="flex items-center gap-1.5"
+                          >
+                            <Eye className="size-4 shrink-0" />
                             查看详情
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openEdit(project)}>
-                          <Edit className="w-4 h-4 mr-2" />
+                          <Edit className="size-4 shrink-0" />
                           编辑项目
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openAccountManager(project)}>
+                          <UserCircle className="size-4 shrink-0" />
+                          设置客户经理
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openRevenueDepartment(project)}>
+                          <Building2 className="size-4 shrink-0" />
+                          设置归属部门
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openTags(project)}>
-                          <Tag className="w-4 h-4 mr-2" />
+                          <Tag className="size-4 shrink-0" />
                           设置标签
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openAllocation(project)}>
-                          <DollarSignIcon className="w-4 h-4 mr-2" />
+                          <DollarSignIcon className="size-4 shrink-0" />
                           项目分成
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem>转为测试中</DropdownMenuItem>
-                        <DropdownMenuItem>转为已转正</DropdownMenuItem>
+                        <DropdownMenuItem>
+                          <FlaskConical className="size-4 shrink-0" />
+                          转为测试中
+                        </DropdownMenuItem>
+                        <DropdownMenuItem>
+                          <CircleCheck className="size-4 shrink-0" />
+                          转为已转正
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem>查看账单</DropdownMenuItem>
+                        <DropdownMenuItem>
+                          <Receipt className="size-4 shrink-0" />
+                          查看账单
+                        </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         {project.status === 'active' ? (
                           <DropdownMenuItem
-                            className="text-destructive"
+                            variant="destructive"
                             onClick={() => setPausingProject(project)}
                           >
-                            <Trash className="w-4 h-4 mr-2" />
+                            <Pause className="size-4 shrink-0" />
                             暂停项目
                           </DropdownMenuItem>
                         ) : null}

@@ -348,6 +348,7 @@ export const tenantProjectImportDataAccess = {
           stage: form.stage,
           businessLineId: form.businessLineId,
           startDate: form.startDate,
+          revenueDepartment: '销售',
           staff: {
             preSalesStaffId: form.preSalesStaffId,
             accountManagerStaffId: form.accountManagerStaffId,

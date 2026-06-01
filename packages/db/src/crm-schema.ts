@@ -170,6 +170,8 @@ export const crmProject = pgTable(
     thisMonthConsumption: money("this_month_consumption").notNull().default("0"),
     /** 可选缓存，非财务真值 */
     balance: money("balance"),
+    /** 当前收入归属部门（冗余；真值见 project_revenue_department_assignment） */
+    revenueDepartment: varchar("revenue_department", { length: 32 }),
     ...crmTimestamps,
   },
   (table) => [
@@ -178,6 +180,37 @@ export const crmProject = pgTable(
     index("project_business_line_id_idx").on(table.businessLineId),
     index("project_stage_idx").on(table.stage),
     index("project_status_idx").on(table.status),
+    index("project_revenue_department_idx").on(table.revenueDepartment),
+  ],
+)
+
+/**
+ * 项目收入归属部门历史
+ * 当前生效：effective_to IS NULL；每项目至多一条（部分唯一）
+ */
+export const projectRevenueDepartmentAssignment = pgTable(
+  "project_revenue_department_assignment",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    department: varchar("department", { length: 32 }).notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    remark: text("remark"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("project_revenue_department_assignment_current_uk")
+      .on(table.projectId)
+      .where(sql`${table.effectiveTo} is null`),
+    index("project_revenue_department_assignment_project_id_idx").on(table.projectId),
+    index("project_revenue_department_assignment_effective_from_idx").on(
+      table.projectId,
+      table.effectiveFrom,
+    ),
   ],
 )
 
@@ -1130,6 +1163,7 @@ export const crmProjectRelations = relations(crmProject, ({ one, many }) => ({
     references: [businessLine.id],
   }),
   staffAssignments: many(projectStaffAssignment),
+  revenueDepartmentAssignments: many(projectRevenueDepartmentAssignment),
   tenantLinks: many(projectTenant),
   tagAssignments: many(projectTagAssignment),
   activities: many(projectActivity),
@@ -1161,6 +1195,20 @@ export const projectStaffAssignmentRelations = relations(projectStaffAssignment,
     references: [userStaff.id],
   }),
 }))
+
+export const projectRevenueDepartmentAssignmentRelations = relations(
+  projectRevenueDepartmentAssignment,
+  ({ one }) => ({
+    project: one(crmProject, {
+      fields: [projectRevenueDepartmentAssignment.projectId],
+      references: [crmProject.id],
+    }),
+    createdByStaff: one(userStaff, {
+      fields: [projectRevenueDepartmentAssignment.createdBy],
+      references: [userStaff.id],
+    }),
+  }),
+)
 
 export const commerceOrderRelations = relations(commerceOrder, ({ one, many }) => ({
   items: many(commerceOrderItem),

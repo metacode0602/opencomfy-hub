@@ -73,6 +73,10 @@ function maskPhoneMiddle(raw?: string | null): string {
   return raw.trim()
 }
 
+function formatTenantType(type: "internal" | "external") {
+  return type === "internal" ? "内部租户" : "外部租户"
+}
+
 export function CrmTenantsListClient() {
   const utils = trpc.useUtils()
   const [searchInput, setSearchInput] = React.useState("")
@@ -171,6 +175,7 @@ export function CrmTenantsListClient() {
                 <TableRow>
                   <TableHead>平台租户ID</TableHead>
                   <TableHead>租户名</TableHead>
+                  <TableHead>租户类型</TableHead>
                   <TableHead>租户手机</TableHead>
                   <TableHead>客户</TableHead>
                   <TableHead>项目标签</TableHead>
@@ -187,13 +192,13 @@ export function CrmTenantsListClient() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={14} className="text-muted-foreground py-8 text-center text-sm">
                       加载中…
                     </TableCell>
                   </TableRow>
                 ) : tenants.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="text-muted-foreground py-8 text-center text-sm">
+                    <TableCell colSpan={14} className="text-muted-foreground py-8 text-center text-sm">
                       暂无数据
                     </TableCell>
                   </TableRow>
@@ -202,6 +207,7 @@ export function CrmTenantsListClient() {
                     <TableRow key={t.id}>
                       <TableCell className="font-mono text-sm">{t.platformTenantId ?? "—"}</TableCell>
                       <TableCell>{t.name}</TableCell>
+                      <TableCell className="text-sm">{formatTenantType(t.type)}</TableCell>
                       <TableCell>{maskPhoneMiddle(t.phone)}</TableCell>
                       <TableCell>
                         <LocaleLink

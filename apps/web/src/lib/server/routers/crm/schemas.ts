@@ -66,6 +66,15 @@ export const projectStaffSchema = z.object({
   projectManagerStaffId: z.string(),
 })
 
+export const staffDepartmentSchema = z.enum([
+  '中台',
+  '运营中心',
+  '产品',
+  '研发',
+  '运维',
+  '销售',
+])
+
 export const tenantProjectImportFormSchema = z.object({
   stage: projectStageSchema,
   businessLineId: z.string().min(1),
@@ -90,17 +99,27 @@ export const projectUpsertSchema = z.object({
   monthlyBudget: z.number().optional(),
   startDate: z.string().min(1),
   endDate: z.string().optional(),
+  revenueDepartment: staffDepartmentSchema,
   staff: projectStaffSchema,
 })
 
-export const staffDepartmentSchema = z.enum([
-  '中台',
-  '运营中心',
-  '产品',
-  '研发',
-  '运维',
-  '销售',
-])
+const effectiveDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, '请选择有效的生效日期')
+
+export const changeProjectAccountManagerSchema = z.object({
+  projectId: z.string().min(1),
+  staffId: z.string().min(1),
+  effectiveFrom: effectiveDateSchema,
+  remark: z.string().max(500).optional(),
+})
+
+export const changeProjectRevenueDepartmentSchema = z.object({
+  projectId: z.string().min(1),
+  department: staffDepartmentSchema,
+  effectiveFrom: effectiveDateSchema,
+  remark: z.string().max(500).optional(),
+})
 
 export const staffAppRoleSchema = z.enum(['admin', 'user', 'member'])
 

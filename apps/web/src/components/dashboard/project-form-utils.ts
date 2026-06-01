@@ -1,4 +1,5 @@
 import { resolveDefaultStaffId } from '@/lib/crm/staff-constants'
+import type { StaffDepartment } from '@/lib/crm/staff-constants'
 import type { UserStaff } from '@/lib/types/crm'
 import type { BusinessLine, Project } from '@/lib/data/types'
 import type { ProjectFormValues } from './project-form-fields'
@@ -19,6 +20,7 @@ export function emptyProjectFormValues(staff: UserStaff[] = []): ProjectFormValu
     accountManagerStaffId: resolveDefaultStaffId(staff, 'account_manager') ?? '',
     deliveryManagerStaffId: resolveDefaultStaffId(staff, 'delivery_manager') ?? '',
     projectManagerStaffId: resolveDefaultStaffId(staff, 'project_manager') ?? '',
+    revenueDepartment: '销售',
     monthlyBudget: '',
     startDate: '',
   }
@@ -36,6 +38,7 @@ export function projectToFormValues(project: Project, staff: UserStaff[] = []): 
     accountManagerStaffId: getStaffIdByName(project.accountManager, staff) ?? '',
     deliveryManagerStaffId: getStaffIdByName(project.deliveryManager, staff) ?? '',
     projectManagerStaffId: getStaffIdByName(project.projectManager, staff) ?? '',
+    revenueDepartment: (project.revenueDepartment as StaffDepartment | undefined) ?? '销售',
     monthlyBudget: project.monthlyBudget > 0 ? String(project.monthlyBudget) : '',
     startDate: project.startDate,
   }
@@ -88,6 +91,7 @@ export function formValuesToProjectInput(values: ProjectFormValues) {
     businessLineId: values.businessLineId,
     monthlyBudget: values.monthlyBudget ? Number(values.monthlyBudget) : undefined,
     startDate: values.startDate,
+    revenueDepartment: values.revenueDepartment,
     staff: {
       preSalesStaffId: values.preSalesStaffId,
       accountManagerStaffId: values.accountManagerStaffId,
@@ -102,6 +106,7 @@ export function validateProjectForm(values: ProjectFormValues): string | null {
   if (!values.name.trim()) return '请填写项目名称'
   if (!values.businessLineId) return '请选择业务线'
   if (!values.stage) return '请选择项目阶段'
+  if (!values.revenueDepartment) return '请选择收入归属部门'
   if (!values.accountManagerStaffId) return '请选择客户经理'
   if (!values.deliveryManagerStaffId) return '请选择交付经理'
   return null

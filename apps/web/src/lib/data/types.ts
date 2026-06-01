@@ -149,6 +149,8 @@ export interface Project {
   thisMonthConsumption: number
   totalConsumption: number
   balance: number
+  /** 当前收入归属部门 */
+  revenueDepartment?: string
   tags: ProjectTag[]
 }
 

@@ -121,8 +121,12 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
             <StatusBadge status={project.stage} />
             <StatusBadge status={project.status} />
             <Badge variant="secondary">{project.businessLineName}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">{project.revenueDepartment}</Badge>
+            </div>
           </div>
           <p className="text-muted-foreground">{project.description}</p>
+
         </div>
         <div className="flex items-center gap-2">
           <Button variant="secondary" onClick={() => setBillingSyncOpen(true)}>

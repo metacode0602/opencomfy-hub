@@ -95,6 +95,9 @@ export function EditProjectDialog({
             onChange={handleChange}
             businessLines={businessLines}
             idPrefix="edit-project"
+            disableCustomerAndTenant
+            hideAccountManager
+            hideRevenueDepartment
           />
         )}
 

@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from '@workspace/ui/components/select'
 import type { BusinessLine, PlatformTenant } from '@/lib/data/types'
+import { STAFF_DEPARTMENTS, type StaffDepartment } from '@/lib/crm/staff-constants'
 import { trpc } from '@/lib/trpc/client'
 import { STAGE_OPTIONS, type ProjectStage } from '@/lib/types/crm'
 
@@ -26,6 +27,7 @@ export type ProjectFormValues = {
   accountManagerStaffId: string
   deliveryManagerStaffId: string
   projectManagerStaffId: string
+  revenueDepartment: StaffDepartment
   monthlyBudget: string
   startDate: string
 }
@@ -40,6 +42,10 @@ type ProjectFormFieldsProps = {
   idPrefix?: string
   /** 编辑模式下禁止修改客户与租户 */
   disableCustomerAndTenant?: boolean
+  /** 编辑模式：客户经理改由列表菜单单独维护 */
+  hideAccountManager?: boolean
+  /** 编辑模式：收入归属部门改由列表菜单单独维护 */
+  hideRevenueDepartment?: boolean
 }
 
 function tenantLabel(t: PlatformTenant) {
@@ -54,6 +60,8 @@ export function ProjectFormFields({
   businessLines,
   idPrefix = 'project',
   disableCustomerAndTenant = false,
+  hideAccountManager = false,
+  hideRevenueDepartment = false,
 }: ProjectFormFieldsProps) {
   const { data: customers = [] } = trpc.crm.customers.list.useQuery({})
   const { data: customerTenants = [] } = trpc.crm.customers.listTenants.useQuery(
@@ -185,6 +193,27 @@ export function ProjectFormFields({
         </div>
       </div>
 
+      {!hideRevenueDepartment ? (
+        <div className="grid gap-2">
+          <Label htmlFor={`${idPrefix}-revenue-dept`}>收入归属部门</Label>
+          <Select
+            value={values.revenueDepartment}
+            onValueChange={(v) => onChange({ revenueDepartment: v as StaffDepartment })}
+          >
+            <SelectTrigger id={`${idPrefix}-revenue-dept`} className="w-full">
+              <SelectValue placeholder="请选择部门" />
+            </SelectTrigger>
+            <SelectContent>
+              {STAFF_DEPARTMENTS.map((dept) => (
+                <SelectItem key={dept} value={dept}>
+                  {dept}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-4">
         <div className="grid gap-2">
           <Label htmlFor={`${idPrefix}-pre-sales`}>售前经理</Label>
@@ -205,24 +234,26 @@ export function ProjectFormFields({
             </SelectContent>
           </Select>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor={`${idPrefix}-account-manager`}>客户经理</Label>
-          <Select
-            value={values.accountManagerStaffId || undefined}
-            onValueChange={(v) => onChange({ accountManagerStaffId: v })}
-          >
-            <SelectTrigger id={`${idPrefix}-account-manager`} className="w-full">
-              <SelectValue placeholder="请选择" />
-            </SelectTrigger>
-            <SelectContent>
-              {staff.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.display_name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {!hideAccountManager ? (
+          <div className="grid gap-2">
+            <Label htmlFor={`${idPrefix}-account-manager`}>客户经理</Label>
+            <Select
+              value={values.accountManagerStaffId || undefined}
+              onValueChange={(v) => onChange({ accountManagerStaffId: v })}
+            >
+              <SelectTrigger id={`${idPrefix}-account-manager`} className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {staff.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-2 gap-4">

@@ -183,6 +183,7 @@ export function mapProjectRow(
     thisMonthConsumption: toNumber(row.thisMonthConsumption),
     totalConsumption: row.totalConsumption,
     balance: toNumber(row.balance),
+    revenueDepartment: row.revenueDepartment ?? undefined,
     tags: row.tags ?? [],
   }
 }
