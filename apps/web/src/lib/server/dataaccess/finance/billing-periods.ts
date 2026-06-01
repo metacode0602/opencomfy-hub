@@ -44,6 +44,11 @@ import {
 } from './tenant-bill-windows'
 import { customerFullNamesByTenantIds } from './income-customer-enrich'
 import { validateSingleIncome } from './validate-single-income'
+import { listCostSourceLines as fetchCostSourceLines } from './list-cost-source-lines'
+import {
+  listImportTenantBindings as fetchImportTenantBindings,
+  type ImportTenantBindingFilters,
+} from './list-import-tenant-bindings'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
 
@@ -126,6 +131,17 @@ export const financeBillingPeriodsDataAccess = {
     financeLog('period', 'created', { id, periodCode: input.periodCode })
     const row = await db.query.billingPeriod.findFirst({ where: eq(billingPeriod.id, id) })
     return mapPeriod(row!)
+  },
+
+  async listCostSourceLines(billingPeriodId: string) {
+    return fetchCostSourceLines(billingPeriodId)
+  },
+
+  async listImportTenantBindings(
+    billingPeriodId: string,
+    filters: ImportTenantBindingFilters = {},
+  ) {
+    return fetchImportTenantBindings(billingPeriodId, filters)
   },
 
   async getBundle(periodId: string) {

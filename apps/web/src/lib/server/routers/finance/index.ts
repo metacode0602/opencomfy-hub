@@ -79,6 +79,40 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    listCostSourceLines: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.listCostSourceLines(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    listImportTenantBindings: protectedProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          tenantType: z.enum(['all', 'internal', 'external']).optional(),
+          customerType: z.enum(['all', 'B', 'C']).optional(),
+          staffId: z.string().optional(),
+          department: z.string().optional(),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          const { billingPeriodId, ...filters } = input
+          return await financeBillingPeriodsDataAccess.listImportTenantBindings(
+            billingPeriodId,
+            filters,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     create: adminProcedure.input(periodCreateSchema).mutation(async ({ input }) => {
       try {
         return await financeBillingPeriodsDataAccess.create(input)

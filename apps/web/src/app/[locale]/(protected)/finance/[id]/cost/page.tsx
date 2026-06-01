@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@workspace/ui/components/card"
-import { Download, RefreshCw } from "lucide-react"
+import { Download, Link2, RefreshCw, TableProperties } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -117,6 +117,28 @@ export default function FinancePeriodCostPage() {
                 重新生成
               </Button>
             ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              asChild
+            >
+              <LocaleLink href={`/finance/${id}/cost/tenant-bindings`}>
+                <Link2 className="size-4" />
+                租户项目映射
+              </LocaleLink>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              asChild
+            >
+              <LocaleLink href={`/finance/${id}/cost/source-lines`}>
+                <TableProperties className="size-4" />
+                查看中间表
+              </LocaleLink>
+            </Button>
             <Button
               variant="outline"
               size="sm"
