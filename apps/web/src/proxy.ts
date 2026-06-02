@@ -74,11 +74,20 @@ export async function proxy(request: NextRequest) {
   const sessionCookie = getSessionCookie(request)
   const { locale, pathnameWithoutLocale: pathForAuth } = pathnameWithoutLocale(pathname)
 
+  if (
+    pathForAuth.startsWith("/login") ||
+    pathForAuth.startsWith("/auth/login") ||
+    pathForAuth.startsWith("/auth/register") ||
+    pathForAuth.startsWith("/register") ||
+    pathForAuth.startsWith("/signup")
+  ) {
+    const signInHref = buildLocalizedHref(locale, "/signin")
+    return NextResponse.redirect(new URL(signInHref, request.url))
+  }
+
   const isPublicRoute =
     pathForAuth === "/" ||
-    // pathForAuth.startsWith("/login") ||
     pathForAuth.startsWith("/signin") ||
-    pathForAuth.startsWith("/signup") ||
     pathForAuth.startsWith("/forgot-password") ||
     pathForAuth.startsWith("/reset-password") ||
     pathForAuth.startsWith("/error")

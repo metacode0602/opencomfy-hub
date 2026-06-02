@@ -60,7 +60,6 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
           .min(1, { message: t('phoneRequired') })
           .regex(phoneRegex, { message: t('invalidPhone') }),
         verificationCode: z.string().min(1, { message: t('codeRequired') }),
-        invitationCode: z.string().optional(),
       }),
     [t]
   )
@@ -70,7 +69,6 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
     defaultValues: {
       phoneNumber: '',
       verificationCode: '',
-      invitationCode: '',
     },
   })
 
@@ -135,17 +133,10 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
     setSuccess('')
     form.clearErrors('verificationCode')
     try {
-      const { data: result, error } = await authClient.phoneNumber.verify(
-        {
-          phoneNumber: values.phoneNumber,
-          code: values.verificationCode,
-        },
-        {
-          headers: values.invitationCode ? {
-            'x-invitation-code': values.invitationCode
-          } : undefined,
-        }
-      )
+      const { data: result, error } = await authClient.phoneNumber.verify({
+        phoneNumber: values.phoneNumber,
+        code: values.verificationCode,
+      })
       console.warn('[phone-signin] [onVerificationSubmit] result', result, error)
       if (error && error?.code !== 'SUCCESS') {
         form.setError('verificationCode', {
@@ -175,11 +166,10 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
   return (
     <AuthCard
       headerLabel={t('welcomeBack')}
-      bottomButtonLabel={t('signUpHint')}
-      bottomButtonHref={`${Routes.Register}`}
-      className={cn('', className)}
+      description={t('description')}
+      className={cn('w-full', className)}
     >
-      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6 p-6'>
+      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6 pb-2'>
         <FieldGroup className='gap-4'>
           <Controller
             name='phoneNumber'
@@ -252,31 +242,7 @@ export const PhoneLoginForm = ({ className, callbackUrl: propCallbackUrl }: Phon
             )}
           />
 
-          <Controller
-            name='invitationCode'
-            control={form.control}
-            render={({ field, fieldState }) => (
-              <Field data-invalid={fieldState.invalid}>
-                <FieldLabel htmlFor={`${formId}-invite`}>邀请码 (可选)</FieldLabel>
-                <Input
-                  {...field}
-                  id={`${formId}-invite`}
-                  disabled={isPending}
-                  placeholder='邀请码，仅新用户注册可用'
-                  aria-invalid={fieldState.invalid}
-                  autoComplete='off'
-                />
-                {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
-              </Field>
-            )}
-          />
         </FieldGroup>
-
-        <div className='text-center text-muted-foreground text-xs'>
-          {t('autoCreateAccount')}
-          {/* <br /> */}
-          {/* <span className='text-primary text-xs'>{t('invitationCodeHint')}</span> */}
-        </div>
 
         <FormError message={error || urlError || undefined} />
         <FormSuccess message={success} />

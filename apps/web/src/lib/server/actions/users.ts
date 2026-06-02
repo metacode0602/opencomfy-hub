@@ -59,27 +59,10 @@ export const signIn = async (email: string, password: string) => {
   }
 }
 
-export const signUp = async (email: string, password: string, username: string) => {
-  try {
-    await auth.api.signUpEmail({
-      body: {
-        email,
-        password,
-        name: username,
-      },
-    })
-
-    return {
-      success: true,
-      message: 'Signed up successfully.',
-    }
-  } catch (error) {
-    const e = error as Error
-
-    return {
-      success: false,
-      message: e.message || 'An unknown error occurred.',
-    }
+export const signUp = async (_email: string, _password: string, _username: string) => {
+  return {
+    success: false,
+    message: '注册已关闭，请联系管理员开通账号',
   }
 }
 

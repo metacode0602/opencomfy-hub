@@ -112,11 +112,10 @@ export const EmailLoginForm = ({ className, callbackUrl: propCallbackUrl }: Emai
   return (
     <AuthCard
       headerLabel={t('welcomeBack')}
-      bottomButtonLabel={t('signUpHint')}
-      bottomButtonHref={`${Routes.Register}`}
-      className={cn('', className)}
+      description={t('description')}
+      className={cn('w-full', className)}
     >
-      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-8 p-6'>
+      <form onSubmit={form.handleSubmit(onSubmit)} className='space-y-6 pb-2'>
         <FieldGroup className='gap-4'>
           <Controller
             name='email'
@@ -197,9 +196,11 @@ export const EmailLoginForm = ({ className, callbackUrl: propCallbackUrl }: Emai
           <span>{t('signIn')}</span>
         </Button>
       </form>
-      <div className='mt-4'>
-        <SocialLoginButton callbackUrl={callbackUrl} />
-      </div>
+      {(websiteConfig.auth.enableGoogleLogin || websiteConfig.auth.enableGithubLogin) && (
+        <div className='mt-4'>
+          <SocialLoginButton callbackUrl={callbackUrl} />
+        </div>
+      )}
       <div className='mt-4 text-center'>
         <Button
           variant='link'

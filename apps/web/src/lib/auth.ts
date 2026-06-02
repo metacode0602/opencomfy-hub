@@ -1,7 +1,15 @@
 import { db } from './db'
 
 import { OrganizationInvitationEmail } from '@workspace/email'
+import {
+  assertLoginAllowed,
+  assertUserMayLogin,
+  findProvisionedUserByEmail,
+} from '@/lib/auth-login-guard'
+import { isTrustedProvisioning } from '@/lib/auth-provisioning'
 import { getActiveOrganization } from '@/lib/server/actions/organizations'
+import { assertPasswordPolicy } from '@workspace/auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { nextCookies } from 'better-auth/next-js'
@@ -45,6 +53,11 @@ export const auth = betterAuth({
     requireEmailVerification: websiteConfig.auth.requireEmailVerification,
     // https://www.better-auth.com/docs/authentication/email-password#forget-password
     async sendResetPassword({ user, url }, request) {
+      const provisioned = await findProvisionedUserByEmail(user.email)
+      if (!provisioned) {
+        return
+      }
+
       const locale = getLocaleFromRequest(request)
       const localizedUrl = getUrlWithLocaleInCallbackUrl(url, locale)
 
@@ -132,6 +145,16 @@ export const auth = betterAuth({
         defaultValue: false,
         input: false,
       },
+      provisionedBy: {
+        type: 'string',
+        required: false,
+        input: false,
+      },
+      provisionedAt: {
+        type: 'date',
+        required: false,
+        input: false,
+      },
     },
     // https://www.better-auth.com/docs/concepts/users-accounts#delete-user
     deleteUser: {
@@ -142,6 +165,14 @@ export const auth = betterAuth({
     // https://www.better-auth.com/docs/concepts/database#database-hooks
     user: {
       create: {
+        before: async (user) => {
+          if (!websiteConfig.auth.allowPublicSignUp && !isTrustedProvisioning()) {
+            throw new APIError('FORBIDDEN', {
+              message: '注册已关闭，请联系管理员开通账号',
+            })
+          }
+          return { data: user }
+        },
         after: async (user) => {
           // Auto create organization for user
           // 用户创建成功后自动创建同名organization
@@ -162,6 +193,26 @@ export const auth = betterAuth({
     session: {
       create: {
         before: async (session) => {
+          if (websiteConfig.auth.requireProvisionedToLogin) {
+            const userInfo = await getUserById(session.userId)
+            try {
+              assertUserMayLogin(
+                userInfo
+                  ? {
+                      provisionedBy: userInfo.provisionedBy ?? null,
+                      banned: userInfo.banned ?? null,
+                      phoneNumberVerified: userInfo.phoneNumberVerified,
+                      phoneNumber: userInfo.phoneNumber,
+                    }
+                  : undefined,
+              )
+            } catch (error) {
+              throw new APIError('FORBIDDEN', {
+                message: error instanceof Error ? error.message : '账号未开通或已禁用',
+              })
+            }
+          }
+
           const organization = await getActiveOrganization(session.userId)
           if (!organization?.organization || !organization?.organization?.id) {
             const userInfo = await getUserById(session.userId);
@@ -276,19 +327,90 @@ export const auth = betterAuth({
           await sendSmsCodeByTecent(phoneNumber, code)
         }
       },
-      signUpOnVerification: {
-        getTempEmail: (phoneNumber) => {
-          return `${phoneNumber}@${websiteConfig.auth.emailSuffix}`
-        },
-        //optionally, you can also pass `getTempName` function to generate a temporary name for the user
-        getTempName: (phoneNumber) => {
-          return phoneNumber //by default, it will use the phone number as the name
-        },
-      },
     }),
     lastLoginMethod(),
     nextCookies(),
   ],
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      const path = ctx.path
+
+      if (path === '/sign-up/email' && !websiteConfig.auth.allowPublicSignUp) {
+        if (!isTrustedProvisioning()) {
+          throw new APIError('FORBIDDEN', {
+            message: '注册已关闭，请联系管理员开通账号',
+          })
+        }
+      }
+
+      if (path === '/sign-in/email') {
+        const body = ctx.body as { email?: string }
+        if (body?.email && websiteConfig.auth.requireProvisionedToLogin) {
+          try {
+            await assertLoginAllowed({ type: 'email', email: body.email })
+          } catch (error) {
+            throw new APIError('FORBIDDEN', {
+              message: error instanceof Error ? error.message : '账号未开通或已禁用',
+            })
+          }
+        }
+      }
+
+      if (path === '/sign-in/phone-number' || path === '/phone-number/send-otp') {
+        const body = ctx.body as { phoneNumber?: string }
+        if (body?.phoneNumber && websiteConfig.auth.requireProvisionedToLogin) {
+          try {
+            await assertLoginAllowed(
+              { type: 'phone', phoneNumber: body.phoneNumber },
+              { requireVerifiedPhone: path === '/sign-in/phone-number' },
+            )
+          } catch (error) {
+            throw new APIError('FORBIDDEN', {
+              message: error instanceof Error ? error.message : '账号未开通或已禁用',
+            })
+          }
+        }
+      }
+
+      if (path === '/change-password') {
+        const body = ctx.body as {
+          newPassword?: string
+          currentPassword?: string
+        }
+        const sessionUser = ctx.context.session?.user as
+          | { email?: string; name?: string }
+          | undefined
+        if (body?.newPassword) {
+          if (body.currentPassword && body.newPassword === body.currentPassword) {
+            throw new APIError('BAD_REQUEST', { message: '新密码不能与当前密码相同' })
+          }
+          try {
+            assertPasswordPolicy(body.newPassword, {
+              email: sessionUser?.email,
+              name: sessionUser?.name,
+            })
+          } catch (error) {
+            throw new APIError('BAD_REQUEST', {
+              message: error instanceof Error ? error.message : '密码不符合安全要求',
+            })
+          }
+        }
+      }
+
+      if (path === '/reset-password') {
+        const body = ctx.body as { newPassword?: string }
+        if (body?.newPassword) {
+          try {
+            assertPasswordPolicy(body.newPassword)
+          } catch (error) {
+            throw new APIError('BAD_REQUEST', {
+              message: error instanceof Error ? error.message : '密码不符合安全要求',
+            })
+          }
+        }
+      }
+    }),
+  },
   onAPIError: {
     // https://www.better-auth.com/docs/reference/options#onapierror
     errorURL: '/auth/error',

@@ -567,12 +567,14 @@ export const crmRouter = createTRPCRouter({
     getById: protectedProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
       staffDataAccess.getById(input.id),
     ),
-    create: adminProcedure.input(staffUpsertSchema).mutation(({ input }) =>
-      staffDataAccess.create(input),
+    create: adminProcedure.input(staffUpsertSchema).mutation(({ input, ctx }) =>
+      staffDataAccess.create(input, { operatorUserId: ctx.user.id }),
     ),
     update: adminProcedure
       .input(z.object({ id: z.string(), data: staffUpsertSchema }))
-      .mutation(({ input }) => staffDataAccess.update(input.id, input.data)),
+      .mutation(({ input, ctx }) =>
+        staffDataAccess.update(input.id, input.data, { operatorUserId: ctx.user.id }),
+      ),
     delete: adminProcedure.input(z.object({ id: z.string() })).mutation(({ input }) =>
       staffDataAccess.delete(input.id),
     ),

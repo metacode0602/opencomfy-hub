@@ -4,28 +4,10 @@ import { auth } from '@/lib/auth'
 import { SigninFormValues, SignupFormValues } from './components/validation'
 import { headers } from 'next/headers'
 
-export async function serverSignUp({
-  email,
-  name,
-  password
-}: SignupFormValues): Promise<{ error: boolean; message: string }> {
-  try {
-    await auth.api.signUpEmail({
-      body: {
-        name,
-        email,
-        password,
-        callbackURL: '/dashboard'
-      },
-      headers: await headers()
-    })
-
-    return { error: false, message: 'Signed up successfully.' }
-  } catch (error: unknown) {
-    console.log(error)
-
-    return { error: true, message: 'Internal Server Error' }
-  }
+export async function serverSignUp(
+  _values: SignupFormValues,
+): Promise<{ error: boolean; message: string }> {
+  return { error: true, message: '注册已关闭，请联系管理员开通账号' }
 }
 
 export async function serverSignIn({

@@ -67,6 +67,10 @@ export const websiteConfig = {
       process.env.NODE_ENV === 'production'
         ? ['https://crm.suanlene.cn', 'https://suanlene.cn']
         : ['http://localhost:30041'], // 信任的来源列表，允许跨域请求
+    allowPublicSignUp: false,
+    allowPhoneSignUp: false,
+    loginMethods: ['email', 'phone'] as const,
+    requireProvisionedToLogin: true,
     enableGoogleLogin: false,
     enableGithubLogin: false,
     requireEmailVerification: false,

@@ -14,9 +14,9 @@ export interface UnifiedLoginFormProps {
 export const UnifiedLoginForm = ({ className, callbackUrl }: UnifiedLoginFormProps) => {
   const { authMode } = useAuthStore()
   return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {authMode === 'phone' && <PhoneLoginForm callbackUrl={callbackUrl} />}
-      {authMode === 'email' && <EmailLoginForm callbackUrl={callbackUrl} />}
-    </div>
+    <>
+      {authMode === 'phone' && <PhoneLoginForm callbackUrl={callbackUrl} className={className} />}
+      {authMode === 'email' && <EmailLoginForm callbackUrl={callbackUrl} className={className} />}
+    </>
   )
 }

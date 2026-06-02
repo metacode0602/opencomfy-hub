@@ -143,7 +143,11 @@ async function mapStaffDetail(row: typeof userStaff.$inferSelect): Promise<Staff
 async function applyStaffAuthLink(
   staffId: string,
   input: StaffUpsertInput,
-  options: { mode: 'create' | 'update'; previousAuthUserId?: string | null },
+  options: {
+    mode: 'create' | 'update'
+    previousAuthUserId?: string | null
+    operatorUserId?: string
+  },
 ): Promise<void> {
   if (input.authUserId) {
     await linkStaffAuthUser(staffId, input.authUserId)
@@ -160,11 +164,17 @@ async function applyStaffAuthLink(
     (options.mode === 'create' || !options.previousAuthUserId)
 
   if (shouldCreate) {
-    const authUserId = await createAuthUserForStaff({
-      displayName: input.displayName,
-      email: input.email,
-      mobile: input.mobile,
-    })
+    if (!options.operatorUserId) {
+      throw new Error('缺少操作员信息，无法创建登录账号')
+    }
+    const authUserId = await createAuthUserForStaff(
+      {
+        displayName: input.displayName,
+        email: input.email,
+        mobile: input.mobile,
+      },
+      options.operatorUserId,
+    )
     await linkStaffAuthUser(staffId, authUserId)
   }
 }
@@ -257,20 +267,30 @@ export const staffDataAccess = {
     return mapStaffDetail(row)
   },
 
-  async create(input: StaffUpsertInput): Promise<StaffDetail> {
+  async create(
+    input: StaffUpsertInput,
+    options?: { operatorUserId: string },
+  ): Promise<StaffDetail> {
     await clearExclusiveDefaultFlags(input)
 
     const id = newId()
     const values = staffValuesFromInput(input)
     await db.insert(userStaff).values({ id, ...values })
-    await applyStaffAuthLink(id, input, { mode: 'create' })
+    await applyStaffAuthLink(id, input, {
+      mode: 'create',
+      operatorUserId: options?.operatorUserId,
+    })
 
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('创建员工失败')
     return mapStaffDetail(row)
   },
 
-  async update(id: string, input: StaffUpsertInput): Promise<StaffDetail> {
+  async update(
+    id: string,
+    input: StaffUpsertInput,
+    options?: { operatorUserId: string },
+  ): Promise<StaffDetail> {
     await clearExclusiveDefaultFlags(input, id)
 
     const previous = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
@@ -288,6 +308,7 @@ export const staffDataAccess = {
       await applyStaffAuthLink(id, input, {
         mode: 'update',
         previousAuthUserId: previous.authUserId,
+        operatorUserId: options?.operatorUserId,
       })
     } else if (previous.authUserId) {
       await syncStaffAuthContact(id, input)

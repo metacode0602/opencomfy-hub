@@ -115,13 +115,26 @@ export const publicProcedure = t.procedure
  * Reusable procedure that enforces users are logged in before running the
  * code
  */
-export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+const PASSWORD_CHANGE_PATH_PREFIX = 'firstLogin.'
+
+export const protectedProcedure = t.procedure.use(({ ctx, next, path }) => {
   if (!ctx.user?.id) {
     throw new TRPCError({
       code: 'UNAUTHORIZED',
       message: '请先登录',
     })
   }
+
+  const mustChangePassword = Boolean(
+    (ctx.user as User & { mustChangePassword?: boolean }).mustChangePassword,
+  )
+  if (mustChangePassword && !path.startsWith(PASSWORD_CHANGE_PATH_PREFIX)) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: '请先修改密码后再继续使用系统',
+    })
+  }
+
   return next({
     ctx: {
       user: ctx.user as User,

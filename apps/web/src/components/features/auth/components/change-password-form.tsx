@@ -17,11 +17,17 @@ import {
 import { FormInputPassword } from '@/components/features/form/form-input'
 import { authClient } from '@/lib/auth-client'
 import { trpc } from '@/lib/trpc/client'
+import {
+  createPasswordPolicySchema,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  passwordPolicyMessage,
+} from '@workspace/auth'
 
 const schema = z
   .object({
     currentPassword: z.string().min(1, '请输入当前密码'),
-    newPassword: z.string().min(8, '新密码至少 8 位'),
+    newPassword: createPasswordPolicySchema(),
     confirmPassword: z.string().min(1, '请确认新密码'),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {
@@ -46,6 +52,11 @@ export function ChangePasswordForm() {
   })
 
   async function onSubmit(values: FormValues) {
+    if (values.newPassword === values.currentPassword) {
+      form.setError('newPassword', { message: passwordPolicyMessage('sameAsCurrent') })
+      return
+    }
+
     setPending(true)
     try {
       await authClient.changePassword({
@@ -99,6 +110,9 @@ export function ChangePasswordForm() {
             label="确认新密码"
             disabled={loading}
           />
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            密码须为 {PASSWORD_MIN_LENGTH}–{PASSWORD_MAX_LENGTH} 位，并包含大写字母、小写字母、数字和特殊字符。
+          </p>
           <Button type="submit" className="w-full" disabled={loading}>
             确认修改
           </Button>

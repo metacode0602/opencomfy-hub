@@ -38,7 +38,7 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
       // Auth mode state
-      authMode: 'phone',
+      authMode: 'email',
       setAuthMode: (mode) => {
         set({ authMode: mode })
         // Reset states when switching modes

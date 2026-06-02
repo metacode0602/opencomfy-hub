@@ -1,6 +1,9 @@
 import { db } from '@/lib/db'
 import { auth } from '@/lib/auth'
+import { runWithProvisioningContext } from '@/lib/auth-provisioning'
 import { websiteConfig } from '@/lib/config/website'
+import { normalizePhone } from '@/lib/utils/phone'
+import { assertPasswordPolicy } from '@workspace/auth'
 import { user, userStaff } from '@workspace/db/schema'
 import { and, eq, ilike, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 
@@ -17,15 +20,8 @@ export function getStaffDefaultPassword(): string {
   if (!password) {
     throw new Error('未配置 STAFF_DEFAULT_PASSWORD 环境变量')
   }
+  assertPasswordPolicy(password)
   return password
-}
-
-export function normalizePhone(value: string): string {
-  const digits = value.replace(/\D/g, '')
-  if (digits.startsWith('86') && digits.length > 11) {
-    return digits.slice(2)
-  }
-  return digits
 }
 
 export function resolveStaffLoginEmail(input: { email?: string | null; mobile: string }): string {
@@ -57,27 +53,38 @@ async function assertAuthUserLinkable(authUserId: string, staffId?: string) {
   }
 }
 
-export async function createAuthUserForStaff(input: {
-  displayName: string
-  email?: string | null
-  mobile: string
-}): Promise<string> {
-  const email = resolveStaffLoginEmail(input)
+export async function provisionUserAsAdmin(
+  input: {
+    email: string
+    password: string
+    name: string
+    mobile?: string
+  },
+  operatorUserId: string,
+): Promise<string> {
+  if (!operatorUserId?.trim()) {
+    throw new Error('缺少操作员信息，无法开通登录账号')
+  }
+
+  const email = input.email.trim().toLowerCase()
+  assertPasswordPolicy(input.password, { email, name: input.name })
+
   const existing = await db.query.user.findFirst({
     where: eq(user.email, email),
     columns: { id: true },
   })
   if (existing) {
-    await assertAuthUserLinkable(existing.id)
-    throw new Error('该登录邮箱已存在，请在员工表单中选择已有账号进行关联')
+    throw new Error('该登录邮箱已存在')
   }
 
-  await auth.api.signUpEmail({
-    body: {
-      email,
-      password: getStaffDefaultPassword(),
-      name: input.displayName.trim(),
-    },
+  await runWithProvisioningContext(async () => {
+    await auth.api.signUpEmail({
+      body: {
+        email,
+        password: input.password,
+        name: input.name.trim(),
+      },
+    })
   })
 
   const created = await db.query.user.findFirst({
@@ -88,17 +95,49 @@ export async function createAuthUserForStaff(input: {
     throw new Error('创建登录账号失败')
   }
 
+  const mobile = input.mobile?.trim()
   await db
     .update(user)
     .set({
+      provisionedBy: operatorUserId,
+      provisionedAt: new Date(),
       mustChangePassword: true,
-      phoneNumber: input.mobile.trim(),
-      phoneNumberVerified: normalizePhone(input.mobile).length > 0,
+      phoneNumber: mobile || null,
+      phoneNumberVerified: mobile ? normalizePhone(mobile).length > 0 : false,
       emailVerified: true,
     })
     .where(eq(user.id, created.id))
 
   return created.id
+}
+
+export async function createAuthUserForStaff(
+  input: {
+    displayName: string
+    email?: string | null
+    mobile: string
+  },
+  operatorUserId: string,
+): Promise<string> {
+  const email = resolveStaffLoginEmail(input)
+  const existing = await db.query.user.findFirst({
+    where: eq(user.email, email),
+    columns: { id: true },
+  })
+  if (existing) {
+    await assertAuthUserLinkable(existing.id)
+    throw new Error('该登录邮箱已存在，请在员工表单中选择已有账号进行关联')
+  }
+
+  return provisionUserAsAdmin(
+    {
+      email,
+      password: getStaffDefaultPassword(),
+      name: input.displayName.trim(),
+      mobile: input.mobile,
+    },
+    operatorUserId,
+  )
 }
 
 export async function autoLinkStaffForAuthUser(authUser: {

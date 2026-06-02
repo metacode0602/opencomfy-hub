@@ -1,29 +1,33 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle
-} from '@workspace/ui/components/card'
-import { SigninForm } from '@/components/features/auth/components/signin-form'
+import { UnifiedLoginForm } from '@/components/auth/unified-login-form'
 import { requireUnauth } from '@/components/features/auth/lib/utils'
+import { LocaleLink } from '@/lib/i18n/navigation'
+import { Routes } from '@/lib/routes'
 import { getTranslations } from 'next-intl/server'
 
 export default async function SigninPage() {
   await requireUnauth('/dashboard')
-  const t = await getTranslations('AuthPage.login')
+  const common = await getTranslations('AuthPage.common')
 
   return (
-    <div className="my-8 flex w-full items-center justify-center px-6">
-      <Card className="w-full max-w-2xl rounded-2xl">
-        <CardHeader>
-          <CardTitle className="text-2xl">{t('welcomeBack')}</CardTitle>
-          <CardDescription>{t('description')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SigninForm />
-        </CardContent>
-      </Card>
-    </div>
+    <main className="flex w-full max-w-md flex-col gap-6 px-4 py-6 sm:px-6">
+      <UnifiedLoginForm className="w-full shadow-sm" />
+
+      <p className="text-balance text-center text-xs leading-relaxed text-muted-foreground">
+        {common('byClickingContinue')}
+        <LocaleLink
+          href={Routes.TermsOfService}
+          className="underline underline-offset-4 hover:text-primary"
+        >
+          {common('termsOfService')}
+        </LocaleLink>{' '}
+        {common('and')}{' '}
+        <LocaleLink
+          href={Routes.PrivacyPolicy}
+          className="underline underline-offset-4 hover:text-primary"
+        >
+          {common('privacyPolicy')}
+        </LocaleLink>
+      </p>
+    </main>
   )
 }
