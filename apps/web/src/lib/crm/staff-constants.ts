@@ -36,6 +36,17 @@ export function staffAppRoleLabel(role: string): string {
   return STAFF_APP_ROLES.find((r) => r.value === role)?.label ?? role
 }
 
+/** 员工勾选了应用角色即需要开通登录 */
+export function staffRolesRequireLogin(roles?: string[] | null): boolean {
+  return (roles?.length ?? 0) > 0
+}
+
+/** 员工应用角色 → Better Auth users.role */
+export function resolveUserRoleFromStaffRoles(roles: string[]): 'admin' | 'user' {
+  if (roles.includes('admin')) return 'admin'
+  return 'user'
+}
+
 export function resolveDefaultStaffId(
   staff: readonly {
     id: string

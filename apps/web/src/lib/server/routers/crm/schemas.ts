@@ -123,22 +123,32 @@ export const changeProjectRevenueDepartmentSchema = z.object({
 
 export const staffAppRoleSchema = z.enum(['admin', 'user', 'member'])
 
-export const staffUpsertSchema = z.object({
-  displayName: z.string().min(1),
-  mobile: z.string().min(1),
-  email: z.string().nullable().optional(),
-  employeeNo: z.string().nullable().optional(),
-  status: z.string(),
-  department: staffDepartmentSchema.nullable().optional(),
-  position: z.string().nullable().optional(),
-  roles: z.array(staffAppRoleSchema).optional().default([]),
-  isDefaultPreSales: z.boolean().optional().default(false),
-  isDefaultAccountManager: z.boolean().optional().default(false),
-  isDefaultDeliveryManager: z.boolean().optional().default(false),
-  isDefaultProjectManager: z.boolean().optional().default(false),
-  authUserId: z.string().nullable().optional(),
-  createLoginAccount: z.boolean().optional().default(true),
-})
+export const staffUpsertSchema = z
+  .object({
+    displayName: z.string().min(1),
+    mobile: z.string().min(1),
+    email: z.string().nullable().optional(),
+    employeeNo: z.string().nullable().optional(),
+    status: z.string(),
+    department: staffDepartmentSchema.nullable().optional(),
+    position: z.string().nullable().optional(),
+    roles: z.array(staffAppRoleSchema).optional().default([]),
+    isDefaultPreSales: z.boolean().optional().default(false),
+    isDefaultAccountManager: z.boolean().optional().default(false),
+    isDefaultDeliveryManager: z.boolean().optional().default(false),
+    isDefaultProjectManager: z.boolean().optional().default(false),
+    authUserId: z.string().nullable().optional(),
+    createLoginAccount: z.boolean().optional().default(true),
+  })
+  .superRefine((data, ctx) => {
+    if (data.roles.length > 0 && !data.email?.trim()) {
+      ctx.addIssue({
+        code: 'custom',
+        message: '选择了角色时必须填写邮箱',
+        path: ['email'],
+      })
+    }
+  })
 
 export const staffListSchema = z
   .object({

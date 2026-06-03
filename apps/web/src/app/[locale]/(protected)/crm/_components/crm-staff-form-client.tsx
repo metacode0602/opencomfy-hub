@@ -11,6 +11,7 @@ import {
 } from "@workspace/ui/components/card"
 import { LocaleLink, useLocaleRouter } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
+import { IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 import {
   CrmStaffFormFields,
@@ -51,7 +52,10 @@ export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
     )
   }
 
+  const isSaving = createMutation.isPending || updateMutation.isPending
+
   const onSave = () => {
+    if (isSaving) return
     const err = validateCrmStaffForm(values)
     if (err) {
       toast.error(err)
@@ -71,7 +75,9 @@ export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
         <CardTitle>{mode === "create" ? "新建员工" : "编辑员工"}</CardTitle>
         <CardDescription>内部员工主数据</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent
+        className={isSaving ? "pointer-events-none opacity-60 transition-opacity" : undefined}
+      >
         <CrmStaffFormFields
           values={values}
           onChange={patch}
@@ -79,17 +85,28 @@ export function CrmStaffFormClient({ staffId }: { staffId?: string }) {
         />
       </CardContent>
       <CardFooter className="flex justify-between">
-        <Button variant="outline" asChild>
-          <LocaleLink href={mode === "edit" && staffId ? `/crm/staff/${staffId}` : "/crm/staff"}>
+        {isSaving ? (
+          <Button variant="outline" disabled>
             取消
-          </LocaleLink>
-        </Button>
-        <Button
-          type="button"
-          onClick={onSave}
-          disabled={createMutation.isPending || updateMutation.isPending}
-        >
-          {mode === "create" ? "创建" : "保存"}
+          </Button>
+        ) : (
+          <Button variant="outline" asChild>
+            <LocaleLink href={mode === "edit" && staffId ? `/crm/staff/${staffId}` : "/crm/staff"}>
+              取消
+            </LocaleLink>
+          </Button>
+        )}
+        <Button type="button" onClick={onSave} disabled={isSaving}>
+          {isSaving ? (
+            <>
+              <IconLoader2 className="mr-2 size-4 animate-spin" />
+              {mode === "create" ? "创建中…" : "保存中…"}
+            </>
+          ) : mode === "create" ? (
+            "创建"
+          ) : (
+            "保存"
+          )}
         </Button>
       </CardFooter>
     </Card>

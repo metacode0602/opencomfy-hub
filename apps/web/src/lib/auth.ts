@@ -6,7 +6,9 @@ import {
   assertUserMayLogin,
   findProvisionedUserByEmail,
 } from '@/lib/auth-login-guard'
-import { isTrustedProvisioning } from '@/lib/auth-provisioning'
+import { resolveUserRoleFromStaffRoles } from '@/lib/crm/staff-constants'
+import { getProvisioningContext, isTrustedProvisioning } from '@/lib/auth-provisioning'
+import { normalizePhone } from '@/lib/utils/phone'
 import { getActiveOrganization } from '@/lib/server/actions/organizations'
 import { assertPasswordPolicy } from '@workspace/auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
@@ -49,6 +51,8 @@ export const auth = betterAuth({
 
   emailAndPassword: {
     enabled: true,
+    // 管理端 signUpEmail 建号时勿自动登录，避免覆盖管理员 session 并触发 mustChangePassword 拦截
+    autoSignIn: false,
     // https://www.better-auth.com/docs/concepts/email#2-require-email-verification
     requireEmailVerification: websiteConfig.auth.requireEmailVerification,
     // https://www.better-auth.com/docs/authentication/email-password#forget-password
@@ -171,6 +175,30 @@ export const auth = betterAuth({
               message: '注册已关闭，请联系管理员开通账号',
             })
           }
+
+          const provisioning = getProvisioningContext()
+          if (provisioning) {
+            const mobile = provisioning.mobile?.trim()
+            const normalizedPhone = mobile ? normalizePhone(mobile) : ''
+            const roles = provisioning.roles ?? []
+            return {
+              data: {
+                ...user,
+                provisionedBy: provisioning.operatorUserId,
+                provisionedAt: new Date(),
+                mustChangePassword: true,
+                emailVerified: true,
+                role: roles.length > 0 ? resolveUserRoleFromStaffRoles(roles) : 'user',
+                ...(mobile
+                  ? {
+                      phoneNumber: mobile,
+                      phoneNumberVerified: normalizedPhone.length > 0,
+                    }
+                  : {}),
+              },
+            }
+          }
+
           return { data: user }
         },
         after: async (user) => {
@@ -193,7 +221,11 @@ export const auth = betterAuth({
     session: {
       create: {
         before: async (session) => {
-          if (websiteConfig.auth.requireProvisionedToLogin) {
+          // 管理端 signUpEmail 建号时尚未写入 provisioned_by，需跳过校验
+          if (
+            websiteConfig.auth.requireProvisionedToLogin &&
+            !isTrustedProvisioning()
+          ) {
             const userInfo = await getUserById(session.userId)
             try {
               assertUserMayLogin(

@@ -1,9 +1,12 @@
 import { db } from '@/lib/db'
 import type { UserStaff } from '@/lib/types/crm'
 import { mapUserStaffRow } from '@/lib/server/mappers/crm'
+import { staffRolesRequireLogin } from '@/lib/crm/staff-constants'
 import {
+  applyAuthUserLoginGrant,
   autoLinkStaffForAuthUser,
   createAuthUserForStaff,
+  ensureStaffLoginAccess,
   getLinkedAuthUser,
   linkStaffAuthUser,
   searchLinkableAuthUsers,
@@ -151,6 +154,19 @@ async function applyStaffAuthLink(
 ): Promise<void> {
   if (input.authUserId) {
     await linkStaffAuthUser(staffId, input.authUserId)
+    if (
+      options.operatorUserId &&
+      staffRolesRequireLogin(input.roles) &&
+      input.email?.trim()
+    ) {
+      await applyAuthUserLoginGrant(input.authUserId, options.operatorUserId, {
+        displayName: input.displayName,
+        email: input.email.trim().toLowerCase(),
+        mobile: input.mobile,
+        roles: input.roles ?? [],
+        resetDefaultPassword: false,
+      })
+    }
     return
   }
 
@@ -159,8 +175,9 @@ async function applyStaffAuthLink(
     return
   }
 
+  const loginRequired = staffRolesRequireLogin(input.roles)
   const shouldCreate =
-    input.createLoginAccount === true &&
+    (input.createLoginAccount === true || loginRequired) &&
     (options.mode === 'create' || !options.previousAuthUserId)
 
   if (shouldCreate) {
@@ -172,11 +189,21 @@ async function applyStaffAuthLink(
         displayName: input.displayName,
         email: input.email,
         mobile: input.mobile,
+        roles: input.roles,
       },
       options.operatorUserId,
     )
     await linkStaffAuthUser(staffId, authUserId)
   }
+}
+
+async function finalizeStaffLoginAccess(
+  staffId: string,
+  input: StaffUpsertInput,
+  operatorUserId?: string,
+): Promise<void> {
+  if (!operatorUserId || !staffRolesRequireLogin(input.roles)) return
+  await ensureStaffLoginAccess(staffId, input, operatorUserId)
 }
 
 export const staffDataAccess = {
@@ -280,6 +307,7 @@ export const staffDataAccess = {
       mode: 'create',
       operatorUserId: options?.operatorUserId,
     })
+    await finalizeStaffLoginAccess(id, input, options?.operatorUserId)
 
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('创建员工失败')
@@ -313,14 +341,31 @@ export const staffDataAccess = {
     } else if (previous.authUserId) {
       await syncStaffAuthContact(id, input)
     }
+    await finalizeStaffLoginAccess(id, input, options?.operatorUserId)
 
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, id) })
     if (!row) throw new Error('员工不存在')
     return mapStaffDetail(row)
   },
 
-  async linkAuthUser(staffId: string, authUserId: string): Promise<StaffDetail> {
+  async linkAuthUser(
+    staffId: string,
+    authUserId: string,
+    options?: { operatorUserId: string },
+  ): Promise<StaffDetail> {
     await linkStaffAuthUser(staffId, authUserId)
+    const staff = await db.query.userStaff.findFirst({ where: eq(userStaff.id, staffId) })
+    if (staff && options?.operatorUserId && staffRolesRequireLogin(staff.roles)) {
+      const email = staff.email?.trim()
+      if (email) {
+        await applyAuthUserLoginGrant(authUserId, options.operatorUserId, {
+          displayName: staff.displayName,
+          email,
+          mobile: staff.mobile,
+          roles: staff.roles ?? [],
+        })
+      }
+    }
     const row = await db.query.userStaff.findFirst({ where: eq(userStaff.id, staffId) })
     if (!row) throw new Error('员工不存在')
     return mapStaffDetail(row)

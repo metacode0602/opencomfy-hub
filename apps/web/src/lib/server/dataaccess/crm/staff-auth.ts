@@ -1,10 +1,15 @@
 import { db } from '@/lib/db'
 import { auth } from '@/lib/auth'
 import { runWithProvisioningContext } from '@/lib/auth-provisioning'
+import {
+  resolveUserRoleFromStaffRoles,
+  staffRolesRequireLogin,
+} from '@/lib/crm/staff-constants'
 import { websiteConfig } from '@/lib/config/website'
 import { normalizePhone } from '@/lib/utils/phone'
 import { assertPasswordPolicy } from '@workspace/auth'
-import { user, userStaff } from '@workspace/db/schema'
+import { account, user, userStaff } from '@workspace/db/schema'
+import { hashPassword } from 'better-auth/crypto'
 import { and, eq, ilike, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 
 export type LinkedAuthUser = {
@@ -53,12 +58,164 @@ async function assertAuthUserLinkable(authUserId: string, staffId?: string) {
   }
 }
 
+async function ensureAuthUserDefaultPassword(authUserId: string): Promise<void> {
+  const password = getStaffDefaultPassword()
+  const hash = await hashPassword(password)
+  const cred = await db.query.account.findFirst({
+    where: and(eq(account.userId, authUserId), eq(account.providerId, 'credential')),
+    columns: { id: true },
+  })
+  if (cred) {
+    await db.update(account).set({ password: hash }).where(eq(account.id, cred.id))
+    return
+  }
+  await db.insert(account).values({
+    id: crypto.randomUUID(),
+    userId: authUserId,
+    accountId: authUserId,
+    providerId: 'credential',
+    password: hash,
+  })
+}
+
+/** 为已存在的登录账号补全开通状态（provisioned_by、角色、邮箱等） */
+export async function applyAuthUserLoginGrant(
+  authUserId: string,
+  operatorUserId: string,
+  patch: {
+    displayName: string
+    email: string
+    mobile: string
+    roles: string[]
+    resetDefaultPassword?: boolean
+  },
+): Promise<void> {
+  const email = patch.email.trim().toLowerCase()
+  const current = await db.query.user.findFirst({
+    where: eq(user.id, authUserId),
+    columns: {
+      id: true,
+      provisionedBy: true,
+      mustChangePassword: true,
+    },
+  })
+  if (!current) {
+    throw new Error('登录账号不存在')
+  }
+
+  const conflict = await db.query.user.findFirst({
+    where: and(eq(user.email, email), ne(user.id, authUserId)),
+    columns: { id: true },
+  })
+  if (conflict) {
+    throw new Error('该邮箱已被其他登录账号使用')
+  }
+
+  const newlyProvisioned = !current.provisionedBy
+  await db
+    .update(user)
+    .set({
+      name: patch.displayName.trim(),
+      email,
+      emailVerified: true,
+      phoneNumber: patch.mobile.trim(),
+      phoneNumberVerified: normalizePhone(patch.mobile).length > 0,
+      role: resolveUserRoleFromStaffRoles(patch.roles),
+      ...(newlyProvisioned
+        ? {
+            provisionedBy: operatorUserId,
+            provisionedAt: new Date(),
+            mustChangePassword: true,
+          }
+        : {}),
+    })
+    .where(eq(user.id, authUserId))
+
+  if (patch.resetDefaultPassword || newlyProvisioned) {
+    await ensureAuthUserDefaultPassword(authUserId)
+  }
+}
+
+/**
+ * 员工勾选应用角色时：创建/关联登录账号、写入 provisioned_by、同步邮箱与角色。
+ */
+export async function ensureStaffLoginAccess(
+  staffId: string,
+  input: {
+    displayName: string
+    mobile: string
+    email?: string | null
+    roles?: string[]
+  },
+  operatorUserId: string,
+): Promise<void> {
+  if (!staffRolesRequireLogin(input.roles)) return
+
+  const email = input.email?.trim().toLowerCase()
+  if (!email) {
+    throw new Error('开通登录权限需要填写邮箱')
+  }
+
+  const staff = await db.query.userStaff.findFirst({
+    where: eq(userStaff.id, staffId),
+    columns: { authUserId: true },
+  })
+  if (!staff) {
+    throw new Error('员工不存在')
+  }
+
+  const grant = {
+    displayName: input.displayName,
+    email,
+    mobile: input.mobile,
+    roles: input.roles ?? [],
+  }
+
+  if (staff.authUserId) {
+    await applyAuthUserLoginGrant(staff.authUserId, operatorUserId, grant)
+    return
+  }
+
+  const existing = await db.query.user.findFirst({
+    where: eq(user.email, email),
+    columns: { id: true, provisionedBy: true },
+  })
+
+  if (existing) {
+    await assertAuthUserLinkable(existing.id, staffId)
+    await linkStaffAuthUser(staffId, existing.id)
+    const linkedId = (
+      await db.query.userStaff.findFirst({
+        where: eq(userStaff.id, staffId),
+        columns: { authUserId: true },
+      })
+    )?.authUserId
+    await applyAuthUserLoginGrant(linkedId ?? existing.id, operatorUserId, {
+      ...grant,
+      resetDefaultPassword: !existing.provisionedBy,
+    })
+    return
+  }
+
+  const authUserId = await createAuthUserForStaff(
+    {
+      displayName: input.displayName,
+      email,
+      mobile: input.mobile,
+      roles: input.roles,
+    },
+    operatorUserId,
+  )
+  await linkStaffAuthUser(staffId, authUserId)
+}
+
 export async function provisionUserAsAdmin(
   input: {
     email: string
     password: string
     name: string
     mobile?: string
+    roles?: string[]
   },
   operatorUserId: string,
 ): Promise<string> {
@@ -77,15 +234,18 @@ export async function provisionUserAsAdmin(
     throw new Error('该登录邮箱已存在')
   }
 
-  await runWithProvisioningContext(async () => {
-    await auth.api.signUpEmail({
-      body: {
-        email,
-        password: input.password,
-        name: input.name.trim(),
-      },
-    })
-  })
+  await runWithProvisioningContext(
+    { operatorUserId, mobile: input.mobile, roles: input.roles },
+    async () => {
+      await auth.api.signUpEmail({
+        body: {
+          email,
+          password: input.password,
+          name: input.name.trim(),
+        },
+      })
+    },
+  )
 
   const created = await db.query.user.findFirst({
     where: eq(user.email, email),
@@ -96,6 +256,7 @@ export async function provisionUserAsAdmin(
   }
 
   const mobile = input.mobile?.trim()
+  const roles = input.roles ?? []
   await db
     .update(user)
     .set({
@@ -105,6 +266,7 @@ export async function provisionUserAsAdmin(
       phoneNumber: mobile || null,
       phoneNumberVerified: mobile ? normalizePhone(mobile).length > 0 : false,
       emailVerified: true,
+      role: roles.length > 0 ? resolveUserRoleFromStaffRoles(roles) : 'user',
     })
     .where(eq(user.id, created.id))
 
@@ -116,6 +278,7 @@ export async function createAuthUserForStaff(
     displayName: string
     email?: string | null
     mobile: string
+    roles?: string[]
   },
   operatorUserId: string,
 ): Promise<string> {
@@ -125,8 +288,7 @@ export async function createAuthUserForStaff(
     columns: { id: true },
   })
   if (existing) {
-    await assertAuthUserLinkable(existing.id)
-    throw new Error('该登录邮箱已存在，请在员工表单中选择已有账号进行关联')
+    throw new Error('该登录邮箱已存在，请保存员工记录以自动关联并开通')
   }
 
   return provisionUserAsAdmin(
@@ -135,6 +297,7 @@ export async function createAuthUserForStaff(
       password: getStaffDefaultPassword(),
       name: input.displayName.trim(),
       mobile: input.mobile,
+      roles: input.roles,
     },
     operatorUserId,
   )
@@ -303,9 +466,13 @@ export async function syncStaffAuthContact(staffId: string, input: {
     if (conflict) {
       throw new Error('该邮箱已被其他登录账号使用')
     }
-    await db.update(user).set({ email, emailVerified: true }).where(eq(user.id, staff.authUserId))
+    await db
+      .update(user)
+      .set({ email, emailVerified: true })
+      .where(eq(user.id, staff.authUserId))
   }
 }
+
 
 export async function unlinkStaffBeforeDelete(staffId: string): Promise<void> {
   await unlinkStaffAuthUser(staffId)

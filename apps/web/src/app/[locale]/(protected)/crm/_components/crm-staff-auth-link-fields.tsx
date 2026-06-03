@@ -83,7 +83,7 @@ export function CrmStaffAuthLinkFields({
       <div>
         <Label>登录账号</Label>
         <p className="text-muted-foreground mt-1 text-xs">
-          新建员工时可自动创建登录账号（使用环境变量中的默认密码）；也可关联已有未绑定账号。
+          勾选上方「应用角色」并填写邮箱后，保存时将自动开通登录（默认密码 STAFF_DEFAULT_PASSWORD），员工首次登录后须自行改密。也可手动选择下方方式关联已有账号。
         </p>
       </div>
 

@@ -24,6 +24,7 @@ import {
   STAFF_APP_ROLES,
   STAFF_DEFAULT_MANAGER_FIELDS,
   STAFF_DEPARTMENTS,
+  staffRolesRequireLogin,
   type StaffAppRole,
   type StaffDepartment,
 } from "@/lib/crm/staff-constants"
@@ -35,6 +36,7 @@ import {
   type StaffAuthLinkValues,
 } from "./crm-staff-auth-link-fields"
 import { trpc } from "@/lib/trpc/client"
+import { IconLoader2 } from "@tabler/icons-react"
 import { toast } from "sonner"
 
 const STATUS_OPTIONS = [
@@ -173,13 +175,22 @@ export function CrmStaffFormFields({
         </div>
       </div>
       <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-email`}>邮箱</Label>
+        <Label htmlFor={`${idPrefix}-email`}>
+          邮箱
+          {staffRolesRequireLogin(values.roles) ? (
+            <span className="text-destructive ml-1">*</span>
+          ) : null}
+        </Label>
         <Input
           id={`${idPrefix}-email`}
           type="email"
           value={values.email}
           onChange={(e) => onChange({ email: e.target.value })}
-          placeholder="请输入邮箱（可选）"
+          placeholder={
+            staffRolesRequireLogin(values.roles)
+              ? "开通登录权限须填写邮箱"
+              : "请输入邮箱（可选）"
+          }
         />
       </div>
 
@@ -233,6 +244,9 @@ export function validateCrmStaffForm(values: CrmStaffFormValues): string | null 
   if (!values.display_name.trim()) return "请填写姓名"
   if (!values.mobile.trim()) return "请填写手机号"
   if (!values.department) return "请选择部门"
+  if (values.roles.length > 0 && !values.email.trim()) {
+    return "选择了角色时必须填写邮箱"
+  }
   return null
 }
 
@@ -336,12 +350,15 @@ export function CrmStaffFormDialog({
     if (!open) return
     if (existing?.linked_auth_user) {
       setAuthLink({ mode: "none", authUserId: existing.linked_auth_user.id })
-    } else if (mode === "create") {
+    } else {
       setAuthLink(staffAuthLinkEmptyValues)
     }
-  }, [existing, mode, open])
+  }, [existing, open])
+
+  const isSaving = createMutation.isPending || updateMutation.isPending
 
   const onSubmit = () => {
+    if (isSaving) return
     const err = validateCrmStaffForm(values)
     if (err) {
       toast.error(err)
@@ -351,7 +368,8 @@ export function CrmStaffFormDialog({
       toast.error("员工不存在")
       return
     }
-    if (mode === "create" || !existing?.linked_auth_user) {
+    const loginByRoles = staffRolesRequireLogin(values.roles)
+    if ((mode === "create" || !existing?.linked_auth_user) && !loginByRoles) {
       const authErr = validateStaffAuthLink(authLink)
       if (authErr) {
         toast.error(authErr)
@@ -361,7 +379,9 @@ export function CrmStaffFormDialog({
     const input = {
       ...staffInputFromForm(values),
       ...(mode === "create" || !existing?.linked_auth_user
-        ? staffAuthInputFromValues(authLink)
+        ? loginByRoles
+          ? { createLoginAccount: true, authUserId: undefined }
+          : staffAuthInputFromValues(authLink)
         : {}),
     }
     if (mode === "edit" && staffId) {
@@ -389,46 +409,73 @@ export function CrmStaffFormDialog({
     )
   }
 
+  const handleOpenChange = (next: boolean) => {
+    if (!next && isSaving) return
+    onOpenChange(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "新建员工" : "编辑员工"}</DialogTitle>
           <DialogDescription>
             {mode === "create"
               ? "添加内部员工，可用于客户经理分配与业务操作人。"
-              : "修改员工基本信息。"}
+              : existing?.linked_auth_user
+                ? "修改员工基本信息；勾选应用角色并填写邮箱将同步开通/更新登录权限。"
+                : "修改员工基本信息；勾选应用角色并填写邮箱即可开通登录（默认密码），员工首次登录后须修改密码。"}
           </DialogDescription>
         </DialogHeader>
-        <CrmStaffFormFields
-          values={values}
-          onChange={patch}
-          idPrefix={mode === "create" ? "staff-new" : `staff-edit-${staffId}`}
-        />
-        {(mode === "create" || !existing?.linked_auth_user) && (
-          <CrmStaffAuthLinkFields
-            mode={authLink.mode}
-            authUserId={authLink.authUserId}
-            onChange={(patchAuth) => setAuthLink((prev) => ({ ...prev, ...patchAuth }))}
-            linkedAuthUser={existing?.linked_auth_user}
-            idPrefix={mode === "create" ? "staff-new-auth" : `staff-edit-auth-${staffId}`}
+        <div
+          className={
+            isSaving ? "pointer-events-none relative opacity-60 transition-opacity" : undefined
+          }
+        >
+          <CrmStaffFormFields
+            values={values}
+            onChange={patch}
+            idPrefix={mode === "create" ? "staff-new" : `staff-edit-${staffId}`}
           />
-        )}
-        {mode === "edit" && existing?.linked_auth_user && (
-          <CrmStaffAuthLinkFields
-            mode="none"
-            authUserId={existing.linked_auth_user.id}
-            onChange={() => undefined}
-            linkedAuthUser={existing.linked_auth_user}
-            idPrefix={`staff-edit-linked-${staffId}`}
-          />
-        )}
+          {(mode === "create" || !existing?.linked_auth_user) && (
+            <CrmStaffAuthLinkFields
+              mode={authLink.mode}
+              authUserId={authLink.authUserId}
+              onChange={(patchAuth) => setAuthLink((prev) => ({ ...prev, ...patchAuth }))}
+              linkedAuthUser={existing?.linked_auth_user}
+              idPrefix={mode === "create" ? "staff-new-auth" : `staff-edit-auth-${staffId}`}
+            />
+          )}
+          {mode === "edit" && existing?.linked_auth_user && (
+            <CrmStaffAuthLinkFields
+              mode="none"
+              authUserId={existing.linked_auth_user.id}
+              onChange={() => undefined}
+              linkedAuthUser={existing.linked_auth_user}
+              idPrefix={`staff-edit-linked-${staffId}`}
+            />
+          )}
+        </div>
         <DialogFooter className="gap-2 sm:gap-2">
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isSaving}
+            onClick={() => onOpenChange(false)}
+          >
             取消
           </Button>
-          <Button type="button" onClick={onSubmit}>
-            {mode === "create" ? "创建" : "保存"}
+          <Button type="button" disabled={isSaving} onClick={onSubmit}>
+            {isSaving ? (
+              <>
+                <IconLoader2 className="mr-2 size-4 animate-spin" />
+                {mode === "create" ? "创建中…" : "保存中…"}
+              </>
+            ) : mode === "create" ? (
+              "创建"
+            ) : (
+              "保存"
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

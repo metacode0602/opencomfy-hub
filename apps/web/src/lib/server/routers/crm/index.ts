@@ -580,7 +580,11 @@ export const crmRouter = createTRPCRouter({
     ),
     linkAuthUser: adminProcedure
       .input(z.object({ staffId: z.string(), authUserId: z.string() }))
-      .mutation(({ input }) => staffDataAccess.linkAuthUser(input.staffId, input.authUserId)),
+      .mutation(({ input, ctx }) =>
+        staffDataAccess.linkAuthUser(input.staffId, input.authUserId, {
+          operatorUserId: ctx.user.id,
+        }),
+      ),
     unlinkAuthUser: adminProcedure
       .input(z.object({ staffId: z.string() }))
       .mutation(({ input }) => staffDataAccess.unlinkAuthUser(input.staffId)),
