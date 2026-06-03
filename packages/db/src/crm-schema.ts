@@ -1077,6 +1077,72 @@ export const tenantBalanceSnapshot = pgTable(
   ],
 )
 
+/** 平台租户黑名单镜像；见 tenant-blacklist-management-design.md */
+export const platformTenantBlacklist = pgTable(
+  "platform_tenant_blacklist",
+  {
+    id: text("id").primaryKey(),
+    platformBlacklistId: integer("platform_blacklist_id").notNull(),
+    blacklistType: varchar("blacklist_type", { length: 32 }).notNull(),
+    platformTenantId: varchar("platform_tenant_id", { length: 128 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    platformTenantName: varchar("platform_tenant_name", { length: 255 }),
+    remark: text("remark"),
+    merchantId: integer("merchant_id"),
+    platformCreatedAt: timestamp("platform_created_at", { withTimezone: true }),
+    platformUpdatedAt: timestamp("platform_updated_at", { withTimezone: true }),
+    localTenantId: text("local_tenant_id").references(() => billingTenant.id, {
+      onDelete: "set null",
+    }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }).notNull(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
+    ...crmTimestamps,
+  },
+  (table) => [
+    uniqueIndex("platform_tenant_blacklist_platform_id_uk").on(table.platformBlacklistId),
+    index("platform_tenant_blacklist_platform_tenant_id_idx").on(table.platformTenantId),
+    index("platform_tenant_blacklist_status_idx").on(table.status),
+    index("platform_tenant_blacklist_removed_at_idx").on(table.removedAt),
+    index("platform_tenant_blacklist_platform_updated_at_idx").on(table.platformUpdatedAt),
+  ],
+)
+
+/** 租户黑名单同步游标（单行） */
+export const tenantBlacklistSyncState = pgTable("tenant_blacklist_sync_state", {
+  id: text("id").primaryKey(),
+  lastPullEndDate: date("last_pull_end_date"),
+  defaultSafetyDays: integer("default_safety_days").notNull().default(2),
+  lastJobId: text("last_job_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+/** 租户黑名单手动同步任务 */
+export const tenantBlacklistSyncJobRun = pgTable(
+  "tenant_blacklist_sync_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 32 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 32 }).notNull(),
+    dataStartTime: text("data_start_time").notNull().default(""),
+    dataEndTime: text("data_end_time").notNull(),
+    safetyDays: integer("safety_days").notNull(),
+    fullSync: boolean("full_sync").notNull().default(false),
+    platformCount: integer("platform_count").notNull().default(0),
+    fetchedCount: integer("fetched_count").notNull().default(0),
+    upsertedCount: integer("upserted_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("tenant_blacklist_sync_job_run_started_at_idx").on(table.startedAt),
+    index("tenant_blacklist_sync_job_run_status_idx").on(table.status),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // Relations（查询用）
 // ---------------------------------------------------------------------------
@@ -1101,7 +1167,17 @@ export const billingTenantRelations = relations(billingTenant, ({ one, many }) =
   billingSyncJobItems: many(billingSyncJobItem),
   balanceSnapshots: many(tenantBalanceSnapshot),
   balanceSnapshotJobItems: many(balanceSnapshotJobItem),
+  platformBlacklistEntries: many(platformTenantBlacklist),
 }))
+
+export const platformTenantBlacklistRelations = relations(platformTenantBlacklist, ({ one }) => ({
+  localTenant: one(billingTenant, {
+    fields: [platformTenantBlacklist.localTenantId],
+    references: [billingTenant.id],
+  }),
+}))
+
+export const tenantBlacklistSyncJobRunRelations = relations(tenantBlacklistSyncJobRun, () => ({}))
 
 export const tenantBalanceSnapshotRelations = relations(tenantBalanceSnapshot, ({ one }) => ({
   tenant: one(billingTenant, {

@@ -16,6 +16,7 @@ import {
 } from "@workspace/ui/components/sidebar"
 import {
   AlertCircleIcon,
+  Ban,
   ArrowDownRightIcon,
   ArrowDownToLineIcon,
   BarChart3,
@@ -118,6 +119,11 @@ const data = {
       title: "计费租户",
       url: "/crm/tenants",
       icon: <Wallet className="size-4" />,
+    },
+    {
+      title: "租户黑名单",
+      url: "/crm/tenant-blacklist",
+      icon: <Ban className="size-4" />,
     },
     {
       title: "平台项目",

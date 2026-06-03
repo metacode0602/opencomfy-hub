@@ -249,7 +249,10 @@ export function FinanceBillingPeriodsContent() {
                     <TableCell className="text-right">
                       <div className="flex flex-wrap justify-end gap-2">
                         <Button variant="outline" size="sm" asChild>
-                          <LocaleLink href={`/finance/${p.id}/income`}>收入</LocaleLink>
+                          <LocaleLink href={`/finance/${p.id}/income`}>企业收入</LocaleLink>
+                        </Button>
+                        <Button variant="outline" size="sm" asChild>
+                          <LocaleLink href={`/finance/${p.id}/personal`}>个人收入</LocaleLink>
                         </Button>
                         <Button variant="outline" size="sm" asChild>
                           <LocaleLink href={`/finance/${p.id}/cost`}>成本</LocaleLink>

@@ -26,7 +26,10 @@ import {
 } from '@/lib/server/dataaccess/crm/tenant-billing-import'
 import { billingScheduledSyncDataAccess } from '@/lib/server/dataaccess/crm/billing-scheduled-sync'
 import { balanceSnapshotDataAccess } from '@/lib/server/dataaccess/crm/balance-snapshot'
+import { tenantBlacklistDataAccess } from '@/lib/server/dataaccess/crm/tenant-blacklist'
+import { TenantBlacklistApiError } from '@/lib/server/integrations/tenant-blacklist-api'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
+import { MAX_BLACKLIST_SAFETY_DAYS } from '@/lib/crm/tenant-blacklist-utils'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
   billingTenantUpdateSchema,
@@ -54,6 +57,19 @@ function mapPlatformImportError(e: unknown): never {
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
   }
   throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '平台租户导入失败' })
+}
+
+function mapTenantBlacklistError(e: unknown): never {
+  if (e instanceof TenantBlacklistApiError) {
+    throw new TRPCError({
+      code: e.code === '401' || e.code === '403' ? 'UNAUTHORIZED' : 'BAD_REQUEST',
+      message: e.message,
+    })
+  }
+  if (e instanceof Error) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '租户黑名单同步失败' })
 }
 
 function mapBillingImportError(e: unknown): never {
@@ -698,6 +714,48 @@ export const crmRouter = createTRPCRouter({
     getRunById: adminProcedure
       .input(z.object({ id: z.string().min(1) }))
       .query(({ input }) => billingScheduledSyncDataAccess.getRunById(input.id)),
+  }),
+
+  tenantBlacklist: createTRPCRouter({
+    getSyncDefaults: adminProcedure.query(() => tenantBlacklistDataAccess.getSyncDefaults()),
+    list: adminProcedure
+      .input(
+        z.object({
+          status: z.string().optional(),
+          startTime: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+          endTime: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+          platformTenantId: z.string().optional(),
+          tenantName: z.string().optional(),
+          page: z.number().int().min(1).default(1),
+          pageSize: z.number().int().min(1).max(50).default(20),
+          includeRemoved: z.boolean().optional(),
+        }),
+      )
+      .query(({ input }) => tenantBlacklistDataAccess.list(input)),
+    sync: adminProcedure
+      .input(
+        z.object({
+          lastPullStartDate: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+          safetyDays: z.number().int().min(0).max(MAX_BLACKLIST_SAFETY_DAYS),
+          fullSync: z.boolean().optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantBlacklistDataAccess.syncFromPlatform(input)
+        } catch (e) {
+          mapTenantBlacklistError(e)
+        }
+      }),
   }),
 
   balanceSnapshot: createTRPCRouter({
