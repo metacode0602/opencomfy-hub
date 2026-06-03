@@ -9,6 +9,6 @@
 
 -- 部分回填（仅 role = admin，自引用）
 -- UPDATE users
-SET provisioned_by = id,
-    provisioned_at = COALESCE(created_at, NOW())
-WHERE provisioned_by IS NULL AND role = 'admin';
+-- SET provisioned_by = id,
+--     provisioned_at = COALESCE(created_at, NOW())
+-- WHERE provisioned_by IS NULL AND role = 'admin';
