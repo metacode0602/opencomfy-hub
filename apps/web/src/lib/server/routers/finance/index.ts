@@ -1,5 +1,9 @@
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
-import { financeBillingPeriodsDataAccess, FinanceError } from '@/lib/server/dataaccess/finance'
+import {
+  financeBillingPeriodsDataAccess,
+  financePersonalIncomeDataAccess,
+  FinanceError,
+} from '@/lib/server/dataaccess/finance'
 import { SLOT_TO_FILE_TYPE } from '@/lib/server/dataaccess/finance/constants'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
@@ -34,7 +38,13 @@ const periodCreateSchema = z.object({
 
 const importSchema = z.object({
   billingPeriodId: z.string(),
-  slot: z.enum(['customer', 'baremetal', 'tenantBill']),
+  slot: z.enum([
+    'customer',
+    'baremetal',
+    'tenantBill',
+    'personalTenantBill',
+    'personalBaremetal',
+  ]),
   fileName: z.string(),
   /** base64 encoded file content */
   fileBase64: z.string().min(1),
@@ -355,7 +365,13 @@ export const financeRouter = createTRPCRouter({
       .input(
         z.object({
           billingPeriodId: z.string(),
-          slot: z.enum(['customer', 'baremetal', 'tenantBill']),
+          slot: z.enum([
+            'customer',
+            'baremetal',
+            'tenantBill',
+            'personalTenantBill',
+            'personalBaremetal',
+          ]),
           windowId: z.string().optional(),
         }),
       )
@@ -387,6 +403,58 @@ export const financeRouter = createTRPCRouter({
             actorId,
           })
           return { ok: true }
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    getPersonalBundle: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financePersonalIncomeDataAccess.getPersonalBundle(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    validatePersonalIncome: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financePersonalIncomeDataAccess.validatePersonalIncome(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    computePersonalIncome: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financePersonalIncomeDataAccess.computePersonalIncome({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    purgePersonalIncome: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financePersonalIncomeDataAccess.purgePersonalIncome(
+            input.billingPeriodId,
+            actorId,
+          )
         } catch (e) {
           mapFinanceError(e)
         }

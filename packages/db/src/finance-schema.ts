@@ -5,6 +5,7 @@
  *
  * 领域模型：
  * - 原始层（Raw）：账期内可替换；每账期每 file_type 仅一组 batch（DB 唯一约束）
+ * - 个人收入：personal_tenant_bill / personal_baremetal_order + billing_period_personal_income_summary
  * - 派生层：platform_income_monthly / platform_cost_monthly，计算前 DELETE 再 INSERT
  * - 重新生成：应用层 purge 后物理删除子表行；不保留历史 batch / calc 快照
  * - 主数据衔接：CRM tenant / project / user_staff；供应商 supplier_unit_cost
@@ -357,9 +358,11 @@ export const billingPeriodTenantBillWindow = pgTable(
 
 /**
  * 导入批次 billing_period_import_batch
- * file_type: customer_consumption | baremetal_order | tenant_bill
+ * file_type: customer_consumption | baremetal_order | tenant_bill |
+ *   personal_tenant_bill | personal_baremetal_order
  *
- * customer / baremetal：每账期至多一条；tenant_bill：每 window 至多一条。
+ * customer / baremetal：每账期至多一条；tenant_bill：每 window 至多一条；
+ * personal_*：每账期各至多一条（个人收入页独立批次）。
  */
 export const billingPeriodImportBatch = pgTable(
   "billing_period_import_batch",
@@ -399,8 +402,53 @@ export const billingPeriodImportBatch = pgTable(
     uniqueIndex("billing_period_import_batch_period_tenant_window_uk")
       .on(table.billingPeriodId, table.windowId)
       .where(sql`${table.fileType} = 'tenant_bill'`),
+    uniqueIndex("billing_period_import_batch_period_personal_tenant_bill_uk")
+      .on(table.billingPeriodId)
+      .where(sql`${table.fileType} = 'personal_tenant_bill'`),
+    uniqueIndex("billing_period_import_batch_period_personal_baremetal_uk")
+      .on(table.billingPeriodId)
+      .where(sql`${table.fileType} = 'personal_baremetal_order'`),
     index("billing_period_import_batch_period_id_idx").on(table.billingPeriodId),
     index("billing_period_import_batch_window_id_idx").on(table.windowId),
+  ],
+)
+
+/**
+ * 个人收入汇总（非项目租户 + 黑名单子集）
+ * summary_kind: non_project | blacklist
+ */
+export const billingPeriodPersonalIncomeSummary = pgTable(
+  "billing_period_personal_income_summary",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    summaryKind: varchar("summary_kind", { length: 32 }).notNull(),
+    balanceConsumption: money("balance_consumption").notNull().default("0"),
+    bareMetalConsumption: money("bare_metal_consumption").notNull().default("0"),
+    totalConsumption: money("total_consumption").notNull(),
+    matchedTenantCount: integer("matched_tenant_count").notNull().default(0),
+    tenantBillBatchId: text("tenant_bill_batch_id").references(
+      () => billingPeriodImportBatch.id,
+      { onDelete: "set null" },
+    ),
+    baremetalBatchId: text("baremetal_batch_id").references(
+      () => billingPeriodImportBatch.id,
+      { onDelete: "set null" },
+    ),
+    ruleVersion: varchar("rule_version", { length: 32 }),
+    lastComputedAt: timestamp("last_computed_at", { withTimezone: true }),
+    ...financeTimestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_period_personal_income_summary_period_kind_uk").on(
+      table.billingPeriodId,
+      table.summaryKind,
+    ),
+    index("billing_period_personal_income_summary_period_id_idx").on(
+      table.billingPeriodId,
+    ),
   ],
 )
 
@@ -792,7 +840,28 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   costPricingSnapshots: many(billingPeriodCostPricingSnapshot),
   reconciliationReport: one(billingPeriodReconciliationReport),
   operationLogs: many(billingPeriodOperationLog),
+  personalIncomeSummaries: many(billingPeriodPersonalIncomeSummary),
 }))
+
+export const billingPeriodPersonalIncomeSummaryRelations = relations(
+  billingPeriodPersonalIncomeSummary,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [billingPeriodPersonalIncomeSummary.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    tenantBillBatch: one(billingPeriodImportBatch, {
+      fields: [billingPeriodPersonalIncomeSummary.tenantBillBatchId],
+      references: [billingPeriodImportBatch.id],
+      relationName: "personalSummaryTenantBillBatch",
+    }),
+    baremetalBatch: one(billingPeriodImportBatch, {
+      fields: [billingPeriodPersonalIncomeSummary.baremetalBatchId],
+      references: [billingPeriodImportBatch.id],
+      relationName: "personalSummaryBaremetalBatch",
+    }),
+  }),
+)
 
 export const billingPeriodTenantBillWindowRelations = relations(
   billingPeriodTenantBillWindow,
@@ -1018,3 +1087,6 @@ export type TenantProjectCostRow = typeof tenantProjectCost.$inferSelect
 export type BillingPeriodReconciliationReportRow =
   typeof billingPeriodReconciliationReport.$inferSelect
 export type BillingPeriodOperationLogRow = typeof billingPeriodOperationLog.$inferSelect
+export type BillingPeriodPersonalIncomeSummaryRow =
+  typeof billingPeriodPersonalIncomeSummary.$inferSelect
+export type PersonalIncomeSummaryKind = "non_project" | "blacklist"

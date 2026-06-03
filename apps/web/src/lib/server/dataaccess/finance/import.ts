@@ -7,7 +7,7 @@ import {
   billingPeriodRawTenantBill,
 } from '@workspace/db/schema'
 import { eq } from 'drizzle-orm'
-import type { ImportFileType } from './constants'
+import { isPersonalImportFileType, type ImportFileType } from './constants'
 import { FinanceError } from './errors'
 import {
   isBaremetalOrderTotalRow,
@@ -15,7 +15,9 @@ import {
   isTenantBillTotalRow,
   normalizeCustomerType,
   parseMoneyCell,
+  parseImportDateTime,
   parseWorkbookDetailed,
+  pickCellRaw,
   pickColumn,
   sha256Hex,
   TENANT_PLATFORM_ID_ALIASES,
@@ -53,10 +55,22 @@ async function purgeBillingPeriodArtifacts(
   return purge(...args)
 }
 
-function parseDateCell(raw: string | null): Date | null {
-  if (!raw) return null
-  const d = new Date(raw)
-  return Number.isNaN(d.getTime()) ? null : d
+async function purgePersonalIncomeArtifacts(
+  ...args: Parameters<
+    (typeof import('./purge-personal'))['purgePersonalIncomeArtifacts']
+  >
+) {
+  const { purgePersonalIncomeArtifacts: purge } = await import('./purge-personal')
+  return purge(...args)
+}
+
+async function isPersonalImportReady(periodId: string): Promise<boolean> {
+  const { getPersonalImportBatches } = await import('./purge-personal')
+  const batches = await getPersonalImportBatches(periodId)
+  return (
+    batches.tenantBill?.parseStatus === 'ok' &&
+    batches.baremetal?.parseStatus === 'ok'
+  )
 }
 
 export type ImportFileResult = {
@@ -138,6 +152,14 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
   return { parsed, errors }
 }
 
+function isBaremetalPayStatusPaid(payStatus: string): boolean {
+  const s = payStatus.trim()
+  if (!s) return true
+  if (s.includes('已支付')) return true
+  if (s.toLowerCase() === 'paid') return true
+  return false
+}
+
 function mapBaremetalRows(
   sheet: ParsedWorkbook,
   periodStart: string,
@@ -157,13 +179,19 @@ function mapBaremetalRows(
     const orderId = pickColumn(row, ['订单ID', 'order_id'])
     const payStatus = pickColumn(row, ['支付状态', 'pay_status']) ?? ''
     const finalAmount = parseMoneyCell(pickColumn(row, ['最终总额', 'final_amount']))
-    const orderedAtRaw = pickColumn(row, ['下单时间', 'ordered_at'])
-    const orderedAt = parseDateCell(orderedAtRaw)
+    const orderedAtCell = pickCellRaw(row, ['下单时间', 'ordered_at'])
+    const orderedAtRaw =
+      orderedAtCell == null
+        ? null
+        : typeof orderedAtCell === 'number'
+          ? String(orderedAtCell)
+          : String(orderedAtCell).trim()
+    const orderedAt = parseImportDateTime(orderedAtCell)
     if (!tenantId || !orderId) {
       errors.push({
         rowNo,
         columnAliases: tenantId ? ['订单ID', 'order_id'] : ['租户ID', 'tenant_id'],
-        message: '缺少租户ID或订单ID',
+        message: tenantId ? '缺少订单ID' : '缺少租户ID',
       })
       continue
     }
@@ -171,14 +199,28 @@ function mapBaremetalRows(
       errors.push({
         rowNo,
         columnAliases: ['下单时间', 'ordered_at'],
-        message: '下单时间无效',
+        message: orderedAtRaw
+          ? `下单时间「${orderedAtRaw}」无法解析，支持如 5/31/26（2026-05-31）、5/31/2026、YYYY-MM-DD 等`
+          : '缺少下单时间',
       })
       continue
     }
-    if (payStatus && !payStatus.includes('已支付') && payStatus.toLowerCase() !== 'paid') {
+    if (!isBaremetalPayStatusPaid(payStatus)) {
+      errors.push({
+        rowNo,
+        columnAliases: ['支付状态', 'pay_status'],
+        message: `支付状态「${payStatus}」无效，仅统计已支付（或留空视为已支付）`,
+      })
       continue
     }
-    if (orderedAt < start || orderedAt > end) continue
+    if (orderedAt < start || orderedAt > end) {
+      errors.push({
+        rowNo,
+        columnAliases: ['下单时间', 'ordered_at'],
+        message: `下单时间不在账期内（须为 ${periodStart} 00:00:00 ~ ${periodEnd} 23:59:59，东八区）；当前值：${orderedAtRaw ?? ''}`,
+      })
+      continue
+    }
 
     const idcName = pickColumn(row, ['机房名称', 'idc_name'])
     const deviceModel = pickColumn(row, ['设备型号', 'device_model'])
@@ -231,11 +273,23 @@ function mapBaremetalRows(
     })
   }
   if (parsed.length === 0 && errors.length === 0) {
-    errors.push({
-      rowNo: 2,
-      columnAliases: ['订单ID', 'order_id'],
-      message: '裸金属消费订单无有效数据行',
-    })
+    const dataRows = sheet.rows.filter(({ row }) => !isBaremetalOrderTotalRow(row))
+    if (dataRows.length === 0) {
+      errors.push({
+        rowNo: sheet.rows[0]?.rowNo ?? 2,
+        columnAliases: ['订单ID', 'order_id'],
+        message: '未找到有效数据行（表内无明细行，或均为总计/合计行）',
+      })
+    } else {
+      for (const { rowNo } of dataRows) {
+        errors.push({
+          rowNo,
+          columnAliases: ['订单ID', 'order_id'],
+          message:
+            '该行未纳入统计：请检查租户ID、订单ID、支付状态、下单时间是否在账期内、机房名称、设备型号、购买数量',
+        })
+      }
+    }
   }
   return { parsed, errors }
 }
@@ -343,6 +397,8 @@ async function recordParseFailure(input: {
   const errorBuffer = buildMarkedErrorWorkbookBuffer({
     sheet: input.sheet,
     errors: input.errors,
+    /** 仅导出含错误的行，并在「错误说明」列逐条标注 */
+    includeAllRows: false,
   })
   const { saveImportErrorReport } = await importStorageLocal()
   const errorReportPath = await saveImportErrorReport({
@@ -368,7 +424,12 @@ async function recordParseFailure(input: {
     uploadedBy: input.actorId ?? null,
   })
 
-  const periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
+  const period = await db.query.billingPeriod.findFirst({
+    where: eq(billingPeriod.id, input.billingPeriodId),
+  })
+  const periodStatus = isPersonalImportFileType(input.fileType)
+    ? (period?.status ?? 'draft')
+    : await syncPeriodImportStatus(input.billingPeriodId)
   const message = summarizeImportErrors(input.errors)
 
   return {
@@ -411,14 +472,22 @@ export async function importExcelFile(input: {
     }
   }
 
-  await purgeBillingPeriodArtifacts({
-    billingPeriodId: input.billingPeriodId,
-    scope: 'file_type',
-    fileType: input.fileType,
-    windowId: input.windowId,
-    actorId: input.actorId,
-    preserveIncomeDerived: input.preserveIncomeDerived,
-  })
+  if (isPersonalImportFileType(input.fileType)) {
+    await purgePersonalIncomeArtifacts({
+      billingPeriodId: input.billingPeriodId,
+      fileType: input.fileType,
+      actorId: input.actorId,
+    })
+  } else {
+    await purgeBillingPeriodArtifacts({
+      billingPeriodId: input.billingPeriodId,
+      scope: 'file_type',
+      fileType: input.fileType,
+      windowId: input.windowId,
+      actorId: input.actorId,
+      preserveIncomeDerived: input.preserveIncomeDerived,
+    })
+  }
 
   const sheet = parseWorkbookDetailed(input.buffer, input.fileName)
   const batchId = newId()
@@ -462,7 +531,10 @@ export async function importExcelFile(input: {
           )
         })
       }
-    } else if (input.fileType === 'baremetal_order') {
+    } else if (
+      input.fileType === 'baremetal_order' ||
+      input.fileType === 'personal_baremetal_order'
+    ) {
       const { parsed, errors } = mapBaremetalRows(sheet, period.periodStart, period.periodEnd)
       parseErrors = errors
       if (errors.length === 0) {
@@ -487,7 +559,10 @@ export async function importExcelFile(input: {
           )
         })
       }
-    } else if (input.fileType === 'tenant_bill') {
+    } else if (
+      input.fileType === 'tenant_bill' ||
+      input.fileType === 'personal_tenant_bill'
+    ) {
       const { parsed, errors, tenantPlatformIds } = mapTenantBillRows(sheet)
       parseErrors = errors
       if (errors.length === 0) {
@@ -511,7 +586,9 @@ export async function importExcelFile(input: {
             parsed.map((r) => ({ ...r, id: newId(), batchId })),
           )
         })
-        tenantPlatformIdsForEnrichment = tenantPlatformIds
+        if (input.fileType === 'tenant_bill') {
+          tenantPlatformIdsForEnrichment = tenantPlatformIds
+        }
       }
     }
 
@@ -539,14 +616,22 @@ export async function importExcelFile(input: {
       )
     }
 
-    const periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
-    const slotStatuses = await getImportSlotStatuses(input.billingPeriodId)
-    const allParsed =
-      Boolean(slotStatuses.customer?.parseStatus === 'ok') &&
-      Boolean(slotStatuses.baremetal?.parseStatus === 'ok') &&
-      slotStatuses.tenantBillWindows.length > 0 &&
-      slotStatuses.tenantBillWindows.every((w) => w.parseStatus === 'ok') &&
-      periodStatus === 'imported'
+    let periodStatus: string
+    let allParsed: boolean
+
+    if (isPersonalImportFileType(input.fileType)) {
+      allParsed = await isPersonalImportReady(input.billingPeriodId)
+      periodStatus = period.status
+    } else {
+      periodStatus = await syncPeriodImportStatus(input.billingPeriodId)
+      const slotStatuses = await getImportSlotStatuses(input.billingPeriodId)
+      allParsed =
+        Boolean(slotStatuses.customer?.parseStatus === 'ok') &&
+        Boolean(slotStatuses.baremetal?.parseStatus === 'ok') &&
+        slotStatuses.tenantBillWindows.length > 0 &&
+        slotStatuses.tenantBillWindows.every((w) => w.parseStatus === 'ok') &&
+        periodStatus === 'imported'
+    }
 
     await appendOperationLog({
       billingPeriodId: input.billingPeriodId,

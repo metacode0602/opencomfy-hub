@@ -88,15 +88,115 @@ export function parseWorkbookBuffer(buffer: Buffer, fileName: string): SheetRow[
 }
 
 export function pickColumn(row: SheetRow, aliases: string[]): string | null {
+  const raw = pickCellRaw(row, aliases)
+  if (raw == null) return null
+  return String(raw).trim()
+}
+
+/** 读取单元格原始值（保留 number，供日期序列号解析） */
+export function pickCellRaw(row: SheetRow, aliases: string[]): string | number | null {
   const keys = Object.keys(row)
   for (const alias of aliases) {
     const norm = normalizeHeader(alias)
     const hit = keys.find((k) => normalizeHeader(k) === norm)
     if (hit && row[hit] != null && String(row[hit]).trim() !== '') {
-      return String(row[hit]).trim()
+      return row[hit]!
     }
   }
   return null
+}
+
+/** Excel 日期序列号 → JS Date（1900 日期系统） */
+function excelSerialToDate(serial: number): Date | null {
+  if (!Number.isFinite(serial) || serial < 1) return null
+  const utcMs = Math.round((serial - 25569) * 86400 * 1000)
+  const d = new Date(utcMs)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function dateAtCst(
+  year: number,
+  month: number,
+  day: number,
+  hour = 0,
+  minute = 0,
+  second = 0,
+): Date | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null
+  const y = String(year)
+  const m = String(month).padStart(2, '0')
+  const d = String(day).padStart(2, '0')
+  const h = String(hour).padStart(2, '0')
+  const mi = String(minute).padStart(2, '0')
+  const s = String(second).padStart(2, '0')
+  const parsed = new Date(`${y}-${m}-${d}T${h}:${mi}:${s}+08:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+/**
+ * 解析导入表中的日期时间（裸金属下单时间等）。
+ * 支持：5/31/26（→ 2026-05-31）、5/31/2026、ISO、Excel 序列号字符串等。
+ */
+export function parseImportDateTime(raw: string | number | null | undefined): Date | null {
+  if (raw == null || raw === '') return null
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw > 30_000 && raw < 120_000) return excelSerialToDate(raw)
+    return null
+  }
+
+  const s = String(raw).trim()
+  if (!s) return null
+
+  const serialOnly = /^(\d+)(?:\.\d+)?$/.exec(s)
+  if (serialOnly) {
+    const serial = Number(serialOnly[1])
+    if (serial > 30_000 && serial < 120_000) {
+      const fromSerial = excelSerialToDate(serial)
+      if (fromSerial) return fromSerial
+    }
+  }
+
+  const mdy2 = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+  )
+  if (mdy2) {
+    const month = Number(mdy2[1])
+    const day = Number(mdy2[2])
+    const year = 2000 + Number(mdy2[3])
+    const hour = mdy2[4] != null ? Number(mdy2[4]) : 0
+    const minute = mdy2[5] != null ? Number(mdy2[5]) : 0
+    const second = mdy2[6] != null ? Number(mdy2[6]) : 0
+    return dateAtCst(year, month, day, hour, minute, second)
+  }
+
+  const mdy4 = s.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
+  )
+  if (mdy4) {
+    const month = Number(mdy4[1])
+    const day = Number(mdy4[2])
+    const year = Number(mdy4[3])
+    const hour = mdy4[4] != null ? Number(mdy4[4]) : 0
+    const minute = mdy4[5] != null ? Number(mdy4[5]) : 0
+    const second = mdy4[6] != null ? Number(mdy4[6]) : 0
+    return dateAtCst(year, month, day, hour, minute, second)
+  }
+
+  const ymd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (ymd) {
+    return dateAtCst(
+      Number(ymd[1]),
+      Number(ymd[2]),
+      Number(ymd[3]),
+      ymd[4] != null ? Number(ymd[4]) : 0,
+      ymd[5] != null ? Number(ymd[5]) : 0,
+      ymd[6] != null ? Number(ymd[6]) : 0,
+    )
+  }
+
+  const fallback = new Date(s)
+  return Number.isNaN(fallback.getTime()) ? null : fallback
 }
 
 const TOTAL_ROW_MARKERS = new Set(['总计', '合计', 'total'])
