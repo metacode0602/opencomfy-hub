@@ -12,7 +12,8 @@ import {
 } from "@workspace/ui/components/card"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
-import { IconCloudDownload, IconPencil } from "@tabler/icons-react"
+import { IconCalendarOff, IconCloudDownload, IconPencil } from "@tabler/icons-react"
+import { CrmTenantInternalSettingDialog } from "./crm-tenant-internal-setting-dialog"
 import type { BillingTenantDetail } from "@/lib/types/billing-tenant"
 import { CrmTenantBillingImportDialog } from "./crm-tenant-billing-import-dialog"
 import { CrmTenantEditDialog } from "./crm-tenant-edit-dialog"
@@ -42,6 +43,16 @@ function formatTenantType(type: "internal" | "external") {
   return type === "internal" ? "内部租户" : "外部租户"
 }
 
+function formatInternalIncomeExclusion(d: BillingTenantDetail) {
+  if (d.type !== "internal") return "—"
+  if (!d.internalEffectiveFrom && !d.internalEffectiveTo) {
+    return "全历史排除（月度收入 / 个人收入 / 提成基数）"
+  }
+  const from = d.internalEffectiveFrom ?? "不限"
+  const to = d.internalEffectiveTo ?? "不限"
+  return `${from} ～ ${to}（与账期自然日交集时排除）`
+}
+
 function formatMoney(amount: number) {
   return amount.toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
@@ -60,6 +71,7 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
 
   const [billingImportOpen, setBillingImportOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
+  const [internalSettingOpen, setInternalSettingOpen] = React.useState(false)
 
   const handleUpdated = React.useCallback(
     (row: BillingTenantDetail) => {
@@ -98,6 +110,15 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
           编辑信息
         </Button>
         <Button
+          variant="outline"
+          size="sm"
+          type="button"
+          onClick={() => setInternalSettingOpen(true)}
+        >
+          <IconCalendarOff className="mr-1.5 size-4" />
+          收入排除设置
+        </Button>
+        <Button
           variant="secondary"
           size="sm"
           type="button"
@@ -113,6 +134,13 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
         onOpenChange={setEditOpen}
         tenantId={tenantId}
         detail={data}
+        onUpdated={handleUpdated}
+      />
+
+      <CrmTenantInternalSettingDialog
+        open={internalSettingOpen}
+        onOpenChange={setInternalSettingOpen}
+        tenant={data}
         onUpdated={handleUpdated}
       />
 
@@ -144,6 +172,9 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
             <ReadOnly label="租户显示名" value={data.name} />
             <ReadOnly label="租户手机号" value={data.phone ?? "—"} />
             <ReadOnly label="租户类型" value={formatTenantType(data.type)} />
+            {data.type === "internal" && (
+              <ReadOnly label="收入排除有效期" value={formatInternalIncomeExclusion(data)} />
+            )}
             <ReadOnly label="状态" value={formatStatus(data.status)} />
             <ReadOnly label="余额(元)" value={formatMoney(data.balance)} />
             <ReadOnly label="欠费时间" value={formatDateTime(data.overdueAt)} />

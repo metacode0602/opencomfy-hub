@@ -3,6 +3,7 @@ import { billingTenant, tenantBill } from '@workspace/db/schema'
 import { eq } from 'drizzle-orm'
 import { financeBillingPeriodsDataAccess } from './billing-periods'
 import { FinanceError } from './errors'
+import { getBillingPeriodDateRange } from './internal-tenant-income-exclusion'
 import { listIncomeEligibleProjects } from './single-income-projects'
 import { buildValidationIssueRows } from '@/lib/finance/single-income-issue-rows'
 import type { SingleIncomeIssueRow, SingleIncomeProjectDetail } from '@/lib/finance/single-income-types'
@@ -83,7 +84,8 @@ export async function validateSingleIncome(
   if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
 
   const billMonth = period.period_code
-  const eligibleProjects = await listIncomeEligibleProjects()
+  const periodRange = await getBillingPeriodDateRange(billingPeriodId)
+  const eligibleProjects = await listIncomeEligibleProjects(periodRange)
 
   const bills = await db
     .select({

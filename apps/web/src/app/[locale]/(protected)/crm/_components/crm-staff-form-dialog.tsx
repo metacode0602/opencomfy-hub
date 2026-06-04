@@ -24,9 +24,11 @@ import {
   STAFF_APP_ROLES,
   STAFF_DEFAULT_MANAGER_FIELDS,
   STAFF_DEPARTMENTS,
+  STAFF_POSITIONS,
   staffRolesRequireLogin,
   type StaffAppRole,
   type StaffDepartment,
+  type StaffPosition,
 } from "@/lib/crm/staff-constants"
 import {
   CrmStaffAuthLinkFields,
@@ -49,6 +51,11 @@ function normalizeDepartment(value: string | null | undefined): StaffDepartment 
   return STAFF_DEPARTMENTS.includes(value as StaffDepartment) ? (value as StaffDepartment) : ""
 }
 
+function normalizePosition(value: string | null | undefined): StaffPosition | "" {
+  if (!value) return ""
+  return STAFF_POSITIONS.includes(value as StaffPosition) ? (value as StaffPosition) : ""
+}
+
 export type CrmStaffFormValues = {
   employee_no: string
   display_name: string
@@ -56,7 +63,7 @@ export type CrmStaffFormValues = {
   email: string
   status: string
   department: StaffDepartment | ""
-  position: string
+  position: StaffPosition | ""
   roles: StaffAppRole[]
   is_default_pre_sales: boolean
   is_default_account_manager: boolean
@@ -166,12 +173,21 @@ export function CrmStaffFormFields({
         </div>
         <div className="grid gap-2">
           <Label htmlFor={`${idPrefix}-position`}>职位</Label>
-          <Input
-            id={`${idPrefix}-position`}
-            value={values.position}
-            onChange={(e) => onChange({ position: e.target.value })}
-            placeholder="如 高级客户经理（可选）"
-          />
+          <Select
+            value={values.position || undefined}
+            onValueChange={(v) => onChange({ position: v as StaffPosition })}
+          >
+            <SelectTrigger id={`${idPrefix}-position`} className="w-full">
+              <SelectValue placeholder="请选择职位" />
+            </SelectTrigger>
+            <SelectContent>
+              {STAFF_POSITIONS.map((pos) => (
+                <SelectItem key={pos} value={pos}>
+                  {pos}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div className="grid gap-2">
@@ -244,6 +260,7 @@ export function validateCrmStaffForm(values: CrmStaffFormValues): string | null 
   if (!values.display_name.trim()) return "请填写姓名"
   if (!values.mobile.trim()) return "请填写手机号"
   if (!values.department) return "请选择部门"
+  if (!values.position) return "请选择职位"
   if (values.roles.length > 0 && !values.email.trim()) {
     return "选择了角色时必须填写邮箱"
   }
@@ -258,7 +275,7 @@ export function staffInputFromForm(values: CrmStaffFormValues) {
     employeeNo: values.employee_no.trim() || null,
     status: values.status,
     department: values.department || null,
-    position: values.position.trim() || null,
+    position: values.position || null,
     roles: values.roles,
     isDefaultPreSales: values.is_default_pre_sales,
     isDefaultAccountManager: values.is_default_account_manager,
@@ -284,7 +301,7 @@ export function useCrmStaffFormState(staffId?: string) {
         email: existing.email ?? "",
         status: existing.status,
         department: normalizeDepartment(existing.department),
-        position: existing.position ?? "",
+        position: normalizePosition(existing.position),
         roles: (existing.roles ?? []) as StaffAppRole[],
         is_default_pre_sales: existing.is_default_pre_sales,
         is_default_account_manager: existing.is_default_account_manager,

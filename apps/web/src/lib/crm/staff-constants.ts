@@ -6,9 +6,15 @@ export const STAFF_DEPARTMENTS = [
   '研发',
   '运维',
   '销售',
+  '市场',
 ] as const
 
 export type StaffDepartment = (typeof STAFF_DEPARTMENTS)[number]
+
+/** 员工职位枚举 */
+export const STAFF_POSITIONS = ['经理', '员工', '高管'] as const
+
+export type StaffPosition = (typeof STAFF_POSITIONS)[number]
 
 /** 应用角色（可多选，用于员工主数据） */
 export const STAFF_APP_ROLES = [

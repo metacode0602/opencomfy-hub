@@ -27,6 +27,7 @@ import { getPendingCostAllocationIssues } from './cost-tenant-resolve'
 import { FinanceError } from './errors'
 import { financeLog, financeWarn } from './logger'
 import { appendOperationLog } from './operation-log'
+import { listExcludedInternalPlatformIdsForPeriod } from './internal-tenant-income-exclusion'
 import { validateCrossFileImports } from './validate-import'
 
 async function purgeIncomeArtifacts(periodId: string): Promise<void> {
@@ -137,6 +138,15 @@ export async function runPeriodIncomePipeline(input: {
   }
 
   const { standardPlatformIds, multiPlatformIds } = await classifyTenantsSql(periodId)
+
+  const excludedInternal = await listExcludedInternalPlatformIdsForPeriod(periodId, platformIds)
+  const excludedSet = new Set(excludedInternal)
+  if (excludedSet.size > 0) {
+    issues.push(`已排除 ${excludedSet.size} 个内部租户（账期自然日口径）`)
+    for (const id of excludedSet) {
+      tenantAggMap.delete(id)
+    }
+  }
 
   await purgeIncomeArtifacts(periodId)
 

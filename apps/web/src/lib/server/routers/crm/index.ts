@@ -32,6 +32,7 @@ import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { MAX_BLACKLIST_SAFETY_DAYS } from '@/lib/crm/tenant-blacklist-utils'
 import { PLATFORM_TENANT_IMPORT_MAX_IDS } from '@/lib/crm/platform-tenant-import-utils'
 import {
+  billingTenantInternalSettingSchema,
   billingTenantUpdateSchema,
   customerMergeSchema,
   customerUpsertSchema,
@@ -491,6 +492,11 @@ export const crmRouter = createTRPCRouter({
     update: adminProcedure
       .input(z.object({ id: z.string(), data: billingTenantUpdateSchema }))
       .mutation(({ input }) => billingTenantsDataAccess.update(input.id, input.data)),
+    updateInternalSetting: adminProcedure
+      .input(z.object({ id: z.string(), data: billingTenantInternalSettingSchema }))
+      .mutation(({ input }) =>
+        billingTenantsDataAccess.updateInternalSetting(input.id, input.data),
+      ),
     previewPlatformImport: adminProcedure
       .input(
         z.object({
@@ -697,6 +703,15 @@ export const crmRouter = createTRPCRouter({
         z
           .object({
             projectIds: z.array(z.string()).optional(),
+            mode: z.enum(['incremental', 'backfill']).optional(),
+            startDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+            endDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
           })
           .optional(),
       )

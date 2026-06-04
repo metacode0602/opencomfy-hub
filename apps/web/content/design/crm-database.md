@@ -259,6 +259,8 @@ CRM 前端已按 **Customer / Project / PlatformTenant** 完成类型与路由�
 | `platform_tenant_id` | varchar | UK | `platformTenantId` |
 | `is_default` | boolean | NOT NULL DEFAULT false | `isDefault` |
 | `type` | varchar | NOT NULL DEFAULT external | `internal` / `external` |
+| `internal_effective_from` | date | 可空 | 内部租户收入排除起始自然日（含）；与账期交集时排除 `platform_income_monthly` 等 |
+| `internal_effective_to` | date | 可空 | 内部租户收入排除结束自然日（含）；`type=internal` 且起止均为空 → 全历史排除 |
 | `status` | varchar | NOT NULL | `active` / `inactive` / `suspended` |
 | `phone` | varchar |  | 手机号 |
 | `overdue_at` | timestamp |  | 欠费日期 |

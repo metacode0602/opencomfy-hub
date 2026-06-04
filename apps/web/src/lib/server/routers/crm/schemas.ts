@@ -73,7 +73,10 @@ export const staffDepartmentSchema = z.enum([
   '研发',
   '运维',
   '销售',
+  '市场',
 ])
+
+export const staffPositionSchema = z.enum(['经理', '员工', '高管'])
 
 export const tenantProjectImportFormSchema = z.object({
   stage: projectStageSchema,
@@ -131,7 +134,7 @@ export const staffUpsertSchema = z
     employeeNo: z.string().nullable().optional(),
     status: z.string(),
     department: staffDepartmentSchema.nullable().optional(),
-    position: z.string().nullable().optional(),
+    position: staffPositionSchema.nullable().optional(),
     roles: z.array(staffAppRoleSchema).optional().default([]),
     isDefaultPreSales: z.boolean().optional().default(false),
     isDefaultAccountManager: z.boolean().optional().default(false),
@@ -155,16 +158,40 @@ export const staffListSchema = z
     search: z.string().optional(),
     status: z.string().optional(),
     department: z.string().optional(),
-    position: z.string().optional(),
+    position: staffPositionSchema.optional(),
   })
   .optional()
+
+const billingTenantDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .nullable()
+  .optional()
+
+export const billingTenantInternalSettingSchema = z
+  .object({
+    type: z.enum(['internal', 'external']),
+    internalEffectiveFrom: billingTenantDateSchema,
+    internalEffectiveTo: billingTenantDateSchema,
+  })
+  .superRefine((data, ctx) => {
+    if (data.type !== 'internal') return
+    const from = data.internalEffectiveFrom?.trim()
+    const to = data.internalEffectiveTo?.trim()
+    if (from && to && from > to) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '收入排除开始日期不能晚于结束日期',
+        path: ['internalEffectiveTo'],
+      })
+    }
+  })
 
 export const billingTenantUpdateSchema = z.object({
   tenant: z.object({
     name: z.string().min(1),
     phone: z.string().optional(),
     status: z.enum(['active', 'inactive', 'suspended']),
-    type: z.enum(['internal', 'external']),
     balance: z.number(),
     overdueAt: z.string().nullable().optional(),
     creditLimit: z.number().nullable().optional(),

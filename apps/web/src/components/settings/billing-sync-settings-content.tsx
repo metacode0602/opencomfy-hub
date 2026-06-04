@@ -1,11 +1,23 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { IconClock, IconLoader2, IconRefresh } from '@tabler/icons-react'
 import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
 import { Badge } from '@workspace/ui/components/badge'
 import { Button } from '@workspace/ui/components/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@workspace/ui/components/card'
+import { Input } from '@workspace/ui/components/input'
+import { Label } from '@workspace/ui/components/label'
 import {
   Table,
   TableBody,
@@ -14,8 +26,13 @@ import {
   TableHeader,
   TableRow,
 } from '@workspace/ui/components/table'
+import { formatCstDate, validateBillingDateRange } from '@/lib/crm/tenant-billing-import-utils'
 import { trpc } from '@/lib/trpc/client'
 import type { BillingSyncJobRunDto } from '@/lib/types/billing-scheduled-sync'
+
+function defaultBackfillDate(): string {
+  return formatCstDate(new Date())
+}
 
 function formatDt(iso?: string | null): string {
   if (!iso) return '—'
@@ -122,15 +139,148 @@ function JobRunRow({ run }: { run: BillingSyncJobRunDto }) {
   )
 }
 
+function BillingSyncBackfillDialog({
+  open,
+  onOpenChange,
+  safetyDays,
+  onCompleted,
+  runNow,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  safetyDays?: number
+  onCompleted: () => void
+  runNow: ReturnType<typeof trpc.crm.billingSync.runNow.useMutation>
+}) {
+  const [startDate, setStartDate] = useState(defaultBackfillDate)
+  const [endDate, setEndDate] = useState(defaultBackfillDate)
+
+  const dateRangeError = useMemo(() => {
+    try {
+      validateBillingDateRange(startDate, endDate)
+      const todayCst = formatCstDate(new Date())
+      if (endDate > todayCst) {
+        return '结束日期不能晚于东八区今天'
+      }
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : '日期范围无效'
+    }
+  }, [startDate, endDate])
+
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      const today = defaultBackfillDate()
+      setStartDate(today)
+      setEndDate(today)
+    }
+    onOpenChange(next)
+  }
+
+  const handleConfirm = async () => {
+    if (dateRangeError) {
+      toast.error(dateRangeError)
+      return
+    }
+
+    try {
+      const result = await runNow.mutateAsync({
+        mode: 'backfill',
+        startDate,
+        endDate,
+      })
+      if (!result.acquiredLock) {
+        toast.warning(result.message ?? '已有同步任务正在运行')
+        return
+      }
+      toast.success(`补同步已完成（${result.status ?? 'unknown'}）`)
+      onCompleted()
+      onOpenChange(false)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '补同步失败')
+    }
+  }
+
+  return (
+    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+      <AlertDialogContent className="max-w-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle>补同步遗漏账单</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="space-y-4 text-sm text-muted-foreground">
+              <p>
+                对所有 active 项目关联租户，按指定日期区间从算算力平台拉取账单。忽略各租户游标与安全窗口，且
+                <span className="text-foreground">不会推进同步游标</span>。
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="billing-backfill-start">开始日期</Label>
+                  <Input
+                    id="billing-backfill-start"
+                    type="date"
+                    value={startDate}
+                    disabled={runNow.isPending}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="billing-backfill-end">结束日期</Label>
+                  <Input
+                    id="billing-backfill-end"
+                    type="date"
+                    value={endDate}
+                    disabled={runNow.isPending}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {dateRangeError ? (
+                <p className="text-destructive text-xs">{dateRangeError}</p>
+              ) : null}
+
+              <p className="text-xs">
+                默认可选至东八区今天；增量同步的安全窗口为 {safetyDays ?? '—'} 天，补同步不受此限制。
+                同一区间可重复执行，数据写入幂等。
+              </p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={runNow.isPending}>取消</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={runNow.isPending || Boolean(dateRangeError)}
+            onClick={(e) => {
+              e.preventDefault()
+              void handleConfirm()
+            }}
+          >
+            {runNow.isPending ? (
+              <>
+                <IconLoader2 className="mr-2 size-4 animate-spin" />
+                同步中…
+              </>
+            ) : (
+              '开始补同步'
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 export function BillingSyncSettingsContent() {
   const utils = trpc.useUtils()
   const { data: config } = trpc.crm.billingSync.getConfig.useQuery()
   const { data: runsData, isLoading } = trpc.crm.billingSync.listRuns.useQuery({ limit: 30 })
   const runNow = trpc.crm.billingSync.runNow.useMutation()
+  const [backfillOpen, setBackfillOpen] = useState(false)
 
   const handleRunNow = async () => {
     try {
-      const result = await runNow.mutateAsync()
+      const result = await runNow.mutateAsync({ mode: 'incremental' })
       if (!result.acquiredLock) {
         toast.warning(result.message ?? '已有同步任务正在运行')
         return
@@ -142,6 +292,10 @@ export function BillingSyncSettingsContent() {
     }
   }
 
+  const invalidateRuns = () => {
+    void utils.crm.billingSync.listRuns.invalidate()
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -151,20 +305,37 @@ export function BillingSyncSettingsContent() {
             每日自动从算算力平台增量同步 active 项目关联租户的账单数据
           </p>
         </div>
-        <Button onClick={() => void handleRunNow()} disabled={runNow.isPending}>
-          {runNow.isPending ? (
-            <>
-              <IconLoader2 className="mr-2 size-4 animate-spin" />
-              同步中…
-            </>
-          ) : (
-            <>
-              <IconRefresh className="mr-2 size-4" />
-              立即同步
-            </>
-          )}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => void handleRunNow()} disabled={runNow.isPending}>
+            {runNow.isPending ? (
+              <>
+                <IconLoader2 className="mr-2 size-4 animate-spin" />
+                同步中…
+              </>
+            ) : (
+              <>
+                <IconRefresh className="mr-2 size-4" />
+                立即同步
+              </>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setBackfillOpen(true)}
+            disabled={runNow.isPending}
+          >
+            补同步遗漏
+          </Button>
+        </div>
       </div>
+
+      <BillingSyncBackfillDialog
+        open={backfillOpen}
+        onOpenChange={setBackfillOpen}
+        safetyDays={config?.safetyDays}
+        onCompleted={invalidateRuns}
+        runNow={runNow}
+      />
 
       <Card>
         <CardHeader>

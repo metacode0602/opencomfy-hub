@@ -218,7 +218,7 @@ export const staffDataAccess = {
       conditions.push(eq(userStaff.department, filters.department))
     }
     if (filters.position?.trim()) {
-      conditions.push(ilike(userStaff.position, `%${filters.position.trim()}%`))
+      conditions.push(eq(userStaff.position, filters.position.trim()))
     }
     if (filters.search?.trim()) {
       const q = `%${filters.search.trim()}%`

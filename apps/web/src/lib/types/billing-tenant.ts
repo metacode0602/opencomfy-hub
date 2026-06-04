@@ -13,6 +13,9 @@ export type BillingTenantListItem = {
   phone?: string
   status: string
   type: BillingTenantType
+  /** 内部租户收入排除起止（自然日，含）；均为空且 type=internal 时全历史排除 */
+  internalEffectiveFrom?: string
+  internalEffectiveTo?: string
   balance: number
   overdueAt?: string
   creditLimit?: number
@@ -35,12 +38,18 @@ export type BillingTenantDetail = BillingTenantListItem & {
   updatedAt: string
 }
 
+/** 内部/外部与收入排除有效期（独立设置，不走常规编辑） */
+export type BillingTenantInternalSettingInput = {
+  type: BillingTenantType
+  internalEffectiveFrom?: string | null
+  internalEffectiveTo?: string | null
+}
+
 export type BillingTenantUpdateInput = {
   tenant: {
     name: string
     phone?: string
     status: 'active' | 'inactive' | 'suspended'
-    type: BillingTenantType
     balance: number
     overdueAt?: string | null
     creditLimit?: number | null

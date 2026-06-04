@@ -26,7 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
-import { STAFF_DEPARTMENTS, staffAppRoleLabel } from "@/lib/crm/staff-constants"
+import { STAFF_DEPARTMENTS, STAFF_POSITIONS, staffAppRoleLabel } from "@/lib/crm/staff-constants"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
 import { IconPlus } from "@tabler/icons-react"
@@ -64,27 +64,17 @@ export function CrmStaffListClient() {
   const [search, setSearch] = React.useState("")
   const [statusFilter, setStatusFilter] = React.useState<string>("all")
   const [departmentFilter, setDepartmentFilter] = React.useState<string>("all")
-  const [positionFilter, setPositionFilter] = React.useState("")
+  const [positionFilter, setPositionFilter] = React.useState<string>("all")
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editId, setEditId] = React.useState<string | null>(null)
   const [del, setDel] = React.useState<{ id: string; label: string } | null>(null)
 
-  const positionOptions = React.useMemo(() => {
-    const set = new Set<string>()
-    for (const s of userStaff) {
-      const pos = s.position?.trim()
-      if (pos) set.add(pos)
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "zh-CN"))
-  }, [userStaff])
-
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase()
-    const posQ = positionFilter.trim().toLowerCase()
     return userStaff.filter((s) => {
       if (statusFilter !== "all" && s.status !== statusFilter) return false
       if (departmentFilter !== "all" && s.department !== departmentFilter) return false
-      if (posQ && !(s.position?.toLowerCase().includes(posQ) ?? false)) return false
+      if (positionFilter !== "all" && s.position !== positionFilter) return false
       if (!q) return true
       return (
         s.display_name.toLowerCase().includes(q) ||
@@ -151,16 +141,13 @@ export function CrmStaffListClient() {
                 ))}
               </SelectContent>
             </Select>
-            <Select
-              value={positionFilter || "all"}
-              onValueChange={(v) => setPositionFilter(v === "all" ? "" : v)}
-            >
-              <SelectTrigger className="w-[160px]">
+            <Select value={positionFilter} onValueChange={setPositionFilter}>
+              <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="职位" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部职位</SelectItem>
-                {positionOptions.map((pos) => (
+                {STAFF_POSITIONS.map((pos) => (
                   <SelectItem key={pos} value={pos}>
                     {pos}
                   </SelectItem>

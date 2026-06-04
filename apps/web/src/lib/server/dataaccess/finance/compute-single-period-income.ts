@@ -15,6 +15,7 @@ import { RULE_VERSION } from './constants'
 import { FinanceError } from './errors'
 import { financeLog } from './logger'
 import { appendOperationLog, newId } from './operation-log'
+import { getBillingPeriodDateRange } from './internal-tenant-income-exclusion'
 import { listIncomeEligibleProjects } from './single-income-projects'
 import type { SingleIncomeComputePayload, SingleIncomePreviewRow } from './single-income-types'
 import {
@@ -121,7 +122,8 @@ export async function buildSinglePeriodIncomePayload(
     )
   }
 
-  const eligibleProjects = await listIncomeEligibleProjects()
+  const periodRange = await getBillingPeriodDateRange(periodId)
+  const eligibleProjects = await listIncomeEligibleProjects(periodRange)
   const missingIds = new Set(
     validation.projectsMissingBill.map((m) => m.projectId),
   )

@@ -1,7 +1,22 @@
 import { db } from '@/lib/db'
 import { platformIncomeMonthly } from '@workspace/db/schema'
 import { eq, sql } from 'drizzle-orm'
+import { getBillingPeriodDateRange } from './internal-tenant-income-exclusion'
 import { financeLog } from './logger'
+
+/** 账期内应从 platform_income_monthly 排除的内部租户（自然日交集 / 未填日期则全历史） */
+function internalTenantIncomeExcludeSql(periodStart: string, periodEnd: string) {
+  return sql`(
+    t.type = 'internal'
+    AND (
+      (t.internal_effective_from IS NULL AND t.internal_effective_to IS NULL)
+      OR (
+        (t.internal_effective_from IS NULL OR t.internal_effective_from <= ${periodEnd}::date)
+        AND (t.internal_effective_to IS NULL OR t.internal_effective_to >= ${periodStart}::date)
+      )
+    )
+  )`
+}
 
 export type TenantClassification = {
   standardPlatformIds: string[]
@@ -10,6 +25,7 @@ export type TenantClassification = {
 
 /** Step I0 — 按 project_tenant 关联数分类租户（income-sql-compute-design §2.1） */
 export async function classifyTenantsSql(periodId: string): Promise<TenantClassification> {
+  const { periodStart, periodEnd } = await getBillingPeriodDateRange(periodId)
   const rows = await db.execute<{
     platform_tenant_id: string
     project_count: number
@@ -25,6 +41,7 @@ export async function classifyTenantsSql(periodId: string): Promise<TenantClassi
       WHERE b.billing_period_id = ${periodId}
     ) raw_t ON raw_t.tenant_platform_id = t.platform_tenant_id
     LEFT JOIN project_tenant pt ON pt.tenant_id = t.id
+    WHERE NOT ${internalTenantIncomeExcludeSql(periodStart, periodEnd)}
     GROUP BY t.platform_tenant_id
   `)
 
@@ -59,6 +76,7 @@ function platformIdArray(platformIds: string[]) {
 
 /** Step I1 — 按租户汇总客户消费 Raw 写入 agg（§4.1） */
 export async function stepI1InsertAggFromRaw(periodId: string): Promise<number> {
+  const { periodStart, periodEnd } = await getBillingPeriodDateRange(periodId)
   const result = await db.execute(sql`
     INSERT INTO billing_period_agg_customer_consumption (
       id, billing_period_id, tenant_platform_id, customer_type,
@@ -79,8 +97,13 @@ export async function stepI1InsertAggFromRaw(periodId: string): Promise<number> 
       NOW()
     FROM billing_period_raw_customer_consumption r
     JOIN billing_period_import_batch b ON b.id = r.batch_id
+    LEFT JOIN tenant t ON t.platform_tenant_id = r.tenant_platform_id
     WHERE b.billing_period_id = ${periodId}
       AND b.file_type = 'customer_consumption'
+      AND (
+        t.id IS NULL
+        OR NOT ${internalTenantIncomeExcludeSql(periodStart, periodEnd)}
+      )
     GROUP BY r.tenant_platform_id
   `)
   financeLog('compute-income-sql', 'I1 agg inserted', {

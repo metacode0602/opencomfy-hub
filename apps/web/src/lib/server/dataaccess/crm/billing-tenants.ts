@@ -7,6 +7,7 @@ import {
 } from '@/lib/server/dataaccess/finance/excel-parser'
 import type {
   BillingTenantDetail,
+  BillingTenantInternalSettingInput,
   BillingTenantListItem,
   BillingTenantUpdateInput,
   TenantImportResult,
@@ -22,7 +23,13 @@ import {
 } from '@workspace/db/schema'
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 
-export type { BillingTenantDetail, BillingTenantListItem, BillingTenantUpdateInput, TenantImportResult }
+export type {
+  BillingTenantDetail,
+  BillingTenantInternalSettingInput,
+  BillingTenantListItem,
+  BillingTenantUpdateInput,
+  TenantImportResult,
+}
 
 function newId() {
   return crypto.randomUUID()
@@ -71,6 +78,8 @@ function mapListRow(
     phone: t.phone ?? undefined,
     status: t.status,
     type: t.type as BillingTenantListItem['type'],
+    internalEffectiveFrom: t.internalEffectiveFrom ?? undefined,
+    internalEffectiveTo: t.internalEffectiveTo ?? undefined,
     balance: toNumber(t.balance),
     overdueAt: toIso(t.overdue_at ?? undefined),
     creditLimit: t.credit_limit != null ? toNumber(t.credit_limit) : undefined,
@@ -324,7 +333,6 @@ export const billingTenantsDataAccess = {
           name: input.tenant.name.trim(),
           phone: input.tenant.phone?.trim() || null,
           status: input.tenant.status,
-          type: input.tenant.type,
           balance: input.tenant.balance.toFixed(4),
           overdue_at: input.tenant.overdueAt ? new Date(input.tenant.overdueAt) : null,
           credit_limit:
@@ -358,6 +366,29 @@ export const billingTenantsDataAccess = {
           )
       }
     })
+
+    const updated = await this.getById(id)
+    if (!updated) throw new Error('更新失败')
+    return updated
+  },
+
+  async updateInternalSetting(
+    id: string,
+    input: BillingTenantInternalSettingInput,
+  ): Promise<BillingTenantDetail> {
+    const existing = await this.getById(id)
+    if (!existing) throw new Error('计费租户不存在')
+
+    await db
+      .update(billingTenant)
+      .set({
+        type: input.type,
+        internalEffectiveFrom:
+          input.type === 'internal' ? input.internalEffectiveFrom?.trim() || null : null,
+        internalEffectiveTo:
+          input.type === 'internal' ? input.internalEffectiveTo?.trim() || null : null,
+      })
+      .where(eq(billingTenant.id, id))
 
     const updated = await this.getById(id)
     if (!updated) throw new Error('更新失败')

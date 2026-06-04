@@ -105,6 +105,10 @@ export const billingTenant = pgTable(
     credit_limit: tenantMoney("credit_limit"),
     balance: tenantMoney("balance").notNull().default("0"),
     type: varchar("type", { length: 32 }).notNull().default("external"), // internal 内部租户 | external 外部租户
+    /** 内部租户收入排除：自然日起（含）；与 period 交集时排除 platform_income_monthly */
+    internalEffectiveFrom: date("internal_effective_from"),
+    /** 内部租户收入排除：自然日止（含）；均为空且 type=internal 时全历史排除 */
+    internalEffectiveTo: date("internal_effective_to"),
     /** 平台侧租户注册时间（OpenAPI create_time） */
     platformRegisteredAt: timestamp("platform_registered_at", { withTimezone: true }),
     /** 定时账单同步：上次成功同步的数据结束日（东八区自然日） */

@@ -22,6 +22,7 @@ import {
   listExcludedProjectTenants,
   listProjectLinkedPlatformTenantIds,
 } from './personal-income-tenants'
+import { filterPlatformIdsForPeriodIncome } from './internal-tenant-income-exclusion'
 import {
   assertPersonalImportsReady,
   getPersonalImportBatches,
@@ -132,12 +133,23 @@ export async function computePersonalPeriodIncome(input: {
 
   const tExcel = new Set([...tBill, ...tBare])
   const projectLinked = await listProjectLinkedPlatformTenantIds([...tExcel])
-  const tPersonal = new Set([...tExcel].filter((id) => !projectLinked.has(id)))
+  let tPersonal = new Set([...tExcel].filter((id) => !projectLinked.has(id)))
+  const issues: string[] = []
+
+  const internalFilter = await filterPlatformIdsForPeriodIncome({
+    periodId,
+    platformTenantIds: [...tPersonal],
+  })
+  if (internalFilter.excluded.length > 0) {
+    const excludedSet = new Set(internalFilter.excluded)
+    tPersonal = new Set([...tPersonal].filter((id) => !excludedSet.has(id)))
+    issues.push(`已排除 ${internalFilter.excluded.length} 个内部租户（账期自然日口径）`)
+  }
 
   if (tPersonal.size === 0) {
     throw new FinanceError(
       'PRECONDITION_FAILED',
-      '排除项目关联租户后无有效个人收入租户，请检查 Excel 与 CRM 项目配置',
+      '排除项目关联租户与内部租户后无有效个人收入租户，请检查 Excel 与 CRM 租户配置',
     )
   }
 
@@ -149,7 +161,6 @@ export async function computePersonalPeriodIncome(input: {
   const nonProjectTotals = sumTenants(tPersonal, agg)
   const blacklistTotals = sumTenants(tBlacklistPersonal, agg)
 
-  const issues: string[] = []
   const excluded = await listExcludedProjectTenants([...tExcel].filter((id) => projectLinked.has(id)))
   if (excluded.length > 0) {
     issues.push(`已排除 ${excluded.length} 个项目关联租户`)

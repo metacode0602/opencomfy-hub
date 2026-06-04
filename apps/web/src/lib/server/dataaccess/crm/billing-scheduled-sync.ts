@@ -1,5 +1,6 @@
 import {
   computeBillingSyncWindow,
+  formatCstDate,
   validateBillingDateRange,
 } from '@/lib/crm/tenant-billing-import-utils'
 import { db } from '@/lib/db'
@@ -123,11 +124,36 @@ function resolveJobStatus(counts: {
   return 'partial'
 }
 
+export type BillingSyncMode = 'incremental' | 'backfill'
+
+function assertBackfillDateRange(startDate: string, endDate: string): void {
+  validateBillingDateRange(startDate, endDate)
+  const todayCst = formatCstDate(new Date())
+  if (endDate > todayCst) {
+    throw new Error('结束日期不能晚于东八区今天')
+  }
+}
+
 export async function runScheduledBillingSync(options?: {
   trigger?: BillingSyncTrigger
   projectIds?: string[]
+  mode?: BillingSyncMode
+  startDate?: string
+  endDate?: string
 }): Promise<BillingSyncRunResult> {
   const trigger = options?.trigger ?? 'scheduled'
+  const mode = options?.mode ?? 'incremental'
+  const isBackfill = mode === 'backfill'
+
+  if (isBackfill) {
+    const startDate = options?.startDate?.trim()
+    const endDate = options?.endDate?.trim()
+    if (!startDate || !endDate) {
+      throw new Error('补同步须填写开始日期与结束日期')
+    }
+    assertBackfillDateRange(startDate, endDate)
+  }
+
   const acquiredLock = await tryAcquireLock()
   if (!acquiredLock) {
     crmWarn('billing-scheduled-sync', 'skip: advisory lock held')
@@ -136,11 +162,13 @@ export async function runScheduledBillingSync(options?: {
 
   const safetyDays = getBillingSyncSafetyDays()
   const initialStartDate = getBillingSyncInitialStartDate()
-  const { endDate: syncEndDate } = computeBillingSyncWindow({
-    cursorEndDate: null,
-    safetyDays,
-    initialStartDate,
-  })
+  const syncEndDate = isBackfill
+    ? options!.endDate!.trim()
+    : computeBillingSyncWindow({
+        cursorEndDate: null,
+        safetyDays,
+        initialStartDate,
+      }).endDate
 
   const jobRunId = newId()
   const startedAt = new Date()
@@ -196,11 +224,17 @@ export async function runScheduledBillingSync(options?: {
       if (!tenant) continue
 
       const cursorEndDate = formatDateOnly(tenant.billingSyncCursorEndDate)
-      const window = computeBillingSyncWindow({
-        cursorEndDate,
-        safetyDays,
-        initialStartDate,
-      })
+      const window = isBackfill
+        ? {
+            startDate: options!.startDate!.trim(),
+            endDate: options!.endDate!.trim(),
+            skipped: false,
+          }
+        : computeBillingSyncWindow({
+            cursorEndDate,
+            safetyDays,
+            initialStartDate,
+          })
 
       const itemStartedAt = new Date()
       await db
@@ -267,6 +301,9 @@ export async function runScheduledBillingSync(options?: {
 
       if (result.success) {
         successCount += 1
+        const summary = isBackfill
+          ? `[补同步] ${result.summary ?? '无变更'}`
+          : result.summary
         await db.insert(billingSyncJobItem).values({
           id: newId(),
           jobRunId,
@@ -275,12 +312,12 @@ export async function runScheduledBillingSync(options?: {
           startDate: window.startDate,
           endDate: window.endDate,
           status: 'success',
-          summary: result.summary,
+          summary,
         })
         await db
           .update(billingTenant)
           .set({
-            billingSyncCursorEndDate: window.endDate,
+            ...(isBackfill ? {} : { billingSyncCursorEndDate: window.endDate }),
             billingSyncLastFinishedAt: finishedAt,
             billingSyncLastStatus: 'success',
             billingSyncLastError: null,
@@ -366,8 +403,19 @@ export const billingScheduledSyncDataAccess = {
     return getBillingSyncConfig()
   },
 
-  runNow(input?: { projectIds?: string[] }): Promise<BillingSyncRunResult> {
-    return runScheduledBillingSync({ trigger: 'manual', projectIds: input?.projectIds })
+  runNow(input?: {
+    projectIds?: string[]
+    mode?: BillingSyncMode
+    startDate?: string
+    endDate?: string
+  }): Promise<BillingSyncRunResult> {
+    return runScheduledBillingSync({
+      trigger: 'manual',
+      projectIds: input?.projectIds,
+      mode: input?.mode,
+      startDate: input?.startDate,
+      endDate: input?.endDate,
+    })
   },
 
   async listRuns(input?: { limit?: number; offset?: number }): Promise<{

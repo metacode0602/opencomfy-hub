@@ -29,9 +29,14 @@ import {
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { TENANT_PROJECT_IMPORT_TAG_NAMES } from "@/lib/crm/tenant-project-import-utils"
 import { trpc } from "@/lib/trpc/client"
-import { IconEye, IconPlus, IconUpload } from "@tabler/icons-react"
+import { IconCalendarOff, IconEye, IconPlus, IconUpload } from "@tabler/icons-react"
 import { CrmTenantImportDialog } from "./crm-tenant-import-dialog"
 import { CrmPlatformTenantImportDialog } from "./crm-platform-tenant-import-dialog"
+import {
+  CrmTenantInternalSettingDialog,
+  type TenantInternalSettingTarget,
+} from "./crm-tenant-internal-setting-dialog"
+import type { BillingTenantListItem } from "@/lib/types/billing-tenant"
 import { StatusBadge } from "@/components/dashboard/status-badge"
 import { useListPagination } from "@/hooks/use-list-pagination"
 import { ListPagination } from "@/components/shared/list-pagination"
@@ -77,6 +82,14 @@ function formatTenantType(type: "internal" | "external") {
   return type === "internal" ? "内部租户" : "外部租户"
 }
 
+function formatInternalExclusionSummary(t: BillingTenantListItem) {
+  if (t.type !== "internal") return null
+  if (!t.internalEffectiveFrom && !t.internalEffectiveTo) return "全历史排除"
+  const from = t.internalEffectiveFrom ?? "…"
+  const to = t.internalEffectiveTo ?? "…"
+  return `${from}～${to}`
+}
+
 export function CrmTenantsListClient() {
   const utils = trpc.useUtils()
   const [searchInput, setSearchInput] = React.useState("")
@@ -84,6 +97,8 @@ export function CrmTenantsListClient() {
   const [tagFilter, setTagFilter] = React.useState(ALL_TAGS)
   const [platformImportOpen, setPlatformImportOpen] = React.useState(false)
   const [excelImportOpen, setExcelImportOpen] = React.useState(false)
+  const [internalSettingTenant, setInternalSettingTenant] =
+    React.useState<TenantInternalSettingTarget | null>(null)
 
   React.useEffect(() => {
     const t = window.setTimeout(() => setSearch(searchInput.trim()), 300)
@@ -186,7 +201,7 @@ export function CrmTenantsListClient() {
                   <TableHead>导入时间</TableHead>
                   <TableHead className="text-right">授信额度</TableHead>
                   <TableHead>状态</TableHead>
-                  <TableHead className="w-20" />
+                  <TableHead className="w-24 text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -207,7 +222,14 @@ export function CrmTenantsListClient() {
                     <TableRow key={t.id}>
                       <TableCell className="font-mono text-sm">{t.platformTenantId ?? "—"}</TableCell>
                       <TableCell>{t.name}</TableCell>
-                      <TableCell className="text-sm">{formatTenantType(t.type)}</TableCell>
+                      <TableCell className="text-sm">
+                        <span>{formatTenantType(t.type)}</span>
+                        {formatInternalExclusionSummary(t) ? (
+                          <span className="text-muted-foreground block text-xs">
+                            {formatInternalExclusionSummary(t)}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell>{maskPhoneMiddle(t.phone)}</TableCell>
                       <TableCell>
                         <LocaleLink
@@ -248,12 +270,23 @@ export function CrmTenantsListClient() {
                       <TableCell>
                         <StatusBadge status={t.status} />
                       </TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="icon" asChild>
-                          <LocaleLink href={`/crm/tenants/${t.id}`} title="查看详情">
-                            <IconEye className="size-4" />
-                          </LocaleLink>
-                        </Button>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            type="button"
+                            title="收入排除设置"
+                            onClick={() => setInternalSettingTenant(t)}
+                          >
+                            <IconCalendarOff className="size-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" asChild>
+                            <LocaleLink href={`/crm/tenants/${t.id}`} title="查看详情">
+                              <IconEye className="size-4" />
+                            </LocaleLink>
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
@@ -286,6 +319,17 @@ export function CrmTenantsListClient() {
           onSuccess={onImportSuccess}
         />
       ) : null}
+
+      <CrmTenantInternalSettingDialog
+        open={internalSettingTenant != null}
+        onOpenChange={(open) => {
+          if (!open) setInternalSettingTenant(null)
+        }}
+        tenant={internalSettingTenant}
+        onUpdated={() => {
+          void utils.crm.tenants.list.invalidate()
+        }}
+      />
     </div>
   )
 }

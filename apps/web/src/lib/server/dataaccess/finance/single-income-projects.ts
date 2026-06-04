@@ -5,6 +5,8 @@ import {
   customer,
   projectTenant,
 } from '@workspace/db/schema'
+import type { BillingPeriodDateRange } from '@/lib/finance/internal-tenant-income-exclusion'
+import { isInternalTenantExcludedFromPeriodIncome } from '@/lib/finance/internal-tenant-income-exclusion'
 import { and, asc, eq, isNotNull, ne } from 'drizzle-orm'
 
 export type IncomeEligibleProject = {
@@ -52,7 +54,9 @@ export async function resolveBillingTenantForProject(
 }
 
 /** 非归档且计费租户具备 platform_tenant_id 的经营项目 */
-export async function listIncomeEligibleProjects(): Promise<IncomeEligibleProject[]> {
+export async function listIncomeEligibleProjects(
+  period?: BillingPeriodDateRange,
+): Promise<IncomeEligibleProject[]> {
   const projects = await db
     .select()
     .from(crmProject)
@@ -66,6 +70,19 @@ export async function listIncomeEligibleProjects(): Promise<IncomeEligibleProjec
 
     const tenant = await resolveBillingTenantForProject(project)
     if (!tenant?.platformTenantId) continue
+    if (
+      period &&
+      isInternalTenantExcludedFromPeriodIncome(
+        {
+          type: tenant.type,
+          internalEffectiveFrom: tenant.internalEffectiveFrom,
+          internalEffectiveTo: tenant.internalEffectiveTo,
+        },
+        period,
+      )
+    ) {
+      continue
+    }
 
     const cust = await db.query.customer.findFirst({
       where: eq(customer.id, tenant.customerId),
