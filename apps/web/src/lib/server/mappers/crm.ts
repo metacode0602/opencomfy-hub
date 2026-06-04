@@ -154,6 +154,7 @@ export function mapProjectRow(
     totalConsumption: number
     platformTenantId?: string
     tags?: Project['tags']
+    conversionSetting?: Project['conversionSetting']
   },
 ): Project {
   return {
@@ -184,6 +185,10 @@ export function mapProjectRow(
     totalConsumption: row.totalConsumption,
     balance: toNumber(row.balance),
     revenueDepartment: row.revenueDepartment ?? undefined,
+    opportunitySource: row.opportunitySource as Project['opportunitySource'],
+    dealClosedMonth: row.dealClosedMonth ?? undefined,
+    commissionMonthPhase: row.commissionMonthPhase as Project['commissionMonthPhase'],
+    conversionSetting: row.conversionSetting,
     tags: row.tags ?? [],
   }
 }

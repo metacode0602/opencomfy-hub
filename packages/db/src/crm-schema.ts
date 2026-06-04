@@ -176,6 +176,13 @@ export const crmProject = pgTable(
     balance: money("balance"),
     /** 当前收入归属部门（冗余；真值见 project_revenue_department_assignment） */
     revenueDepartment: varchar("revenue_department", { length: 32 }),
+    /** 当前商机来源（冗余；真值见 project_opportunity_source_assignment） */
+    opportunitySource: varchar("opportunity_source", { length: 32 }),
+    /** 提成成交锚定月 YYYY-MM（首消月或转正时写入） */
+    dealClosedMonth: varchar("deal_closed_month", { length: 7 }),
+    /** 提成月序分段：months_1_6 | months_7_to_2026_12；第 7 月起固化 */
+    commissionMonthPhase: varchar("commission_month_phase", { length: 32 }),
+    commissionPhaseLockedAt: timestamp("commission_phase_locked_at", { withTimezone: true }),
     ...crmTimestamps,
   },
   (table) => [
@@ -185,6 +192,8 @@ export const crmProject = pgTable(
     index("project_stage_idx").on(table.stage),
     index("project_status_idx").on(table.status),
     index("project_revenue_department_idx").on(table.revenueDepartment),
+    index("project_opportunity_source_idx").on(table.opportunitySource),
+    index("project_deal_closed_month_idx").on(table.dealClosedMonth),
   ],
 )
 
@@ -228,6 +237,62 @@ export const projectTag = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [uniqueIndex("project_tag_name_uk").on(table.name)],
+)
+
+/**
+ * 项目商机来源历史
+ * 当前生效：effective_to IS NULL；每项目至多一条（部分唯一）
+ */
+export const projectOpportunitySourceAssignment = pgTable(
+  "project_opportunity_source_assignment",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    opportunitySource: varchar("opportunity_source", { length: 32 }).notNull(),
+    effectiveFrom: date("effective_from").notNull(),
+    effectiveTo: date("effective_to"),
+    remark: text("remark"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("project_opportunity_source_assignment_current_uk")
+      .on(table.projectId)
+      .where(sql`${table.effectiveTo} is null`),
+    index("project_opportunity_source_assignment_project_id_idx").on(table.projectId),
+    index("project_opportunity_source_assignment_effective_from_idx").on(
+      table.projectId,
+      table.effectiveFrom,
+    ),
+  ],
+)
+
+/**
+ * 项目转正设置（经营转正主数据，含转正原因与日期）
+ * 每项目至多一条
+ */
+export const projectConversionSetting = pgTable(
+  "project_conversion_setting",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    reason: varchar("reason", { length: 32 }).notNull(),
+    signedOn: date("signed_on").notNull(),
+    /** 转正生效日期（经营口径） */
+    conversionDate: date("conversion_date").notNull(),
+    remark: text("remark"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("project_conversion_setting_project_id_uk").on(table.projectId),
+    index("project_conversion_setting_conversion_date_idx").on(table.conversionDate),
+  ],
 )
 
 /** 项目与标签关联 */
@@ -1244,6 +1309,8 @@ export const crmProjectRelations = relations(crmProject, ({ one, many }) => ({
   }),
   staffAssignments: many(projectStaffAssignment),
   revenueDepartmentAssignments: many(projectRevenueDepartmentAssignment),
+  opportunitySourceAssignments: many(projectOpportunitySourceAssignment),
+  conversionSetting: one(projectConversionSetting),
   tenantLinks: many(projectTenant),
   tagAssignments: many(projectTagAssignment),
   activities: many(projectActivity),
@@ -1289,6 +1356,31 @@ export const projectRevenueDepartmentAssignmentRelations = relations(
     }),
   }),
 )
+
+export const projectOpportunitySourceAssignmentRelations = relations(
+  projectOpportunitySourceAssignment,
+  ({ one }) => ({
+    project: one(crmProject, {
+      fields: [projectOpportunitySourceAssignment.projectId],
+      references: [crmProject.id],
+    }),
+    createdByStaff: one(userStaff, {
+      fields: [projectOpportunitySourceAssignment.createdBy],
+      references: [userStaff.id],
+    }),
+  }),
+)
+
+export const projectConversionSettingRelations = relations(projectConversionSetting, ({ one }) => ({
+  project: one(crmProject, {
+    fields: [projectConversionSetting.projectId],
+    references: [crmProject.id],
+  }),
+  createdByStaff: one(userStaff, {
+    fields: [projectConversionSetting.createdBy],
+    references: [userStaff.id],
+  }),
+}))
 
 export const commerceOrderRelations = relations(commerceOrder, ({ one, many }) => ({
   items: many(commerceOrderItem),

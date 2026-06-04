@@ -124,6 +124,33 @@ export const changeProjectRevenueDepartmentSchema = z.object({
   remark: z.string().max(500).optional(),
 })
 
+export const opportunitySourceSchema = z.enum([
+  'marketing_sales',
+  'sales_self',
+  'exec_sales',
+])
+
+export const changeProjectOpportunitySourceSchema = z.object({
+  projectId: z.string().min(1),
+  opportunitySource: opportunitySourceSchema,
+  effectiveFrom: effectiveDateSchema,
+  remark: z.string().max(500).optional(),
+})
+
+export const conversionReasonSchema = z.enum([
+  'offline_signing',
+  'online_signing',
+  'online_registration_only',
+])
+
+export const setProjectConversionSettingSchema = z.object({
+  projectId: z.string().min(1),
+  reason: conversionReasonSchema,
+  signedOn: effectiveDateSchema,
+  conversionDate: effectiveDateSchema,
+  remark: z.string().max(500).optional(),
+})
+
 export const staffAppRoleSchema = z.enum(['admin', 'user', 'member'])
 
 export const staffUpsertSchema = z

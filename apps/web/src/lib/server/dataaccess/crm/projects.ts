@@ -21,6 +21,8 @@ import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql, sum } f
 import type { ProjectTag } from '@/lib/data/types'
 import type { StaffDepartment } from '@/lib/crm/staff-constants'
 import { projectRevenueDepartmentDataAccess } from './project-revenue-department'
+import { projectConversionSettingDataAccess } from './project-conversion-setting'
+import { projectCommissionPhaseDataAccess } from './project-commission-phase'
 
 export type ProjectListFilters = {
   search?: string
@@ -295,11 +297,20 @@ async function loadProjectEnrichment(projectIds: string[]) {
 function mapToProject(
   row: typeof crmProject.$inferSelect,
   enrich: Awaited<ReturnType<typeof loadProjectEnrichment>>,
+  options?: {
+    conversionSetting?: Project['conversionSetting']
+    commissionMonthPhase?: Project['commissionMonthPhase']
+  },
 ): Project {
   const staff = enrich.staffMap.get(row.id) ?? {}
   const cust = enrich.customerMap.get(row.customerId)
+  const commissionMonthPhase =
+    options?.commissionMonthPhase ??
+    (row.commissionMonthPhase as Project['commissionMonthPhase'] | null) ??
+    undefined
   return mapProjectRow({
     ...row,
+    commissionMonthPhase: commissionMonthPhase ?? null,
     customerName: cust?.name ?? '',
     customerType: cust?.type ?? 'B',
     businessLineName: enrich.lineMap.get(row.businessLineId) ?? '',
@@ -310,6 +321,7 @@ function mapToProject(
     totalConsumption: enrich.consumptionMap.get(row.id) ?? 0,
     platformTenantId: enrich.platformTenantIdMap.get(row.id),
     tags: enrich.tagsMap.get(row.id) ?? [],
+    conversionSetting: options?.conversionSetting,
   })
 }
 
@@ -486,7 +498,22 @@ export const projectsDataAccess = {
     const row = await db.query.crmProject.findFirst({ where: eq(crmProject.id, id) })
     if (!row) return null
     const enrich = await loadProjectEnrichment([id])
-    return mapToProject(row, enrich)
+    const conversionRaw = await projectConversionSettingDataAccess.getByProjectId(id)
+    const conversionSetting = conversionRaw
+      ? {
+          reason: conversionRaw.reason,
+          signedOn: conversionRaw.signedOn,
+          conversionDate: conversionRaw.conversionDate,
+          remark: conversionRaw.remark ?? undefined,
+        }
+      : undefined
+
+    const phaseSnapshot = await projectCommissionPhaseDataAccess.resolve(id)
+
+    return mapToProject(row, enrich, {
+      conversionSetting,
+      commissionMonthPhase: phaseSnapshot.monthPhase ?? undefined,
+    })
   },
 
   async create(input: ProjectUpsertInput): Promise<Project> {

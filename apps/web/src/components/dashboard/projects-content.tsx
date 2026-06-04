@@ -16,9 +16,10 @@ import {
   UserCircle,
   Building2,
   FlaskConical,
-  CircleCheck,
   Receipt,
   Pause,
+  Handshake,
+  FileCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
@@ -69,6 +70,8 @@ import { ProjectTagsDialog } from './project-tags-dialog'
 import { ProjectCostAllocationDialog } from './project-cost-allocation-dialog'
 import { ProjectAccountManagerDialog } from './project-account-manager-dialog'
 import { ProjectRevenueDepartmentDialog } from './project-revenue-department-dialog'
+import { ProjectOpportunitySourceDialog } from './project-opportunity-source-dialog'
+import { ProjectConversionSettingDialog } from './project-conversion-setting-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
@@ -101,6 +104,11 @@ export function ProjectsContent() {
   const [amProject, setAmProject] = useState<Project | null>(null)
   const [deptOpen, setDeptOpen] = useState(false)
   const [deptProject, setDeptProject] = useState<Project | null>(null)
+  const [oppSourceOpen, setOppSourceOpen] = useState(false)
+  const [oppSourceProject, setOppSourceProject] = useState<Project | null>(null)
+  const [conversionOpen, setConversionOpen] = useState(false)
+  const [conversionProject, setConversionProject] = useState<Project | null>(null)
+  const [testingProject, setTestingProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
   const [conversionQueryOpen, setConversionQueryOpen] = useState(false)
@@ -149,6 +157,16 @@ export function ProjectsContent() {
     onSuccess: () => {
       toast.success('项目已暂停')
       setPausingProject(null)
+      void refetch()
+      void utils.crm.projects.stageCounts.invalidate()
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const updateStageMutation = trpc.crm.projects.updateStage.useMutation({
+    onSuccess: () => {
+      toast.success('项目阶段已更新')
+      setTestingProject(null)
       void refetch()
       void utils.crm.projects.stageCounts.invalidate()
     },
@@ -225,6 +243,21 @@ export function ProjectsContent() {
   const openRevenueDepartment = (project: Project) => {
     setDeptProject(project)
     setDeptOpen(true)
+  }
+
+  const openOpportunitySource = (project: Project) => {
+    setOppSourceProject(project)
+    setOppSourceOpen(true)
+  }
+
+  const openConversionSetting = (project: Project) => {
+    setConversionProject(project)
+    setConversionOpen(true)
+  }
+
+  const handleConfirmTesting = () => {
+    if (!testingProject) return
+    updateStageMutation.mutate({ id: testingProject.id, stage: 'testing' })
   }
 
   const handleConfirmPause = () => {
@@ -318,6 +351,49 @@ export function ProjectsContent() {
         project={deptProject}
         onSaved={() => void refetch()}
       />
+
+      <ProjectOpportunitySourceDialog
+        open={oppSourceOpen}
+        onOpenChange={setOppSourceOpen}
+        project={oppSourceProject}
+        onSaved={() => void refetch()}
+      />
+
+      <ProjectConversionSettingDialog
+        open={conversionOpen}
+        onOpenChange={setConversionOpen}
+        project={conversionProject}
+        onSaved={() => {
+          void refetch()
+          void utils.crm.projects.stageCounts.invalidate()
+        }}
+      />
+
+      <AlertDialog
+        open={testingProject !== null}
+        onOpenChange={(open) => !open && setTestingProject(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>转为测试中？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将项目「{testingProject?.name}」阶段更新为测试中。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button" disabled={updateStageMutation.isPending}>
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={updateStageMutation.isPending}
+              onClick={handleConfirmTesting}
+            >
+              {updateStageMutation.isPending ? '处理中…' : '确认'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <CrmProjectImportDialog
         open={importOpen}
@@ -668,18 +744,24 @@ export function ProjectsContent() {
                           <Tag className="size-4 shrink-0" />
                           设置标签
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => openOpportunitySource(project)}>
+                          <Handshake className="size-4 shrink-0" />
+                          设置商机来源
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => openAllocation(project)}>
                           <DollarSignIcon className="size-4 shrink-0" />
                           项目分成
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem>
-                          <FlaskConical className="size-4 shrink-0" />
-                          转为测试中
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <CircleCheck className="size-4 shrink-0" />
-                          转为已转正
+                        {project.stage === 'lead' ? (
+                          <DropdownMenuItem onClick={() => setTestingProject(project)}>
+                            <FlaskConical className="size-4 shrink-0" />
+                            转为测试中
+                          </DropdownMenuItem>
+                        ) : null}
+                        <DropdownMenuItem onClick={() => openConversionSetting(project)}>
+                          <FileCheck className="size-4 shrink-0" />
+                          项目转正设置
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>

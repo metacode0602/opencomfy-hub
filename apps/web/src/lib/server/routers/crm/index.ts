@@ -20,6 +20,9 @@ import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import { projectAccountManagerDataAccess } from '@/lib/server/dataaccess/crm/project-account-manager'
 import { projectRevenueDepartmentDataAccess } from '@/lib/server/dataaccess/crm/project-revenue-department'
+import { projectOpportunitySourceDataAccess } from '@/lib/server/dataaccess/crm/project-opportunity-source'
+import { projectConversionSettingDataAccess } from '@/lib/server/dataaccess/crm/project-conversion-setting'
+import { projectCommissionPhaseDataAccess } from '@/lib/server/dataaccess/crm/project-commission-phase'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
@@ -41,6 +44,8 @@ import {
   projectUpsertSchema,
   changeProjectAccountManagerSchema,
   changeProjectRevenueDepartmentSchema,
+  changeProjectOpportunitySourceSchema,
+  setProjectConversionSettingSchema,
   staffDepartmentSchema,
   staffUpsertSchema,
   staffListSchema,
@@ -287,6 +292,49 @@ export const crmRouter = createTRPCRouter({
           })
         }
       }),
+    getOpportunitySourceAssignment: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(({ input }) => projectOpportunitySourceDataAccess.getCurrent(input.projectId)),
+    changeOpportunitySource: adminProcedure
+      .input(changeProjectOpportunitySourceSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          await projectOpportunitySourceDataAccess.change({
+            ...input,
+            createdBy,
+          })
+          return projectsDataAccess.getById(input.projectId)
+        } catch (e) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: e instanceof Error ? e.message : '更新商机来源失败',
+          })
+        }
+      }),
+    getConversionSetting: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(({ input }) => projectConversionSettingDataAccess.getByProjectId(input.projectId)),
+    setConversionSetting: adminProcedure
+      .input(setProjectConversionSettingSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          await projectConversionSettingDataAccess.set({
+            ...input,
+            createdBy,
+          })
+          return projectsDataAccess.getById(input.projectId)
+        } catch (e) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: e instanceof Error ? e.message : '项目转正设置失败',
+          })
+        }
+      }),
+    getCommissionPhase: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(({ input }) => projectCommissionPhaseDataAccess.resolve(input.projectId)),
     listActivities: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listActivitiesByProject(input.projectId)),

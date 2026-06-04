@@ -63,6 +63,7 @@ import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
 import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
 import { ProjectMonthMetricCell } from '@/components/dashboard/project-month-metric-cell'
 import { ProjectBillingSyncDialog } from '@/components/dashboard/project-billing-sync-dialog'
+import { ProjectCommissionInfoCard } from '@/components/dashboard/project-commission-info-card'
 import { IconCloudDownload } from '@tabler/icons-react'
 import { CopyToClipboard } from '@/components/shared/copy-to-clipboard'
 
@@ -407,6 +408,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
+          <ProjectCommissionInfoCard project={project} />
           <div className="grid grid-cols-1 gap-6">
             <ProjectBalanceTrendChart projectId={project.id} />
           </div>

@@ -1,6 +1,11 @@
 // 模拟数据类型定义（v3.0：Customer / Project / PlatformTenant）
 
 import type { ProjectStage } from '@/lib/types/crm'
+import type {
+  CommissionMonthPhase,
+  ConversionReason,
+  OpportunitySource,
+} from '@/lib/crm/commission-constants'
 
 /** 期望规模 — 单条卡型及数量 */
 export type ExpectedScaleCardEntry = {
@@ -151,6 +156,19 @@ export interface Project {
   balance: number
   /** 当前收入归属部门 */
   revenueDepartment?: string
+  /** 当前商机来源 */
+  opportunitySource?: OpportunitySource
+  /** 提成成交锚定月 YYYY-MM */
+  dealClosedMonth?: string
+  /** 提成月序分段（第 7 月起固化） */
+  commissionMonthPhase?: CommissionMonthPhase
+  /** 项目转正设置 */
+  conversionSetting?: {
+    reason: ConversionReason
+    signedOn: string
+    conversionDate: string
+    remark?: string
+  }
   tags: ProjectTag[]
 }
 
