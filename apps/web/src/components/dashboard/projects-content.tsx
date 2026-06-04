@@ -84,6 +84,15 @@ const STAFF_FILTER_ALL = 'all'
 const STAFF_FILTER_ME = '__me__'
 const DEPARTMENT_FILTER_ALL = 'all'
 
+/** 已转正且已配置转正日期与成交锚定月时，不再展示「项目转正设置」 */
+function isConversionSettingComplete(project: Project): boolean {
+  return (
+    project.stage === 'converted' &&
+    Boolean(project.conversionSetting?.conversionDate) &&
+    Boolean(project.dealClosedMonth)
+  )
+}
+
 export function ProjectsContent() {
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const [search, setSearch] = useState('')
@@ -759,10 +768,12 @@ export function ProjectsContent() {
                             转为测试中
                           </DropdownMenuItem>
                         ) : null}
-                        <DropdownMenuItem onClick={() => openConversionSetting(project)}>
-                          <FileCheck className="size-4 shrink-0" />
-                          项目转正设置
-                        </DropdownMenuItem>
+                        {!isConversionSettingComplete(project) ? (
+                          <DropdownMenuItem onClick={() => openConversionSetting(project)}>
+                            <FileCheck className="size-4 shrink-0" />
+                            项目转正设置
+                          </DropdownMenuItem>
+                        ) : null}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem>
                           <Receipt className="size-4 shrink-0" />

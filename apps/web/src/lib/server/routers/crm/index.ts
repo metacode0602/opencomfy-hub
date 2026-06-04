@@ -315,6 +315,19 @@ export const crmRouter = createTRPCRouter({
     getConversionSetting: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectConversionSettingDataAccess.getByProjectId(input.projectId)),
+    hasRechargeOnConversionDate: protectedProcedure
+      .input(
+        z.object({
+          projectId: z.string().min(1),
+          conversionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      )
+      .query(({ input }) =>
+        projectConversionSettingDataAccess.hasRechargeOnDate(
+          input.projectId,
+          input.conversionDate,
+        ),
+      ),
     setConversionSetting: adminProcedure
       .input(setProjectConversionSettingSchema)
       .mutation(async ({ input, ctx }) => {

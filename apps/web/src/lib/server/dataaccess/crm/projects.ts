@@ -484,8 +484,22 @@ export const projectsDataAccess = {
       .orderBy(sql`${crmProject.createdAt} desc`)
 
     const projectRows = rows.map((r) => r.project)
-    const enrich = await loadProjectEnrichment(projectRows.map((p) => p.id))
-    return projectRows.map((row) => mapToProject(row, enrich))
+    const projectIds = projectRows.map((p) => p.id)
+    const enrich = await loadProjectEnrichment(projectIds)
+    const conversionByProjectId =
+      await projectConversionSettingDataAccess.getByProjectIds(projectIds)
+    return projectRows.map((row) => {
+      const raw = conversionByProjectId.get(row.id)
+      const conversionSetting = raw
+        ? {
+            reason: raw.reason,
+            signedOn: raw.signedOn,
+            conversionDate: raw.conversionDate,
+            remark: raw.remark ?? undefined,
+          }
+        : undefined
+      return mapToProject(row, enrich, { conversionSetting })
+    })
   },
 
   async listByCustomerId(customerId: string): Promise<Project[]> {

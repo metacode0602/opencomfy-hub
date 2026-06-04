@@ -40,3 +40,9 @@ export function toEffectiveDateString(value: Date | string): string {
 export function todayShanghaiDateString(now = new Date()): string {
   return formatShanghaiDate(now)
 }
+
+/** 转正日期 YYYY-MM-DD → 成交锚定月 YYYY-MM（预览用） */
+export function conversionDateToAnchorMonth(conversionDate: string): string | null {
+  if (!isValidDateString(conversionDate)) return null
+  return conversionDate.slice(0, 7)
+}

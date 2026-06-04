@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import {
@@ -29,8 +29,13 @@ import {
   CONVERSION_REASON_VALUES,
   type ConversionReason,
 } from '@/lib/crm/commission-constants'
-import { todayShanghaiDateString } from '@/lib/crm/project-effective-dates'
+import {
+  conversionDateToAnchorMonth,
+  todayShanghaiDateString,
+} from '@/lib/crm/project-effective-dates'
 import { trpc } from '@/lib/trpc/client'
+
+const SIGNING_REASONS = new Set<ConversionReason>(['offline_signing', 'online_signing'])
 
 export type ProjectConversionSettingDialogProps = {
   open: boolean
@@ -62,6 +67,16 @@ function ProjectConversionSettingForm({
   )
   const [remark, setRemark] = useState(existing?.remark ?? '')
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isValidating, setIsValidating] = useState(false)
+
+  const utils = trpc.useUtils()
+
+  const anchorMonthDisplay = useMemo(() => {
+    if (project.dealClosedMonth) return project.dealClosedMonth
+    return conversionDateToAnchorMonth(conversionDate) ?? ''
+  }, [project.dealClosedMonth, conversionDate])
+
+  const remarkRequired = reason === 'online_registration_only'
 
   const saveMutation = trpc.crm.projects.setConversionSetting.useMutation({
     onSuccess: () => {
@@ -72,7 +87,7 @@ function ProjectConversionSettingForm({
     onError: (e) => setSubmitError(e.message),
   })
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!reason) {
       setSubmitError('请选择转正原因')
       return
@@ -85,6 +100,31 @@ function ProjectConversionSettingForm({
       setSubmitError('请选择转正日期')
       return
     }
+    if (remarkRequired && !remark.trim()) {
+      setSubmitError('仅线上注册须填写备注')
+      return
+    }
+
+    if (SIGNING_REASONS.has(reason)) {
+      setIsValidating(true)
+      setSubmitError(null)
+      try {
+        const hasRecharge = await utils.crm.projects.hasRechargeOnConversionDate.fetch({
+          projectId: project.id,
+          conversionDate,
+        })
+        if (!hasRecharge) {
+          setSubmitError('指定转正日期当天无已完成充值记录，无法保存')
+          return
+        }
+      } catch (e) {
+        setSubmitError(e instanceof Error ? e.message : '充值校验失败')
+        return
+      } finally {
+        setIsValidating(false)
+      }
+    }
+
     saveMutation.mutate({
       projectId: project.id,
       reason,
@@ -150,14 +190,27 @@ function ProjectConversionSettingForm({
             转正日期用于经营留痕；提成月序分段按成交锚定月（首消月）计算。
           </p>
         </div>
+        {anchorMonthDisplay ? (
+          <div className="grid gap-2">
+            <Label>成交锚定月</Label>
+            <p className="text-sm font-medium">{anchorMonthDisplay}</p>
+            <p className="text-xs text-muted-foreground">
+              {project.dealClosedMonth
+                ? '已按首月消费锚定'
+                : '根据转正日期预览；首月有消费后将写入项目主数据'}
+            </p>
+          </div>
+        ) : null}
         <div className="grid gap-2">
-          <Label htmlFor="project-conversion-remark">备注（可选）</Label>
+          <Label htmlFor="project-conversion-remark">
+            备注{remarkRequired ? '（必填）' : '（可选）'}
+          </Label>
           <Textarea
             id="project-conversion-remark"
             rows={2}
             value={remark}
             onChange={(e) => setRemark(e.target.value)}
-            placeholder="补充说明"
+            placeholder={remarkRequired ? '请说明仅线上注册原因' : '补充说明'}
           />
         </div>
       </div>
@@ -168,8 +221,18 @@ function ProjectConversionSettingForm({
         <Button variant="outline" type="button" onClick={() => onOpenChange(false)}>
           取消
         </Button>
-        <Button type="button" onClick={handleSubmit} disabled={saveMutation.isPending}>
-          {saveMutation.isPending ? '保存中…' : existing ? '保存' : '保存并转正'}
+        <Button
+          type="button"
+          onClick={() => void handleSubmit()}
+          disabled={saveMutation.isPending || isValidating}
+        >
+          {isValidating
+            ? '校验充值中…'
+            : saveMutation.isPending
+              ? '保存中…'
+              : existing
+                ? '保存'
+                : '保存并转正'}
         </Button>
       </DialogFooter>
     </>
