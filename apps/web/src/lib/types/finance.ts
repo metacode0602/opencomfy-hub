@@ -72,15 +72,15 @@ export type IncomeAdjustmentHistoryEntry = {
   created_at: string
 }
 
-/** 券卡时调账历史 */
+/** 余额卡时调账历史 */
 export type VoucherCardHoursAdjustmentHistoryEntry = {
   id: string
   cost_id: string
-  voucher_card_hours_before: string | null
-  voucher_card_hours_after: string | null
+  balance_card_hours_before: string | null
+  balance_card_hours_after: string | null
   adjustment_hours: string
-  gifted_duration_cost_excl_tax_before: string | null
-  gifted_duration_cost_excl_tax_after: string | null
+  sold_duration_cost_excl_tax_before: string | null
+  sold_duration_cost_excl_tax_after: string | null
   gross_profit_before: string | null
   gross_profit_after: string | null
   unit_price_per_hour: string

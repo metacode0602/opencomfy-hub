@@ -2,12 +2,19 @@
 
 import { formatMoney } from "@/app/[locale]/(protected)/finance/_lib/display"
 import {
-  deriveCostFieldsAfterVoucherAdjustment,
+  computeAdjustmentAmountFromHistoryEntry,
+  computeBalanceAdjustmentAmount,
+  deriveCostFieldsAfterBalanceAdjustment,
+  formatSignedAdjustmentMoney,
   resolveUnitPricePerHour,
-  validateHoursInput,
+  validateSignedHoursInput,
 } from "@/lib/finance/cost-row-utils"
-import { useFinanceCostOpsStore } from "@/lib/stores/finance-cost-ops-store"
-import type { PlatformCostMonthly } from "@/lib/types/finance"
+import { parseMoney } from "@/lib/finance/income-row-utils"
+import { trpc } from "@/lib/trpc/client"
+import type {
+  PlatformCostMonthly,
+  VoucherCardHoursAdjustmentHistoryEntry,
+} from "@/lib/types/finance"
 import { Button } from "@workspace/ui/components/button"
 import {
   Dialog,
@@ -35,8 +42,9 @@ import { toast } from "sonner"
 type VoucherCardHoursAdjustmentDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  displayRow: PlatformCostMonthly | null
-  baseRow: PlatformCostMonthly | null
+  row: PlatformCostMonthly | null
+  history: VoucherCardHoursAdjustmentHistoryEntry[]
+  onSaved: () => void
 }
 
 function parseHours(value: string | null | undefined): number {
@@ -58,23 +66,33 @@ function formatHours(value: string | null | undefined): string {
 export function VoucherCardHoursAdjustmentDialog({
   open,
   onOpenChange,
-  displayRow: row,
-  baseRow,
+  row,
+  history,
+  onSaved,
 }: VoucherCardHoursAdjustmentDialogProps) {
-  const applyVoucherAdjustment = useFinanceCostOpsStore(
-    (s) => s.applyVoucherCardHoursAdjustment,
-  )
-  const getHistory = useFinanceCostOpsStore((s) => s.getVoucherAdjustmentHistory)
+  const mutation = trpc.finance.periods.applyBalanceCardHoursAdjustment.useMutation({
+    onSuccess: () => {
+      toast.success("余额卡时调账已保存")
+      onSaved()
+      onOpenChange(false)
+    },
+    onError: (err) => {
+      setError(err.message)
+    },
+  })
 
   const [adjustmentHours, setAdjustmentHours] = useState("")
   const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const [historyDetail, setHistoryDetail] =
+    useState<VoucherCardHoursAdjustmentHistoryEntry | null>(null)
 
   useEffect(() => {
     if (!open || !row) return
     setAdjustmentHours("")
     setReason("")
     setError(null)
+    setHistoryDetail(null)
   }, [open, row])
 
   const unitPrice = useMemo(
@@ -82,45 +100,48 @@ export function VoucherCardHoursAdjustmentDialog({
     [row],
   )
 
-  const originalHours = row ? parseHours(row.voucher_card_hours) : 0
+  const originalHours = row ? parseHours(row.balance_card_hours) : 0
   const adjustmentNum = Number(adjustmentHours.trim() || "0")
-  const finalHours = Math.max(0, originalHours - adjustmentNum)
+  const finalHours = Math.max(0, originalHours + adjustmentNum)
 
   const preview = useMemo(() => {
     if (!row || unitPrice == null) return null
     if (Number.isNaN(adjustmentNum) || adjustmentHours.trim() === "") {
       return null
     }
-    return deriveCostFieldsAfterVoucherAdjustment({
+    return deriveCostFieldsAfterBalanceAdjustment({
       row,
       adjustmentHours: adjustmentNum,
       unitPricePerHour: unitPrice,
     })
   }, [row, unitPrice, adjustmentNum, adjustmentHours])
 
-  const history = row ? getHistory(row.id) : []
-
   function handleSubmit() {
-    if (!row || !baseRow) return
+    if (!row) return
 
     if (unitPrice == null) {
       setError("未找到该机房的卡型单价，无法调账")
       return
     }
 
-    const hoursErr = validateHoursInput(adjustmentHours)
+    const hoursErr = validateSignedHoursInput(adjustmentHours)
     if (hoursErr) {
       setError(hoursErr)
       return
     }
 
     const adj = Number(adjustmentHours.trim())
-    if (adj === 0) {
-      setError("调账卡时需大于 0")
+    if (originalHours + adj < 0) {
+      setError(
+        `调账后余额卡时不能为负（原值 ${formatHours(row.balance_card_hours)}，调账值 ${adj >= 0 ? "+" : ""}${adj}）`,
+      )
       return
     }
-    if (adj > originalHours) {
-      setError(`调账卡时不能超过原券卡时（${formatHours(row.voucher_card_hours)}）`)
+    const adjustmentAmount = computeBalanceAdjustmentAmount(adj, unitPrice)
+    if (parseMoney(row.balance_consumption) + adjustmentAmount < 0) {
+      setError(
+        `调账后余额消费不能为负（当前 ${formatMoney(row.balance_consumption)}，本次调账金额 ${formatSignedAdjustmentMoney(adjustmentAmount)}）`,
+      )
       return
     }
 
@@ -129,21 +150,20 @@ export function VoucherCardHoursAdjustmentDialog({
       return
     }
 
-    applyVoucherAdjustment({
-      baseRow,
+    mutation.mutate({
+      costId: row.id,
       adjustmentHours: adj,
-      reason,
+      reason: reason.trim(),
       unitPricePerHour: unitPrice,
     })
-    toast.success("券卡时调账已保存")
-    onOpenChange(false)
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>券卡时调账</DialogTitle>
+          <DialogTitle>余额卡时调账</DialogTitle>
           <DialogDescription>
             {row
               ? `${row.account_manager} · ${row.idc_name ?? "—"} · ${row.card_type ?? "—"}`
@@ -163,16 +183,16 @@ export function VoucherCardHoursAdjustmentDialog({
                 </span>
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                赠送时长成本（不含税）= 单价 ×（原值 − 调账值）÷ 1.06；毛利 = 确认收入（不含税）−
-                售出时长成本（不含税）− 赠送时长成本（不含税）
+                调账金额 = 调账值 × 单价；余额消费 = 原余额消费 + 调账金额（调账值为正加、为负减）；售出时长成本
+                = 单价 ×（原值 + 调账值）÷ 1.06；毛利 = 确认收入 − 售出时长成本 − 赠送时长成本
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="space-y-1 rounded-md border p-3">
-                <p className="text-xs text-muted-foreground">原值（券卡时）</p>
+                <p className="text-xs text-muted-foreground">原值（余额卡时）</p>
                 <p className="text-lg font-semibold tabular-nums">
-                  {formatHours(row.voucher_card_hours)}
+                  {formatHours(row.balance_card_hours)}
                 </p>
               </div>
               <div className="space-y-2 rounded-md border p-3">
@@ -186,7 +206,7 @@ export function VoucherCardHoursAdjustmentDialog({
                     setAdjustmentHours(e.target.value)
                     setError(null)
                   }}
-                  placeholder="扣减卡时"
+                  placeholder="如 +10 或 -5"
                 />
               </div>
               <div className="space-y-1 rounded-md border p-3">
@@ -194,20 +214,28 @@ export function VoucherCardHoursAdjustmentDialog({
                 <p className="text-lg font-semibold tabular-nums">
                   {adjustmentHours.trim() !== "" && !Number.isNaN(adjustmentNum)
                     ? formatHours(String(finalHours))
-                    : formatHours(row.voucher_card_hours)}
+                    : formatHours(row.balance_card_hours)}
                 </p>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">余额消费</p>
+                <p className="mt-1 text-lg font-semibold tabular-nums">
+                  {preview
+                    ? formatMoney(preview.balanceConsumptionAfter)
+                    : formatMoney(row.balance_consumption)}
+                </p>
+              </div>
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">
-                  赠送时长成本（不含税）
+                  售出时长成本（不含税）
                 </p>
                 <p className="mt-1 text-lg font-semibold tabular-nums">
                   {preview
-                    ? formatMoney(preview.giftedDurationCostExclTax)
-                    : formatMoney(row.gifted_duration_cost_excl_tax)}
+                    ? formatMoney(preview.soldDurationCostExclTax)
+                    : formatMoney(row.sold_duration_cost_excl_tax)}
                 </p>
               </div>
               <div className="rounded-md border p-3">
@@ -229,7 +257,7 @@ export function VoucherCardHoursAdjustmentDialog({
                   setReason(e.target.value)
                   setError(null)
                 }}
-                placeholder="说明本次券卡时调账原因"
+                placeholder="说明本次余额卡时调账原因"
                 rows={3}
               />
             </div>
@@ -240,36 +268,51 @@ export function VoucherCardHoursAdjustmentDialog({
 
         {row && history.length > 0 && (
           <div className="min-h-0 flex-1 space-y-2">
-            <p className="text-sm font-medium">调账历史</p>
+            <p className="text-sm font-medium">
+              调账历史
+              <span className="ml-2 font-normal text-muted-foreground">
+                点击行查看原因
+              </span>
+            </p>
             <ScrollArea className="h-[min(220px,30vh)] rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="whitespace-nowrap">时间</TableHead>
-                    <TableHead className="text-right">券卡时（原→新）</TableHead>
-                    <TableHead className="text-right">赠送成本（原→新）</TableHead>
-                    <TableHead>原因</TableHead>
+                    <TableHead className="text-right">调账值</TableHead>
+                    <TableHead className="text-right">余额卡时（原→新）</TableHead>
+                    <TableHead className="text-right">售出成本（原→新）</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...history].reverse().map((h) => (
-                    <TableRow key={h.id}>
-                      <TableCell className="whitespace-nowrap text-xs tabular-nums">
-                        {h.created_at.slice(0, 19).replace("T", " ")}
-                      </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums">
-                        {formatHours(h.voucher_card_hours_before)} →{" "}
-                        {formatHours(h.voucher_card_hours_after)}
-                      </TableCell>
-                      <TableCell className="text-right text-xs tabular-nums">
-                        {formatMoney(h.gifted_duration_cost_excl_tax_before)} →{" "}
-                        {formatMoney(h.gifted_duration_cost_excl_tax_after)}
-                      </TableCell>
-                      <TableCell className="max-w-[120px] text-xs">
-                        {h.reason}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {[...history].reverse().map((h) => {
+                    const adj = Number(h.adjustment_hours)
+                    const adjLabel = Number.isNaN(adj)
+                      ? h.adjustment_hours
+                      : `${adj >= 0 ? "+" : ""}${adj}`
+                    return (
+                      <TableRow
+                        key={h.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => setHistoryDetail(h)}
+                      >
+                        <TableCell className="whitespace-nowrap text-xs tabular-nums">
+                          {h.created_at.slice(0, 19).replace("T", " ")}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {adjLabel}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {formatHours(h.balance_card_hours_before)} →{" "}
+                          {formatHours(h.balance_card_hours_after)}
+                        </TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          {formatMoney(h.sold_duration_cost_excl_tax_before)} →{" "}
+                          {formatMoney(h.sold_duration_cost_excl_tax_after)}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </ScrollArea>
@@ -280,11 +323,106 @@ export function VoucherCardHoursAdjustmentDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleSubmit} disabled={!row}>
-            保存调账
+          <Button
+            onClick={handleSubmit}
+            disabled={!row || mutation.isPending}
+          >
+            {mutation.isPending ? "保存中…" : "保存调账"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog
+      open={historyDetail != null}
+      onOpenChange={(next) => {
+        if (!next) setHistoryDetail(null)
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>调账详情</DialogTitle>
+          <DialogDescription>
+            {historyDetail
+              ? historyDetail.created_at.slice(0, 19).replace("T", " ")
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+        {historyDetail && (
+          <div className="grid gap-3 text-sm">
+            <div className="grid grid-cols-3 gap-2 rounded-md border p-3">
+              <div>
+                <p className="text-xs text-muted-foreground">调账值</p>
+                <p className="font-medium tabular-nums">
+                  {(() => {
+                    const adj = Number(historyDetail.adjustment_hours)
+                    return Number.isNaN(adj)
+                      ? historyDetail.adjustment_hours
+                      : `${adj >= 0 ? "+" : ""}${adj}`
+                  })()}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">单价</p>
+                <p className="font-medium tabular-nums">
+                  ¥
+                  {Number(historyDetail.unit_price_per_hour).toLocaleString(
+                    "zh-CN",
+                    {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 4,
+                    },
+                  )}
+                  /卡时
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">调账金额</p>
+                <p className="font-medium tabular-nums">
+                  {formatMoney(
+                    String(
+                      computeAdjustmentAmountFromHistoryEntry(historyDetail),
+                    ),
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">余额卡时</p>
+              <p className="mt-1 tabular-nums">
+                {formatHours(historyDetail.balance_card_hours_before)} →{" "}
+                {formatHours(historyDetail.balance_card_hours_after)}
+              </p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">售出时长成本（不含税）</p>
+              <p className="mt-1 tabular-nums">
+                {formatMoney(historyDetail.sold_duration_cost_excl_tax_before)} →{" "}
+                {formatMoney(historyDetail.sold_duration_cost_excl_tax_after)}
+              </p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">毛利</p>
+              <p className="mt-1 tabular-nums">
+                {formatMoney(historyDetail.gross_profit_before)} →{" "}
+                {formatMoney(historyDetail.gross_profit_after)}
+              </p>
+            </div>
+            <div className="rounded-md border p-3">
+              <p className="text-xs text-muted-foreground">调账原因</p>
+              <p className="mt-1 whitespace-pre-wrap break-words">
+                {historyDetail.reason}
+              </p>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setHistoryDetail(null)}>
+            关闭
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

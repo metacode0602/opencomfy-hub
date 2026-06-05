@@ -1,9 +1,7 @@
 "use client"
 
 import { downloadCostDetailExcel } from "@/lib/finance/cost-detail-export"
-import { mergeCostRowsWithOverrides } from "@/lib/finance/cost-row-utils"
 import { LocaleLink } from "@/lib/i18n/navigation"
-import { useFinanceCostOpsStore } from "@/lib/stores/finance-cost-ops-store"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
 import {
@@ -31,19 +29,17 @@ export default function FinancePeriodCostPage() {
 
   const period = bundle?.period
   const rows = useMemo(() => bundle?.cost ?? [], [bundle?.cost])
-  const overrides = useFinanceCostOpsStore((s) => s.overrides)
-  const displayRows = useMemo(
-    () => mergeCostRowsWithOverrides(rows, overrides),
-    [rows, overrides],
+  const adjustmentHistories = useMemo(
+    () => bundle?.costAdjustmentHistories ?? {},
+    [bundle?.costAdjustmentHistories],
   )
-  const hasRecordRows = displayRows.some((r) => r.type === "record")
+  const hasRecordRows = rows.some((r) => r.type === "record")
+  const utils = trpc.useUtils()
   const [regenerateOpen, setRegenerateOpen] = useState(false)
   const canRegenerateCost =
     period?.status !== "published" &&
     period?.status !== "adjusted" &&
     period?.status !== "void"
-
-  const utils = trpc.useUtils()
 
   function handleExportExcel() {
     if (!hasRecordRows) {
@@ -52,7 +48,7 @@ export default function FinancePeriodCostPage() {
     }
     if (!period) return
     const ok = downloadCostDetailExcel({
-      rows: displayRows,
+      rows,
       periodCode: period.period_code,
     })
     if (ok) toast.success("成本毛利明细 Excel 已下载")
@@ -155,7 +151,13 @@ export default function FinancePeriodCostPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <CostGroupedEditable baseRows={rows} />
+          <CostGroupedEditable
+            rows={rows}
+            adjustmentHistories={adjustmentHistories}
+            onAdjustmentSaved={() => {
+              void utils.finance.periods.getBundle.invalidate({ id })
+            }}
+          />
         </CardContent>
       </Card>
 

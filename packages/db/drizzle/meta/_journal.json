@@ -43,6 +43,20 @@
       "when": 1780625791777,
       "tag": "0005_small_hellfire_club",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780700000000,
+      "tag": "0006_balance_card_hours_adjustment",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780645897163,
+      "tag": "0007_hard_sersi",
+      "breakpoints": true
     }
   ]
 }

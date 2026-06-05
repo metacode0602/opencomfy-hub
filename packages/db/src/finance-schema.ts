@@ -812,7 +812,7 @@ export const incomeAdjustmentHistory = pgTable(
   (table) => [index("income_adjustment_history_income_id_idx").on(table.incomeId)],
 )
 
-/** 券卡时调账历史 */
+/** 余额卡时调账历史 */
 export const voucherCardHoursAdjustmentHistory = pgTable(
   "voucher_card_hours_adjustment_history",
   {
@@ -820,11 +820,11 @@ export const voucherCardHoursAdjustmentHistory = pgTable(
     costId: text("cost_id")
       .notNull()
       .references(() => platformCostMonthly.id, { onDelete: "cascade" }),
-    voucherCardHoursBefore: cardHours("voucher_card_hours_before"),
-    voucherCardHoursAfter: cardHours("voucher_card_hours_after"),
+    balanceCardHoursBefore: cardHours("balance_card_hours_before"),
+    balanceCardHoursAfter: cardHours("balance_card_hours_after"),
     adjustmentHours: cardHours("adjustment_hours").notNull(),
-    giftedDurationCostExclTaxBefore: money("gifted_duration_cost_excl_tax_before"),
-    giftedDurationCostExclTaxAfter: money("gifted_duration_cost_excl_tax_after"),
+    soldDurationCostExclTaxBefore: money("sold_duration_cost_excl_tax_before"),
+    soldDurationCostExclTaxAfter: money("sold_duration_cost_excl_tax_after"),
     grossProfitBefore: money("gross_profit_before"),
     grossProfitAfter: money("gross_profit_after"),
     unitPricePerHour: money("unit_price_per_hour").notNull(),

@@ -1,39 +1,26 @@
 "use client"
 
-import { mergeCostRowsWithOverrides } from "@/lib/finance/cost-row-utils"
-import { useFinanceCostOpsStore } from "@/lib/stores/finance-cost-ops-store"
-import type { PlatformCostMonthly } from "@/lib/types/finance"
-import { useMemo, useState } from "react"
+import type { PlatformCostMonthly, VoucherCardHoursAdjustmentHistoryEntry } from "@/lib/types/finance"
+import { useState } from "react"
 import { VoucherCardHoursAdjustmentDialog } from "../../../_components/voucher-card-hours-adjustment-dialog"
 import { CostGroupedTable } from "./cost-grouped-table"
 
 type CostGroupedEditableProps = {
-  baseRows: PlatformCostMonthly[]
+  rows: PlatformCostMonthly[]
+  adjustmentHistories: Record<string, VoucherCardHoursAdjustmentHistoryEntry[]>
+  onAdjustmentSaved: () => void
 }
 
-export function CostGroupedEditable({ baseRows }: CostGroupedEditableProps) {
-  const overrides = useFinanceCostOpsStore((s) => s.overrides)
-  const voucherHistories = useFinanceCostOpsStore(
-    (s) => s.voucherAdjustmentHistories,
-  )
-
-  const rows = useMemo(
-    () => mergeCostRowsWithOverrides(baseRows, overrides),
-    [baseRows, overrides],
-  )
-
-  const baseById = useMemo(
-    () => new Map(baseRows.map((r) => [r.id, r])),
-    [baseRows],
-  )
-
-  const [adjDisplay, setAdjDisplay] = useState<PlatformCostMonthly | null>(null)
-  const [adjBase, setAdjBase] = useState<PlatformCostMonthly | null>(null)
+export function CostGroupedEditable({
+  rows,
+  adjustmentHistories,
+  onAdjustmentSaved,
+}: CostGroupedEditableProps) {
+  const [adjRow, setAdjRow] = useState<PlatformCostMonthly | null>(null)
   const [adjOpen, setAdjOpen] = useState(false)
 
-  function openVoucherAdjust(display: PlatformCostMonthly) {
-    setAdjDisplay(display)
-    setAdjBase(baseById.get(display.id) ?? display)
+  function openBalanceAdjust(row: PlatformCostMonthly) {
+    setAdjRow(row)
     setAdjOpen(true)
   }
 
@@ -42,16 +29,18 @@ export function CostGroupedEditable({ baseRows }: CostGroupedEditableProps) {
       <CostGroupedTable
         rows={rows}
         editable
-        onVoucherAdjust={openVoucherAdjust}
+        onVoucherAdjust={openBalanceAdjust}
         voucherAdjustmentHistoryCount={(id) =>
-          voucherHistories[id]?.length ?? 0
+          adjustmentHistories[id]?.length ?? 0
         }
+        adjustmentHistories={adjustmentHistories}
       />
       <VoucherCardHoursAdjustmentDialog
         open={adjOpen}
         onOpenChange={setAdjOpen}
-        displayRow={adjDisplay}
-        baseRow={adjBase}
+        row={adjRow}
+        history={adjRow ? (adjustmentHistories[adjRow.id] ?? []) : []}
+        onSaved={onAdjustmentSaved}
       />
     </>
   )

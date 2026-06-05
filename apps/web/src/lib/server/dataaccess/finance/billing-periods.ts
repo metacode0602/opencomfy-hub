@@ -4,6 +4,7 @@ import {
   platformCostMonthly,
   platformIncomeMonthly,
 } from '@workspace/db/schema'
+import { listBalanceCardHoursAdjustmentHistories } from './apply-balance-card-hours-adjustment'
 import { desc, eq } from 'drizzle-orm'
 import {
   computeBillingPeriodCost,
@@ -173,6 +174,8 @@ export const financeBillingPeriodsDataAccess = {
       .select()
       .from(platformCostMonthly)
       .where(eq(platformCostMonthly.billingPeriodId, periodId))
+    const costAdjustmentHistories =
+      await listBalanceCardHoursAdjustmentHistories(periodId)
     return {
       period,
       income: income.map((r) => ({
@@ -223,7 +226,19 @@ export const financeBillingPeriodsDataAccess = {
         created_at: r.createdAt.toISOString(),
         updated_at: r.updatedAt?.toISOString() ?? null,
       })),
+      costAdjustmentHistories,
     }
+  },
+
+  async applyBalanceCardHoursAdjustment(
+    ...args: Parameters<
+      (typeof import('./apply-balance-card-hours-adjustment'))['applyBalanceCardHoursAdjustment']
+    >
+  ) {
+    const { applyBalanceCardHoursAdjustment } = await import(
+      './apply-balance-card-hours-adjustment'
+    )
+    return applyBalanceCardHoursAdjustment(...args)
   },
 
   async importExcelFile(

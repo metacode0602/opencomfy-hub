@@ -387,6 +387,29 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    applyBalanceCardHoursAdjustment: adminProcedure
+      .input(
+        z.object({
+          costId: z.string(),
+          adjustmentHours: z.number(),
+          reason: z.string().min(1),
+          unitPricePerHour: z.number().positive().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.applyBalanceCardHoursAdjustment(
+            {
+              ...input,
+              actorId,
+            },
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     saveSupplementary: adminProcedure
       .input(
         z.object({
