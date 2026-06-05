@@ -111,6 +111,7 @@ function ProjectBillingSyncDialogBody({
 
       void utils.crm.projects.getById.invalidate({ id: projectId })
       void utils.crm.projects.listBills.invalidate({ projectId })
+      void utils.crm.projects.listMonthlyBills.invalidate({ projectId })
       void utils.crm.projects.listRecharges.invalidate({ projectId })
       void utils.crm.projects.listOrders.invalidate({ projectId })
       void utils.crm.projects.listConsumptions.invalidate({ projectId })

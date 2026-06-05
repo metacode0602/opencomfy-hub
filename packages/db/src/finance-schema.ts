@@ -17,6 +17,7 @@
 
 import { relations, sql } from "drizzle-orm"
 import {
+  boolean,
   date,
   index,
   integer,
@@ -76,7 +77,17 @@ export const billingPeriod = pgTable(
     status: varchar("status", { length: 32 }).notNull().default("draft"),
     /** purge / 重新生成后置 NULL，计算完成后写入 */
     totalIncome: money("total_income"),
+    /** 企业收入：platform_income_monthly 总消费合计 */
+    enterpriseIncome: money("enterprise_income"),
+    /** 个人收入：billing_period_personal_income_summary.non_project 总消费 */
+    personalIncome: money("personal_income"),
+    /** 收入合计：企业收入 + 个人收入 */
+    incomeTotal: money("income_total"),
     totalCost: money("total_cost"),
+    /** 项目成本：外部租户（有项目绑定）成本合计 */
+    projectCost: money("project_cost"),
+    /** 内部用户成本：内部租户成本合计 */
+    internalUserCost: money("internal_user_cost"),
     totalGrossProfit: money("total_gross_profit"),
     supplementary: money("supplementary"),
     balanceIncome: money("balance_income"),
@@ -84,6 +95,10 @@ export const billingPeriod = pgTable(
     lastComputedAt: timestamp("last_computed_at", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
+    /** 为 true 时整月单窗口上传客户账单，成本按账期结束日刊例价计算 */
+    ignoreListPriceWindows: boolean("ignore_list_price_windows")
+      .notNull()
+      .default(false),
     ...financeTimestamps,
   },
   (table) => [
@@ -825,6 +840,172 @@ export const voucherCardHoursAdjustmentHistory = pgTable(
 )
 
 // ---------------------------------------------------------------------------
+// 弹性算力提成派生（独立于 platform_cost_monthly）
+// ---------------------------------------------------------------------------
+
+export const platformCostCommissionDeriveRun = pgTable(
+  "platform_cost_commission_derive_run",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    policyCode: varchar("policy_code", { length: 64 }).notNull(),
+    runVersion: integer("run_version").notNull().default(1),
+    status: varchar("status", { length: 32 }).notNull(), // running | calculated | failed
+    startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    errorSummary: text("error_summary"),
+    ...financeTimestamps,
+  },
+  (table) => [
+    index("platform_cost_commission_derive_run_period_idx").on(table.billingPeriodId),
+    uniqueIndex("platform_cost_commission_derive_run_period_policy_ver_uk").on(
+      table.billingPeriodId,
+      table.policyCode,
+      table.runVersion,
+    ),
+  ],
+)
+
+export const platformCostCommissionDeriveProject = pgTable(
+  "platform_cost_commission_derive_project",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => platformCostCommissionDeriveRun.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    settlementMonth: varchar("settlement_month", { length: 7 }).notNull(),
+    flexConsumption: money("flex_consumption").notNull().default("0"),
+    grossProfitBase: money("gross_profit_base").notNull().default("0"),
+    grossProfitRateDisplay: money("gross_profit_rate_display"),
+    opportunitySource: varchar("opportunity_source", { length: 32 }),
+    dealClosedMonth: varchar("deal_closed_month", { length: 7 }),
+    monthPhase: varchar("month_phase", { length: 32 }),
+    monthsSinceDeal: integer("months_since_deal"),
+    accountManagerStaffId: text("account_manager_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    revenueDepartment: varchar("revenue_department", { length: 32 }),
+    skippedCommission: boolean("skipped_commission").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_cost_commission_derive_project_run_project_uk").on(
+      table.runId,
+      table.projectId,
+    ),
+    index("platform_cost_commission_derive_project_run_idx").on(table.runId),
+  ],
+)
+
+export const platformCostCommissionDeriveLine = pgTable(
+  "platform_cost_commission_derive_line",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => platformCostCommissionDeriveRun.id, { onDelete: "cascade" }),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "cascade" }),
+    recipientRole: varchar("recipient_role", { length: 32 }).notNull(),
+    recipientStaffId: text("recipient_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    recipientDept: varchar("recipient_dept", { length: 32 }),
+    monthPhase: varchar("month_phase", { length: 32 }).notNull(),
+    rate: money("rate").notNull().default("0"),
+    platformRatio: money("platform_ratio").notNull().default("1"),
+    grossProfitBase: money("gross_profit_base").notNull().default("0"),
+    commissionAmount: money("commission_amount").notNull().default("0"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_cost_commission_derive_line_run_project_role_uk").on(
+      table.runId,
+      table.projectId,
+      table.recipientRole,
+    ),
+    index("platform_cost_commission_derive_line_run_idx").on(table.runId),
+  ],
+)
+
+export const platformCostCommissionDeriveAmPhase = pgTable(
+  "platform_cost_commission_derive_am_phase",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => platformCostCommissionDeriveRun.id, { onDelete: "cascade" }),
+    accountManagerStaffId: text("account_manager_staff_id")
+      .notNull()
+      .references(() => userStaff.id, { onDelete: "cascade" }),
+    monthPhase: varchar("month_phase", { length: 32 }).notNull(),
+    projectCount: integer("project_count").notNull().default(0),
+    grossProfitBaseSum: money("gross_profit_base_sum").notNull().default("0"),
+    salesCommissionSum: money("sales_commission_sum").notNull().default("0"),
+    flexConsumptionSum: money("flex_consumption_sum"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_cost_commission_derive_am_phase_run_am_phase_uk").on(
+      table.runId,
+      table.accountManagerStaffId,
+      table.monthPhase,
+    ),
+  ],
+)
+
+export const platformCostCommissionDeriveDeptPhase = pgTable(
+  "platform_cost_commission_derive_dept_phase",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => platformCostCommissionDeriveRun.id, { onDelete: "cascade" }),
+    recipientDept: varchar("recipient_dept", { length: 32 }).notNull(),
+    monthPhase: varchar("month_phase", { length: 32 }).notNull(),
+    grossProfitBaseSum: money("gross_profit_base_sum").notNull().default("0"),
+    commissionPoolSum: money("commission_pool_sum").notNull().default("0"),
+    projectCount: integer("project_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_cost_commission_derive_dept_phase_run_dept_phase_uk").on(
+      table.runId,
+      table.recipientDept,
+      table.monthPhase,
+    ),
+  ],
+)
+
+export const platformCostCommissionDeriveIssue = pgTable(
+  "platform_cost_commission_derive_issue",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => platformCostCommissionDeriveRun.id, { onDelete: "cascade" }),
+    projectId: text("project_id").references(() => crmProject.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 64 }).notNull(),
+    message: text("message").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("platform_cost_commission_derive_issue_run_project_code_uk").on(
+      table.runId,
+      table.projectId,
+      table.code,
+    ),
+    index("platform_cost_commission_derive_issue_run_idx").on(table.runId),
+  ],
+)
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -841,6 +1022,7 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   reconciliationReport: one(billingPeriodReconciliationReport),
   operationLogs: many(billingPeriodOperationLog),
   personalIncomeSummaries: many(billingPeriodPersonalIncomeSummary),
+  commissionDeriveRuns: many(platformCostCommissionDeriveRun),
 }))
 
 export const billingPeriodPersonalIncomeSummaryRelations = relations(
@@ -1089,4 +1271,10 @@ export type BillingPeriodReconciliationReportRow =
 export type BillingPeriodOperationLogRow = typeof billingPeriodOperationLog.$inferSelect
 export type BillingPeriodPersonalIncomeSummaryRow =
   typeof billingPeriodPersonalIncomeSummary.$inferSelect
+export type PlatformCostCommissionDeriveRunRow =
+  typeof platformCostCommissionDeriveRun.$inferSelect
+export type PlatformCostCommissionDeriveProjectRow =
+  typeof platformCostCommissionDeriveProject.$inferSelect
+export type PlatformCostCommissionDeriveLineRow =
+  typeof platformCostCommissionDeriveLine.$inferSelect
 export type PersonalIncomeSummaryKind = "non_project" | "blacklist"

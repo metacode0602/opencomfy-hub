@@ -51,6 +51,7 @@ import {
 } from './list-import-tenant-bindings'
 import type { ImportSlotKey } from './constants'
 import { SLOT_TO_FILE_TYPE } from './constants'
+import { periodUsesPeriodEndCostPricing } from './billing-period-pricing-mode'
 
 async function financeImport() {
   return import('./import')
@@ -67,12 +68,18 @@ export type BillingPeriodDto = {
   period_end: string
   status: string
   total_income: string | null
+  enterprise_income: string | null
+  personal_income: string | null
+  income_total: string | null
   total_cost: string | null
+  project_cost: string | null
+  internal_user_cost: string | null
   supplementary: string | null
   balance_income: string | null
   baremetal_income: string | null
   last_computed_at: string | null
   published_at: string | null
+  ignore_list_price_windows: boolean
 }
 
 function mapPeriod(row: typeof billingPeriod.$inferSelect): BillingPeriodDto {
@@ -83,12 +90,18 @@ function mapPeriod(row: typeof billingPeriod.$inferSelect): BillingPeriodDto {
     period_end: row.periodEnd,
     status: row.status,
     total_income: row.totalIncome,
+    enterprise_income: row.enterpriseIncome,
+    personal_income: row.personalIncome,
+    income_total: row.incomeTotal,
     total_cost: row.totalCost,
+    project_cost: row.projectCost,
+    internal_user_cost: row.internalUserCost,
     supplementary: row.supplementary,
     balance_income: row.balanceIncome,
     baremetal_income: row.baremetalIncome,
     last_computed_at: row.lastComputedAt?.toISOString() ?? null,
     published_at: row.publishedAt?.toISOString() ?? null,
+    ignore_list_price_windows: row.ignoreListPriceWindows ?? false,
   }
 }
 
@@ -109,6 +122,7 @@ export const financeBillingPeriodsDataAccess = {
     periodCode: string
     periodStart: string
     periodEnd: string
+    ignoreListPriceWindows?: boolean
   }): Promise<BillingPeriodDto> {
     const existing = await db.query.billingPeriod.findFirst({
       where: eq(billingPeriod.periodCode, input.periodCode.trim()),
@@ -126,6 +140,7 @@ export const financeBillingPeriodsDataAccess = {
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
       status: 'draft',
+      ignoreListPriceWindows: input.ignoreListPriceWindows ?? false,
     })
     await syncTenantBillWindowsForPeriod(id)
     financeLog('period', 'created', { id, periodCode: input.periodCode })
@@ -232,6 +247,8 @@ export const financeBillingPeriodsDataAccess = {
     const period = await this.getById(periodId)
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
     const costMode = options?.costMode ?? 'create'
+    const usePeriodEndPricing =
+      costMode === 'regenerate' || periodUsesPeriodEndCostPricing(period)
     const windows = await listTenantBillWindows(periodId)
     const priceWindowInfo = await detectPlatformListPriceWindows({
       periodStart: period.period_start,
@@ -239,13 +256,12 @@ export const financeBillingPeriodsDataAccess = {
     })
     const slots = await getImportSlotStatuses(periodId)
     const cross = await validateCrossFileImports(periodId)
-    const missingTenantBill =
-      costMode === 'regenerate'
-        ? await findMissingTenantBillPricingAtPeriodEnd({
-            periodId,
-            periodEnd: period.period_end,
-          })
-        : await findMissingTenantBillPricing({ periodId })
+    const missingTenantBill = usePeriodEndPricing
+      ? await findMissingTenantBillPricingAtPeriodEnd({
+          periodId,
+          periodEnd: period.period_end,
+        })
+      : await findMissingTenantBillPricing({ periodId })
     const missingBaremetal = await findMissingBaremetalPlatformListPrice({ periodId })
     const missingPricing = [...missingTenantBill, ...missingBaremetal]
     const tenantBillReady =
@@ -352,31 +368,8 @@ export const financeBillingPeriodsDataAccess = {
         .where(eq(platformIncomeMonthly.id, item.incomeRowId))
     }
 
-    const incomeRows = await db
-      .select()
-      .from(platformIncomeMonthly)
-      .where(eq(platformIncomeMonthly.billingPeriodId, input.billingPeriodId))
-
-    let totalIncome = 0
-    let balanceIncome = 0
-    let baremetalIncome = 0
-    let supplementary = 0
-    for (const row of incomeRows) {
-      totalIncome += Number(row.totalConsumption ?? 0)
-      balanceIncome += Number(row.balanceConsumption ?? 0)
-      baremetalIncome += Number(row.bareMetalConsumption ?? 0)
-      supplementary += Number(row.supplementaryConsumption ?? 0)
-    }
-
-    await db
-      .update(billingPeriod)
-      .set({
-        totalIncome: toMoneyString(totalIncome),
-        balanceIncome: toMoneyString(balanceIncome),
-        baremetalIncome: toMoneyString(baremetalIncome),
-        supplementary: toMoneyString(supplementary),
-      })
-      .where(eq(billingPeriod.id, input.billingPeriodId))
+    const { refreshBillingPeriodPeriodTotals } = await import('./billing-period-period-totals')
+    await refreshBillingPeriodPeriodTotals(input.billingPeriodId)
 
     await appendOperationLog({
       billingPeriodId: input.billingPeriodId,

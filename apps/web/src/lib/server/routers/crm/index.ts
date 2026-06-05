@@ -470,6 +470,9 @@ export const crmRouter = createTRPCRouter({
     listBills: protectedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listBillsByProject(input.projectId)),
+    listMonthlyBills: protectedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(({ input }) => billingDataAccess.listMonthlyBillsByProject(input.projectId)),
     previewTenantProjectImport: adminProcedure
       .input(
         z.object({

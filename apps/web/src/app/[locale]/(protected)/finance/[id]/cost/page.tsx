@@ -94,6 +94,9 @@ export default function FinancePeriodCostPage() {
         <Button variant="outline" size="sm" asChild>
           <LocaleLink href={`/finance/${id}/income`}>查看收入</LocaleLink>
         </Button>
+        <Button variant="outline" size="sm" asChild>
+          <LocaleLink href={`/finance/${id}/commission`}>弹性算力提成</LocaleLink>
+        </Button>
       </div>
 
       <Card>

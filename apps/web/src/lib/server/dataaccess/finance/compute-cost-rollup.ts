@@ -13,11 +13,12 @@ import {
 import { parseMoney, toMoneyString } from '@/lib/finance/income-row-utils'
 import {
   billingPeriodCostSourceLine,
+  billingTenant,
   dataCenter,
   gpuCardType,
   platformCostMonthly,
 } from '@workspace/db/schema'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import {
   findLatestPricingSnapshot,
   type CostPricingSnapshotRow,
@@ -65,14 +66,14 @@ function readSourceLinePricingAsOf(
   line: typeof billingPeriodCostSourceLine.$inferSelect,
   periodEnd: string,
   windows: { id: string; windowEnd: string }[],
-  mode: ComputeCostMode,
+  usePeriodEndPricing: boolean,
 ): string {
   const meta = line.sourceMeta as { pricing_as_of?: string } | null
   if (line.kind === 'baremetal' && meta?.pricing_as_of) {
     return meta.pricing_as_of
   }
   if (line.windowId) {
-    if (mode === 'regenerate') return periodEnd
+    if (usePeriodEndPricing) return periodEnd
     return windows.find((w) => w.id === line.windowId)?.windowEnd ?? periodEnd
   }
   return periodEnd
@@ -200,15 +201,46 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
   issues: string[]
   periodEnd: string
   mode?: ComputeCostMode
-}): Promise<number> {
-  const { billingPeriodId: periodId, snapshots, issues, periodEnd, mode = 'create' } = input
+  usePeriodEndPricing?: boolean
+}): Promise<{
+  costCount: number
+  projectCost: number
+  internalUserCost: number
+}> {
+  const {
+    billingPeriodId: periodId,
+    snapshots,
+    issues,
+    periodEnd,
+    mode = 'create',
+    usePeriodEndPricing = mode === 'regenerate',
+  } = input
 
   const lines = await db
     .select()
     .from(billingPeriodCostSourceLine)
     .where(eq(billingPeriodCostSourceLine.billingPeriodId, periodId))
 
-  if (lines.length === 0) return 0
+  if (lines.length === 0) {
+    return { costCount: 0, projectCost: 0, internalUserCost: 0 }
+  }
+
+  const tenantIds = [
+    ...new Set(lines.map((l) => l.tenantId).filter((id): id is string => Boolean(id))),
+  ]
+  const tenantTypeById = new Map<string, string>()
+  if (tenantIds.length > 0) {
+    const tenantRows = await db
+      .select({ id: billingTenant.id, type: billingTenant.type })
+      .from(billingTenant)
+      .where(inArray(billingTenant.id, tenantIds))
+    for (const row of tenantRows) {
+      tenantTypeById.set(row.id, row.type)
+    }
+  }
+
+  let projectCostAcc = 0
+  let internalUserCostAcc = 0
 
   const windows = await listTenantBillWindows(periodId)
   const windowIds = windows.map((w) => w.id)
@@ -216,7 +248,7 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
   const pricingPairs = lines.map((line) => ({
     dataCenterId: line.dataCenterId,
     gpuCardTypeId: line.gpuCardTypeId,
-    asOfDate: readSourceLinePricingAsOf(line, periodEnd, windows, mode),
+    asOfDate: readSourceLinePricingAsOf(line, periodEnd, windows, usePeriodEndPricing),
   }))
   const { map: pricingMap } = await loadResolvedPricingMap({ pairs: pricingPairs })
 
@@ -245,7 +277,7 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
       balanceCardHours: Number(line.balanceCardHours ?? 0),
       voucherCardHours: Number(line.voucherCardHours ?? 0),
     }
-    const asOf = readSourceLinePricingAsOf(line, periodEnd, windows, mode)
+    const asOf = readSourceLinePricingAsOf(line, periodEnd, windows, usePeriodEndPricing)
     const resolved = pricingMap.get(
       pricingRefKey(line.dataCenterId, line.gpuCardTypeId, asOf),
     )
@@ -261,6 +293,12 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
       pricing,
       lineMetrics,
     )
+    const lineCost = sold + gifted
+    if (line.tenantId && tenantTypeById.get(line.tenantId) === 'internal') {
+      internalUserCostAcc += lineCost
+    } else {
+      projectCostAcc += lineCost
+    }
     const snap = findLatestPricingSnapshot({
       snapshots,
       dataCenterId: line.dataCenterId,
@@ -358,7 +396,13 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
     })
   }
 
-  if (recordRows.length === 0) return 0
+  if (recordRows.length === 0) {
+    return {
+      costCount: 0,
+      projectCost: projectCostAcc,
+      internalUserCost: internalUserCostAcc,
+    }
+  }
 
   const staffSumRows = buildStaffSumRows(periodId, recordRows)
 
@@ -415,5 +459,9 @@ export async function rollupSourceLinesToPlatformMonthly(input: {
     recordCount: recordRows.length,
     staffSumCount: staffSumRows.length,
   })
-  return recordRows.length
+  return {
+    costCount: recordRows.length,
+    projectCost: projectCostAcc,
+    internalUserCost: internalUserCostAcc,
+  }
 }

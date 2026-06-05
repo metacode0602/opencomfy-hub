@@ -39,4 +39,5 @@ export const COMMISSION_MONTH_PHASE_LABELS: Record<CommissionMonthPhase, string>
 }
 
 /** 弹性算力提成政策执行期 */
+export const COMMISSION_POLICY_START_MONTH = '2026-05'
 export const COMMISSION_POLICY_END_MONTH = '2026-12'

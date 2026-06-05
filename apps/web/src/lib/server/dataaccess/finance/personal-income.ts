@@ -22,12 +22,18 @@ function mapPeriod(row: typeof billingPeriod.$inferSelect): BillingPeriodDto {
     period_end: row.periodEnd,
     status: row.status,
     total_income: row.totalIncome,
+    enterprise_income: row.enterpriseIncome,
+    personal_income: row.personalIncome,
+    income_total: row.incomeTotal,
     total_cost: row.totalCost,
+    project_cost: row.projectCost,
+    internal_user_cost: row.internalUserCost,
     supplementary: row.supplementary,
     balance_income: row.balanceIncome,
     baremetal_income: row.baremetalIncome,
     last_computed_at: row.lastComputedAt?.toISOString() ?? null,
     published_at: row.publishedAt?.toISOString() ?? null,
+    ignore_list_price_windows: row.ignoreListPriceWindows ?? false,
   }
 }
 

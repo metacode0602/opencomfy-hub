@@ -9,6 +9,7 @@ import {
   detectPlatformListPriceWindows,
   type PlatformListPriceWindow,
 } from './platform-list-price'
+import { periodUsesPeriodEndCostPricing } from './billing-period-pricing-mode'
 import { financeWarn } from './logger'
 import { newId } from './operation-log'
 
@@ -62,10 +63,22 @@ export async function syncTenantBillWindowsForPeriod(
   })
   if (!period) return []
 
-  const detected = await detectPlatformListPriceWindows({
-    periodStart: period.periodStart,
-    periodEnd: period.periodEnd,
-  })
+  const detected = periodUsesPeriodEndCostPricing(period)
+    ? {
+        hasChanges: false,
+        changedCardTypes: [] as Array<{ code: string; changeDates: string[] }>,
+        windows: [
+          {
+            windowStart: period.periodStart,
+            windowEnd: period.periodEnd,
+            sortOrder: 0,
+          },
+        ],
+      }
+    : await detectPlatformListPriceWindows({
+        periodStart: period.periodStart,
+        periodEnd: period.periodEnd,
+      })
 
   const existing = await listTenantBillWindows(periodId)
   const sameShape =

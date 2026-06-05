@@ -42,7 +42,12 @@ async function resetPeriodTotals(tx: DbExecutor, periodId: string): Promise<void
     .update(billingPeriod)
     .set({
       totalIncome: null,
+      enterpriseIncome: null,
+      personalIncome: null,
+      incomeTotal: null,
       totalCost: null,
+      projectCost: null,
+      internalUserCost: null,
       totalGrossProfit: null,
       supplementary: null,
       balanceIncome: null,

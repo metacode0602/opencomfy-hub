@@ -229,53 +229,16 @@ export async function stepI5UpdatePeriodIncomeTotals(input: {
   periodId: string
   markComputed?: boolean
 }): Promise<void> {
-  const { periodId, markComputed = false } = input
-
-  if (markComputed) {
-    await db.execute(sql`
-      UPDATE billing_period bp
-      SET
-        total_income     = sub.total,
-        balance_income   = sub.balance,
-        baremetal_income = sub.bare,
-        supplementary    = sub.supplementary,
-        last_computed_at = NOW(),
-        status           = 'computed'
-      FROM (
-        SELECT
-          COALESCE(SUM(total_consumption::numeric), 0)      AS total,
-          COALESCE(SUM(balance_consumption::numeric), 0)    AS balance,
-          COALESCE(SUM(bare_metal_consumption::numeric), 0) AS bare,
-          COALESCE(SUM(supplementary_consumption::numeric), 0) AS supplementary
-        FROM platform_income_monthly
-        WHERE billing_period_id = ${periodId}
-      ) sub
-      WHERE bp.id = ${periodId}
-    `)
-  } else {
-    await db.execute(sql`
-      UPDATE billing_period bp
-      SET
-        total_income     = sub.total,
-        balance_income   = sub.balance,
-        baremetal_income = sub.bare,
-        supplementary    = sub.supplementary
-      FROM (
-        SELECT
-          COALESCE(SUM(total_consumption::numeric), 0)      AS total,
-          COALESCE(SUM(balance_consumption::numeric), 0)    AS balance,
-          COALESCE(SUM(bare_metal_consumption::numeric), 0) AS bare,
-          COALESCE(SUM(supplementary_consumption::numeric), 0) AS supplementary
-        FROM platform_income_monthly
-        WHERE billing_period_id = ${periodId}
-      ) sub
-      WHERE bp.id = ${periodId}
-    `)
-  }
+  const { refreshBillingPeriodPeriodTotals } = await import('./billing-period-period-totals')
+  await refreshBillingPeriodPeriodTotals(input.periodId, {
+    ...(input.markComputed
+      ? { status: 'computed', lastComputedAt: new Date() }
+      : {}),
+  })
 
   financeLog('compute-income-sql', 'I5 period income totals updated', {
-    periodId,
-    markComputed,
+    periodId: input.periodId,
+    markComputed: input.markComputed,
   })
 }
 

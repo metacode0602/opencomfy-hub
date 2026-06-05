@@ -284,6 +284,9 @@ export async function computePersonalPeriodIncome(input: {
     matched_tenant_count: row.count,
   }))
 
+  const { refreshBillingPeriodPeriodTotals } = await import('./billing-period-period-totals')
+  await refreshBillingPeriodPeriodTotals(periodId)
+
   financeLog('compute-personal-income', 'done', { periodId, personalTenantCount: tPersonal.size })
 
   return {

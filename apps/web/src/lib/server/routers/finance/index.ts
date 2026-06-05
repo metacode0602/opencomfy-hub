@@ -1,5 +1,7 @@
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import {
+  commissionDeriveDataAccess,
+  derivePlatformCostCommissionPhase,
   financeBillingPeriodsDataAccess,
   financePersonalIncomeDataAccess,
   FinanceError,
@@ -34,6 +36,7 @@ const periodCreateSchema = z.object({
   periodCode: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, '账期编码格式应为 YYYY-MM'),
   periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  ignoreListPriceWindows: z.boolean().optional().default(false),
 })
 
 const importSchema = z.object({
@@ -454,6 +457,86 @@ export const financeRouter = createTRPCRouter({
           return await financePersonalIncomeDataAccess.purgePersonalIncome(
             input.billingPeriodId,
             actorId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+  }),
+
+  commissionDerive: createTRPCRouter({
+    run: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await derivePlatformCostCommissionPhase({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    getByPeriod: protectedProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await commissionDeriveDataAccess.getByPeriod(input.billingPeriodId)
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    getAmPhaseSummary: protectedProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          staffId: z.string().optional(),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await commissionDeriveDataAccess.getAmPhaseSummary(
+            input.billingPeriodId,
+            input.staffId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    getDeptPhaseSummary: protectedProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          dept: z.enum(['市场', '中台']),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await commissionDeriveDataAccess.getDeptPhaseSummary(
+            input.billingPeriodId,
+            input.dept,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    listProjectLines: protectedProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          projectId: z.string().optional(),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await commissionDeriveDataAccess.listProjectLines(
+            input.billingPeriodId,
+            input.projectId,
           )
         } catch (e) {
           mapFinanceError(e)

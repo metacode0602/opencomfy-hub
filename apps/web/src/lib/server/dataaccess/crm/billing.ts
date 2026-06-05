@@ -24,6 +24,7 @@ import {
 import { mapBillingTenantRow } from '@/lib/server/mappers/crm'
 import { projectsDataAccess } from './projects'
 import { projectActivitiesDataAccess } from './project-activities'
+import type { TenantMonthlyBillListItem } from '@/lib/types/tenant-billing-list'
 import {
   billingTenant,
   commerceOrder,
@@ -402,15 +403,50 @@ export const billingDataAccess = {
     return fallback.map(mapCouponRow)
   },
 
-  async listBillsByProject(projectId: string): Promise<Bill[]> {
+  async listMonthlyBillsByProject(projectId: string): Promise<TenantMonthlyBillListItem[]> {
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(projectId)
+    if (tenantIds.length === 0) return []
+
     const rows = await db
       .select()
       .from(tenantBill)
-      .where(eq(tenantBill.projectId, projectId))
+      .where(inArray(tenantBill.tenantId, tenantIds))
       .orderBy(desc(tenantBill.billMonth))
 
+    return rows.map((row) => ({
+      id: row.id,
+      billMonth: row.billMonth,
+      totalAmount: toNumber(row.totalAmount),
+      balanceAmount: toNumber(row.balanceAmount),
+      couponAmount: toNumber(row.couponAmount),
+      status: row.status,
+      dueDate: String(row.dueDate),
+      paidAt: row.paidAt ? row.paidAt.toISOString() : undefined,
+    }))
+  },
+
+  async listBillsByProject(projectId: string): Promise<Bill[]> {
+    const tenantIds = await projectsDataAccess.getBillingTenantIdsForProject(projectId)
+    if (tenantIds.length === 0) return []
+
+    const rows = await db
+      .select()
+      .from(tenantBill)
+      .where(
+        and(inArray(tenantBill.tenantId, tenantIds), eq(tenantBill.projectId, projectId)),
+      )
+      .orderBy(desc(tenantBill.billMonth))
+    const fallback =
+      rows.length > 0
+        ? rows
+        : await db
+            .select()
+            .from(tenantBill)
+            .where(inArray(tenantBill.tenantId, tenantIds))
+            .orderBy(desc(tenantBill.billMonth))
+
     const result: Bill[] = []
-    for (const row of rows) {
+    for (const row of fallback) {
       const details = await db
         .select()
         .from(tenantBillDetail)

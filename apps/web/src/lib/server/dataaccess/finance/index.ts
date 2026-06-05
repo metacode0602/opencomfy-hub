@@ -1,3 +1,7 @@
+export {
+  commissionDeriveDataAccess,
+  derivePlatformCostCommissionPhase,
+} from './commission-derive'
 export { financeBillingPeriodsDataAccess } from './billing-periods'
 export type { BillingPeriodDto } from './billing-periods'
 export { financePersonalIncomeDataAccess } from './personal-income'

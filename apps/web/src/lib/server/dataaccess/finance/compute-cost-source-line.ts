@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { toHoursString } from '@/lib/finance/cost-row-utils'
 import { toMoneyString } from '@/lib/finance/income-row-utils'
 import {
+  billingPeriod,
   billingPeriodCostSourceLine,
   billingPeriodImportBatch,
   billingPeriodRawBaremetalOrder,
@@ -33,6 +34,7 @@ import { asOfFromOrderedAt } from './platform-list-price'
 import type { ComputeCostMode } from './compute-cost-mode'
 import { financeLog } from './logger'
 import { newId } from './operation-log'
+import { periodUsesPeriodEndCostPricing } from './billing-period-pricing-mode'
 import { listTenantBillWindows } from './tenant-bill-windows'
 
 function parseNum(s: string | null | undefined): number {
@@ -251,11 +253,22 @@ export async function persistCostSourceLines(input: {
   periodEnd: string
   issues: string[]
   mode?: ComputeCostMode
+  usePeriodEndPricing?: boolean
 }): Promise<number> {
   const { billingPeriodId: periodId, issues, mode = 'create' } = input
   financeLog('compute-cost-source-line', 'start', { periodId })
 
+  const usePeriodEndPricing =
+    input.usePeriodEndPricing ??
+    (mode === 'regenerate' ||
+      periodUsesPeriodEndCostPricing(
+        (await db.query.billingPeriod.findFirst({
+          where: eq(billingPeriod.id, periodId),
+        })) ?? {},
+      ))
+
   const masterCtx = await loadCostMasterDataContext()
+
   const bindings = await resolveCostTenantBindings({
     billingPeriodId: periodId,
     tenantPlatformIds: input.tenantPlatformIds,
@@ -280,7 +293,7 @@ export async function persistCostSourceLines(input: {
       .select()
       .from(billingPeriodRawTenantBill)
       .where(eq(billingPeriodRawTenantBill.batchId, batch.id))
-    const flexAsOf = mode === 'regenerate' ? input.periodEnd : window.windowEnd
+    const flexAsOf = usePeriodEndPricing ? input.periodEnd : window.windowEnd
     for (const row of rows) {
       const dc = resolveDataCenterByContainerRegion(masterCtx, row.regionCode)
       const card = resolveGpuCardType(masterCtx, row.gpuModel)
@@ -328,7 +341,7 @@ export async function persistCostSourceLines(input: {
       ...buildFlexSourceLines({
         periodId,
         windowId: window.id,
-        windowEnd: mode === 'regenerate' ? input.periodEnd : window.windowEnd,
+        windowEnd: usePeriodEndPricing ? input.periodEnd : window.windowEnd,
         rows,
         bindingsByTenant,
         masterCtx,

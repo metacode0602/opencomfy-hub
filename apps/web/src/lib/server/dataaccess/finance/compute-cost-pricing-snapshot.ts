@@ -26,14 +26,14 @@ function readLinePricingAsOf(
   },
   periodEnd: string,
   windows: { id: string; windowEnd: string }[],
-  mode: ComputeCostMode,
+  usePeriodEndPricing: boolean,
 ): string {
   const meta = line.sourceMeta as { pricing_as_of?: string } | null
   if (line.kind === 'baremetal' && meta?.pricing_as_of) {
     return meta.pricing_as_of
   }
   if (line.windowId) {
-    if (mode === 'regenerate') return periodEnd
+    if (usePeriodEndPricing) return periodEnd
     return windows.find((w) => w.id === line.windowId)?.windowEnd ?? periodEnd
   }
   return periodEnd
@@ -43,8 +43,14 @@ export async function persistCostPricingSnapshots(input: {
   billingPeriodId: string
   periodEnd: string
   mode?: ComputeCostMode
+  usePeriodEndPricing?: boolean
 }): Promise<Map<string, CostPricingSnapshotRow>> {
-  const { billingPeriodId: periodId, periodEnd, mode = 'create' } = input
+  const {
+    billingPeriodId: periodId,
+    periodEnd,
+    mode = 'create',
+    usePeriodEndPricing = mode === 'regenerate',
+  } = input
   financeLog('compute-cost-pricing-snapshot', 'start', { periodId })
 
   const windows = await listTenantBillWindows(periodId)
@@ -98,7 +104,7 @@ export async function persistCostPricingSnapshots(input: {
 
   for (const line of sourceLines) {
     const effectiveWindowId = line.windowId ?? defaultWindowId
-    const asOfDate = readLinePricingAsOf(line, periodEnd, windows, mode)
+    const asOfDate = readLinePricingAsOf(line, periodEnd, windows, usePeriodEndPricing)
 
     const pairKey = pricingRefKey(line.dataCenterId, line.gpuCardTypeId, asOfDate)
     if (!pricingPairs.has(pairKey)) {

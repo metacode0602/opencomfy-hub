@@ -69,6 +69,8 @@ export async function purgeCostImportsForRegenerate(periodId: string): Promise<v
       .update(billingPeriod)
       .set({
         totalCost: null,
+        projectCost: null,
+        internalUserCost: null,
         totalGrossProfit: null,
       })
       .where(eq(billingPeriod.id, periodId))

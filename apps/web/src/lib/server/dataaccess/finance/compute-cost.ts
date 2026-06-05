@@ -26,6 +26,8 @@ import {
   findMissingTenantBillPricing,
   findMissingTenantBillPricingAtPeriodEnd,
 } from './tenant-bill-pricing'
+import { refreshBillingPeriodPeriodTotals } from './billing-period-period-totals'
+import { periodUsesPeriodEndCostPricing } from './billing-period-pricing-mode'
 import { listTenantBillWindows } from './tenant-bill-windows'
 
 export type { ComputeCostMode } from './compute-cost-mode'
@@ -113,6 +115,9 @@ async function assertCostComputePreconditions(
     throw new FinanceError('PRECONDITION_FAILED', '当前账期状态不允许计算成本')
   }
 
+  const usePeriodEndPricing =
+    mode === 'regenerate' || periodUsesPeriodEndCostPricing(period)
+
   if (mode === 'regenerate') {
     await assertRegenerateCostImportsReady(periodId)
   } else {
@@ -132,19 +137,18 @@ async function assertCostComputePreconditions(
     }
   }
 
-  const missingPricing =
-    mode === 'regenerate'
-      ? [
-          ...(await findMissingTenantBillPricingAtPeriodEnd({
-            periodId,
-            periodEnd: period.periodEnd,
-          })),
-          ...(await findMissingBaremetalPlatformListPrice({ periodId })),
-        ]
-      : [
-          ...(await findMissingTenantBillPricing({ periodId })),
-          ...(await findMissingBaremetalPlatformListPrice({ periodId })),
-        ]
+  const missingPricing = usePeriodEndPricing
+    ? [
+        ...(await findMissingTenantBillPricingAtPeriodEnd({
+          periodId,
+          periodEnd: period.periodEnd,
+        })),
+        ...(await findMissingBaremetalPlatformListPrice({ periodId })),
+      ]
+    : [
+        ...(await findMissingTenantBillPricing({ periodId })),
+        ...(await findMissingBaremetalPlatformListPrice({ periodId })),
+      ]
 
   if (missingPricing.length > 0) {
     await db
@@ -230,6 +234,8 @@ export async function computeBillingPeriodCost(input: {
   const period = (await db.query.billingPeriod.findFirst({
     where: eq(billingPeriod.id, periodId),
   }))!
+  const usePeriodEndPricing =
+    mode === 'regenerate' || periodUsesPeriodEndCostPricing(period)
 
   await purgeCostDerivedStandalone(periodId)
   if (mode === 'create') {
@@ -246,17 +252,20 @@ export async function computeBillingPeriodCost(input: {
     periodEnd: period.periodEnd,
     issues,
     mode,
+    usePeriodEndPricing,
   })
 
   const snapshots = await persistCostPricingSnapshots({
     billingPeriodId: periodId,
     periodEnd: period.periodEnd,
     mode,
+    usePeriodEndPricing,
   })
-  const costCount = await rollupSourceLinesToPlatformMonthly({
+  const rollup = await rollupSourceLinesToPlatformMonthly({
     billingPeriodId: periodId,
     snapshots,
     issues,
+    usePeriodEndPricing,
     periodEnd: period.periodEnd,
     mode,
   })
@@ -271,28 +280,26 @@ export async function computeBillingPeriodCost(input: {
       ),
     )
 
-  let totalCost = 0
   let totalGross = 0
   for (const row of recordRows) {
     totalGross += parseNum(row.grossProfit)
-    totalCost +=
-      parseNum(row.soldDurationCostExclTax) + parseNum(row.giftedDurationCostExclTax)
   }
 
-  await db
-    .update(billingPeriod)
-    .set({
-      status: 'computed',
-      totalCost: toMoneyString(totalCost),
-      totalGrossProfit: toMoneyString(totalGross),
-      lastComputedAt: new Date(),
-    })
-    .where(eq(billingPeriod.id, periodId))
+  const totalCost = rollup.projectCost + rollup.internalUserCost
+
+  await refreshBillingPeriodPeriodTotals(periodId, {
+    projectCost: rollup.projectCost,
+    internalUserCost: rollup.internalUserCost,
+    totalCost,
+    totalGrossProfit: totalGross,
+    status: 'computed',
+    lastComputedAt: new Date(),
+  })
 
   await upsertCostReconciliationReport({
     periodId,
     issues,
-    costRowCount: costCount,
+    costRowCount: rollup.costCount,
   })
 
   await appendOperationLog({
@@ -301,7 +308,7 @@ export async function computeBillingPeriodCost(input: {
     actorId: input.actorId,
     metadata: {
       ruleVersion: RULE_VERSION,
-      costCount,
+      costCount: rollup.costCount,
       issueCount: issues.length,
       mode,
     },
@@ -309,15 +316,17 @@ export async function computeBillingPeriodCost(input: {
 
   financeLog('compute-cost', 'done', {
     periodId,
-    costCount,
+    costCount: rollup.costCount,
     totalCost,
+    projectCost: rollup.projectCost,
+    internalUserCost: rollup.internalUserCost,
     totalGross,
     issues: issues.length,
     mode,
   })
 
   return {
-    costCount,
+    costCount: rollup.costCount,
     reconciliationIssues: issues,
     status: 'computed',
   }
