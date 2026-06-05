@@ -16,6 +16,7 @@ import { tenantBillingListsDataAccess } from '@/lib/server/dataaccess/crm/tenant
 import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/platform-tenant-import'
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
 import { conversionQueryDataAccess } from '@/lib/server/dataaccess/crm/conversion-query'
+import { tenantProjectQueryDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-query'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import { projectAccountManagerDataAccess } from '@/lib/server/dataaccess/crm/project-account-manager'
@@ -523,6 +524,18 @@ export const crmRouter = createTRPCRouter({
             throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
           }
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '批量转正失败' })
+        }
+      }),
+    queryTenantProjects: adminProcedure
+      .input(z.object({ rawTenantIds: z.string() }))
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantProjectQueryDataAccess.query(input.rawTenantIds)
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '租户项目查询失败' })
         }
       }),
     listBillingTenants: protectedProcedure

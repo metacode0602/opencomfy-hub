@@ -14,11 +14,14 @@ import { and, eq, inArray } from 'drizzle-orm'
 
 export type ImportSourceKind = 'tenant_bill' | 'baremetal'
 
+export type ProjectLinkedFilter = 'all' | 'with_project' | 'without_project'
+
 export type ImportTenantBindingFilters = {
   tenantType?: 'all' | 'internal' | 'external'
   customerType?: 'all' | 'B' | 'C'
   staffId?: string
   department?: string
+  projectLinked?: ProjectLinkedFilter
 }
 
 export type ImportTenantBindingRow = {
@@ -93,6 +96,11 @@ function matchesFilters(
   }
   if (filters.department && filters.department !== 'all') {
     if (row.staff_department !== filters.department) return false
+  }
+  if (filters.projectLinked && filters.projectLinked !== 'all') {
+    const hasProject = Boolean(row.project_id)
+    if (filters.projectLinked === 'with_project' && !hasProject) return false
+    if (filters.projectLinked === 'without_project' && hasProject) return false
   }
   return true
 }

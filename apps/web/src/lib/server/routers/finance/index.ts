@@ -112,6 +112,7 @@ export const financeRouter = createTRPCRouter({
           customerType: z.enum(['all', 'B', 'C']).optional(),
           staffId: z.string().optional(),
           department: z.string().optional(),
+          projectLinked: z.enum(['all', 'with_project', 'without_project']).optional(),
         }),
       )
       .query(async ({ input }) => {

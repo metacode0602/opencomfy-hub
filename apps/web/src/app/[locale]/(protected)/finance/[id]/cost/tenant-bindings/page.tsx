@@ -2,6 +2,7 @@
 
 import { formatText } from "../../../_lib/display"
 import { STAFF_DEPARTMENTS } from "@/lib/crm/staff-constants"
+import { downloadImportTenantBindingsExcel } from "@/lib/finance/import-tenant-bindings-export"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
 import { Button } from "@workspace/ui/components/button"
@@ -29,10 +30,14 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { cn } from "@workspace/ui/lib/utils"
+import { Download } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useMemo, useState } from "react"
+import { toast } from "sonner"
 
 const FILTER_ALL = "all"
+const PROJECT_LINKED_WITH = "with_project"
+const PROJECT_LINKED_WITHOUT = "without_project"
 
 const importSourceLabels: Record<string, string> = {
   tenant_bill: "客户账单",
@@ -80,6 +85,7 @@ export default function FinanceImportTenantBindingsPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
 
+  const [projectLinked, setProjectLinked] = useState<string>(PROJECT_LINKED_WITH)
   const [tenantType, setTenantType] = useState<string>(FILTER_ALL)
   const [customerType, setCustomerType] = useState<string>(FILTER_ALL)
   const [staffId, setStaffId] = useState<string>(FILTER_ALL)
@@ -106,6 +112,10 @@ export default function FinanceImportTenantBindingsPage() {
         customerType === FILTER_ALL ? undefined : (customerType as "B" | "C"),
       staffId: staffId === FILTER_ALL ? undefined : staffId,
       department: department === FILTER_ALL ? undefined : department,
+      projectLinked:
+        projectLinked === FILTER_ALL
+          ? undefined
+          : (projectLinked as "with_project" | "without_project"),
     },
     { enabled: Boolean(id) },
   )
@@ -143,11 +153,25 @@ export default function FinanceImportTenantBindingsPage() {
   )
 
   const hasActiveFilters =
+    projectLinked !== PROJECT_LINKED_WITH ||
     tenantType !== FILTER_ALL ||
     customerType !== FILTER_ALL ||
     staffId !== FILTER_ALL ||
     department !== FILTER_ALL ||
     tenantIdFilters.length > 0
+
+  function handleExportExcel() {
+    if (displayRows.length === 0) {
+      toast.error("当前筛选条件下暂无数据可导出")
+      return
+    }
+    const ok = downloadImportTenantBindingsExcel({
+      rows: displayRows,
+      periodCode: period?.period_code ?? id,
+    })
+    if (ok) toast.success("租户项目映射 Excel 已下载")
+    else toast.error("导出失败")
+  }
 
   if (!id) {
     return (
@@ -177,22 +201,45 @@ export default function FinanceImportTenantBindingsPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>租户项目映射 · {period?.period_code ?? id}</CardTitle>
-          <CardDescription>
-            导入的客户账单详情与裸金属订单中的平台租户 ID，与 CRM 项目、客户经理的对应关系（
-            billing_period_tenant_project_enrichment）
-            {period
-              ? ` · 账期 ${period.period_start} ~ ${period.period_end}`
-              : null}
-            · 共 {displayRows.length} 行
-            {tenantIdFilters.length > 0 && rows.length !== displayRows.length
-              ? `（已筛选，共 ${rows.length} 行）`
-              : null}
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>租户项目映射 · {period?.period_code ?? id}</CardTitle>
+            <CardDescription>
+              导入的客户账单详情与裸金属订单中的平台租户 ID，与 CRM 项目、客户经理的对应关系（
+              billing_period_tenant_project_enrichment）
+              {period
+                ? ` · 账期 ${period.period_start} ~ ${period.period_end}`
+                : null}
+              · 共 {displayRows.length} 行
+              {tenantIdFilters.length > 0 && rows.length !== displayRows.length
+                ? `（已筛选，共 ${rows.length} 行）`
+                : null}
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportExcel}
+            disabled={displayRows.length === 0}
+          >
+            <Download className="size-4" />
+            导出 Excel
+          </Button>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
+            <Select value={projectLinked} onValueChange={setProjectLinked}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="项目关联" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PROJECT_LINKED_WITH}>项目租户</SelectItem>
+                <SelectItem value={PROJECT_LINKED_WITHOUT}>非项目租户</SelectItem>
+                <SelectItem value={FILTER_ALL}>全部</SelectItem>
+              </SelectContent>
+            </Select>
+
             <Input
               className="max-w-md"
               placeholder="租户 ID 搜索，多个以逗号分隔（平台租户 ID 或 CRM 租户 ID）"
@@ -255,6 +302,7 @@ export default function FinanceImportTenantBindingsPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => {
+                  setProjectLinked(PROJECT_LINKED_WITH)
                   setTenantType(FILTER_ALL)
                   setCustomerType(FILTER_ALL)
                   setStaffId(FILTER_ALL)

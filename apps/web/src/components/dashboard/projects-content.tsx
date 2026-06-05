@@ -76,7 +76,8 @@ import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
 import { ConversionQueryDialog } from './conversion-query-dialog'
-import { IconUpload, IconClipboardSearch } from '@tabler/icons-react'
+import { TenantProjectQueryDialog } from './tenant-project-query-dialog'
+import { IconUpload, IconClipboardSearch, IconUsersGroup } from '@tabler/icons-react'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 
@@ -121,6 +122,7 @@ export function ProjectsContent() {
   const [importOpen, setImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
   const [conversionQueryOpen, setConversionQueryOpen] = useState(false)
+  const [tenantProjectQueryOpen, setTenantProjectQueryOpen] = useState(false)
   const [pausingProject, setPausingProject] = useState<Project | null>(null)
 
   const utils = trpc.useUtils()
@@ -287,6 +289,16 @@ export function ProjectsContent() {
             variant="outline"
             className="gap-2"
             type="button"
+            onClick={() => setTenantProjectQueryOpen(true)}
+          >
+            <IconUsersGroup className="size-4" />
+            租户项目查询
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            type="button"
             onClick={() => setConversionQueryOpen(true)}
           >
             <IconClipboardSearch className="size-4" />
@@ -424,6 +436,11 @@ export function ProjectsContent() {
           void refetch()
           void utils.crm.projects.stageCounts.invalidate()
         }}
+      />
+
+      <TenantProjectQueryDialog
+        open={tenantProjectQueryOpen}
+        onOpenChange={setTenantProjectQueryOpen}
       />
 
       <AlertDialog
