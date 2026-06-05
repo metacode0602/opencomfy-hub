@@ -63,11 +63,14 @@ export function computeBalanceAdjustmentAmount(
 }
 
 /** 调账值为正则显示 +，为负则显示 − */
-export function formatSignedAdjustmentMoney(amount: number): string {
+export function formatSignedAdjustmentMoney(
+  amount: number,
+  fractionDigits = 2,
+): string {
   const abs = Math.abs(amount)
   const formatted = abs.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
   })
   if (amount > 0) return `+${formatted}`
   if (amount < 0) return `−${formatted}`

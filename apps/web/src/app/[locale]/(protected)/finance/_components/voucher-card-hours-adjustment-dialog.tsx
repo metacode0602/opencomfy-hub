@@ -53,14 +53,26 @@ function parseHours(value: string | null | undefined): number {
   return Number.isNaN(n) ? 0 : n
 }
 
+const FRACTION_DIGITS = 4
+
 function formatHours(value: string | null | undefined): string {
   if (value == null || value === "") return "—"
   const n = Number(value)
   if (Number.isNaN(n)) return value
   return n.toLocaleString("zh-CN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
+    minimumFractionDigits: FRACTION_DIGITS,
+    maximumFractionDigits: FRACTION_DIGITS,
   })
+}
+
+function formatAdjustmentHoursLabel(value: number | string): string {
+  const adj = Number(value)
+  if (Number.isNaN(adj)) return String(value)
+  const formatted = adj.toLocaleString("zh-CN", {
+    minimumFractionDigits: FRACTION_DIGITS,
+    maximumFractionDigits: FRACTION_DIGITS,
+  })
+  return `${adj >= 0 ? "+" : ""}${formatted}`
 }
 
 export function VoucherCardHoursAdjustmentDialog({
@@ -133,14 +145,14 @@ export function VoucherCardHoursAdjustmentDialog({
     const adj = Number(adjustmentHours.trim())
     if (originalHours + adj < 0) {
       setError(
-        `调账后余额卡时不能为负（原值 ${formatHours(row.balance_card_hours)}，调账值 ${adj >= 0 ? "+" : ""}${adj}）`,
+        `调账后余额卡时不能为负（原值 ${formatHours(row.balance_card_hours)}，调账值 ${formatAdjustmentHoursLabel(adj)}）`,
       )
       return
     }
     const adjustmentAmount = computeBalanceAdjustmentAmount(adj, unitPrice)
     if (parseMoney(row.balance_consumption) + adjustmentAmount < 0) {
       setError(
-        `调账后余额消费不能为负（当前 ${formatMoney(row.balance_consumption)}，本次调账金额 ${formatSignedAdjustmentMoney(adjustmentAmount)}）`,
+        `调账后余额消费不能为负（当前 ${formatMoney(row.balance_consumption, FRACTION_DIGITS)}，本次调账金额 ${formatSignedAdjustmentMoney(adjustmentAmount, FRACTION_DIGITS)}）`,
       )
       return
     }
@@ -178,7 +190,7 @@ export function VoucherCardHoursAdjustmentDialog({
                 机房卡型单价（卡时/分成）
                 <span className="ml-2 font-medium text-foreground tabular-nums">
                   {unitPrice != null
-                    ? `¥${unitPrice.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}/卡时`
+                    ? `¥${unitPrice.toLocaleString("zh-CN", { minimumFractionDigits: FRACTION_DIGITS, maximumFractionDigits: FRACTION_DIGITS })}/卡时`
                     : "未配置"}
                 </span>
               </p>
@@ -224,8 +236,8 @@ export function VoucherCardHoursAdjustmentDialog({
                 <p className="text-xs text-muted-foreground">余额消费</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums">
                   {preview
-                    ? formatMoney(preview.balanceConsumptionAfter)
-                    : formatMoney(row.balance_consumption)}
+                    ? formatMoney(preview.balanceConsumptionAfter, FRACTION_DIGITS)
+                    : formatMoney(row.balance_consumption, FRACTION_DIGITS)}
                 </p>
               </div>
               <div className="rounded-md border p-3">
@@ -234,16 +246,16 @@ export function VoucherCardHoursAdjustmentDialog({
                 </p>
                 <p className="mt-1 text-lg font-semibold tabular-nums">
                   {preview
-                    ? formatMoney(preview.soldDurationCostExclTax)
-                    : formatMoney(row.sold_duration_cost_excl_tax)}
+                    ? formatMoney(preview.soldDurationCostExclTax, FRACTION_DIGITS)
+                    : formatMoney(row.sold_duration_cost_excl_tax, FRACTION_DIGITS)}
                 </p>
               </div>
               <div className="rounded-md border p-3">
                 <p className="text-xs text-muted-foreground">毛利</p>
                 <p className="mt-1 text-lg font-semibold tabular-nums">
                   {preview
-                    ? formatMoney(preview.grossProfit)
-                    : formatMoney(row.gross_profit)}
+                    ? formatMoney(preview.grossProfit, FRACTION_DIGITS)
+                    : formatMoney(row.gross_profit, FRACTION_DIGITS)}
                 </p>
               </div>
             </div>
@@ -285,12 +297,7 @@ export function VoucherCardHoursAdjustmentDialog({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...history].reverse().map((h) => {
-                    const adj = Number(h.adjustment_hours)
-                    const adjLabel = Number.isNaN(adj)
-                      ? h.adjustment_hours
-                      : `${adj >= 0 ? "+" : ""}${adj}`
-                    return (
+                  {[...history].reverse().map((h) => (
                       <TableRow
                         key={h.id}
                         className="cursor-pointer hover:bg-muted/50"
@@ -300,19 +307,25 @@ export function VoucherCardHoursAdjustmentDialog({
                           {h.created_at.slice(0, 19).replace("T", " ")}
                         </TableCell>
                         <TableCell className="text-right text-xs tabular-nums">
-                          {adjLabel}
+                          {formatAdjustmentHoursLabel(h.adjustment_hours)}
                         </TableCell>
                         <TableCell className="text-right text-xs tabular-nums">
                           {formatHours(h.balance_card_hours_before)} →{" "}
                           {formatHours(h.balance_card_hours_after)}
                         </TableCell>
                         <TableCell className="text-right text-xs tabular-nums">
-                          {formatMoney(h.sold_duration_cost_excl_tax_before)} →{" "}
-                          {formatMoney(h.sold_duration_cost_excl_tax_after)}
+                          {formatMoney(
+                            h.sold_duration_cost_excl_tax_before,
+                            FRACTION_DIGITS,
+                          )}{" "}
+                          →{" "}
+                          {formatMoney(
+                            h.sold_duration_cost_excl_tax_after,
+                            FRACTION_DIGITS,
+                          )}
                         </TableCell>
                       </TableRow>
-                    )
-                  })}
+                    ))}
                 </TableBody>
               </Table>
             </ScrollArea>
@@ -354,12 +367,7 @@ export function VoucherCardHoursAdjustmentDialog({
               <div>
                 <p className="text-xs text-muted-foreground">调账值</p>
                 <p className="font-medium tabular-nums">
-                  {(() => {
-                    const adj = Number(historyDetail.adjustment_hours)
-                    return Number.isNaN(adj)
-                      ? historyDetail.adjustment_hours
-                      : `${adj >= 0 ? "+" : ""}${adj}`
-                  })()}
+                  {formatAdjustmentHoursLabel(historyDetail.adjustment_hours)}
                 </p>
               </div>
               <div>
@@ -369,8 +377,8 @@ export function VoucherCardHoursAdjustmentDialog({
                   {Number(historyDetail.unit_price_per_hour).toLocaleString(
                     "zh-CN",
                     {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 4,
+                      minimumFractionDigits: FRACTION_DIGITS,
+                      maximumFractionDigits: FRACTION_DIGITS,
                     },
                   )}
                   /卡时
@@ -383,6 +391,7 @@ export function VoucherCardHoursAdjustmentDialog({
                     String(
                       computeAdjustmentAmountFromHistoryEntry(historyDetail),
                     ),
+                    FRACTION_DIGITS,
                   )}
                 </p>
               </div>
@@ -397,15 +406,23 @@ export function VoucherCardHoursAdjustmentDialog({
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground">售出时长成本（不含税）</p>
               <p className="mt-1 tabular-nums">
-                {formatMoney(historyDetail.sold_duration_cost_excl_tax_before)} →{" "}
-                {formatMoney(historyDetail.sold_duration_cost_excl_tax_after)}
+                {formatMoney(
+                  historyDetail.sold_duration_cost_excl_tax_before,
+                  FRACTION_DIGITS,
+                )}{" "}
+                →{" "}
+                {formatMoney(
+                  historyDetail.sold_duration_cost_excl_tax_after,
+                  FRACTION_DIGITS,
+                )}
               </p>
             </div>
             <div className="rounded-md border p-3">
               <p className="text-xs text-muted-foreground">毛利</p>
               <p className="mt-1 tabular-nums">
-                {formatMoney(historyDetail.gross_profit_before)} →{" "}
-                {formatMoney(historyDetail.gross_profit_after)}
+                {formatMoney(historyDetail.gross_profit_before, FRACTION_DIGITS)}{" "}
+                →{" "}
+                {formatMoney(historyDetail.gross_profit_after, FRACTION_DIGITS)}
               </p>
             </div>
             <div className="rounded-md border p-3">

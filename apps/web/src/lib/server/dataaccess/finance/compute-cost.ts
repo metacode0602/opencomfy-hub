@@ -97,8 +97,11 @@ async function assertCostComputePreconditions(
     where: eq(billingPeriod.id, periodId),
   })
   if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-  if (period.status === 'published' || period.status === 'adjusted') {
+  if (period.status === 'published') {
     throw new FinanceError('CONFLICT', '已发布账期不可直接重算，请先撤回发布')
+  }
+  if (period.status === 'adjusted' && mode !== 'regenerate') {
+    throw new FinanceError('CONFLICT', '已调账账期不可直接重算，请使用重新生成')
   }
   if (period.status === 'void') {
     throw new FinanceError('CONFLICT', '作废账期不可计算')
@@ -110,7 +113,8 @@ async function assertCostComputePreconditions(
     period.status !== 'imported' &&
     period.status !== 'computed' &&
     period.status !== 'draft' &&
-    period.status !== 'pending_pricing'
+    period.status !== 'pending_pricing' &&
+    !(mode === 'regenerate' && period.status === 'adjusted')
   ) {
     throw new FinanceError('PRECONDITION_FAILED', '当前账期状态不允许计算成本')
   }

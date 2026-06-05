@@ -85,13 +85,19 @@ export type ImportFileResult = {
   periodStatus: string
 }
 
-async function getPeriodOrThrow(periodId: string) {
+async function getPeriodOrThrow(
+  periodId: string,
+  options?: { allowAdjusted?: boolean },
+) {
   const period = await db.query.billingPeriod.findFirst({
     where: eq(billingPeriod.id, periodId),
   })
   if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-  if (period.status === 'published' || period.status === 'adjusted') {
+  if (period.status === 'published') {
     throw new FinanceError('CONFLICT', '已发布账期须先撤回发布后再上传')
+  }
+  if (period.status === 'adjusted' && !options?.allowAdjusted) {
+    throw new FinanceError('CONFLICT', '已调账账期须先重新生成后再上传')
   }
   if (period.status === 'void') {
     throw new FinanceError('CONFLICT', '作废账期不可上传')
@@ -455,7 +461,9 @@ export async function importExcelFile(input: {
   /** 成本 Tab 重新生成上传：不清理收入派生 */
   preserveIncomeDerived?: boolean
 }): Promise<ImportFileResult> {
-  const period = await getPeriodOrThrow(input.billingPeriodId)
+  const period = await getPeriodOrThrow(input.billingPeriodId, {
+    allowAdjusted: input.preserveIncomeDerived,
+  })
   financeLog('import', `start ${input.fileType}`, {
     periodId: input.billingPeriodId,
     fileName: input.fileName,

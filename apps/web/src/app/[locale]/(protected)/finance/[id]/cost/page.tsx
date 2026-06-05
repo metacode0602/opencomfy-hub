@@ -1,5 +1,6 @@
 "use client"
 
+import { collectCostAdjustmentRows } from "@/lib/finance/cost-adjustment-export"
 import { downloadCostDetailExcel } from "@/lib/finance/cost-detail-export"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
@@ -15,6 +16,7 @@ import { Download, Link2, RefreshCw, TableProperties } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
+import { CostAdjustmentConfirmDialog } from "./_components/cost-adjustment-confirm-dialog"
 import { CostGroupedEditable } from "./_components/cost-grouped-editable"
 import { CostRegenerateDialog } from "./_components/cost-regenerate-dialog"
 
@@ -34,11 +36,24 @@ export default function FinancePeriodCostPage() {
     [bundle?.costAdjustmentHistories],
   )
   const hasRecordRows = rows.some((r) => r.type === "record")
+  const adjustmentRows = useMemo(
+    () => collectCostAdjustmentRows(rows, adjustmentHistories),
+    [rows, adjustmentHistories],
+  )
+  const hasAdjustments = adjustmentRows.length > 0
   const utils = trpc.useUtils()
+  const [adjustmentConfirmOpen, setAdjustmentConfirmOpen] = useState(false)
   const [regenerateOpen, setRegenerateOpen] = useState(false)
+
+  function handleRegenerateClick() {
+    if (hasAdjustments) {
+      setAdjustmentConfirmOpen(true)
+    } else {
+      setRegenerateOpen(true)
+    }
+  }
   const canRegenerateCost =
     period?.status !== "published" &&
-    period?.status !== "adjusted" &&
     period?.status !== "void"
 
   function handleExportExcel() {
@@ -110,7 +125,7 @@ export default function FinancePeriodCostPage() {
                 variant="outline"
                 size="sm"
                 className="gap-2"
-                onClick={() => setRegenerateOpen(true)}
+                onClick={handleRegenerateClick}
               >
                 <RefreshCw className="size-4" />
                 重新生成
@@ -160,6 +175,17 @@ export default function FinancePeriodCostPage() {
           />
         </CardContent>
       </Card>
+
+      {period && hasAdjustments ? (
+        <CostAdjustmentConfirmDialog
+          open={adjustmentConfirmOpen}
+          onOpenChange={setAdjustmentConfirmOpen}
+          rows={rows}
+          adjustmentHistories={adjustmentHistories}
+          periodCode={period.period_code}
+          onConfirm={() => setRegenerateOpen(true)}
+        />
+      ) : null}
 
       {period ? (
         <CostRegenerateDialog

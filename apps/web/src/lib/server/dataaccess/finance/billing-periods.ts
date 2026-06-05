@@ -520,9 +520,9 @@ export const financeBillingPeriodsDataAccess = {
       where: eq(billingPeriod.id, periodId),
     })
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-    if (period.status === 'published' || period.status === 'adjusted') {
-      throw new FinanceError('CONFLICT', '已发布账期不可重新生成成本，请先撤回发布')
-    }
+  if (period.status === 'published') {
+    throw new FinanceError('CONFLICT', '已发布账期不可重新生成成本，请先撤回发布')
+  }
     if (period.status === 'void') {
       throw new FinanceError('CONFLICT', '作废账期不可重新生成成本')
     }
