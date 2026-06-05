@@ -1,4 +1,5 @@
 import type { ProjectStage } from '@/lib/types/crm'
+import type { OpportunitySource } from '@/lib/crm/commission-constants'
 
 export type ProjectImportStage = ProjectStage
 export type ProjectImportStatus = 'active' | 'paused' | 'completed'
@@ -66,6 +67,15 @@ export type ProjectImportPreviewRow = {
   errorColumnIndexes: number[]
   selectable: boolean
   existingProjectId?: string
+  /** 预览可编辑：客户经理 staff id（优先于 staffPreview） */
+  accountManagerStaffId?: string | null
+  /** 预览可编辑：商机来源 */
+  opportunitySource?: OpportunitySource | null
+  opportunitySourceLabel?: string
+  /** 预览可编辑：转正日期 YYYY-MM-DD */
+  conversionDate?: string | null
+  /** 预览可编辑：成交锚定月 YYYY-MM */
+  dealClosedMonth?: string | null
 }
 
 export type ProjectImportPreviewResult = {
@@ -90,9 +100,18 @@ export type ProjectImportPreviewResult = {
   }>
 }
 
+export type ProjectImportRowOverride = {
+  rowIndex: number
+  accountManagerStaffId?: string | null
+  opportunitySource?: OpportunitySource | null
+  conversionDate?: string | null
+  dealClosedMonth?: string | null
+}
+
 export type ProjectImportCommitOptions = {
   allowCreateStaff: boolean
   rowIndexes?: number[]
+  rowOverrides?: ProjectImportRowOverride[]
 }
 
 export type ProjectImportCommitResult = {

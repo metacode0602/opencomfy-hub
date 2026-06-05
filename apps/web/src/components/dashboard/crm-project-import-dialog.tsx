@@ -14,6 +14,13 @@ import {
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -31,11 +38,24 @@ import {
   downloadProjectImportErrorExcel,
 } from "@/lib/crm/project-import-error-export"
 import { PROJECT_IMPORT_MAX_BYTES } from "@/lib/crm/project-import-utils"
+import {
+  OPPORTUNITY_SOURCE_LABELS,
+  OPPORTUNITY_SOURCE_VALUES,
+  type OpportunitySource,
+} from "@/lib/crm/commission-constants"
+import { conversionDateToAnchorMonth } from "@/lib/crm/project-effective-dates"
 import type {
   ProjectImportCommitResult,
   ProjectImportPreviewResult,
   ProjectImportPreviewRow,
+  ProjectImportRowOverride,
 } from "@/lib/types/project-import"
+import type { UserStaff } from "@/lib/types/crm"
+import { trpc } from "@/lib/trpc/client"
+import {
+  preventStaffSelectOutsideDismiss,
+  StaffSelect,
+} from "@/components/crm/staff-select"
 
 type Step = "upload" | "preview" | "done"
 
@@ -53,6 +73,52 @@ const ACTION_LABEL: Record<ProjectImportPreviewRow["action"], string> = {
   skip: "跳过",
 }
 
+const NONE_OPPORTUNITY = "__none__"
+const EMPTY_STAFF: UserStaff[] = []
+
+type EditableRowPatch = Partial<
+  Pick<
+    ProjectImportPreviewRow,
+    "accountManagerStaffId" | "opportunitySource" | "conversionDate" | "dealClosedMonth"
+  >
+>
+
+function buildRowOverrides(
+  initial: ProjectImportPreviewResult,
+  edited: ProjectImportPreviewResult,
+): ProjectImportRowOverride[] {
+  const initialByRow = new Map(initial.rows.map((row) => [row.rowIndex, row]))
+  const overrides: ProjectImportRowOverride[] = []
+
+  for (const row of edited.rows) {
+    if (!row.selectable) continue
+    const base = initialByRow.get(row.rowIndex)
+    const patch: ProjectImportRowOverride = { rowIndex: row.rowIndex }
+    let changed = false
+
+    if (row.accountManagerStaffId !== base?.accountManagerStaffId) {
+      patch.accountManagerStaffId = row.accountManagerStaffId ?? null
+      changed = true
+    }
+    if (row.opportunitySource !== base?.opportunitySource) {
+      patch.opportunitySource = row.opportunitySource ?? null
+      changed = true
+    }
+    if (row.conversionDate !== base?.conversionDate) {
+      patch.conversionDate = row.conversionDate ?? null
+      changed = true
+    }
+    if (row.dealClosedMonth !== base?.dealClosedMonth) {
+      patch.dealClosedMonth = row.dealClosedMonth ?? null
+      changed = true
+    }
+
+    if (changed) overrides.push(patch)
+  }
+
+  return overrides
+}
+
 export function CrmProjectImportDialog({
   open,
   onOpenChange,
@@ -67,9 +133,17 @@ export function CrmProjectImportDialog({
   const [phase, setPhase] = React.useState<LoadPhase>("idle")
   const [file, setFile] = React.useState<File | null>(null)
   const [preview, setPreview] = React.useState<ProjectImportPreviewResult | null>(null)
+  const [editablePreview, setEditablePreview] = React.useState<ProjectImportPreviewResult | null>(
+    null,
+  )
   const [commitResult, setCommitResult] = React.useState<ProjectImportCommitResult | null>(null)
   const [allowCreateStaff, setAllowCreateStaff] = React.useState(true)
   const [parseError, setParseError] = React.useState<string | null>(null)
+
+  const { data: staffData } = trpc.crm.staff.listActive.useQuery(undefined, {
+    enabled: open && step === "preview",
+  })
+  const staff = staffData ?? EMPTY_STAFF
 
   const loading = phase === "parsing" || phase === "committing"
 
@@ -78,6 +152,7 @@ export function CrmProjectImportDialog({
     setPhase("idle")
     setFile(null)
     setPreview(null)
+    setEditablePreview(null)
     setCommitResult(null)
     setAllowCreateStaff(true)
     setParseError(null)
@@ -88,18 +163,38 @@ export function CrmProjectImportDialog({
     if (!open) reset()
   }, [open, reset])
 
+  const patchEditableRow = React.useCallback((rowIndex: number, patch: EditableRowPatch) => {
+    setEditablePreview((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        rows: prev.rows.map((row) => {
+          if (row.rowIndex !== rowIndex) return row
+          const next = { ...row, ...patch }
+          if (patch.conversionDate) {
+            const month = conversionDateToAnchorMonth(patch.conversionDate)
+            if (month) next.dealClosedMonth = month
+          }
+          return next
+        }),
+      }
+    })
+  }, [])
+
+  const activePreview = editablePreview ?? preview
+
   const selectableCount = React.useMemo(
-    () => preview?.rows.filter((r) => r.selectable).length ?? 0,
-    [preview],
+    () => activePreview?.rows.filter((r) => r.selectable).length ?? 0,
+    [activePreview],
   )
 
   const validationError = React.useMemo(() => {
-    if (step !== "preview" || !preview) return null
+    if (step !== "preview" || !activePreview) return null
     if (selectableCount === 0) {
       return "没有可导入的行，请检查 Excel 内容或重新上传"
     }
     return null
-  }, [step, preview, selectableCount])
+  }, [step, activePreview, selectableCount])
 
   const onFileChange = (next: File | null) => {
     setParseError(null)
@@ -145,6 +240,7 @@ export function CrmProjectImportDialog({
       }
 
       setPreview(body)
+      setEditablePreview(body)
       setStep("preview")
 
       const { summary } = body
@@ -180,7 +276,7 @@ export function CrmProjectImportDialog({
   }
 
   const onCommit = async () => {
-    if (!preview) return
+    if (!preview || !editablePreview) return
     if (validationError) {
       toast.error(validationError)
       return
@@ -195,6 +291,7 @@ export function CrmProjectImportDialog({
         body: JSON.stringify({
           previewToken: preview.previewToken,
           allowCreateStaff,
+          rowOverrides: buildRowOverrides(preview, editablePreview),
         }),
       })
       const body = (await res.json()) as ProjectImportCommitResult & { error?: string }
@@ -226,13 +323,18 @@ export function CrmProjectImportDialog({
     onOpenChange(next)
   }
 
-  const previewSummary = preview
-    ? `共 ${preview.summary.total} 行，可导入 ${selectableCount} 行，错误 ${preview.summary.error} 行，告警 ${preview.summary.warn} 行`
+  const previewSummary = activePreview
+    ? `共 ${activePreview.summary.total} 行，可导入 ${selectableCount} 行，错误 ${activePreview.summary.error} 行，告警 ${activePreview.summary.warn} 行`
     : null
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-5xl">
+      <DialogContent
+        className="grid max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 overflow-hidden sm:max-w-6xl"
+        onPointerDownOutside={preventStaffSelectOutsideDismiss}
+        onInteractOutside={preventStaffSelectOutsideDismiss}
+        onFocusOutside={preventStaffSelectOutsideDismiss}
+      >
         <DialogHeader className="shrink-0">
           <DialogTitle>
             {step === "upload" && "导入项目信息"}
@@ -241,9 +343,10 @@ export function CrmProjectImportDialog({
           </DialogTitle>
           <DialogDescription>
             {step === "upload" &&
-              "上传项目信息表 Excel，按表头名称解析。无租户 ID 时将自动创建客户（简称=项目名称）与默认租户。"}
+              "上传项目信息表 Excel，按表头名称解析。无租户 ID 时将自动创建客户（简称=项目名称）与默认租户。预览时可修改客户经理、商机来源、转正日期与成交锚定月。"}
             {step === "preview" &&
-              (previewSummary ?? "核对解析结果后确认导入。")}
+              (previewSummary ??
+                "核对解析结果，可在下方修改客户经理、商机来源与转正信息后再导入。")}
             {step === "done" && "导入结果如下，关闭后将刷新项目列表。"}
           </DialogDescription>
         </DialogHeader>
@@ -267,7 +370,8 @@ export function CrmProjectImportDialog({
                   </p>
                 ) : (
                   <p className="text-muted-foreground text-xs">
-                    表头需包含「项目名称」等列；支持 .xlsx / .xls，最大 10MB
+                    表头需包含「项目名称」；可选列：客户经理、商机来源（市场+销售/销售自拓/高管+销售）、转正式日期、转正月份。支持
+                    .xlsx / .xls，最大 10MB
                   </p>
                 )}
               </div>
@@ -281,13 +385,13 @@ export function CrmProjectImportDialog({
             </div>
           )}
 
-          {step === "preview" && preview && (
+          {step === "preview" && activePreview && (
             <div className="space-y-4 px-1">
-              {preview.summary.error > 0 && (
+              {activePreview.summary.error > 0 && (
                 <Alert variant="destructive">
                   <IconAlertTriangle className="size-4" />
                   <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <span>有 {preview.summary.error} 行存在错误，将无法导入</span>
+                    <span>有 {activePreview.summary.error} 行存在错误，将无法导入</span>
                     <Button
                       type="button"
                       size="sm"
@@ -309,17 +413,25 @@ export function CrmProjectImportDialog({
                       <TableHead className="w-12">行</TableHead>
                       <TableHead>项目名称</TableHead>
                       <TableHead className="w-24">租户ID</TableHead>
-                      <TableHead className="w-32">客户策略</TableHead>
-                      <TableHead>客户经理</TableHead>
-                      <TableHead>项目经理</TableHead>
+                      <TableHead className="w-28">客户策略</TableHead>
+                      <TableHead className="min-w-[140px]">客户经理</TableHead>
+                      <TableHead className="min-w-[130px]">商机来源</TableHead>
+                      <TableHead className="min-w-[130px]">转正日期</TableHead>
+                      <TableHead className="min-w-[110px]">成交锚定月</TableHead>
                       <TableHead className="w-28">阶段</TableHead>
                       <TableHead className="w-16">动作</TableHead>
-                      <TableHead className="min-w-[160px]">告警</TableHead>
+                      <TableHead className="min-w-[140px]">告警</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {preview.rows.map((row) => (
-                      <PreviewTableRow key={row.rowIndex} row={row} />
+                    {activePreview.rows.map((row) => (
+                      <PreviewTableRow
+                        key={row.rowIndex}
+                        row={row}
+                        staff={staff}
+                        disabled={loading}
+                        onPatch={patchEditableRow}
+                      />
                     ))}
                   </TableBody>
                 </Table>
@@ -398,6 +510,7 @@ export function CrmProjectImportDialog({
                 onClick={() => {
                   setStep("upload")
                   setPreview(null)
+                  setEditablePreview(null)
                 }}
               >
                 上一步
@@ -439,13 +552,24 @@ export function CrmProjectImportDialog({
   )
 }
 
-function PreviewTableRow({ row }: { row: ProjectImportPreviewRow }) {
-  const disabled = !row.selectable
+function PreviewTableRow({
+  row,
+  staff,
+  disabled,
+  onPatch,
+}: {
+  row: ProjectImportPreviewRow
+  staff: readonly UserStaff[]
+  disabled: boolean
+  onPatch: (rowIndex: number, patch: EditableRowPatch) => void
+}) {
+  const rowDisabled = !row.selectable || disabled
   const am = row.staffPreview.account_manager
-  const pm = row.staffPreview.project_manager
+  const accountManagerStaffId =
+    row.accountManagerStaffId ?? am?.staffId ?? ""
 
   return (
-    <TableRow className={disabled ? "bg-muted/40 opacity-70" : undefined}>
+    <TableRow className={rowDisabled ? "bg-muted/40 opacity-80" : undefined}>
       <TableCell className="tabular-nums">{row.rowIndex}</TableCell>
       <TableCell className="max-w-[140px]">
         <div className="truncate font-medium" title={row.projectName}>
@@ -463,32 +587,90 @@ function PreviewTableRow({ row }: { row: ProjectImportPreviewRow }) {
       </TableCell>
       <TableCell className="font-mono text-xs">{row.platformTenantId ?? "—"}</TableCell>
       <TableCell className="text-xs">{CUSTOMER_STRATEGY_LABEL[row.customerStrategy]}</TableCell>
-      <TableCell className="text-xs">
-        {am ? (
-          <span>
-            {am.name}
-            {am.willCreate && (
+      <TableCell className="align-top">
+        {rowDisabled ? (
+          <span className="text-xs">
+            {am?.name ?? "—"}
+            {am?.willCreate && (
               <Badge variant="outline" className="ml-1 text-[10px]">
                 新建
               </Badge>
             )}
           </span>
         ) : (
-          "—"
+          <StaffSelect
+            value={accountManagerStaffId}
+            staff={staff}
+            disabled={disabled}
+            allowEmpty
+            placeholder="选择客户经理"
+            className="min-w-[130px]"
+            onChange={(value) =>
+              onPatch(row.rowIndex, { accountManagerStaffId: value || null })
+            }
+          />
         )}
       </TableCell>
-      <TableCell className="text-xs">
-        {pm ? (
-          <span>
-            {pm.name}
-            {pm.willCreate && (
-              <Badge variant="outline" className="ml-1 text-[10px]">
-                新建
-              </Badge>
-            )}
+      <TableCell className="align-top">
+        {rowDisabled ? (
+          <span className="text-xs">
+            {row.opportunitySource
+              ? OPPORTUNITY_SOURCE_LABELS[row.opportunitySource]
+              : (row.opportunitySourceLabel ?? "—")}
           </span>
         ) : (
-          "—"
+          <Select
+            value={row.opportunitySource ?? NONE_OPPORTUNITY}
+            disabled={disabled}
+            onValueChange={(value) =>
+              onPatch(row.rowIndex, {
+                opportunitySource:
+                  value === NONE_OPPORTUNITY ? null : (value as OpportunitySource),
+              })
+            }
+          >
+            <SelectTrigger className="h-8 w-full min-w-[120px] text-xs">
+              <SelectValue placeholder="商机来源" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE_OPPORTUNITY}>不设置</SelectItem>
+              {OPPORTUNITY_SOURCE_VALUES.map((source) => (
+                <SelectItem key={source} value={source}>
+                  {OPPORTUNITY_SOURCE_LABELS[source]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </TableCell>
+      <TableCell className="align-top">
+        {rowDisabled ? (
+          <span className="text-xs">{row.conversionDate ?? "—"}</span>
+        ) : (
+          <Input
+            type="date"
+            className="h-8 min-w-[130px] text-xs"
+            value={row.conversionDate ?? ""}
+            disabled={disabled}
+            onChange={(e) =>
+              onPatch(row.rowIndex, { conversionDate: e.target.value || null })
+            }
+          />
+        )}
+      </TableCell>
+      <TableCell className="align-top">
+        {rowDisabled ? (
+          <span className="text-xs">{row.dealClosedMonth ?? "—"}</span>
+        ) : (
+          <Input
+            type="month"
+            className="h-8 min-w-[110px] text-xs"
+            value={row.dealClosedMonth ?? ""}
+            disabled={disabled}
+            onChange={(e) =>
+              onPatch(row.rowIndex, { dealClosedMonth: e.target.value || null })
+            }
+          />
         )}
       </TableCell>
       <TableCell className="text-xs">{row.mapped.stageLabel}</TableCell>

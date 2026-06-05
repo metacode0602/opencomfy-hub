@@ -1,5 +1,10 @@
 import * as XLSX from 'xlsx'
 
+import {
+  OPPORTUNITY_SOURCE_LABELS,
+  type OpportunitySource,
+} from '@/lib/crm/commission-constants'
+import { conversionDateToAnchorMonth } from '@/lib/crm/project-effective-dates'
 import type {
   ProjectImportParseResult,
   ProjectImportParsedRow,
@@ -36,6 +41,8 @@ export const PROJECT_IMPORT_COLUMN_ALIASES: Record<string, string[]> = {
   开始测试日期: ['开始测试日期', '测试开始日期'],
   试用完成日期: ['试用完成日期', '测试完成日期'],
   转正式日期: ['转正式日期', '转正日期', 'conversion_date'],
+  转正月份: ['转正月份', '成交锚定月', '成交月', 'deal_closed_month'],
+  商机来源: ['商机来源', '机会来源', 'opportunity_source'],
   '余额+裸金属消费': ['余额+裸金属消费'],
   总消费: ['总消费'],
   余额消费: ['余额消费'],
@@ -252,6 +259,101 @@ export function resolveImportStartDate(raw: Record<string, string | number | nul
     parseImportDate(pickImportCell(raw, '创建时间')) ??
     new Date().toISOString().slice(0, 10)
   )
+}
+
+/** YYYY-MM 或 Excel 日期/序列号 */
+export function parseImportMonth(value: string | number | null): string | null {
+  if (value == null || value === '') return null
+  if (typeof value === 'number' && value > 30000 && value < 60000) {
+    const date = XLSX.SSF.parse_date_code(value)
+    if (date) {
+      return `${date.y}-${String(date.m).padStart(2, '0')}`
+    }
+  }
+  const s = String(value).trim()
+  const monthMatch = s.match(/^(\d{4})[./-](\d{1,2})$/)
+  if (monthMatch) {
+    return `${monthMatch[1]}-${monthMatch[2]!.padStart(2, '0')}`
+  }
+  const asDate = parseImportDate(value)
+  if (asDate) return asDate.slice(0, 7)
+  return null
+}
+
+const OPPORTUNITY_SOURCE_ALIASES: Record<string, OpportunitySource> = {
+  marketing_sales: 'marketing_sales',
+  市场销售: 'marketing_sales',
+  '市场+销售': 'marketing_sales',
+  '市场＋销售': 'marketing_sales',
+  sales_self: 'sales_self',
+  销售自拓: 'sales_self',
+  exec_sales: 'exec_sales',
+  高管销售: 'exec_sales',
+  '高管+销售': 'exec_sales',
+  '高管＋销售': 'exec_sales',
+}
+
+function normalizeOpportunitySourceKey(value: string): string {
+  return value.trim().replace(/\s+/g, '').replace(/＋/g, '+').toLowerCase()
+}
+
+export function mapOpportunitySourceLabel(value: string | null): {
+  source: OpportunitySource | null
+  label: string
+} {
+  const raw = (value ?? '').trim()
+  if (!raw) return { source: null, label: '（空）' }
+
+  const normalized = normalizeOpportunitySourceKey(raw)
+  const fromAlias = OPPORTUNITY_SOURCE_ALIASES[normalized]
+  if (fromAlias) {
+    return { source: fromAlias, label: OPPORTUNITY_SOURCE_LABELS[fromAlias] }
+  }
+
+  for (const [code, label] of Object.entries(OPPORTUNITY_SOURCE_LABELS) as [
+    OpportunitySource,
+    string,
+  ][]) {
+    if (normalizeOpportunitySourceKey(label) === normalized || label === raw) {
+      return { source: code, label }
+    }
+  }
+
+  return { source: null, label: `${raw}（未识别）` }
+}
+
+export function buildConversionFieldsFromRaw(raw: Record<string, string | number | null>): {
+  conversionDate: string | null
+  dealClosedMonth: string | null
+} {
+  const conversionDate = parseImportDate(pickImportCell(raw, '转正式日期'))
+  const monthFromColumn = parseImportMonth(pickImportCell(raw, '转正月份'))
+  const dealClosedMonth =
+    monthFromColumn ??
+    (conversionDate ? conversionDateToAnchorMonth(conversionDate) : null)
+  return { conversionDate, dealClosedMonth }
+}
+
+export function buildEditableFieldsFromRaw(
+  raw: Record<string, string | number | null>,
+  staffPreview: ProjectImportPreviewRow['staffPreview'],
+): Pick<
+  ProjectImportPreviewRow,
+  | 'accountManagerStaffId'
+  | 'opportunitySource'
+  | 'opportunitySourceLabel'
+  | 'conversionDate'
+  | 'dealClosedMonth'
+> {
+  const opp = mapOpportunitySourceLabel(pickImportCell(raw, '商机来源'))
+  const { conversionDate, dealClosedMonth } = buildConversionFieldsFromRaw(raw)
+  return {
+    accountManagerStaffId: staffPreview.account_manager?.staffId ?? null,
+    opportunitySource: opp.source,
+    opportunitySourceLabel: opp.label,
+    conversionDate,
+    dealClosedMonth,
+  }
 }
 
 export function errorFieldsToColumnIndexes(

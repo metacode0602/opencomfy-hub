@@ -2,12 +2,25 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { auth } from '@/lib/auth'
+import { opportunitySourceSchema } from '@/lib/server/routers/crm/schemas'
 import { projectImportDataAccess } from '@/lib/server/dataaccess/crm/project-import'
+
+const monthSchema = z.string().regex(/^\d{4}-\d{2}$/)
+const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+
+const rowOverrideSchema = z.object({
+  rowIndex: z.number().int().positive(),
+  accountManagerStaffId: z.string().nullable().optional(),
+  opportunitySource: opportunitySourceSchema.nullable().optional(),
+  conversionDate: dateSchema.nullable().optional(),
+  dealClosedMonth: monthSchema.nullable().optional(),
+})
 
 const bodySchema = z.object({
   previewToken: z.string().min(1),
   allowCreateStaff: z.boolean().default(true),
   rowIndexes: z.array(z.number().int().positive()).optional(),
+  rowOverrides: z.array(rowOverrideSchema).optional(),
 })
 
 export async function POST(req: Request) {
@@ -35,6 +48,7 @@ export async function POST(req: Request) {
     const result = await projectImportDataAccess.commit(parsed.data.previewToken, {
       allowCreateStaff: parsed.data.allowCreateStaff,
       rowIndexes: parsed.data.rowIndexes,
+      rowOverrides: parsed.data.rowOverrides,
     })
     return NextResponse.json(result)
   } catch (e) {

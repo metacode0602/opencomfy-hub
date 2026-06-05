@@ -1,8 +1,10 @@
 import { db } from '@/lib/db'
 import {
   buildProjectImportPreviewResult,
+  buildEditableFieldsFromRaw,
   detectMissingRequiredHeaders,
   errorFieldsToColumnIndexes,
+  mapOpportunitySourceLabel,
   mapStageLabel,
   mapStatusLabel,
   parseImportDate,
@@ -12,13 +14,19 @@ import {
   sanitizeDescription,
   splitTags,
 } from '@/lib/crm/project-import-utils'
+import {
+  effectiveFromStartUtc,
+  todayShanghaiDateString,
+} from '@/lib/crm/project-effective-dates'
 import { crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
+import { projectOpportunitySourceDataAccess } from '@/lib/server/dataaccess/crm/project-opportunity-source'
 import type {
   ProjectImportCommitOptions,
   ProjectImportCommitResult,
   ProjectImportParsedRow,
   ProjectImportPreviewResult,
   ProjectImportPreviewRow,
+  ProjectImportRowOverride,
   ProjectImportStaffRole,
 } from '@/lib/types/project-import'
 import {
@@ -468,6 +476,87 @@ function purgeExpiredPreviewCache() {
   }
 }
 
+function applyRowOverride(
+  row: ProjectImportPreviewRow,
+  override: ProjectImportRowOverride | undefined,
+): ProjectImportPreviewRow {
+  if (!override) return row
+  return {
+    ...row,
+    accountManagerStaffId:
+      override.accountManagerStaffId !== undefined
+        ? override.accountManagerStaffId
+        : row.accountManagerStaffId,
+    opportunitySource:
+      override.opportunitySource !== undefined
+        ? override.opportunitySource
+        : row.opportunitySource,
+    conversionDate:
+      override.conversionDate !== undefined ? override.conversionDate : row.conversionDate,
+    dealClosedMonth:
+      override.dealClosedMonth !== undefined ? override.dealClosedMonth : row.dealClosedMonth,
+  }
+}
+
+async function resolveAccountManagerStaffId(
+  row: ProjectImportPreviewRow,
+  override: ProjectImportRowOverride | undefined,
+  allowCreateStaff: boolean,
+  staffCache: Map<string, string>,
+  stats: { createdStaff: number },
+): Promise<string | undefined> {
+  if (override && 'accountManagerStaffId' in override) {
+    return override.accountManagerStaffId || undefined
+  }
+  if (row.accountManagerStaffId) return row.accountManagerStaffId
+
+  const previewStaff = row.staffPreview.account_manager
+  if (!previewStaff) return undefined
+
+  return ensureStaffId(previewStaff.name, allowCreateStaff, staffCache, stats)
+}
+
+async function applyOpportunitySourceForProject(
+  projectId: string,
+  row: ProjectImportPreviewRow,
+) {
+  if (!row.opportunitySource) return
+  const effectiveFrom = row.conversionDate ?? row.mapped.startDate ?? todayShanghaiDateString()
+  await projectOpportunitySourceDataAccess.change({
+    projectId,
+    opportunitySource: row.opportunitySource,
+    effectiveFrom,
+    remark: '项目 Excel 导入',
+  })
+}
+
+async function applyDealClosedMonthForProject(projectId: string, row: ProjectImportPreviewRow) {
+  if (!row.dealClosedMonth) return
+  await db
+    .update(crmProject)
+    .set({ dealClosedMonth: row.dealClosedMonth })
+    .where(eq(crmProject.id, projectId))
+}
+
+async function patchCustomerConversionDateIfEmpty(
+  customerId: string,
+  conversionDate: string | null | undefined,
+) {
+  if (!conversionDate) return
+  const existing = await db.query.customer.findFirst({
+    where: eq(customer.id, customerId),
+    columns: { conversionDate: true },
+  })
+  if (existing?.conversionDate) return
+  await db.update(customer).set({ conversionDate }).where(eq(customer.id, customerId))
+}
+
+function staffAssignmentEffectiveFrom(row: ProjectImportPreviewRow): Date {
+  const startDate = row.mapped.startDate
+  if (startDate) return effectiveFromStartUtc(startDate)
+  return new Date()
+}
+
 export const projectImportDataAccess = {
   async preview(buffer: Buffer, fileName: string): Promise<ProjectImportPreviewResult> {
     purgeExpiredPreviewCache()
@@ -535,9 +624,28 @@ export const projectImportDataAccess = {
       if (pickImportCell(item.raw, '父记录')) warnings.push('父记录暂不支持层级导入')
       if (pickImportCell(item.raw, '关注人')) warnings.push('关注人暂不入库，仅预览展示')
 
+      const oppRaw = pickImportCell(item.raw, '商机来源')
+      if (oppRaw && !mapOpportunitySourceLabel(oppRaw).source) {
+        warnings.push(`商机来源「${oppRaw}」无法识别，请在预览中手动选择`)
+      }
+
+      const editableFields = buildEditableFieldsFromRaw(item.raw, extra.staffPreview)
+
+      if (stageInfo.stage === 'converted' && !editableFields.opportunitySource) {
+        warnings.push('已转正项目缺少商机来源，请在预览中设置（否则提成将无法计算）')
+      }
+      if (
+        stageInfo.stage === 'converted' &&
+        !editableFields.conversionDate &&
+        !editableFields.dealClosedMonth
+      ) {
+        warnings.push('已转正项目缺少转正日期或成交锚定月，可在预览中补充')
+      }
+
       rows.push({
         ...draft,
         ...extra,
+        ...editableFields,
         mapped: { ...draft.mapped, ...extra.mapped },
         warnings,
         errors,
@@ -602,6 +710,10 @@ export const projectImportDataAccess = {
     const errors: ProjectImportCommitResult['errors'] = []
     const staffCache = new Map<string, string>()
 
+    const overrideByRow = new Map(
+      (options.rowOverrides ?? []).map((override) => [override.rowIndex, override]),
+    )
+
     const selectedRows = cached.preview.rows.filter((row) => {
       if (!row.selectable) {
         stats.skipped++
@@ -614,7 +726,9 @@ export const projectImportDataAccess = {
       return true
     })
 
-    for (const row of selectedRows) {
+    for (const baseRow of selectedRows) {
+      const override = overrideByRow.get(baseRow.rowIndex)
+      const row = applyRowOverride(baseRow, override)
       try {
         await db.transaction(async () => {
           const parsed = cached.parsed.find((p) => p.rowIndex === row.rowIndex)
@@ -650,7 +764,9 @@ export const projectImportDataAccess = {
                 address: '',
                 testStartedOn: parseImportDate(pickImportCell(parsed.raw, '开始测试日期')),
                 testCompletedOn: parseImportDate(pickImportCell(parsed.raw, '试用完成日期')),
-                conversionDate: parseImportDate(pickImportCell(parsed.raw, '转正式日期')),
+                conversionDate:
+                  row.conversionDate ??
+                  parseImportDate(pickImportCell(parsed.raw, '转正式日期')),
               })
               rowCreatedCustomers++
             } else {
@@ -684,12 +800,15 @@ export const projectImportDataAccess = {
 
           if (!customerId) throw new Error('无法确定客户')
 
+          await patchCustomerConversionDateIfEmpty(customerId, row.conversionDate)
+
           const businessLineId =
             row.mapped.businessLineId ??
             (await resolveBusinessLineId(pickImportCell(parsed.raw, '业务线'))).id
 
           const staffByRole: Partial<Record<ProjectImportStaffRole, string>> = {}
           for (const { role } of STAFF_COLUMNS) {
+            if (role === 'account_manager') continue
             const previewStaff = row.staffPreview[role]
             if (!previewStaff) continue
             staffByRole[role] = await ensureStaffId(
@@ -698,6 +817,17 @@ export const projectImportDataAccess = {
               staffCache,
               stats,
             )
+          }
+
+          const accountManagerStaffId = await resolveAccountManagerStaffId(
+            row,
+            override,
+            options.allowCreateStaff,
+            staffCache,
+            stats,
+          )
+          if (accountManagerStaffId) {
+            staffByRole.account_manager = accountManagerStaffId
           }
 
           const endDate =
@@ -720,6 +850,7 @@ export const projectImportDataAccess = {
 
           let projectId = row.existingProjectId
           const now = new Date()
+          const staffEffectiveFrom = staffAssignmentEffectiveFrom(row)
 
           if (projectId && row.action === 'update') {
             await db
@@ -752,8 +883,10 @@ export const projectImportDataAccess = {
             stats.createdProjects++
           }
 
-          await upsertPartialStaffAssignments(projectId, staffByRole, now)
+          await upsertPartialStaffAssignments(projectId, staffByRole, staffEffectiveFrom)
           await appendTagsForProject(projectId, row.tags)
+          await applyOpportunitySourceForProject(projectId, row)
+          await applyDealClosedMonthForProject(projectId, row)
 
           const creatorStaffId = row.mapped.creatorName
             ? staffCache.get(row.mapped.creatorName) ??
