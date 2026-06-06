@@ -25,6 +25,7 @@ import {
 } from './excel-parser'
 import {
   parseDeviceModel,
+  parseDeviceQty,
   parsePurchaseQty,
 } from './baremetal-order-parse'
 import { resolveAndPersistEnrichment } from './enrichment'
@@ -259,6 +260,15 @@ function mapBaremetalRows(
       })
       continue
     }
+    const deviceQty = parseDeviceQty(pickCellRaw(row, ['设备数量', 'device_qty']))
+    if (deviceQty == null) {
+      errors.push({
+        rowNo,
+        columnAliases: ['设备数量', 'device_qty'],
+        message: '设备数量无效，应为正整数（留空视为 1）',
+      })
+      continue
+    }
 
     parsed.push({
       rowNo,
@@ -270,7 +280,7 @@ function mapBaremetalRows(
       payStatus: payStatus || '已支付',
       deviceStatus: pickColumn(row, ['设备状态', 'device_status']),
       purchaseQtyText,
-      deviceQty: parsedDevice.cardCount,
+      deviceQty,
       orderAmount: parseMoneyCell(pickColumn(row, ['订单金额', 'order_amount'])),
       refundAmount: parseMoneyCell(pickColumn(row, ['退款金额', 'refund_amount'])),
       finalAmount,
@@ -462,7 +472,8 @@ export async function importExcelFile(input: {
   preserveIncomeDerived?: boolean
 }): Promise<ImportFileResult> {
   const period = await getPeriodOrThrow(input.billingPeriodId, {
-    allowAdjusted: input.preserveIncomeDerived,
+    allowAdjusted:
+      input.preserveIncomeDerived || isPersonalImportFileType(input.fileType),
   })
   financeLog('import', `start ${input.fileType}`, {
     periodId: input.billingPeriodId,

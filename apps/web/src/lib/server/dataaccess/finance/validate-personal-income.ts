@@ -93,10 +93,9 @@ export async function validatePersonalIncome(
     baremetalReady &&
     tenantsPersonal > 0 &&
     period.status !== 'void' &&
-    period.status !== 'published' &&
-    period.status !== 'adjusted'
+    period.status !== 'published'
 
-  if (period.status === 'published' || period.status === 'adjusted') {
+  if (period.status === 'published') {
     messages.push('已发布账期须先撤回发布')
   }
 

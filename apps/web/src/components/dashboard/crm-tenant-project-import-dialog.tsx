@@ -75,7 +75,6 @@ const EMPTY_STAFF: UserStaff[] = []
 
 function formValidationError(form: TenantProjectImportFormValues): string | null {
   if (!form.businessLineId) return "请选择业务线"
-  if (!form.accountManagerStaffId) return "请选择客户经理"
   if (!form.deliveryManagerStaffId) return "请选择交付经理"
   if (!form.startDate) return "请选择开始日期"
   return null
@@ -362,7 +361,7 @@ export function CrmTenantProjectImportDialog({
                   value={form.accountManagerStaffId}
                   staff={staff}
                   disabled={loading || !formReady}
-                  allowEmpty={false}
+                  placeholder="可选"
                   onChange={(v) => patchForm({ accountManagerStaffId: v })}
                 />
               </div>

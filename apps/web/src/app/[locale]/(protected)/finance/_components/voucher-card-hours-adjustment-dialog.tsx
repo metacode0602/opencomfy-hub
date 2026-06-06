@@ -6,7 +6,6 @@ import {
   computeBalanceAdjustmentAmount,
   deriveCostFieldsAfterBalanceAdjustment,
   formatSignedAdjustmentMoney,
-  resolveUnitPricePerHour,
   validateSignedHoursInput,
 } from "@/lib/finance/cost-row-utils"
 import { parseMoney } from "@/lib/finance/income-row-utils"
@@ -75,6 +74,22 @@ function formatAdjustmentHoursLabel(value: number | string): string {
   return `${adj >= 0 ? "+" : ""}${formatted}`
 }
 
+function formatUnitPrice(value: number): string {
+  return value.toLocaleString("zh-CN", {
+    minimumFractionDigits: FRACTION_DIGITS,
+    maximumFractionDigits: FRACTION_DIGITS,
+  })
+}
+
+function validateDealUnitPriceInput(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (trimmed === "") return "请输入卡时成交价格"
+  const n = Number(trimmed)
+  if (Number.isNaN(n)) return "请输入有效数字"
+  if (n <= 0) return "成交价格须大于 0"
+  return null
+}
+
 export function VoucherCardHoursAdjustmentDialog({
   open,
   onOpenChange,
@@ -94,6 +109,7 @@ export function VoucherCardHoursAdjustmentDialog({
   })
 
   const [adjustmentHours, setAdjustmentHours] = useState("")
+  const [dealUnitPrice, setDealUnitPrice] = useState("")
   const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [historyDetail, setHistoryDetail] =
@@ -102,19 +118,22 @@ export function VoucherCardHoursAdjustmentDialog({
   useEffect(() => {
     if (!open || !row) return
     setAdjustmentHours("")
+    setDealUnitPrice("")
     setReason("")
     setError(null)
     setHistoryDetail(null)
   }, [open, row])
 
-  const unitPrice = useMemo(
-    () => (row ? resolveUnitPricePerHour(row) : null),
-    [row],
-  )
+  const unitPrice = useMemo(() => {
+    const trimmed = dealUnitPrice.trim()
+    if (trimmed === "") return null
+    const n = Number(trimmed)
+    if (Number.isNaN(n) || n <= 0) return null
+    return n
+  }, [dealUnitPrice])
 
   const originalHours = row ? parseHours(row.balance_card_hours) : 0
   const adjustmentNum = Number(adjustmentHours.trim() || "0")
-  const finalHours = Math.max(0, originalHours + adjustmentNum)
 
   const preview = useMemo(() => {
     if (!row || unitPrice == null) return null
@@ -128,13 +147,23 @@ export function VoucherCardHoursAdjustmentDialog({
     })
   }, [row, unitPrice, adjustmentNum, adjustmentHours])
 
+  const effectiveAdjustmentHours = preview
+    ? parseHours(preview.effectiveAdjustmentHours)
+    : adjustmentNum
+  const finalHours = Math.max(0, originalHours + effectiveAdjustmentHours)
+  const adjustmentAmount =
+    preview != null ? parseMoney(preview.adjustmentAmount) : null
+
   function handleSubmit() {
     if (!row) return
 
-    if (unitPrice == null) {
-      setError("未找到该机房的卡型单价，无法调账")
+    const priceErr = validateDealUnitPriceInput(dealUnitPrice)
+    if (priceErr) {
+      setError(priceErr)
       return
     }
+
+    const unitPriceValue = Number(dealUnitPrice.trim())
 
     const hoursErr = validateSignedHoursInput(adjustmentHours)
     if (hoursErr) {
@@ -143,16 +172,19 @@ export function VoucherCardHoursAdjustmentDialog({
     }
 
     const adj = Number(adjustmentHours.trim())
-    if (originalHours + adj < 0) {
-      setError(
-        `调账后余额卡时不能为负（原值 ${formatHours(row.balance_card_hours)}，调账值 ${formatAdjustmentHoursLabel(adj)}）`,
-      )
+    const derived = deriveCostFieldsAfterBalanceAdjustment({
+      row,
+      adjustmentHours: adj,
+      unitPricePerHour: unitPriceValue,
+    })
+    const effectiveAdj = parseHours(derived.effectiveAdjustmentHours)
+    if (Math.abs(effectiveAdj) < 1e-8) {
+      setError("调减金额已超过余额消费，当前无法继续调减")
       return
     }
-    const adjustmentAmount = computeBalanceAdjustmentAmount(adj, unitPrice)
-    if (parseMoney(row.balance_consumption) + adjustmentAmount < 0) {
+    if (originalHours + effectiveAdj < 0) {
       setError(
-        `调账后余额消费不能为负（当前 ${formatMoney(row.balance_consumption, FRACTION_DIGITS)}，本次调账金额 ${formatSignedAdjustmentMoney(adjustmentAmount, FRACTION_DIGITS)}）`,
+        `调账后余额卡时不能为负（原值 ${formatHours(row.balance_card_hours)}，实际调账值 ${formatAdjustmentHoursLabel(effectiveAdj)}）`,
       )
       return
     }
@@ -166,7 +198,7 @@ export function VoucherCardHoursAdjustmentDialog({
       costId: row.id,
       adjustmentHours: adj,
       reason: reason.trim(),
-      unitPricePerHour: unitPrice,
+      unitPricePerHour: unitPriceValue,
     })
   }
 
@@ -186,18 +218,46 @@ export function VoucherCardHoursAdjustmentDialog({
         {row && (
           <div className="grid shrink-0 gap-4 py-2">
             <div className="rounded-md border bg-muted/40 p-3 text-sm">
-              <p className="text-muted-foreground">
-                机房卡型单价（卡时/分成）
-                <span className="ml-2 font-medium text-foreground tabular-nums">
-                  {unitPrice != null
-                    ? `¥${unitPrice.toLocaleString("zh-CN", { minimumFractionDigits: FRACTION_DIGITS, maximumFractionDigits: FRACTION_DIGITS })}/卡时`
-                    : "未配置"}
-                </span>
+              <p className="text-xs text-muted-foreground">
+                调账金额 = 调账值 × 卡时成交价格；余额消费 = 原余额消费 + 调账金额（调账值为正加、为负减）；调减金额超过余额消费时，按当前余额消费封顶扣减；售出时长成本
+                = 成交价格 ×（原值 + 实际调账值）÷ 1.06；毛利 = 确认收入 − 售出时长成本 − 赠送时长成本
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                调账金额 = 调账值 × 单价；余额消费 = 原余额消费 + 调账金额（调账值为正加、为负减）；售出时长成本
-                = 单价 ×（原值 + 调账值）÷ 1.06；毛利 = 确认收入 − 售出时长成本 − 赠送时长成本
-              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2 rounded-md border p-3">
+                <Label htmlFor="voucher-adj-deal-price">卡时成交价格（元/卡时）</Label>
+                <Input
+                  id="voucher-adj-deal-price"
+                  type="text"
+                  inputMode="decimal"
+                  value={dealUnitPrice}
+                  onChange={(e) => {
+                    setDealUnitPrice(e.target.value)
+                    setError(null)
+                  }}
+                  placeholder="如 1.0500"
+                />
+              </div>
+              <div className="space-y-1 rounded-md border p-3">
+                <p className="text-xs text-muted-foreground">调账金额（余额消费）</p>
+                <p className="text-lg font-semibold tabular-nums">
+                  {adjustmentAmount != null
+                    ? formatSignedAdjustmentMoney(adjustmentAmount, FRACTION_DIGITS)
+                    : "—"}
+                </p>
+                {unitPrice != null && adjustmentHours.trim() !== "" && (
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    {formatAdjustmentHoursLabel(effectiveAdjustmentHours)} × ¥
+                    {formatUnitPrice(unitPrice)}
+                  </p>
+                )}
+                {preview?.capped && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    调减金额已超过余额消费，已按余额消费封顶扣减
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
@@ -228,6 +288,11 @@ export function VoucherCardHoursAdjustmentDialog({
                     ? formatHours(String(finalHours))
                     : formatHours(row.balance_card_hours)}
                 </p>
+                {preview?.capped && (
+                  <p className="text-xs text-muted-foreground tabular-nums">
+                    实际调账值 {formatAdjustmentHoursLabel(effectiveAdjustmentHours)}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -371,16 +436,9 @@ export function VoucherCardHoursAdjustmentDialog({
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">单价</p>
+                <p className="text-xs text-muted-foreground">成交价格</p>
                 <p className="font-medium tabular-nums">
-                  ¥
-                  {Number(historyDetail.unit_price_per_hour).toLocaleString(
-                    "zh-CN",
-                    {
-                      minimumFractionDigits: FRACTION_DIGITS,
-                      maximumFractionDigits: FRACTION_DIGITS,
-                    },
-                  )}
+                  ¥{formatUnitPrice(Number(historyDetail.unit_price_per_hour))}
                   /卡时
                 </p>
               </div>

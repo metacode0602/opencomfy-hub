@@ -13,7 +13,7 @@ export const PERIOD_STATUS_LABELS: Record<string, string> = {
 }
 
 export function isPublishedPeriodStatus(status: string): boolean {
-  return status === 'published' || status === 'adjusted'
+  return status === 'published'
 }
 
 export function formatPeriodStatus(status: string): string {

@@ -118,9 +118,7 @@ export async function validateSingleIncome(
     projectsIncludedList.length > 0 && period.status !== 'void'
 
   const canComputeSingleIncome =
-    canPreviewSingleIncome &&
-    period.status !== 'published' &&
-    period.status !== 'adjusted'
+    canPreviewSingleIncome && period.status !== 'published'
 
   const projectDetailsById = new Map(
     eligibleProjects.map((p) => [p.projectId, toProjectDetail(p)]),

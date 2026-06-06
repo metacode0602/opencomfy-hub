@@ -100,7 +100,7 @@ function canPublishPeriod(status: string): boolean {
 }
 
 function canUnpublishPeriod(status: string): boolean {
-  return isPublishedPeriodStatus(status)
+  return status === 'published'
 }
 
 function canRegeneratePeriod(status: string): boolean {
@@ -112,7 +112,7 @@ function canRegeneratePeriod(status: string): boolean {
 }
 
 function canVoidPeriod(status: string): boolean {
-  return status === 'published' || status === 'adjusted'
+  return status === 'published'
 }
 
 export function FinanceBillingPeriodsContent() {
@@ -596,7 +596,7 @@ function ConfirmDialogs({
           <AlertDialogHeader>
             <AlertDialogTitle>确认撤回发布？</AlertDialogTitle>
             <AlertDialogDescription>
-              账期 {confirmAction?.periodCode} 将恢复为已计算状态，可继续调整并重新发布。
+              账期 {confirmAction?.periodCode} 将恢复为已计算状态，可继续调整并重新发布。不会删除或清理已导入、计算、调账及提成派生数据。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

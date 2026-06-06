@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import {
   deriveCostFieldsAfterBalanceAdjustment,
   recomputeCostSumRows,
+  resolveEffectiveBalanceAdjustment,
   resolveUnitPricePerHour,
 } from '@/lib/finance/cost-row-utils'
 import { parseMoney } from '@/lib/finance/income-row-utils'
@@ -133,15 +134,18 @@ export async function applyBalanceCardHoursAdjustment(input: {
   }
 
   const originalHours = Number(record.balanceCardHours ?? 0)
-  if (originalHours + input.adjustmentHours < 0) {
-    throw new FinanceError('BAD_REQUEST', '调账后余额卡时不能为负')
-  }
-
-  const adjustmentAmount =
-    input.adjustmentHours * unitPrice
   const balanceConsumption = Number(record.balanceConsumption ?? 0)
-  if (balanceConsumption + adjustmentAmount < 0) {
-    throw new FinanceError('BAD_REQUEST', '调账后余额消费不能为负')
+  const effective = resolveEffectiveBalanceAdjustment({
+    adjustmentHours: input.adjustmentHours,
+    unitPricePerHour: unitPrice,
+    balanceConsumption,
+    balanceCardHours: originalHours,
+  })
+  if (Math.abs(effective.adjustmentHours) < 1e-8) {
+    throw new FinanceError('BAD_REQUEST', '调减金额已超过余额消费，当前无法继续调减')
+  }
+  if (originalHours + effective.adjustmentHours < 0) {
+    throw new FinanceError('BAD_REQUEST', '调账后余额卡时不能为负')
   }
 
   const derived = deriveCostFieldsAfterBalanceAdjustment({
@@ -195,7 +199,7 @@ export async function applyBalanceCardHoursAdjustment(input: {
       costId: input.costId,
       balanceCardHoursBefore: record.balanceCardHours,
       balanceCardHoursAfter: derived.balanceCardHoursAfter,
-      adjustmentHours: String(input.adjustmentHours),
+      adjustmentHours: derived.effectiveAdjustmentHours,
       soldDurationCostExclTaxBefore: record.soldDurationCostExclTax,
       soldDurationCostExclTaxAfter: derived.soldDurationCostExclTax,
       grossProfitBefore: record.grossProfit,
@@ -230,7 +234,8 @@ export async function applyBalanceCardHoursAdjustment(input: {
     actorId: input.actorId,
     metadata: {
       costId: input.costId,
-      adjustmentHours: input.adjustmentHours,
+      adjustmentHours: Number(derived.effectiveAdjustmentHours),
+      capped: derived.capped,
     },
   })
 

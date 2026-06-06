@@ -4,6 +4,7 @@ import { IncomeDetailEditable } from "../../_components/income-detail-editable"
 import { SingleIncomeRecomputeDialog } from "../../_components/single-income-recompute-dialog"
 import { downloadIncomeDetailExcel } from "@/lib/finance/income-detail-export"
 import {
+  countUniqueIncomeTenants,
   mergeIncomeRowsWithOverrides,
   sortIncomeRowsByTotalConsumptionDesc,
 } from "@/lib/finance/income-row-utils"
@@ -44,6 +45,10 @@ export default function FinancePeriodIncomePage() {
         mergeIncomeRowsWithOverrides(rows, overrides),
       ),
     [rows, overrides],
+  )
+  const tenantCount = useMemo(
+    () => countUniqueIncomeTenants(displayRows),
+    [displayRows],
   )
 
   const periodPublished = period
@@ -113,7 +118,8 @@ export default function FinancePeriodIncomePage() {
             <CardTitle>收入明细 · {period.period_code}</CardTitle>
             <CardDescription>
               platform_income_monthly（账期 {period.period_start} ~{" "}
-              {period.period_end}）· 客户全称经租户关联 customer
+              {period.period_end}）· 共 {tenantCount} 个租户、
+              {displayRows.length} 条明细 · 客户全称经租户关联 customer
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">

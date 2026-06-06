@@ -82,7 +82,7 @@ async function loadPeriodOrThrow(periodId: string) {
   if (period.status === 'void') {
     throw new FinanceError('CONFLICT', '作废账期不可计算')
   }
-  if (period.status === 'published' || period.status === 'adjusted') {
+  if (period.status === 'published') {
     throw new FinanceError('CONFLICT', '已发布账期须先撤回发布后再计算个人收入')
   }
   return period

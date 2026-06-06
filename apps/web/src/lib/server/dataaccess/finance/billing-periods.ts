@@ -463,12 +463,13 @@ export const financeBillingPeriodsDataAccess = {
     })
   },
 
+  /** 撤回发布：仅更新账期状态，不 purge 导入/计算/调账/提成派生数据。 */
   async unpublish(periodId: string, actorId?: string | null): Promise<void> {
     const period = await db.query.billingPeriod.findFirst({
       where: eq(billingPeriod.id, periodId),
     })
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-    if (period.status !== 'published' && period.status !== 'adjusted') {
+    if (period.status !== 'published') {
       throw new FinanceError('PRECONDITION_FAILED', '仅已发布账期可撤回')
     }
     await db
@@ -560,7 +561,7 @@ export const financeBillingPeriodsDataAccess = {
       where: eq(billingPeriod.id, periodId),
     })
     if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-    if (period.status !== 'published' && period.status !== 'adjusted') {
+    if (period.status !== 'published') {
       throw new FinanceError('PRECONDITION_FAILED', '仅已发布账期可作废')
     }
     const { purgeBillingPeriodArtifacts } = await financePurge()

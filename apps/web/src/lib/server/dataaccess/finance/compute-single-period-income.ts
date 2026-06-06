@@ -58,10 +58,7 @@ async function loadPeriodForSingleIncome(
   if (period.status === 'void') {
     throw new FinanceError('CONFLICT', '作废账期不可计算')
   }
-  if (
-    !options?.allowPublished &&
-    (period.status === 'published' || period.status === 'adjusted')
-  ) {
+  if (!options?.allowPublished && period.status === 'published') {
     throw new FinanceError('CONFLICT', '已发布账期不可直接重算，请先撤回发布')
   }
   return { periodCode: period.periodCode }
@@ -335,6 +332,11 @@ export async function computeSinglePeriodIncome(input: {
   const periodId = input.billingPeriodId
   financeLog('compute-single-income', 'start', { periodId, ruleVersion: RULE_VERSION })
 
+  const period = await db.query.billingPeriod.findFirst({
+    where: eq(billingPeriod.id, periodId),
+  })
+  if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
+
   const payload = await buildSinglePeriodIncomePayload(periodId)
 
   await db.delete(platformIncomeMonthly).where(eq(platformIncomeMonthly.billingPeriodId, periodId))
@@ -358,7 +360,10 @@ export async function computeSinglePeriodIncome(input: {
     })
   }
 
-  await stepI5UpdatePeriodIncomeTotals({ periodId, markComputed: true })
+  await stepI5UpdatePeriodIncomeTotals({
+    periodId,
+    markComputed: period.status !== 'adjusted',
+  })
 
   await upsertSingleIncomeReconciliationReport({
     periodId,

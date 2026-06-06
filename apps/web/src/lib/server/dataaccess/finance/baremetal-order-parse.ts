@@ -38,6 +38,16 @@ export function parseDeviceModel(text: string | null | undefined): ParsedDeviceM
   return { cardCode, cardCount }
 }
 
+/** 解析 Excel「设备数量」；缺省为 1。无效值返回 null。 */
+export function parseDeviceQty(raw: string | number | null | undefined): number | null {
+  if (raw == null || (typeof raw === 'string' && raw.trim() === '')) {
+    return 1
+  }
+  const n = typeof raw === 'number' ? raw : Number.parseFloat(String(raw).trim())
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) return null
+  return n
+}
+
 export function parsePurchaseQty(text: string | null | undefined): ParsedPurchaseQty | null {
   const raw = text?.trim()
   if (!raw) return null

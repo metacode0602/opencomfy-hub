@@ -62,6 +62,50 @@ export function computeBalanceAdjustmentAmount(
   return adjustmentHours * unitPricePerHour
 }
 
+/**
+ * 调减时若金额超过余额消费（或对应卡时），按上限封顶扣减。
+ * 返回实际生效的调账卡时与金额。
+ */
+export function resolveEffectiveBalanceAdjustment(input: {
+  adjustmentHours: number
+  unitPricePerHour: number
+  balanceConsumption: number
+  balanceCardHours: number
+}): {
+  adjustmentHours: number
+  adjustmentAmount: number
+  capped: boolean
+} {
+  const rawAmount = computeBalanceAdjustmentAmount(
+    input.adjustmentHours,
+    input.unitPricePerHour,
+  )
+
+  if (input.adjustmentHours >= 0 || rawAmount >= 0) {
+    return {
+      adjustmentHours: input.adjustmentHours,
+      adjustmentAmount: rawAmount,
+      capped: false,
+    }
+  }
+
+  const balance = Math.max(0, input.balanceConsumption)
+  const hours = Math.max(0, input.balanceCardHours)
+  const balanceCap = -balance
+  const hoursCap = hours > 0 ? -hours * input.unitPricePerHour : 0
+  const effectiveAmount = Math.max(rawAmount, balanceCap, hoursCap)
+  const effectiveHours =
+    input.unitPricePerHour > 0
+      ? effectiveAmount / input.unitPricePerHour
+      : input.adjustmentHours
+
+  return {
+    adjustmentHours: effectiveHours,
+    adjustmentAmount: effectiveAmount,
+    capped: effectiveAmount > rawAmount,
+  }
+}
+
 /** 调账值为正则显示 +，为负则显示 − */
 export function formatSignedAdjustmentMoney(
   amount: number,
@@ -254,16 +298,21 @@ export function deriveCostFieldsAfterBalanceAdjustment(input: {
   soldDurationCostExclTax: string
   grossProfit: string
   adjustmentAmount: string
+  effectiveAdjustmentHours: string
+  capped: boolean
 } {
-  const adjustmentAmount = computeBalanceAdjustmentAmount(
-    input.adjustmentHours,
-    input.unitPricePerHour,
-  )
+  const balanceConsumptionBefore = parseMoney(input.row.balance_consumption)
   const originalHours = parseHours(input.row.balance_card_hours)
-  const finalHours = Math.max(0, originalHours + input.adjustmentHours)
+  const effective = resolveEffectiveBalanceAdjustment({
+    adjustmentHours: input.adjustmentHours,
+    unitPricePerHour: input.unitPricePerHour,
+    balanceConsumption: balanceConsumptionBefore,
+    balanceCardHours: originalHours,
+  })
+  const finalHours = Math.max(0, originalHours + effective.adjustmentHours)
   const balanceConsumption = Math.max(
     0,
-    parseMoney(input.row.balance_consumption) + adjustmentAmount,
+    balanceConsumptionBefore + effective.adjustmentAmount,
   )
   const confirmed = computeConfirmedRevenueExclTax(balanceConsumption)
   const sold = computeSoldDurationCostExclTax(
@@ -281,6 +330,8 @@ export function deriveCostFieldsAfterBalanceAdjustment(input: {
     confirmedRevenueExclTax: toMoneyString(confirmed),
     soldDurationCostExclTax: toMoneyString(sold),
     grossProfit: toMoneyString(gross),
-    adjustmentAmount: toMoneyString(adjustmentAmount),
+    adjustmentAmount: toMoneyString(effective.adjustmentAmount),
+    effectiveAdjustmentHours: toHoursString(effective.adjustmentHours),
+    capped: effective.capped,
   }
 }

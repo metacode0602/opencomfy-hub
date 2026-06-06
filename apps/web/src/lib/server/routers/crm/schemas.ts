@@ -82,7 +82,7 @@ export const tenantProjectImportFormSchema = z.object({
   stage: projectStageSchema,
   businessLineId: z.string().min(1),
   preSalesStaffId: z.string(),
-  accountManagerStaffId: z.string().min(1),
+  accountManagerStaffId: z.string(),
   deliveryManagerStaffId: z.string().min(1),
   projectManagerStaffId: z.string(),
   tagId: z.string(),

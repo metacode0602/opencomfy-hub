@@ -56,7 +56,7 @@ async function assertIncomeComputePreconditions(periodId: string): Promise<void>
     where: eq(billingPeriod.id, periodId),
   })
   if (!period) throw new FinanceError('NOT_FOUND', '账期不存在')
-  if (period.status === 'published' || period.status === 'adjusted') {
+  if (period.status === 'published') {
     throw new FinanceError('CONFLICT', '已发布账期不可直接重算，请先撤回发布')
   }
   if (period.status === 'void') {
@@ -68,6 +68,7 @@ async function assertIncomeComputePreconditions(periodId: string): Promise<void>
   if (
     period.status !== 'imported' &&
     period.status !== 'computed' &&
+    period.status !== 'adjusted' &&
     period.status !== 'draft'
   ) {
     throw new FinanceError('PRECONDITION_FAILED', '当前账期状态不允许计算收入')

@@ -213,6 +213,11 @@ export function SingleIncomeRecomputeDialog({
                   {validation.projectsEligible}
                 </p>
                 <p>库内账单（{validation.billMonth}）：{validation.billsInDb} 条</p>
+                {validation.periodStatus === 'adjusted' && (
+                  <p className="text-amber-700 dark:text-amber-300">
+                    账期存在调账记录：可重新计算收入，不影响成本与弹性算力数据；收入侧本地调账将随明细行重建而失效。
+                  </p>
+                )}
                 {!validation.canComputeSingleIncome && validation.canPreviewSingleIncome && (
                   <p className="text-amber-700 dark:text-amber-300">
                     账期已发布：仅可试算预览，不可写入（须先撤回发布）

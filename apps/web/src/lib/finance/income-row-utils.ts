@@ -62,6 +62,12 @@ export function sortIncomeRowsByTotalConsumptionDesc(
   )
 }
 
+export function countUniqueIncomeTenants(
+  rows: PlatformIncomeMonthly[],
+): number {
+  return new Set(rows.map((r) => r.tenant_platform_id)).size
+}
+
 export function validateMoneyInput(raw: string): string | null {
   const trimmed = raw.trim()
   if (trimmed === "") return "请输入金额"

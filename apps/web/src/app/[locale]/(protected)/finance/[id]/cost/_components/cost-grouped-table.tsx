@@ -1,6 +1,7 @@
 "use client"
 
 import {
+  computeAdjustmentAmountFromHistoryEntry,
   COST_TAX_DIVISOR,
   formatSignedAdjustmentMoney,
   sumAdjustmentAmountsFromHistories,
@@ -33,9 +34,58 @@ import { ChevronDown, ChevronRight, Info } from "lucide-react"
 import * as React from "react"
 import { formatMoney, formatText } from "../../../_lib/display"
 
+const ADJUSTMENT_FRACTION_DIGITS = 4
+
 type GrossProfitDetailState = {
   row: PlatformCostMonthly
   adjustmentAmount: number
+  histories: VoucherCardHoursAdjustmentHistoryEntry[]
+}
+
+function formatAdjustmentHoursLabel(value: number | string): string {
+  const adj = Number(value)
+  if (Number.isNaN(adj)) return String(value)
+  const formatted = adj.toLocaleString("zh-CN", {
+    minimumFractionDigits: ADJUSTMENT_FRACTION_DIGITS,
+    maximumFractionDigits: ADJUSTMENT_FRACTION_DIGITS,
+  })
+  return `${adj >= 0 ? "+" : ""}${formatted}`
+}
+
+function formatDealUnitPrice(value: number | string): string {
+  const n = Number(value)
+  if (Number.isNaN(n)) return String(value)
+  return n.toLocaleString("zh-CN", {
+    minimumFractionDigits: ADJUSTMENT_FRACTION_DIGITS,
+    maximumFractionDigits: ADJUSTMENT_FRACTION_DIGITS,
+  })
+}
+
+function formatAdjustmentFormula(
+  entry: VoucherCardHoursAdjustmentHistoryEntry,
+): string {
+  const amount = computeAdjustmentAmountFromHistoryEntry(entry)
+  return `¥${formatDealUnitPrice(entry.unit_price_per_hour)} × ${formatAdjustmentHoursLabel(entry.adjustment_hours)} = ${formatSignedAdjustmentMoney(amount, ADJUSTMENT_FRACTION_DIGITS)}`
+}
+
+function collectAdjustmentHistoriesForRow(
+  row: PlatformCostMonthly,
+  rows: PlatformCostMonthly[],
+  adjustmentHistories: Record<string, VoucherCardHoursAdjustmentHistoryEntry[]>,
+): VoucherCardHoursAdjustmentHistoryEntry[] {
+  if (row.type === "record") {
+    return adjustmentHistories[row.id] ?? []
+  }
+
+  const recordIds = rows
+    .filter((r) => {
+      if (r.type !== "record") return false
+      if (row.staff_id) return r.staff_id === row.staff_id
+      return true
+    })
+    .map((r) => r.id)
+
+  return recordIds.flatMap((id) => adjustmentHistories[id] ?? [])
 }
 
 function rowDetailLabel(row: PlatformCostMonthly): string {
@@ -63,11 +113,12 @@ function GrossProfitDetailDialog({
   const gross = row ? parseMoney(row.gross_profit) : 0
   const computedGross = confirmed - sold - gifted
   const adjustmentAmount = detail?.adjustmentAmount ?? 0
+  const adjustmentHistories = detail?.histories ?? []
   const balanceBeforeAdjustment = balanceConsumption - adjustmentAmount
 
   return (
     <Dialog open={detail != null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md min-w-[30vw]">
         <DialogHeader>
           <DialogTitle>毛利计算明细</DialogTitle>
           <DialogDescription>
@@ -79,7 +130,7 @@ function GrossProfitDetailDialog({
             <div className="rounded-md border bg-muted/40 p-3 space-y-1">
               <p className="font-medium">计算公式</p>
               <p className="text-muted-foreground">
-                余额卡时调账金额 = Σ(调账值 × 单价)，调账值为正则加、为负则减
+                余额卡时调账金额 = Σ(成交价格 × 调账卡时)，调账值为正则加、为负则减
               </p>
               <p className="text-muted-foreground">
                 余额消费 = 调账前余额消费 + 余额卡时调账金额
@@ -100,18 +151,58 @@ function GrossProfitDetailDialog({
                       {formatMoney(String(balanceBeforeAdjustment))}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between gap-3 px-3 py-2">
-                    <span className="text-muted-foreground">余额卡时调账</span>
-                    <span
-                      className={cn(
-                        "tabular-nums font-medium",
-                        adjustmentAmount > 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-destructive",
-                      )}
-                    >
-                      {formatSignedAdjustmentMoney(adjustmentAmount)}
+                  <div className="flex items-start justify-between gap-3 px-3 py-2">
+                    <span className="shrink-0 text-muted-foreground">
+                      余额卡时调账
                     </span>
+                    <div className="min-w-0 space-y-0.5 text-right">
+                      {adjustmentHistories.length > 0 ? (
+                        adjustmentHistories.map((entry) => {
+                          const entryAmount =
+                            computeAdjustmentAmountFromHistoryEntry(entry)
+                          return (
+                            <p
+                              key={entry.id}
+                              className={cn(
+                                "tabular-nums text-xs leading-relaxed",
+                                entryAmount > 0
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-destructive",
+                              )}
+                            >
+                              {formatAdjustmentFormula(entry)}
+                            </p>
+                          )
+                        })
+                      ) : (
+                        <p
+                          className={cn(
+                            "tabular-nums text-sm font-medium",
+                            adjustmentAmount > 0
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-destructive",
+                          )}
+                        >
+                          {formatSignedAdjustmentMoney(adjustmentAmount)}
+                        </p>
+                      )}
+                      {adjustmentHistories.length > 1 && (
+                        <p
+                          className={cn(
+                            "tabular-nums text-sm font-medium",
+                            adjustmentAmount > 0
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-destructive",
+                          )}
+                        >
+                          合计{" "}
+                          {formatSignedAdjustmentMoney(
+                            adjustmentAmount,
+                            ADJUSTMENT_FRACTION_DIGITS,
+                          )}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </>
               )}
@@ -341,6 +432,21 @@ export function CostGroupedTable({
   const [grossProfitDetail, setGrossProfitDetail] =
     React.useState<GrossProfitDetailState | null>(null)
 
+  const openGrossProfitDetail = React.useCallback(
+    (row: PlatformCostMonthly, adjustmentAmount: number) => {
+      setGrossProfitDetail({
+        row,
+        adjustmentAmount,
+        histories: collectAdjustmentHistoriesForRow(
+          row,
+          rows,
+          adjustmentHistories,
+        ),
+      })
+    },
+    [rows, adjustmentHistories],
+  )
+
   const toggle = (staffId: string) => {
     setOpenStaff((prev) => {
       const next = new Set(prev)
@@ -368,13 +474,6 @@ export function CostGroupedTable({
       </div>
     )
   }
-
-  const openGrossProfitDetail = React.useCallback(
-    (row: PlatformCostMonthly, adjustmentAmount: number) => {
-      setGrossProfitDetail({ row, adjustmentAmount })
-    },
-    [],
-  )
 
   return (
     <>
