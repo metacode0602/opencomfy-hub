@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import type { Customer, CustomerExpectedScale } from '@/lib/data/types'
 import {
   mapCustomerRow,
+  toIsoDateTime,
 } from '@/lib/server/mappers/crm'
 import {
   billingTenant,
@@ -78,6 +79,15 @@ const projectCountByCustomer = db
   .groupBy(crmProject.customerId)
   .as('project_count_by_customer')
 
+const defaultTenantByCustomer = db
+  .select({
+    customerId: billingTenant.customerId,
+    platformRegisteredAt: billingTenant.platformRegisteredAt,
+  })
+  .from(billingTenant)
+  .where(eq(billingTenant.isDefault, true))
+  .as('default_tenant_by_customer')
+
 function buildCustomerListConditions(filters: CustomerListFilters = {}) {
   const conditions: SQL[] = []
   if (filters.type && filters.type !== 'all') {
@@ -118,11 +128,13 @@ async function queryCustomersWithMetrics(
       balance: tenantMetricsByCustomer.balance,
       totalRecharge: tenantMetricsByCustomer.totalRecharge,
       totalConsumption: tenantMetricsByCustomer.totalConsumption,
+      platformRegisteredAt: defaultTenantByCustomer.platformRegisteredAt,
     })
     .from(customer)
     .leftJoin(userStaff, eq(customer.salesManagerId, userStaff.id))
     .leftJoin(projectCountByCustomer, eq(customer.id, projectCountByCustomer.customerId))
     .leftJoin(tenantMetricsByCustomer, eq(customer.id, tenantMetricsByCustomer.customerId))
+    .leftJoin(defaultTenantByCustomer, eq(customer.id, defaultTenantByCustomer.customerId))
     .where(conditions)
     .orderBy(desc(customer.createdAt))
 
@@ -133,6 +145,9 @@ async function queryCustomersWithMetrics(
       totalConsumption: toMetricNumber(row.totalConsumption),
       balance: toMetricNumber(row.balance),
       salesManagerName: row.salesManagerName ?? undefined,
+      platformRegisteredAt: row.platformRegisteredAt
+        ? toIsoDateTime(row.platformRegisteredAt)
+        : undefined,
     }),
   )
 }

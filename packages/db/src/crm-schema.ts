@@ -76,6 +76,12 @@ export const customer = pgTable(
     testCompletedOn: date("test_completed_on"),
     conversionDate: date("conversion_date"),
     conversionTrigger: varchar("conversion_trigger", { length: 128 }),
+    /** 是否已完成实名认证 */
+    identityVerified: boolean("identity_verified").default(false).notNull(),
+    /** 实名认证完成时间 */
+    identityVerifiedAt: timestamp("identity_verified_at", { withTimezone: true }),
+    /** 实名认证方式：manual（手动）| auto（自动） */
+    identityVerificationType: varchar("identity_verification_type", { length: 16 }),
     ...crmTimestamps,
   },
   (table) => [

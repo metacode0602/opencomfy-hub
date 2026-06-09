@@ -102,6 +102,7 @@ export function mapCustomerRow(
     totalConsumption: number
     balance: number
     salesManagerName?: string
+    platformRegisteredAt?: string
   },
 ): Customer {
   return {
@@ -120,6 +121,15 @@ export function mapCustomerRow(
     salesManagerName: metrics.salesManagerName,
     expectedScale: (row.expectedScale as CustomerExpectedScale | null) ?? null,
     createdAt: toIsoDate(row.createdAt),
+    platformRegisteredAt: metrics.platformRegisteredAt,
+    identityVerified: row.identityVerified,
+    identityVerifiedAt: row.identityVerifiedAt
+      ? toIsoDateTime(row.identityVerifiedAt)
+      : undefined,
+    identityVerificationType:
+      row.identityVerificationType === 'manual' || row.identityVerificationType === 'auto'
+        ? row.identityVerificationType
+        : undefined,
     projectCount: metrics.projectCount,
     totalRecharge: metrics.totalRecharge,
     totalConsumption: metrics.totalConsumption,

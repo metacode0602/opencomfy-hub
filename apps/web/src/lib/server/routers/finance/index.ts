@@ -104,6 +104,21 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    listProjectCostMetadata: protectedProcedure
+      .input(
+        z.object({
+          tenantPlatformIds: z.array(z.string()).max(2000),
+          settlementMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+        }),
+      )
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.listProjectCostMetadata(input)
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     listImportTenantBindings: protectedProcedure
       .input(
         z.object({

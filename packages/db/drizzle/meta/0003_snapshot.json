@@ -1,6 +1,6 @@
 {
-  "id": "1c510adc-2356-4d30-bd5b-6b0be73b0eca",
-  "prevId": "1ecc05ef-4139-4249-80ad-7df588e39f40",
+  "id": "4898799a-8fdd-474e-8b59-b4acc9ac277b",
+  "prevId": "5b38e0ce-6684-4cdf-96c2-7373adeb855f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3658,6 +3658,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "opportunity_source": {
+          "name": "opportunity_source",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deal_closed_month": {
+          "name": "deal_closed_month",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commission_month_phase": {
+          "name": "commission_month_phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commission_phase_locked_at": {
+          "name": "commission_phase_locked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3754,6 +3778,36 @@
           "columns": [
             {
               "expression": "revenue_department",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_opportunity_source_idx": {
+          "name": "project_opportunity_source_idx",
+          "columns": [
+            {
+              "expression": "opportunity_source",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_deal_closed_month_idx": {
+          "name": "project_deal_closed_month_idx",
+          "columns": [
+            {
+              "expression": "deal_closed_month",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3933,6 +3987,25 @@
         "conversion_trigger": {
           "name": "conversion_trigger",
           "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "identity_verified": {
+          "name": "identity_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "identity_verified_at": {
+          "name": "identity_verified_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "identity_verification_type": {
+          "name": "identity_verification_type",
+          "type": "varchar(16)",
           "primaryKey": false,
           "notNull": false
         },
@@ -4997,6 +5070,274 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.project_conversion_setting": {
+      "name": "project_conversion_setting",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signed_on": {
+          "name": "signed_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversion_date": {
+          "name": "conversion_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "project_conversion_setting_project_id_uk": {
+          "name": "project_conversion_setting_project_id_uk",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_conversion_setting_conversion_date_idx": {
+          "name": "project_conversion_setting_conversion_date_idx",
+          "columns": [
+            {
+              "expression": "conversion_date",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "project_conversion_setting_project_id_project_id_fk": {
+          "name": "project_conversion_setting_project_id_project_id_fk",
+          "tableFrom": "project_conversion_setting",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_conversion_setting_created_by_user_staff_id_fk": {
+          "name": "project_conversion_setting_created_by_user_staff_id_fk",
+          "tableFrom": "project_conversion_setting",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.project_opportunity_source_assignment": {
+      "name": "project_opportunity_source_assignment",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "opportunity_source": {
+          "name": "opportunity_source",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_from": {
+          "name": "effective_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_to": {
+          "name": "effective_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "project_opportunity_source_assignment_current_uk": {
+          "name": "project_opportunity_source_assignment_current_uk",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"project_opportunity_source_assignment\".\"effective_to\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_opportunity_source_assignment_project_id_idx": {
+          "name": "project_opportunity_source_assignment_project_id_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "project_opportunity_source_assignment_effective_from_idx": {
+          "name": "project_opportunity_source_assignment_effective_from_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effective_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "project_opportunity_source_assignment_project_id_project_id_fk": {
+          "name": "project_opportunity_source_assignment_project_id_project_id_fk",
+          "tableFrom": "project_opportunity_source_assignment",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_opportunity_source_assignment_created_by_user_staff_id_fk": {
+          "name": "project_opportunity_source_assignment_created_by_user_staff_id_fk",
+          "tableFrom": "project_opportunity_source_assignment",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -8820,8 +9161,38 @@
           "primaryKey": false,
           "notNull": false
         },
+        "enterprise_income": {
+          "name": "enterprise_income",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "personal_income": {
+          "name": "personal_income",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "income_total": {
+          "name": "income_total",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "total_cost": {
           "name": "total_cost",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "project_cost": {
+          "name": "project_cost",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internal_user_cost": {
+          "name": "internal_user_cost",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
@@ -8867,6 +9238,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "ignore_list_price_windows": {
+          "name": "ignore_list_price_windows",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -11450,6 +11828,850 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.platform_cost_commission_derive_am_phase": {
+      "name": "platform_cost_commission_derive_am_phase",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_manager_staff_id": {
+          "name": "account_manager_staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month_phase": {
+          "name": "month_phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_count": {
+          "name": "project_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "gross_profit_base_sum": {
+          "name": "gross_profit_base_sum",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "sales_commission_sum": {
+          "name": "sales_commission_sum",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "flex_consumption_sum": {
+          "name": "flex_consumption_sum",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_am_phase_run_am_phase_uk": {
+          "name": "platform_cost_commission_derive_am_phase_run_am_phase_uk",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_manager_staff_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "month_phase",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_am_phase_run_id_platform_cost_commission_derive_run_id_fk": {
+          "name": "platform_cost_commission_derive_am_phase_run_id_platform_cost_commission_derive_run_id_fk",
+          "tableFrom": "platform_cost_commission_derive_am_phase",
+          "tableTo": "platform_cost_commission_derive_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_am_phase_account_manager_staff_id_user_staff_id_fk": {
+          "name": "platform_cost_commission_derive_am_phase_account_manager_staff_id_user_staff_id_fk",
+          "tableFrom": "platform_cost_commission_derive_am_phase",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "account_manager_staff_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_cost_commission_derive_dept_phase": {
+      "name": "platform_cost_commission_derive_dept_phase",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_dept": {
+          "name": "recipient_dept",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month_phase": {
+          "name": "month_phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gross_profit_base_sum": {
+          "name": "gross_profit_base_sum",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "commission_pool_sum": {
+          "name": "commission_pool_sum",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "project_count": {
+          "name": "project_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_dept_phase_run_dept_phase_uk": {
+          "name": "platform_cost_commission_derive_dept_phase_run_dept_phase_uk",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_dept",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "month_phase",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_dept_phase_run_id_platform_cost_commission_derive_run_id_fk": {
+          "name": "platform_cost_commission_derive_dept_phase_run_id_platform_cost_commission_derive_run_id_fk",
+          "tableFrom": "platform_cost_commission_derive_dept_phase",
+          "tableTo": "platform_cost_commission_derive_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_cost_commission_derive_issue": {
+      "name": "platform_cost_commission_derive_issue",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "code": {
+          "name": "code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "message": {
+          "name": "message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_issue_run_project_code_uk": {
+          "name": "platform_cost_commission_derive_issue_run_project_code_uk",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_cost_commission_derive_issue_run_idx": {
+          "name": "platform_cost_commission_derive_issue_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_issue_run_id_platform_cost_commission_derive_run_id_fk": {
+          "name": "platform_cost_commission_derive_issue_run_id_platform_cost_commission_derive_run_id_fk",
+          "tableFrom": "platform_cost_commission_derive_issue",
+          "tableTo": "platform_cost_commission_derive_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_issue_project_id_project_id_fk": {
+          "name": "platform_cost_commission_derive_issue_project_id_project_id_fk",
+          "tableFrom": "platform_cost_commission_derive_issue",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_cost_commission_derive_line": {
+      "name": "platform_cost_commission_derive_line",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_role": {
+          "name": "recipient_role",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_staff_id": {
+          "name": "recipient_staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recipient_dept": {
+          "name": "recipient_dept",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "month_phase": {
+          "name": "month_phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rate": {
+          "name": "rate",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "platform_ratio": {
+          "name": "platform_ratio",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'1'"
+        },
+        "gross_profit_base": {
+          "name": "gross_profit_base",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "commission_amount": {
+          "name": "commission_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_line_run_project_role_uk": {
+          "name": "platform_cost_commission_derive_line_run_project_role_uk",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recipient_role",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_cost_commission_derive_line_run_idx": {
+          "name": "platform_cost_commission_derive_line_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_line_run_id_platform_cost_commission_derive_run_id_fk": {
+          "name": "platform_cost_commission_derive_line_run_id_platform_cost_commission_derive_run_id_fk",
+          "tableFrom": "platform_cost_commission_derive_line",
+          "tableTo": "platform_cost_commission_derive_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_line_project_id_project_id_fk": {
+          "name": "platform_cost_commission_derive_line_project_id_project_id_fk",
+          "tableFrom": "platform_cost_commission_derive_line",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_line_recipient_staff_id_user_staff_id_fk": {
+          "name": "platform_cost_commission_derive_line_recipient_staff_id_user_staff_id_fk",
+          "tableFrom": "platform_cost_commission_derive_line",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "recipient_staff_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_cost_commission_derive_project": {
+      "name": "platform_cost_commission_derive_project",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "settlement_month": {
+          "name": "settlement_month",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "flex_consumption": {
+          "name": "flex_consumption",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "gross_profit_base": {
+          "name": "gross_profit_base",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "gross_profit_rate_display": {
+          "name": "gross_profit_rate_display",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opportunity_source": {
+          "name": "opportunity_source",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deal_closed_month": {
+          "name": "deal_closed_month",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "month_phase": {
+          "name": "month_phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "months_since_deal": {
+          "name": "months_since_deal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "account_manager_staff_id": {
+          "name": "account_manager_staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revenue_department": {
+          "name": "revenue_department",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "skipped_commission": {
+          "name": "skipped_commission",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_project_run_project_uk": {
+          "name": "platform_cost_commission_derive_project_run_project_uk",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_cost_commission_derive_project_run_idx": {
+          "name": "platform_cost_commission_derive_project_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_project_run_id_platform_cost_commission_derive_run_id_fk": {
+          "name": "platform_cost_commission_derive_project_run_id_platform_cost_commission_derive_run_id_fk",
+          "tableFrom": "platform_cost_commission_derive_project",
+          "tableTo": "platform_cost_commission_derive_run",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_project_project_id_project_id_fk": {
+          "name": "platform_cost_commission_derive_project_project_id_project_id_fk",
+          "tableFrom": "platform_cost_commission_derive_project",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_cost_commission_derive_project_account_manager_staff_id_user_staff_id_fk": {
+          "name": "platform_cost_commission_derive_project_account_manager_staff_id_user_staff_id_fk",
+          "tableFrom": "platform_cost_commission_derive_project",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "account_manager_staff_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.platform_cost_commission_derive_run": {
+      "name": "platform_cost_commission_derive_run",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "billing_period_id": {
+          "name": "billing_period_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy_code": {
+          "name": "policy_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_version": {
+          "name": "run_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_summary": {
+          "name": "error_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "platform_cost_commission_derive_run_period_idx": {
+          "name": "platform_cost_commission_derive_run_period_idx",
+          "columns": [
+            {
+              "expression": "billing_period_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "platform_cost_commission_derive_run_period_policy_ver_uk": {
+          "name": "platform_cost_commission_derive_run_period_policy_ver_uk",
+          "columns": [
+            {
+              "expression": "billing_period_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "policy_code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "run_version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "platform_cost_commission_derive_run_billing_period_id_billing_period_id_fk": {
+          "name": "platform_cost_commission_derive_run_billing_period_id_billing_period_id_fk",
+          "tableFrom": "platform_cost_commission_derive_run",
+          "tableTo": "billing_period",
+          "columnsFrom": [
+            "billing_period_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.platform_cost_monthly": {
       "name": "platform_cost_monthly",
       "schema": "",
@@ -12401,14 +13623,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "voucher_card_hours_before": {
-          "name": "voucher_card_hours_before",
+        "balance_card_hours_before": {
+          "name": "balance_card_hours_before",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
         },
-        "voucher_card_hours_after": {
-          "name": "voucher_card_hours_after",
+        "balance_card_hours_after": {
+          "name": "balance_card_hours_after",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
@@ -12419,14 +13641,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "gifted_duration_cost_excl_tax_before": {
-          "name": "gifted_duration_cost_excl_tax_before",
+        "sold_duration_cost_excl_tax_before": {
+          "name": "sold_duration_cost_excl_tax_before",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
         },
-        "gifted_duration_cost_excl_tax_after": {
-          "name": "gifted_duration_cost_excl_tax_after",
+        "sold_duration_cost_excl_tax_after": {
+          "name": "sold_duration_cost_excl_tax_after",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false

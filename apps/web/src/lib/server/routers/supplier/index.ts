@@ -14,7 +14,9 @@ import { onboardingBatchDataAccess } from '@/lib/server/dataaccess/supplier/onbo
 import { supplierOverviewDataAccess } from '@/lib/server/dataaccess/supplier/overview'
 import { supplierActivityDataAccess } from '@/lib/server/dataaccess/supplier/supplier-activity'
 import { platformDatacenterImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-datacenter-import'
+import { platformDatacenterBindDataAccess } from '@/lib/server/dataaccess/supplier/platform-datacenter-bind'
 import { platformSupplierImportDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-import'
+import { platformSupplierBindDataAccess } from '@/lib/server/dataaccess/supplier/platform-supplier-bind'
 import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/supplier-import'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
@@ -106,11 +108,31 @@ const platformSupplierSearchSchema = z.object({
   defaultBusinessManagerStaffId: z.string().min(1),
 })
 
+const platformSupplierBindSearchSchema = z.object({
+  supplierId: z.string().min(1),
+  query: z.string().trim().min(1, '请输入平台租户 ID 或名称'),
+})
+
+const platformSupplierBindCommitSchema = z.object({
+  supplierId: z.string().min(1),
+  applicationId: z.string().min(1),
+})
+
 const platformDatacenterSearchSchema = z.object({
   tenantIds: z
     .array(z.string().regex(/^\d+$/))
     .max(PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS),
   name: z.string(),
+})
+
+const platformDatacenterBindSearchSchema = z.object({
+  dataCenterId: z.string().min(1),
+  query: z.string().trim().min(1, '请输入平台租户 ID、机房 ID 或名称'),
+})
+
+const platformDatacenterBindCommitSchema = z.object({
+  dataCenterId: z.string().min(1),
+  idcId: z.string().min(1),
 })
 
 function mapImportError(error: unknown): never {
@@ -1021,6 +1043,28 @@ export const supplierRouter = createTRPCRouter({
       }),
   }),
 
+  platformBind: createTRPCRouter({
+    search: adminProcedure
+      .input(platformSupplierBindSearchSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformSupplierBindDataAccess.search(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    bind: adminProcedure
+      .input(platformSupplierBindCommitSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformSupplierBindDataAccess.bind(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
   platformDatacenterImport: createTRPCRouter({
     preview: adminProcedure
       .input(platformDatacenterSearchSchema)
@@ -1037,6 +1081,28 @@ export const supplierRouter = createTRPCRouter({
       .mutation(async ({ input }) => {
         try {
           return await platformDatacenterImportDataAccess.commit(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  platformDatacenterBind: createTRPCRouter({
+    search: adminProcedure
+      .input(platformDatacenterBindSearchSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformDatacenterBindDataAccess.search(input)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    bind: adminProcedure
+      .input(platformDatacenterBindCommitSchema)
+      .mutation(async ({ input }) => {
+        try {
+          return await platformDatacenterBindDataAccess.bind(input)
         } catch (e) {
           mapImportError(e)
         }

@@ -1,6 +1,6 @@
 {
-  "id": "768e00a6-d26a-475f-a86c-b5a23fdc5366",
-  "prevId": "f81a835b-272b-4b13-8693-c85cce55077b",
+  "id": "5b38e0ce-6684-4cdf-96c2-7373adeb855f",
+  "prevId": "1ecc05ef-4139-4249-80ad-7df588e39f40",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -13604,14 +13604,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "voucher_card_hours_before": {
-          "name": "voucher_card_hours_before",
+        "balance_card_hours_before": {
+          "name": "balance_card_hours_before",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
         },
-        "voucher_card_hours_after": {
-          "name": "voucher_card_hours_after",
+        "balance_card_hours_after": {
+          "name": "balance_card_hours_after",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
@@ -13622,14 +13622,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "gifted_duration_cost_excl_tax_before": {
-          "name": "gifted_duration_cost_excl_tax_before",
+        "sold_duration_cost_excl_tax_before": {
+          "name": "sold_duration_cost_excl_tax_before",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false
         },
-        "gifted_duration_cost_excl_tax_after": {
-          "name": "gifted_duration_cost_excl_tax_after",
+        "sold_duration_cost_excl_tax_after": {
+          "name": "sold_duration_cost_excl_tax_after",
           "type": "numeric(15, 4)",
           "primaryKey": false,
           "notNull": false

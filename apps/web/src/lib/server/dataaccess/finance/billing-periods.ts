@@ -46,6 +46,7 @@ import {
 import { customerFullNamesByTenantIds } from './income-customer-enrich'
 import { validateSingleIncome } from './validate-single-income'
 import { listCostSourceLines as fetchCostSourceLines } from './list-cost-source-lines'
+import { listProjectCostMetadata } from './list-project-cost-metadata'
 import {
   listImportTenantBindings as fetchImportTenantBindings,
   type ImportTenantBindingFilters,
@@ -151,6 +152,13 @@ export const financeBillingPeriodsDataAccess = {
 
   async listCostSourceLines(billingPeriodId: string) {
     return fetchCostSourceLines(billingPeriodId)
+  },
+
+  async listProjectCostMetadata(input: {
+    tenantPlatformIds: string[]
+    settlementMonth: string
+  }) {
+    return listProjectCostMetadata(input)
   },
 
   async listImportTenantBindings(

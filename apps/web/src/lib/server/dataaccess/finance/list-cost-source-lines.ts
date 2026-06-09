@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { contractPricingModeNames, isSharePricingMode } from '@/lib/data/types'
 import type { ContractPricingMode } from '@/lib/data/types'
+import { parsePricingTiers } from '@/lib/finance/cost-pricing-utils'
 import {
   billingPeriodCostPricingSnapshot,
   billingPeriodCostSourceLine,
@@ -23,6 +24,8 @@ export type CostSourceLineDto = {
   voucher_card_hours: string
   balance_card_hours: string
   gpu_card_type_name: string | null
+  data_center_id: string
+  gpu_card_type_id: string
   region: string | null
   data_center_name: string | null
   pricing_mode: string | null
@@ -30,6 +33,7 @@ export type CostSourceLineDto = {
   list_price_per_hour: string | null
   deal_unit_price_per_hour: string | null
   revenue_share_percent: string | null
+  pricing_tiers: unknown
   staff_name: string | null
 }
 
@@ -147,6 +151,8 @@ export async function listCostSourceLines(
       voucher_card_hours: line.voucherCardHours,
       balance_card_hours: line.balanceCardHours,
       gpu_card_type_name: line.gpuCardTypeName,
+      data_center_id: line.dataCenterId,
+      gpu_card_type_id: line.gpuCardTypeId,
       region: readRegion(line.sourceMeta, dcById.get(line.dataCenterId)),
       data_center_name: line.dataCenterName,
       pricing_mode: pricingFields.pricingMode,
@@ -154,6 +160,7 @@ export async function listCostSourceLines(
       list_price_per_hour: pricingFields.listPricePerHour,
       deal_unit_price_per_hour: pricingFields.dealUnitPricePerHour,
       revenue_share_percent: pricingFields.revenueSharePercent,
+      pricing_tiers: snap?.pricingTiers ?? null,
       staff_name: line.staffName,
     }
   })

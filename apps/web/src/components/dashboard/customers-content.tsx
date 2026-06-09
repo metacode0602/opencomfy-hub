@@ -17,6 +17,7 @@ import {
   GitMerge,
   Pause,
   MoreHorizontal,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -50,8 +51,10 @@ import type { Customer } from '@/lib/data/types'
 import { CreateCustomerDialog } from './create-customer-dialog'
 import { EditCustomerDialog } from './edit-customer-dialog'
 import { CustomerMergeDialog } from './customer-merge-dialog'
+import { CustomerIdentitySyncDialog } from './customer-identity-sync-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
+import { formatDateTime } from '@/lib/utils/date-utils'
 
 export function CustomersContent() {
   const [search, setSearch] = useState('')
@@ -60,6 +63,7 @@ export function CustomersContent() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
+  const [identitySyncOpen, setIdentitySyncOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
   const [mergeTarget, setMergeTarget] = useState<Customer | null>(null)
 
@@ -95,10 +99,16 @@ export function CustomersContent() {
           <h1 className="text-2xl font-bold">客户管理</h1>
           <p className="text-muted-foreground">管理所有 B 端和 C 端客户信息</p>
         </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          新建客户
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setIdentitySyncOpen(true)}>
+            <ShieldCheck className="w-4 h-4 mr-2" />
+            同步实名信息
+          </Button>
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            新建客户
+          </Button>
+        </div>
       </div>
 
       <CreateCustomerDialog
@@ -122,6 +132,12 @@ export function CustomersContent() {
           onMerged={() => void refetch()}
         />
       ) : null}
+
+      <CustomerIdentitySyncDialog
+        open={identitySyncOpen}
+        onOpenChange={setIdentitySyncOpen}
+        onSynced={() => void refetch()}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
@@ -222,6 +238,9 @@ export function CustomersContent() {
                 <TableHead>联系人</TableHead>
                 <TableHead>销售经理</TableHead>
                 <TableHead>行业</TableHead>
+                <TableHead>平台创建时间</TableHead>
+                <TableHead>实名认证</TableHead>
+                <TableHead>审核通过时间</TableHead>
                 <TableHead>项目数</TableHead>
                 <TableHead>总充值</TableHead>
                 <TableHead>总消费</TableHead>
@@ -255,6 +274,17 @@ export function CustomersContent() {
                     {row.salesManagerName ?? '—'}
                   </TableCell>
                   <TableCell className="text-muted-foreground">{row.industry}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {formatDateTime(row.platformRegisteredAt)}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={row.identityVerified ? 'default' : 'outline'}>
+                      {row.identityVerified ? '已实名' : '未实名'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                    {row.identityVerified ? formatDateTime(row.identityVerifiedAt) : '—'}
+                  </TableCell>
                   <TableCell>{row.projectCount}</TableCell>
                   <TableCell>¥{row.totalRecharge.toLocaleString()}</TableCell>
                   <TableCell>¥{row.totalConsumption.toLocaleString()}</TableCell>

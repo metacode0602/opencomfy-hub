@@ -31,6 +31,10 @@ import {
 import { billingScheduledSyncDataAccess } from '@/lib/server/dataaccess/crm/billing-scheduled-sync'
 import { balanceSnapshotDataAccess } from '@/lib/server/dataaccess/crm/balance-snapshot'
 import { tenantBlacklistDataAccess } from '@/lib/server/dataaccess/crm/tenant-blacklist'
+import {
+  customerIdentitySyncDataAccess,
+  EnterpriseAuthApiError,
+} from '@/lib/server/dataaccess/crm/customer-identity-sync'
 import { TenantBlacklistApiError } from '@/lib/server/integrations/tenant-blacklist-api'
 import { SuanliOpenApiError } from '@/lib/server/integrations/suanli-tenant-api'
 import { MAX_BLACKLIST_SAFETY_DAYS } from '@/lib/crm/tenant-blacklist-utils'
@@ -64,6 +68,19 @@ function mapPlatformImportError(e: unknown): never {
     throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
   }
   throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '平台租户导入失败' })
+}
+
+function mapEnterpriseAuthError(e: unknown): never {
+  if (e instanceof EnterpriseAuthApiError) {
+    throw new TRPCError({
+      code: e.code === '401' || e.code === '403' ? 'UNAUTHORIZED' : 'BAD_REQUEST',
+      message: e.message,
+    })
+  }
+  if (e instanceof Error) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '企业实名同步失败' })
 }
 
 function mapTenantBlacklistError(e: unknown): never {
@@ -217,6 +234,22 @@ export const crmRouter = createTRPCRouter({
     merge: adminProcedure.input(customerMergeSchema).mutation(({ input }) =>
       customerMergeDataAccess.mergeCustomers(input),
     ),
+    previewIdentitySync: adminProcedure.query(async () => {
+      try {
+        return await customerIdentitySyncDataAccess.previewSync()
+      } catch (e) {
+        mapEnterpriseAuthError(e)
+      }
+    }),
+    applyIdentitySync: adminProcedure
+      .input(z.object({ customerIds: z.array(z.string().min(1)).min(1) }))
+      .mutation(async ({ input }) => {
+        try {
+          return await customerIdentitySyncDataAccess.applySync(input)
+        } catch (e) {
+          mapEnterpriseAuthError(e)
+        }
+      }),
   }),
 
   projects: createTRPCRouter({

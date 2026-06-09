@@ -89,6 +89,10 @@ export function formValuesToCustomer(
       ? null
       : { ...scale, cards },
     createdAt: base.createdAt ?? new Date().toISOString().slice(0, 10),
+    platformRegisteredAt: base.platformRegisteredAt,
+    identityVerified: base.identityVerified ?? false,
+    identityVerifiedAt: base.identityVerifiedAt,
+    identityVerificationType: base.identityVerificationType,
     projectCount: base.projectCount ?? 0,
     totalRecharge: base.totalRecharge ?? 0,
     totalConsumption: base.totalConsumption ?? 0,

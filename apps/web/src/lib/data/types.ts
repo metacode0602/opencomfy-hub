@@ -74,6 +74,14 @@ export interface Customer {
   /** 期望规模：卡型多选 */
   expectedScale?: CustomerExpectedScale | null
   createdAt: string
+  /** 默认计费账户在平台侧的注册/创建时间 */
+  platformRegisteredAt?: string
+  /** 是否已完成实名（企业认证审核通过） */
+  identityVerified: boolean
+  /** 实名/审核通过时间 */
+  identityVerifiedAt?: string
+  /** 实名方式：manual 手动 | auto 自动 */
+  identityVerificationType?: 'manual' | 'auto'
   projectCount: number
   totalRecharge: number
   totalConsumption: number

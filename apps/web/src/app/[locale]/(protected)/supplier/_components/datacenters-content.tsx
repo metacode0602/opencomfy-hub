@@ -6,10 +6,11 @@ import {
   AlertCircle,
   Building2,
   CheckCircle2,
-  ChevronRight,
   Eye,
+  LinkIcon,
   Loader2,
   MapPin,
+  MoreHorizontal,
   Search,
   Server,
   Settings2,
@@ -27,6 +28,12 @@ import {
   TableRow,
 } from '@workspace/ui/components/table'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@workspace/ui/components/dropdown-menu'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -37,6 +44,7 @@ import { Progress } from '@workspace/ui/components/progress'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { PlatformDatacenterImportTrigger } from '@/components/dashboard/platform-datacenter-import-dialog'
+import { PlatformDatacenterBindDialog } from '@/components/dashboard/platform-datacenter-bind-dialog'
 import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier-datacenter-import-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenter } from '@/lib/data/types'
@@ -50,6 +58,10 @@ function getErrorMessage(error: unknown): string {
 
 function formatLocation(dc: DataCenter): string {
   return dc.address || dc.location || '—'
+}
+
+function isDatacenterPlatformBound(dc: DataCenter): boolean {
+  return !!dc.externalOnboardingId
 }
 
 export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: string }) {
@@ -78,6 +90,8 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
   const [statusFilter, setStatusFilter] = useState('all')
   const [supplierFilter, setSupplierFilter] = useState('all')
   const [containerInstanceRegionFilter, setContainerInstanceRegionFilter] = useState('')
+  const [bindDataCenter, setBindDataCenter] = useState<DataCenter | null>(null)
+  const [bindDialogOpen, setBindDialogOpen] = useState(false)
 
   const filtered = useMemo(() => {
     return dataCenters.filter((dc) => {
@@ -154,6 +168,11 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
       supplierIdFilter ? { supplierId: supplierIdFilter } : undefined,
     )
     void utils.supplier.list.invalidate()
+  }
+
+  const handleBindOpenChange = (open: boolean) => {
+    setBindDialogOpen(open)
+    if (!open) setBindDataCenter(null)
   }
 
   return (
@@ -399,13 +418,32 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                       ¥{dc.managementNodeFee.toLocaleString()}
                     </TableCell> */}
                     <TableCell>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/supplier/datacenters/${dc.id}`}>
-                          <Eye className="mr-1 h-3 w-3" />
-                          详情
-                          <ChevronRight className="h-3 w-3" />
-                        </Link>
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem asChild>
+                            <Link href={`/supplier/datacenters/${dc.id}`}>
+                              <Eye className="mr-2 h-4 w-4" />
+                              查看详情
+                            </Link>
+                          </DropdownMenuItem>
+                          {!isDatacenterPlatformBound(dc) && (
+                            <DropdownMenuItem
+                              onSelect={() => {
+                                setBindDataCenter(dc)
+                                setBindDialogOpen(true)
+                              }}
+                            >
+                              <LinkIcon className="mr-2 h-4 w-4" />
+                              平台绑定
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 )
@@ -423,6 +461,13 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
           />
         )}
       </Card>
+
+      <PlatformDatacenterBindDialog
+        open={bindDialogOpen}
+        onOpenChange={handleBindOpenChange}
+        dataCenter={bindDataCenter}
+        onSuccess={invalidateDatacenters}
+      />
     </div>
   )
 }

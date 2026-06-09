@@ -19,6 +19,7 @@ import {
   Eye,
   Edit,
   CreditCard,
+  LinkIcon,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -56,6 +57,7 @@ import {
 } from '@/components/dashboard/supplier-form-dialog'
 import { SupplierImportTrigger } from '@/components/dashboard/supplier-import-dialog'
 import { PlatformSupplierImportTrigger } from '@/components/dashboard/platform-supplier-import-dialog'
+import { PlatformSupplierBindDialog } from '@/components/dashboard/platform-supplier-bind-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { ListPagination } from '@/components/shared/list-pagination'
 
@@ -64,6 +66,13 @@ const statusNames: Record<string, string> = {
   cooperating: '合作中',
   suspended: '已暂停',
   terminated: '已终止',
+}
+
+function isSupplierPlatformBound(supplier: Supplier): boolean {
+  return (
+    (!!supplier.externalTenantId && !supplier.externalTenantId.startsWith('crm-manual-')) ||
+    !!supplier.platformTenantId
+  )
 }
 
 interface SuppliersContentProps {
@@ -78,6 +87,8 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
   const { data: activeStaff = [] } = trpc.crm.staff.listActive.useQuery()
   const [editSupplier, setEditSupplier] = useState<Supplier | null>(null)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [bindSupplier, setBindSupplier] = useState<Supplier | null>(null)
+  const [bindDialogOpen, setBindDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
@@ -86,6 +97,11 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
   const handleEditOpenChange = (open: boolean) => {
     setEditDialogOpen(open)
     if (!open) setEditSupplier(null)
+  }
+
+  const handleBindOpenChange = (open: boolean) => {
+    setBindDialogOpen(open)
+    if (!open) setBindSupplier(null)
   }
 
   const updateSupplierMutation = trpc.supplier.update.useMutation({
@@ -396,6 +412,17 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
                           <Edit className="w-4 h-4 mr-2" />
                           编辑信息
                         </DropdownMenuItem>
+                        {!isSupplierPlatformBound(supplier) && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setBindSupplier(supplier)
+                              setBindDialogOpen(true)
+                            }}
+                          >
+                            <LinkIcon className="w-4 h-4 mr-2" />
+                            平台绑定
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem>
                           <FileText className="w-4 h-4 mr-2" />
                           查看合同
@@ -525,6 +552,13 @@ export function SuppliersContent({ externalTenantId }: SuppliersContentProps) {
         supplier={editSupplier}
         activeStaff={activeStaff}
         onUpdated={handleSupplierUpdated}
+      />
+
+      <PlatformSupplierBindDialog
+        open={bindDialogOpen}
+        onOpenChange={handleBindOpenChange}
+        supplier={bindSupplier}
+        onSuccess={() => void utils.supplier.list.invalidate()}
       />
 
       {filteredSuppliers.length === 0 && (

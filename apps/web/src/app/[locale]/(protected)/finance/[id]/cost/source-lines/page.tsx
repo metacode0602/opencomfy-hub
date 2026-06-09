@@ -1,8 +1,10 @@
 "use client"
 
 import { formatMoney, formatText } from "../../../_lib/display"
+import { downloadCostSourceLinesExcel } from "@/lib/finance/cost-source-lines-export"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { trpc } from "@/lib/trpc/client"
+import { ProjectCostDialog } from "./_components/project-cost-dialog"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -20,8 +22,10 @@ import {
   TableRow,
 } from "@workspace/ui/components/table"
 import { cn } from "@workspace/ui/lib/utils"
+import { Download, PieChart } from "lucide-react"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
+import { toast } from "sonner"
 
 const kindLabels: Record<string, string> = {
   flex: "弹性",
@@ -31,6 +35,7 @@ const kindLabels: Record<string, string> = {
 export default function FinanceCostSourceLinesPage() {
   const params = useParams<{ id: string }>()
   const id = params.id
+  const [projectCostOpen, setProjectCostOpen] = useState(false)
 
   const { data: period } = trpc.finance.periods.getById.useQuery(
     { id: id ?? "" },
@@ -56,6 +61,19 @@ export default function FinanceCostSourceLinesPage() {
       }),
     [rows],
   )
+
+  function handleExportExcel() {
+    if (sortedRows.length === 0) {
+      toast.error("暂无中间表数据可导出")
+      return
+    }
+    const ok = downloadCostSourceLinesExcel({
+      rows: sortedRows,
+      periodCode: period?.period_code ?? id,
+    })
+    if (ok) toast.success("成本中间表 Excel 已下载")
+    else toast.error("导出失败")
+  }
 
   if (!id) {
     return (
@@ -88,17 +106,41 @@ export default function FinanceCostSourceLinesPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>
-            成本中间表 · {period?.period_code ?? id}
-          </CardTitle>
-          <CardDescription>
-            billing_period_cost_source_line（{sortedRows.length} 行）
-            {period
-              ? ` · 账期 ${period.period_start} ~ ${period.period_end}`
-              : null}
-            · 用于校验租户消费、卡时、机房卡型与价格分成是否正确
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div>
+            <CardTitle>
+              成本中间表 · {period?.period_code ?? id}
+            </CardTitle>
+            <CardDescription>
+              billing_period_cost_source_line（{sortedRows.length} 行）
+              {period
+                ? ` · 账期 ${period.period_start} ~ ${period.period_end}`
+                : null}
+              · 用于校验租户消费、卡时、机房卡型与价格分成是否正确
+            </CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setProjectCostOpen(true)}
+              disabled={sortedRows.length === 0}
+            >
+              <PieChart className="size-4" />
+              项目成本
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleExportExcel}
+              disabled={sortedRows.length === 0}
+            >
+              <Download className="size-4" />
+              导出 Excel
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {sortedRows.length === 0 ? (
@@ -184,6 +226,13 @@ export default function FinanceCostSourceLinesPage() {
           )}
         </CardContent>
       </Card>
+
+      <ProjectCostDialog
+        open={projectCostOpen}
+        onOpenChange={setProjectCostOpen}
+        sourceLines={sortedRows}
+        periodCode={period?.period_code ?? id}
+      />
     </div>
   )
 }
