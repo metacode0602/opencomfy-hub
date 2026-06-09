@@ -52,6 +52,7 @@ import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplie
 import { DatacenterPlannedBatchesPanel } from './datacenter-planned-batches-panel'
 import { DatacenterOnboardingDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-onboarding-dialog'
 import { EditDatacenterDialog } from '@/components/dashboard/edit-datacenter-dialog'
+import { SupplierOpsEngineersList } from '@/components/dashboard/supplier-ops-engineers-list'
 import { toast } from 'sonner'
 
 const inventoryStatusColors: Record<DataCenterDevice['status'], string> = {
@@ -102,6 +103,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
     error,
     refetch,
   } = trpc.supplier.getDataCenterDetail.useQuery({ dataCenterId }, { retry: 1 })
+  const { data: opsEngineers = [] } = trpc.supplier.listOpsEngineers.useQuery({ dataCenterId })
 
   const invalidateAfterImport = () => {
     const supplierId = detail?.dataCenter.supplierId
@@ -314,6 +316,19 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         dataCenterName={dataCenter.name}
         onSuccess={invalidateAfterImport}
       />
+
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">运维工程师</CardTitle>
+          <CardDescription>本机房运维工程师联系方式</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <SupplierOpsEngineersList
+            engineers={opsEngineers}
+            emptyMessage="暂无运维工程师，可在机房列表「运维通讯录」中维护"
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="border-border bg-card">

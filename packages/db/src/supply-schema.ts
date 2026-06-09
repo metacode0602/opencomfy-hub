@@ -102,6 +102,31 @@ export const supplier = pgTable(
   ],
 )
 
+/** 供应商运维工程师通讯录 */
+export const supplierOpsEngineer = pgTable(
+  "supplier_ops_engineer",
+  {
+    id: text("id").primaryKey(),
+    supplierId: text("supplier_id")
+      .notNull()
+      .references(() => supplier.id, { onDelete: "cascade" }), // 供应商ID
+    dataCenterId: text("data_center_id")
+      .notNull()
+      .references(() => dataCenter.id, { onDelete: "cascade" }), // 数据中心ID
+    name: varchar("name", { length: 128 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    email: varchar("email", { length: 255 }),
+    wechatId: varchar("wechat_id", { length: 128 }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    ...supplyTimestamps,
+  },
+  (table) => [
+    index("supplier_ops_engineer_supplier_id_idx").on(table.supplierId),
+    index("supplier_ops_engineer_data_center_id_idx").on(table.dataCenterId),
+    index("supplier_ops_engineer_data_center_sort_idx").on(table.dataCenterId, table.sortOrder),
+  ],
+)
+
 export const gpuCardType = pgTable(
   "gpu_card_type",
   {

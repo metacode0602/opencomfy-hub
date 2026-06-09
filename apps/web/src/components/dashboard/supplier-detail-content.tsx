@@ -55,6 +55,7 @@ import {
   resolveGpuCardTypeRole,
 } from '@/lib/supplier/gpu-card-type-metrics'
 import { toast } from 'sonner'
+import { SupplierOpsEngineersList } from '@/components/dashboard/supplier-ops-engineers-list'
 interface SupplierDetailContentProps {
   supplier: Supplier
 }
@@ -112,6 +113,9 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
     supplierId: supplier.id,
   })
   const { data: bills = [] } = trpc.supplier.listBills.useQuery({
+    supplierId: supplier.id,
+  })
+  const { data: opsEngineers = [] } = trpc.supplier.listOpsEngineers.useQuery({
     supplierId: supplier.id,
   })
 
@@ -503,6 +507,20 @@ export function SupplierDetailContent({ supplier: initialSupplier }: SupplierDet
               </CardContent>
             </Card>
           </div>
+
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base">运维工程师</CardTitle>
+              <CardDescription>各机房运维工程师联系方式</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <SupplierOpsEngineersList
+                engineers={opsEngineers}
+                showDataCenter
+                emptyMessage="暂无运维工程师，可在机房列表「运维通讯录」中维护"
+              />
+            </CardContent>
+          </Card>
 
           <Card className="bg-card border-border">
             <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

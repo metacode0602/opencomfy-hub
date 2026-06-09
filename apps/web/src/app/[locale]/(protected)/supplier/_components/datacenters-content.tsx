@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   Search,
   Server,
+  Phone,
   Settings2,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
@@ -45,6 +46,7 @@ import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { PlatformDatacenterImportTrigger } from '@/components/dashboard/platform-datacenter-import-dialog'
 import { PlatformDatacenterBindDialog } from '@/components/dashboard/platform-datacenter-bind-dialog'
+import { SupplierOpsEngineersDialog } from '@/components/dashboard/supplier-ops-engineers-dialog'
 import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier-datacenter-import-dialog'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenter } from '@/lib/data/types'
@@ -92,6 +94,8 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
   const [containerInstanceRegionFilter, setContainerInstanceRegionFilter] = useState('')
   const [bindDataCenter, setBindDataCenter] = useState<DataCenter | null>(null)
   const [bindDialogOpen, setBindDialogOpen] = useState(false)
+  const [opsEngineerDataCenter, setOpsEngineerDataCenter] = useState<DataCenter | null>(null)
+  const [opsEngineersDialogOpen, setOpsEngineersDialogOpen] = useState(false)
 
   const filtered = useMemo(() => {
     return dataCenters.filter((dc) => {
@@ -173,6 +177,11 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
   const handleBindOpenChange = (open: boolean) => {
     setBindDialogOpen(open)
     if (!open) setBindDataCenter(null)
+  }
+
+  const handleOpsEngineersOpenChange = (open: boolean) => {
+    setOpsEngineersDialogOpen(open)
+    if (!open) setOpsEngineerDataCenter(null)
   }
 
   return (
@@ -431,6 +440,15 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                               查看详情
                             </Link>
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              setOpsEngineerDataCenter(dc)
+                              setOpsEngineersDialogOpen(true)
+                            }}
+                          >
+                            <Phone className="mr-2 h-4 w-4" />
+                            运维通讯录
+                          </DropdownMenuItem>
                           {!isDatacenterPlatformBound(dc) && (
                             <DropdownMenuItem
                               onSelect={() => {
@@ -467,6 +485,12 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
         onOpenChange={handleBindOpenChange}
         dataCenter={bindDataCenter}
         onSuccess={invalidateDatacenters}
+      />
+
+      <SupplierOpsEngineersDialog
+        open={opsEngineersDialogOpen}
+        onOpenChange={handleOpsEngineersOpenChange}
+        dataCenter={opsEngineerDataCenter}
       />
     </div>
   )

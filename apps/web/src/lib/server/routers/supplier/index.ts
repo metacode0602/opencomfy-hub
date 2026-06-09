@@ -21,6 +21,7 @@ import { physicalDevicesDataAccess } from '@/lib/server/dataaccess/supplier/phys
 import { supplierImportDataAccess } from '@/lib/server/dataaccess/supplier/supplier-import'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { suppliersDataAccess } from '@/lib/server/dataaccess/supplier/suppliers'
+import { supplierOpsEngineersDataAccess } from '@/lib/server/dataaccess/supplier/supplier-ops-engineers'
 import { supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { SuanliSupplyOpenApiError } from '@/lib/server/integrations/suanli-supply-api'
 import { PLATFORM_DATACENTER_IMPORT_MAX_TENANT_IDS } from '@/lib/supplier/platform-datacenter-import-utils'
@@ -80,6 +81,12 @@ import {
 import { overviewFiltersSchema, gpuResourceTrendSchema } from '@/lib/server/routers/supplier/overview-schemas'
 import { gpuResourceStatisticsDataAccess } from '@/lib/server/dataaccess/supplier/gpu-resource-statistics'
 import { supplierListSchema, supplierCreateSchema, supplierUpdateSchema } from '@/lib/server/routers/supplier/supplier-schemas'
+import {
+  supplierOpsEngineerCreateSchema,
+  supplierOpsEngineerDeleteSchema,
+  supplierOpsEngineerListSchema,
+  supplierOpsEngineerUpdateSchema,
+} from '@/lib/server/routers/supplier/supplier-ops-engineer-schemas'
 import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter-create-schemas'
 import {
   datacenterUpdateSchema,
@@ -270,6 +277,71 @@ export const supplierRouter = createTRPCRouter({
       mapImportError(e)
     }
   }),
+
+  listOpsEngineers: protectedProcedure
+    .input(supplierOpsEngineerListSchema)
+    .query(async ({ input }) => {
+      try {
+        return await supplierOpsEngineersDataAccess.list(input)
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        mapImportError(e)
+      }
+    }),
+
+  createOpsEngineer: adminProcedure
+    .input(supplierOpsEngineerCreateSchema)
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await supplierOpsEngineersDataAccess.create({
+          ...input,
+          operatorStaffId: staffId,
+        })
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        mapImportError(e)
+      }
+    }),
+
+  updateOpsEngineer: adminProcedure
+    .input(supplierOpsEngineerUpdateSchema)
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await supplierOpsEngineersDataAccess.update({
+          id: input.id,
+          ...input.data,
+          operatorStaffId: staffId,
+        })
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        mapImportError(e)
+      }
+    }),
+
+  deleteOpsEngineer: adminProcedure
+    .input(supplierOpsEngineerDeleteSchema)
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        return await supplierOpsEngineersDataAccess.delete({
+          id: input.id,
+          operatorStaffId: staffId,
+        })
+      } catch (e) {
+        if (e instanceof Error) {
+          throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+        }
+        mapImportError(e)
+      }
+    }),
 
   listDataCenters: protectedProcedure
     .input(z.object({ supplierId: z.string() }))
