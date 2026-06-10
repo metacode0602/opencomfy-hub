@@ -26,36 +26,8 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1780993677655,
-      "tag": "0003_zippy_hemingway",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1780996778899,
-      "tag": "0004_green_katie_power",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1781075899650,
-      "tag": "0005_white_klaw",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1781076929790,
-      "tag": "0006_pink_frank_castle",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1781077982818,
-      "tag": "0007_same_agent_zero",
+      "when": 1781083073737,
+      "tag": "0003_lowly_wendell_rand",
       "breakpoints": true
     }
   ]
