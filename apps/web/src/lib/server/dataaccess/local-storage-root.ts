@@ -9,6 +9,8 @@ const DEFAULT_DATA_DIR = '.data'
 export const LOCAL_STORAGE_SUBDIRS = {
   financeImports: 'finance-imports',
   supplierActivityAttachments: 'supplier-activity-attachments',
+  merchantActivityAttachments: 'merchant-activity-attachments',
+  merchantRechargeAttachments: 'merchant-recharge-attachments',
   projectActivityAttachments: 'project-activity-attachments',
 } as const
 

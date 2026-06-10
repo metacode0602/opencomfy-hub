@@ -7,6 +7,7 @@ export const ROUTE_ACCESS = {
   crmAdminOnly: ['/crm/staff'],
   finance: [
     '/finance',
+    '/merchant',
     '/supplier/gpu-card-types',
     '/supplier/platform-pricing',
     '/supplier/unit-costs',

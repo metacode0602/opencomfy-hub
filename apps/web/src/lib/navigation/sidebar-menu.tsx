@@ -18,6 +18,7 @@ import {
   Server,
   Settings,
   Sparkles,
+  Store,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -67,6 +68,7 @@ const navCrm: MenuItem[] = [
 
 const navMarketplace: MenuItem[] = [
   { title: '运营月报', url: '/finance', icon: <CreditCard className="size-4" />, roles: ADMIN_ONLY },
+  { title: '商户管理', url: '/merchant', icon: <Store className="size-4" />, roles: ADMIN_ONLY },
   { title: '系统卡型', url: '/supplier/gpu-card-types', icon: <Cpu className="size-4" />, roles: ADMIN_ONLY },
   { title: '平台定价', url: '/supplier/platform-pricing', icon: <Sparkles className="size-4" />, roles: ADMIN_ONLY },
   { title: '机房成本', url: '/supplier/unit-costs', icon: <DollarSignIcon className="size-4" />, roles: ADMIN_ONLY },

@@ -55,14 +55,6 @@ import { trpc } from '@/lib/trpc/client'
 
 const CHART_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
 
-// 消费趋势数据（多产品线 mock，总览 Tab 仍用日趋势 mock）
-const consumptionTrendMock = [
-  { month: '1月', serverless: 45000, cloud_vm: 85000, job: 65000, bare_metal: 120000, storage: 25000 },
-  { month: '2月', serverless: 52000, cloud_vm: 92000, job: 78000, bare_metal: 135000, storage: 28000 },
-  { month: '3月', serverless: 68000, cloud_vm: 115000, job: 95000, bare_metal: 180000, storage: 32000 },
-  { month: '4月', serverless: 78000, cloud_vm: 128000, job: 105000, bare_metal: 210000, storage: 38000 },
-  { month: '5月', serverless: 85000, cloud_vm: 145000, job: 125000, bare_metal: 250000, storage: 45000 },
-]
 
 const PRODUCT_LINE_ICONS: Record<string, typeof Zap> = {
   serverless: Zap,
