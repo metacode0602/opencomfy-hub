@@ -6,28 +6,28 @@ import {
   globalDashboardFiltersSchema,
   globalPeriodInputSchema,
 } from '@/lib/server/routers/dashboard/global-ops-schemas'
-import { createTRPCRouter, protectedProcedure } from '../trpc'
+import { createTRPCRouter, sharedReadProcedure } from '../trpc'
 
 const globalSearchSchema = z.object({
   query: z.string().min(1).max(100),
 })
 
 export const globalOpsRouter = createTRPCRouter({
-  getFilterOptions: protectedProcedure.query(async () => {
+  getFilterOptions: sharedReadProcedure.query(async () => {
     return globalOpsDataAccess.getFilterOptions()
   }),
 
-  getSnapshot: protectedProcedure
+  getSnapshot: sharedReadProcedure
     .input(globalDashboardFiltersSchema.optional())
     .query(async ({ input }) => {
       return globalOpsDataAccess.getSnapshot(input ?? {})
     }),
 
-  getPeriod: protectedProcedure.input(globalPeriodInputSchema).query(async ({ input }) => {
+  getPeriod: sharedReadProcedure.input(globalPeriodInputSchema).query(async ({ input }) => {
     return globalOpsDataAccess.getPeriod(input)
   }),
 
-  getAlerts: protectedProcedure.input(globalAlertsQuerySchema).query(async ({ input }) => {
+  getAlerts: sharedReadProcedure.input(globalAlertsQuerySchema).query(async ({ input }) => {
     const snapshot = await globalOpsDataAccess.getSnapshot({})
     let alerts = snapshot.alerts
     if (input.level !== 'all') {
@@ -41,7 +41,7 @@ export const globalOpsRouter = createTRPCRouter({
 })
 
 export const dashboardRouter = createTRPCRouter({
-  globalSearch: protectedProcedure.input(globalSearchSchema).query(async ({ input }) => {
+  globalSearch: sharedReadProcedure.input(globalSearchSchema).query(async ({ input }) => {
     return globalSearchDataAccess.search(input.query)
   }),
   globalOps: globalOpsRouter,

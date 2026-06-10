@@ -4,6 +4,8 @@ import type { NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 
 import { auth } from "@/lib/auth"
+import { normalizeAppRole } from "@/lib/auth/app-role"
+import { canAccessPath, defaultHomeForRole } from "@/lib/auth/route-access"
 import { DEFAULT_LOCALE, LOCALES, routing } from "@/lib/i18n/routing"
 
 const corsHeaders: Record<string, string> = {
@@ -111,8 +113,18 @@ export async function proxy(request: NextRequest) {
     }
 
     if (!mustChangePassword && isChangePasswordRoute) {
-      const dashboardHref = buildLocalizedHref(locale, "/dashboard")
-      return NextResponse.redirect(new URL(dashboardHref, request.url))
+      const role = normalizeAppRole(session?.user?.role)
+      const homeHref = buildLocalizedHref(
+        locale,
+        role ? defaultHomeForRole(role) : "/dashboard",
+      )
+      return NextResponse.redirect(new URL(homeHref, request.url))
+    }
+
+    const role = normalizeAppRole(session?.user?.role)
+    if (role && !isPublicRoute && !isChangePasswordRoute && !canAccessPath(role, pathForAuth)) {
+      const homeHref = buildLocalizedHref(locale, defaultHomeForRole(role))
+      return NextResponse.redirect(new URL(homeHref, request.url))
     }
   }
 

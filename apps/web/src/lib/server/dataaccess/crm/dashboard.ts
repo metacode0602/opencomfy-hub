@@ -15,7 +15,16 @@ import {
   projectActivity,
   tenantBill,
 } from '@workspace/db/schema'
-import { count, desc, eq, inArray, or, sum } from 'drizzle-orm'
+import {
+  buildCustomerTableIdFilter,
+  buildProjectIdFilter,
+  buildTenantIdFilter,
+  loadVisibleCustomerIds,
+  loadVisibleProjectIds,
+  loadVisibleTenantIds,
+  type CrmDataScope,
+} from '@/lib/server/auth/crm-data-scope'
+import { and, count, desc, eq, inArray, or, sum } from 'drizzle-orm'
 
 export type DashboardSummary = {
   activeCustomerCount: number
@@ -36,18 +45,43 @@ function percentChange(thisValue: number, lastValue: number): number | null {
   return Math.round(((thisValue - lastValue) / lastValue) * 1000) / 10
 }
 
-async function sumConsumptionForMonth(usageMonth: string): Promise<number> {
+async function sumConsumptionForMonth(usageMonth: string, tenantIds: string[] | null): Promise<number> {
+  if (tenantIds && tenantIds.length === 0) return 0
   const rows = await db
     .select({ value: sum(consumptionUsageDaily.amount) })
     .from(consumptionUsageDaily)
-    .where(eq(consumptionUsageDaily.usageMonth, usageMonth))
+    .where(
+      and(
+        eq(consumptionUsageDaily.usageMonth, usageMonth),
+        tenantIds ? inArray(consumptionUsageDaily.tenantId, tenantIds) : undefined,
+      ),
+    )
   return Number(rows[0]?.value ?? 0)
 }
 
 export const dashboardDataAccess = {
-  async summary(): Promise<DashboardSummary> {
+  async summary(scope?: CrmDataScope): Promise<DashboardSummary> {
     const thisMonth = shanghaiUsageMonth()
     const lastMonth = shanghaiUsageMonth(new Date(), 1)
+    const visibleCustomerIds = scope ? await loadVisibleCustomerIds(scope) : null
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    const visibleTenantIds = scope ? await loadVisibleTenantIds(scope) : null
+
+    if (visibleCustomerIds && visibleCustomerIds.length === 0) {
+      return {
+        activeCustomerCount: 0,
+        activeProjectCount: 0,
+        thisMonthConsumption: 0,
+        lastMonthConsumption: 0,
+        totalBalance: 0,
+        activeContractCount: 0,
+        trends: {
+          activeCustomerCount: null,
+          activeProjectCount: null,
+          thisMonthConsumption: null,
+        },
+      }
+    }
 
     const [
       activeCustomers,
@@ -60,18 +94,43 @@ export const dashboardDataAccess = {
       db
         .select({ value: count() })
         .from(customer)
-        .where(eq(customer.status, 'active')),
+        .where(
+          and(
+            eq(customer.status, 'active'),
+            buildCustomerTableIdFilter(visibleCustomerIds),
+          ),
+        ),
       db
         .select({ value: count() })
         .from(crmProject)
-        .where(eq(crmProject.status, 'active')),
-      db.select({ value: sum(billingTenant.balance) }).from(billingTenant),
-      sumConsumptionForMonth(thisMonth),
-      sumConsumptionForMonth(lastMonth),
+        .where(
+          and(
+            eq(crmProject.status, 'active'),
+            buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds),
+          ),
+        ),
       db
-        .select({ value: count() })
-        .from(contract)
-        .where(eq(contract.status, 'active')),
+        .select({ value: sum(billingTenant.balance) })
+        .from(billingTenant)
+        .where(buildTenantIdFilter(scope ?? { type: 'all' }, visibleTenantIds)),
+      sumConsumptionForMonth(thisMonth, visibleTenantIds),
+      sumConsumptionForMonth(lastMonth, visibleTenantIds),
+      visibleProjectIds && visibleProjectIds.length === 0
+        ? Promise.resolve([{ value: 0 }])
+        : db
+            .select({ value: count() })
+            .from(contract)
+            .where(
+              and(
+                eq(contract.status, 'active'),
+                visibleProjectIds
+                  ? or(
+                      inArray(contract.projectId, visibleProjectIds),
+                      inArray(contract.customerId, visibleCustomerIds ?? []),
+                    )
+                  : undefined,
+              ),
+            ),
     ])
 
     return {
@@ -89,11 +148,17 @@ export const dashboardDataAccess = {
     }
   },
 
-  async recentProjects(limit = 5): Promise<Project[]> {
-    return projectsDataAccess.listRecent(limit)
+  async recentProjects(limit = 5, scope?: CrmDataScope): Promise<Project[]> {
+    return projectsDataAccess.listRecent(limit, scope)
   },
 
-  async recentActivities(limit = 6): Promise<Array<Activity & { projectName: string }>> {
+  async recentActivities(
+    limit = 6,
+    scope?: CrmDataScope,
+  ): Promise<Array<Activity & { projectName: string }>> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) return []
+
     const rows = await db
       .select({
         activity: projectActivity,
@@ -101,6 +166,7 @@ export const dashboardDataAccess = {
       })
       .from(projectActivity)
       .leftJoin(crmProject, eq(projectActivity.projectId, crmProject.id))
+      .where(buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds))
       .orderBy(desc(projectActivity.createdAt))
       .limit(limit)
 
@@ -110,11 +176,19 @@ export const dashboardDataAccess = {
     }))
   },
 
-  async pendingBills(limit = 10): Promise<Bill[]> {
+  async pendingBills(limit = 10, scope?: CrmDataScope): Promise<Bill[]> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) return []
+
     const rows = await db
       .select()
       .from(tenantBill)
-      .where(or(eq(tenantBill.status, 'pending'), eq(tenantBill.status, 'overdue'))!)
+      .where(
+        and(
+          or(eq(tenantBill.status, 'pending'), eq(tenantBill.status, 'overdue'))!,
+          visibleProjectIds ? inArray(tenantBill.projectId, visibleProjectIds) : undefined,
+        ),
+      )
       .orderBy(desc(tenantBill.dueDate))
       .limit(limit)
 
@@ -137,15 +211,25 @@ export const dashboardDataAccess = {
     )
   },
 
-  async consumptionTrend(months = 12) {
+  async consumptionTrend(months = 12, scope?: CrmDataScope) {
     const monthKeys = lastNShanghaiUsageMonths(months)
+    const visibleTenantIds = scope ? await loadVisibleTenantIds(scope) : null
+    if (visibleTenantIds && visibleTenantIds.length === 0) {
+      return monthKeys.map((month) => ({ month, consumption: 0 }))
+    }
+
     const rows = await db
       .select({
         month: consumptionUsageDaily.usageMonth,
         amount: sum(consumptionUsageDaily.amount),
       })
       .from(consumptionUsageDaily)
-      .where(inArray(consumptionUsageDaily.usageMonth, monthKeys))
+      .where(
+        and(
+          inArray(consumptionUsageDaily.usageMonth, monthKeys),
+          visibleTenantIds ? inArray(consumptionUsageDaily.tenantId, visibleTenantIds) : undefined,
+        ),
+      )
       .groupBy(consumptionUsageDaily.usageMonth)
 
     const amountByMonth = new Map(rows.map((r) => [r.month, Number(r.amount ?? 0)]))
@@ -156,15 +240,23 @@ export const dashboardDataAccess = {
     }))
   },
 
-  async productLineBreakdown(usageMonth?: string) {
+  async productLineBreakdown(usageMonth?: string, scope?: CrmDataScope) {
     const month = usageMonth ?? shanghaiUsageMonth()
+    const visibleTenantIds = scope ? await loadVisibleTenantIds(scope) : null
+    if (visibleTenantIds && visibleTenantIds.length === 0) return []
+
     const rows = await db
       .select({
         productLine: consumptionUsageDaily.productLine,
         amount: sum(consumptionUsageDaily.amount),
       })
       .from(consumptionUsageDaily)
-      .where(eq(consumptionUsageDaily.usageMonth, month))
+      .where(
+        and(
+          eq(consumptionUsageDaily.usageMonth, month),
+          visibleTenantIds ? inArray(consumptionUsageDaily.tenantId, visibleTenantIds) : undefined,
+        ),
+      )
       .groupBy(consumptionUsageDaily.productLine)
 
     return rows

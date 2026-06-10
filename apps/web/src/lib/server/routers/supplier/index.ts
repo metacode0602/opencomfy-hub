@@ -102,7 +102,7 @@ import {
   supplierDataCleanupExecuteSchema,
   supplierDataCleanupPreviewSchema,
 } from '@/lib/server/routers/supplier/data-cleanup-schemas'
-import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
+import { adminProcedure, createTRPCRouter, supplyProcedure } from '../trpc'
 
 const importFileSchema = z.object({
   fileName: z.string().min(1),
@@ -210,7 +210,7 @@ function mapImportError(error: unknown): never {
 }
 
 export const supplierRouter = createTRPCRouter({
-  list: protectedProcedure.input(supplierListSchema).query(async ({ input }) => {
+  list: supplyProcedure.input(supplierListSchema).query(async ({ input }) => {
     try {
       return await suppliersDataAccess.list(input)
     } catch (e) {
@@ -218,7 +218,7 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
-  getById: protectedProcedure
+  getById: supplyProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -232,7 +232,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listSupplierActivities: protectedProcedure
+  listSupplierActivities: supplyProcedure
     .input(supplierActivityListSchema)
     .query(async ({ input }) => {
       try {
@@ -243,7 +243,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  createSupplierActivity: protectedProcedure
+  createSupplierActivity: supplyProcedure
     .input(supplierActivityCreateSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -262,7 +262,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  update: adminProcedure.input(supplierUpdateSchema).mutation(async ({ input }) => {
+  update: supplyProcedure.input(supplierUpdateSchema).mutation(async ({ input }) => {
     try {
       return await suppliersDataAccess.update(input)
     } catch (e) {
@@ -270,7 +270,7 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
-  create: adminProcedure.input(supplierCreateSchema).mutation(async ({ input }) => {
+  create: supplyProcedure.input(supplierCreateSchema).mutation(async ({ input }) => {
     try {
       return await suppliersDataAccess.create(input)
     } catch (e) {
@@ -278,7 +278,7 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
-  listOpsEngineers: protectedProcedure
+  listOpsEngineers: supplyProcedure
     .input(supplierOpsEngineerListSchema)
     .query(async ({ input }) => {
       try {
@@ -291,7 +291,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  createOpsEngineer: adminProcedure
+  createOpsEngineer: supplyProcedure
     .input(supplierOpsEngineerCreateSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -308,7 +308,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  updateOpsEngineer: adminProcedure
+  updateOpsEngineer: supplyProcedure
     .input(supplierOpsEngineerUpdateSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -326,7 +326,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  deleteOpsEngineer: adminProcedure
+  deleteOpsEngineer: supplyProcedure
     .input(supplierOpsEngineerDeleteSchema)
     .mutation(async ({ input, ctx }) => {
       try {
@@ -343,7 +343,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listDataCenters: protectedProcedure
+  listDataCenters: supplyProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -354,7 +354,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  createDataCenter: protectedProcedure
+  createDataCenter: supplyProcedure
     .input(datacenterCreateSchema)
     .mutation(async ({ input }) => {
       try {
@@ -365,7 +365,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  updateDataCenter: protectedProcedure
+  updateDataCenter: supplyProcedure
     .input(datacenterUpdateSchema)
     .mutation(async ({ input }) => {
       try {
@@ -375,7 +375,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  updateDataCenterStatus: protectedProcedure
+  updateDataCenterStatus: supplyProcedure
     .input(datacenterUpdateStatusSchema)
     .mutation(async ({ input }) => {
       try {
@@ -385,7 +385,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listAllDataCenters: protectedProcedure
+  listAllDataCenters: supplyProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
@@ -398,7 +398,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  getDataCenterStats: protectedProcedure
+  getDataCenterStats: supplyProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
@@ -411,7 +411,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  getDataCenterDetail: protectedProcedure
+  getDataCenterDetail: supplyProcedure
     .input(z.object({ dataCenterId: z.string().min(1) }))
     .query(async ({ input }) => {
       try {
@@ -425,7 +425,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listGpuInventory: protectedProcedure
+  listGpuInventory: supplyProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
@@ -438,7 +438,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  getGpuInventoryDetail: protectedProcedure
+  getGpuInventoryDetail: supplyProcedure
     .input(z.object({ inventoryId: z.string().min(1) }))
     .query(async ({ input }) => {
       try {
@@ -452,7 +452,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listContracts: protectedProcedure
+  listContracts: supplyProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -463,7 +463,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listAllContracts: protectedProcedure.query(async () => {
+  listAllContracts: supplyProcedure.query(async () => {
     try {
       return await suppliersDataAccess.listAllContracts()
     } catch (e) {
@@ -471,7 +471,7 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
-  listBills: protectedProcedure
+  listBills: supplyProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -482,7 +482,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listPricingRecords: protectedProcedure
+  listPricingRecords: supplyProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -493,7 +493,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listPricingHistory: protectedProcedure
+  listPricingHistory: supplyProcedure
     .input(z.object({ supplierId: z.string() }))
     .query(async ({ input }) => {
       try {
@@ -504,7 +504,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  listActiveGpuCardTypes: protectedProcedure.query(async () => {
+  listActiveGpuCardTypes: supplyProcedure.query(async () => {
     try {
       return await suppliersDataAccess.listActiveGpuCardTypes()
     } catch (e) {
@@ -512,7 +512,7 @@ export const supplierRouter = createTRPCRouter({
     }
   }),
 
-  listPhysicalDevices: protectedProcedure
+  listPhysicalDevices: supplyProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
@@ -525,7 +525,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  getPhysicalDeviceStats: protectedProcedure
+  getPhysicalDeviceStats: supplyProcedure
     .input(z.object({ supplierId: z.string().optional() }))
     .query(async ({ input }) => {
       try {
@@ -538,7 +538,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  getPhysicalDeviceDetail: protectedProcedure
+  getPhysicalDeviceDetail: supplyProcedure
     .input(z.object({ deviceId: z.string().min(1) }))
     .query(async ({ input }) => {
       try {
@@ -552,7 +552,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-  markPhysicalDeviceOnline: adminProcedure
+  markPhysicalDeviceOnline: supplyProcedure
     .input(z.object({ deviceId: z.string().min(1) }))
     .mutation(async ({ input, ctx }) => {
       try {
@@ -566,7 +566,7 @@ export const supplierRouter = createTRPCRouter({
     }),
 
   deviceImport: createTRPCRouter({
-    getContext: protectedProcedure
+    getContext: supplyProcedure
       .input(z.object({ supplierId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -576,7 +576,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getGpuCardTypeIdByInternalIp: protectedProcedure
+    getGpuCardTypeIdByInternalIp: supplyProcedure
       .input(z.object({ supplierId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -586,7 +586,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commitInventory: adminProcedure
+    commitInventory: supplyProcedure
       .input(
         deviceImportCommitBaseSchema.extend({
           dataCenterId: z.string().min(1),
@@ -604,7 +604,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commitChangelog: adminProcedure
+    commitChangelog: supplyProcedure
       .input(
         deviceImportCommitBaseSchema.extend({
           dataCenterId: z.string().min(1),
@@ -622,7 +622,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commitFaultRecords: adminProcedure
+    commitFaultRecords: supplyProcedure
       .input(
         deviceImportCommitBaseSchema.extend({
           rows: z.array(faultRecordsRowSchema).min(1),
@@ -641,7 +641,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   deviceRetire: createTRPCRouter({
-    listBatches: protectedProcedure
+    listBatches: supplyProcedure
       .input(
         z
           .object({
@@ -660,7 +660,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getBatchById: protectedProcedure
+    getBatchById: supplyProcedure
       .input(z.object({ id: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -674,7 +674,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getContext: protectedProcedure
+    getContext: supplyProcedure
       .input(z.object({ supplierId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -684,7 +684,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    preview: adminProcedure.input(deviceRetireRequestSchema).mutation(async ({ input }) => {
+    preview: supplyProcedure.input(deviceRetireRequestSchema).mutation(async ({ input }) => {
       try {
         return await deviceRetireDataAccess.preview(input)
       } catch (e) {
@@ -692,7 +692,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    commit: adminProcedure.input(deviceRetireRequestSchema).mutation(async ({ input, ctx }) => {
+    commit: supplyProcedure.input(deviceRetireRequestSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await deviceRetireDataAccess.commit({
@@ -705,7 +705,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getDatacenterContext: protectedProcedure
+    getDatacenterContext: supplyProcedure
       .input(datacenterRetireContextSchema)
       .query(async ({ input }) => {
         try {
@@ -715,7 +715,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getDatacenterRetireListSample: protectedProcedure
+    getDatacenterRetireListSample: supplyProcedure
       .input(datacenterRetireListSampleSchema)
       .query(async ({ input }) => {
         try {
@@ -728,7 +728,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    previewDatacenter: adminProcedure
+    previewDatacenter: supplyProcedure
       .input(datacenterRetireRequestSchema)
       .mutation(async ({ input }) => {
         try {
@@ -738,7 +738,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commitDatacenter: adminProcedure
+    commitDatacenter: supplyProcedure
       .input(datacenterRetireRequestSchema)
       .mutation(async ({ input, ctx }) => {
         try {
@@ -755,7 +755,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   onboardingBatch: createTRPCRouter({
-    list: protectedProcedure.input(onboardingBatchListSchema).query(async ({ input }) => {
+    list: supplyProcedure.input(onboardingBatchListSchema).query(async ({ input }) => {
       try {
         return await onboardingBatchDataAccess.list(input)
       } catch (e) {
@@ -763,7 +763,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    listBySupplier: protectedProcedure
+    listBySupplier: supplyProcedure
       .input(onboardingBatchListBySupplierSchema)
       .query(async ({ input }) => {
         try {
@@ -774,7 +774,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getById: protectedProcedure
+    getById: supplyProcedure
       .input(z.object({ id: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -788,7 +788,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getProgress: protectedProcedure
+    getProgress: supplyProcedure
       .input(z.object({ batchId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -798,7 +798,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getDetailPage: protectedProcedure
+    getDetailPage: supplyProcedure
       .input(z.object({ batchId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -812,7 +812,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    listDatacenterUploadedDevices: protectedProcedure
+    listDatacenterUploadedDevices: supplyProcedure
       .input(onboardingBatchDatacenterDevicesSchema)
       .query(async ({ input }) => {
         try {
@@ -828,7 +828,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    create: adminProcedure.input(onboardingBatchCreateSchema).mutation(async ({ input, ctx }) => {
+    create: supplyProcedure.input(onboardingBatchCreateSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await onboardingBatchDataAccess.create({
@@ -840,7 +840,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    parseList: adminProcedure.input(onboardingBatchParseListSchema).mutation(async ({ input }) => {
+    parseList: supplyProcedure.input(onboardingBatchParseListSchema).mutation(async ({ input }) => {
       try {
         return await onboardingBatchDataAccess.parseList(input)
       } catch (e) {
@@ -848,7 +848,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    commitList: adminProcedure.input(onboardingBatchCommitListSchema).mutation(async ({ input, ctx }) => {
+    commitList: supplyProcedure.input(onboardingBatchCommitListSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await onboardingBatchDataAccess.commitList({
@@ -860,7 +860,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    adjustPlan: adminProcedure
+    adjustPlan: supplyProcedure
       .input(onboardingBatchAdjustPlanSchema)
       .mutation(async ({ input, ctx }) => {
         try {
@@ -878,7 +878,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    listProgressEvents: protectedProcedure
+    listProgressEvents: supplyProcedure
       .input(onboardingBatchProgressEventsSchema)
       .query(async ({ input }) => {
         try {
@@ -888,7 +888,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    listAdjustHistory: protectedProcedure
+    listAdjustHistory: supplyProcedure
       .input(onboardingBatchAdjustHistorySchema)
       .query(async ({ input }) => {
         try {
@@ -898,7 +898,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    completeBatch: adminProcedure
+    completeBatch: supplyProcedure
       .input(onboardingBatchCompleteSchema)
       .mutation(async ({ input, ctx }) => {
         try {
@@ -916,7 +916,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    voidBatch: adminProcedure
+    voidBatch: supplyProcedure
       .input(onboardingBatchVoidSchema)
       .mutation(async ({ input, ctx }) => {
         try {
@@ -936,7 +936,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   faultIncident: createTRPCRouter({
-    list: protectedProcedure.input(faultIncidentListSchema).query(async ({ input }) => {
+    list: supplyProcedure.input(faultIncidentListSchema).query(async ({ input }) => {
       try {
         if (input?.supplierId) {
           await suppliersDataAccess.assertSupplierExists(input.supplierId)
@@ -947,7 +947,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    create: adminProcedure.input(faultIncidentCreateSchema).mutation(async ({ input, ctx }) => {
+    create: supplyProcedure.input(faultIncidentCreateSchema).mutation(async ({ input, ctx }) => {
       try {
         await suppliersDataAccess.assertSupplierExists(input.supplierId)
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
@@ -961,7 +961,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    close: adminProcedure.input(faultIncidentCloseSchema).mutation(async ({ input, ctx }) => {
+    close: supplyProcedure.input(faultIncidentCloseSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await faultIncidentDataAccess.close({
@@ -977,7 +977,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   internalTestHold: createTRPCRouter({
-    list: protectedProcedure.input(internalTestHoldListSchema).query(async ({ input }) => {
+    list: supplyProcedure.input(internalTestHoldListSchema).query(async ({ input }) => {
       try {
         return await internalTestHoldDataAccess.list(input ?? {})
       } catch (e) {
@@ -985,7 +985,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getById: protectedProcedure
+    getById: supplyProcedure
       .input(z.object({ holdId: z.string().min(1) }))
       .query(async ({ input }) => {
         try {
@@ -999,7 +999,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    create: adminProcedure.input(internalTestHoldCreateSchema).mutation(async ({ input, ctx }) => {
+    create: supplyProcedure.input(internalTestHoldCreateSchema).mutation(async ({ input, ctx }) => {
       try {
         const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
         return await internalTestHoldDataAccess.create({
@@ -1011,7 +1011,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    end: adminProcedure.input(internalTestHoldEndSchema).mutation(async ({ input }) => {
+    end: supplyProcedure.input(internalTestHoldEndSchema).mutation(async ({ input }) => {
       try {
         return await internalTestHoldDataAccess.endHold(input.holdId)
       } catch (e) {
@@ -1019,7 +1019,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    linkDevices: adminProcedure
+    linkDevices: supplyProcedure
       .input(internalTestHoldLinkDevicesSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1029,7 +1029,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    unlinkDevice: adminProcedure
+    unlinkDevice: supplyProcedure
       .input(internalTestHoldUnlinkDeviceSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1042,7 +1042,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   import: createTRPCRouter({
-    preview: adminProcedure
+    preview: supplyProcedure
       .input(
         importFileSchema.extend({
           defaultBusinessManagerStaffId: z.string().min(1),
@@ -1056,7 +1056,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commit: adminProcedure
+    commit: supplyProcedure
       .input(
         importFileSchema.extend({
           defaultBusinessManagerStaffId: z.string().min(1),
@@ -1072,7 +1072,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   datacenterImport: createTRPCRouter({
-    preview: adminProcedure
+    preview: supplyProcedure
       .input(importFileSchema.extend({ supplierId: z.string().min(1).optional() }))
       .mutation(async ({ input }) => {
         try {
@@ -1082,7 +1082,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commit: adminProcedure
+    commit: supplyProcedure
       .input(importFileSchema.extend({ supplierId: z.string().min(1).optional() }))
       .mutation(async ({ input }) => {
         try {
@@ -1094,7 +1094,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   platformImport: createTRPCRouter({
-    preview: adminProcedure
+    preview: supplyProcedure
       .input(platformSupplierSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1104,7 +1104,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commit: adminProcedure
+    commit: supplyProcedure
       .input(platformSupplierSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1116,7 +1116,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   platformBind: createTRPCRouter({
-    search: adminProcedure
+    search: supplyProcedure
       .input(platformSupplierBindSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1126,7 +1126,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    bind: adminProcedure
+    bind: supplyProcedure
       .input(platformSupplierBindCommitSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1138,7 +1138,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   platformDatacenterImport: createTRPCRouter({
-    preview: adminProcedure
+    preview: supplyProcedure
       .input(platformDatacenterSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1148,7 +1148,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    commit: adminProcedure
+    commit: supplyProcedure
       .input(platformDatacenterSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1160,7 +1160,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   platformDatacenterBind: createTRPCRouter({
-    search: adminProcedure
+    search: supplyProcedure
       .input(platformDatacenterBindSearchSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1170,7 +1170,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    bind: adminProcedure
+    bind: supplyProcedure
       .input(platformDatacenterBindCommitSchema)
       .mutation(async ({ input }) => {
         try {
@@ -1182,7 +1182,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   gpuCardTypes: createTRPCRouter({
-    list: protectedProcedure.input(gpuCardTypeListSchema).query(async ({ input }) => {
+    list: adminProcedure.input(gpuCardTypeListSchema).query(async ({ input }) => {
       try {
         return await gpuCardTypesDataAccess.list(input ?? {})
       } catch (e) {
@@ -1190,7 +1190,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    listActive: protectedProcedure.query(async () => {
+    listActive: adminProcedure.query(async () => {
       try {
         return await gpuCardTypesDataAccess.listActive()
       } catch (e) {
@@ -1198,7 +1198,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getById: protectedProcedure
+    getById: adminProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -1242,7 +1242,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   unitCosts: createTRPCRouter({
-    listRecords: protectedProcedure.input(unitCostListSchema).query(async ({ input }) => {
+    listRecords: adminProcedure.input(unitCostListSchema).query(async ({ input }) => {
       try {
         return await unitCostsDataAccess.listRecords(input?.supplierId)
       } catch (e) {
@@ -1250,7 +1250,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    listHistory: protectedProcedure.input(unitCostListSchema).query(async ({ input }) => {
+    listHistory: adminProcedure.input(unitCostListSchema).query(async ({ input }) => {
       try {
         return await unitCostsDataAccess.listHistory(input?.supplierId)
       } catch (e) {
@@ -1311,7 +1311,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   overview: createTRPCRouter({
-    getFilterOptions: protectedProcedure.query(async () => {
+    getFilterOptions: supplyProcedure.query(async () => {
       try {
         return await supplierOverviewDataAccess.getFilterOptions()
       } catch (e) {
@@ -1320,7 +1320,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getStats: protectedProcedure.input(overviewFiltersSchema).query(async ({ input }) => {
+    getStats: supplyProcedure.input(overviewFiltersSchema).query(async ({ input }) => {
       try {
         return await supplierOverviewDataAccess.getStats(input)
       } catch (e) {
@@ -1329,7 +1329,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getGpuResourceTrend: protectedProcedure
+    getGpuResourceTrend: supplyProcedure
       .input(gpuResourceTrendSchema)
       .query(async ({ input }) => {
         try {
@@ -1340,7 +1340,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getGpuRegionOverview: protectedProcedure.query(async () => {
+    getGpuRegionOverview: supplyProcedure.query(async () => {
       try {
         return await gpuResourceStatisticsDataAccess.getRegionOverview()
       } catch (e) {
@@ -1349,7 +1349,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    getAdminStatisticsDataCount: protectedProcedure
+    getAdminStatisticsDataCount: supplyProcedure
       .input(overviewFiltersSchema.pick({ region: true }))
       .query(async ({ input }) => {
         try {
@@ -1362,7 +1362,7 @@ export const supplierRouter = createTRPCRouter({
   }),
 
   platformPricing: createTRPCRouter({
-    listPage: protectedProcedure.query(async () => {
+    listPage: adminProcedure.query(async () => {
       try {
         return await platformPricingDataAccess.getListPage()
       } catch (e) {
@@ -1371,7 +1371,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    listRecords: protectedProcedure.query(async () => {
+    listRecords: adminProcedure.query(async () => {
       try {
         return await platformPricingDataAccess.listRecords()
       } catch (e) {
@@ -1380,7 +1380,7 @@ export const supplierRouter = createTRPCRouter({
       }
     }),
 
-    listRecordsForCardType: protectedProcedure
+    listRecordsForCardType: adminProcedure
       .input(z.object({ cardTypeId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -1391,7 +1391,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    getDetailPage: protectedProcedure
+    getDetailPage: adminProcedure
       .input(z.object({ cardTypeId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -1406,7 +1406,7 @@ export const supplierRouter = createTRPCRouter({
         }
       }),
 
-    listHistory: protectedProcedure
+    listHistory: adminProcedure
       .input(z.object({ cardTypeId: z.string() }))
       .query(async ({ input }) => {
         try {

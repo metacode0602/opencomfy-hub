@@ -1,4 +1,15 @@
-import { createTRPCRouter, protectedProcedure, adminProcedure } from '../trpc'
+import {
+  createTRPCRouter,
+  adminProcedure,
+  crmScopedProcedure,
+  crmWriteProcedure,
+  sharedReadProcedure,
+} from '../trpc'
+import {
+  assertCustomerInScope,
+  assertProjectInScope,
+  assertTenantInScope,
+} from '@/lib/server/auth/crm-data-scope'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { customersDataAccess } from '@/lib/server/dataaccess/crm/customers'
@@ -151,25 +162,31 @@ const projectFilterSchema = z.object({
 
 export const crmRouter = createTRPCRouter({
   customers: createTRPCRouter({
-    list: protectedProcedure.input(listFilterSchema.optional()).query(({ input }) =>
-      customersDataAccess.list(input),
+    list: crmScopedProcedure.input(listFilterSchema.optional()).query(({ input, ctx }) =>
+      customersDataAccess.list(input, ctx.crmScope),
     ),
-    getById: protectedProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
-      customersDataAccess.getById(input.id),
+    getById: crmScopedProcedure.input(z.object({ id: z.string() })).query(({ input, ctx }) =>
+      customersDataAccess.getById(input.id, ctx.crmScope),
     ),
-    create: adminProcedure.input(customerUpsertSchema).mutation(({ input }) =>
+    create: crmWriteProcedure.input(customerUpsertSchema).mutation(({ input }) =>
       customersDataAccess.create(input),
     ),
-    update: adminProcedure
+    update: crmWriteProcedure
       .input(z.object({ id: z.string(), data: customerUpsertSchema }))
-      .mutation(({ input }) => customersDataAccess.update(input.id, input.data)),
-    listProjects: protectedProcedure
+      .mutation(async ({ input, ctx }) => {
+        await assertCustomerInScope(ctx.crmScope, input.id)
+        return customersDataAccess.update(input.id, input.data)
+      }),
+    listProjects: crmScopedProcedure
       .input(z.object({ customerId: z.string() }))
-      .query(({ input }) => projectsDataAccess.listByCustomerId(input.customerId)),
-    listRecharges: protectedProcedure
+      .query(async ({ input, ctx }) => {
+        await assertCustomerInScope(ctx.crmScope, input.customerId)
+        return projectsDataAccess.listByCustomerId(input.customerId, ctx.crmScope)
+      }),
+    listRecharges: crmScopedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listRechargesByCustomer(input.customerId)),
-    listDailyConsumptions: protectedProcedure
+    listDailyConsumptions: crmScopedProcedure
       .input(
         z.object({
           customerId: z.string(),
@@ -183,7 +200,7 @@ export const crmRouter = createTRPCRouter({
           usageMonth: input.usageMonth,
         }),
       ),
-    listDailyConsumptionDetails: protectedProcedure
+    listDailyConsumptionDetails: crmScopedProcedure
       .input(
         z.object({
           customerId: z.string(),
@@ -199,7 +216,7 @@ export const crmRouter = createTRPCRouter({
           productLine: input.productLine,
         }),
       ),
-    consumptionTrend: protectedProcedure
+    consumptionTrend: crmScopedProcedure
       .input(
         z.object({
           customerId: z.string(),
@@ -209,7 +226,7 @@ export const crmRouter = createTRPCRouter({
       .query(({ input }) =>
         billingDataAccess.consumptionTrendByCustomer(input.customerId, input.months),
       ),
-    productLineBreakdown: protectedProcedure
+    productLineBreakdown: crmScopedProcedure
       .input(
         z.object({
           customerId: z.string(),
@@ -219,13 +236,13 @@ export const crmRouter = createTRPCRouter({
       .query(({ input }) =>
         billingDataAccess.productLineBreakdownByCustomer(input.customerId, input.usageMonth),
       ),
-    listCoupons: protectedProcedure
+    listCoupons: crmScopedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listCouponsByCustomer(input.customerId)),
-    listContracts: protectedProcedure
+    listContracts: crmScopedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => contractsDataAccess.listByCustomerId(input.customerId)),
-    listTenants: protectedProcedure
+    listTenants: crmScopedProcedure
       .input(z.object({ customerId: z.string() }))
       .query(({ input }) => billingDataAccess.listTenantsByCustomer(input.customerId)),
     previewMerge: adminProcedure.input(customerMergeSchema).query(({ input }) =>
@@ -253,52 +270,66 @@ export const crmRouter = createTRPCRouter({
   }),
 
   projects: createTRPCRouter({
-    list: protectedProcedure.input(projectFilterSchema.optional()).query(({ input }) =>
-      projectsDataAccess.list(input),
+    list: crmScopedProcedure.input(projectFilterSchema.optional()).query(({ input, ctx }) =>
+      projectsDataAccess.list(input, ctx.crmScope),
     ),
-    getById: protectedProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
-      projectsDataAccess.getById(input.id),
+    getById: crmScopedProcedure.input(z.object({ id: z.string() })).query(({ input, ctx }) =>
+      projectsDataAccess.getById(input.id, ctx.crmScope),
     ),
-    create: adminProcedure.input(projectUpsertSchema).mutation(({ input }) =>
-      projectsDataAccess.create(input),
-    ),
-    update: adminProcedure
+    create: crmWriteProcedure.input(projectUpsertSchema).mutation(async ({ input, ctx }) => {
+      await assertCustomerInScope(ctx.crmScope, input.customerId)
+      return projectsDataAccess.create(input)
+    }),
+    update: crmWriteProcedure
       .input(z.object({ id: z.string(), data: projectUpsertSchema }))
-      .mutation(({ input }) => projectsDataAccess.update(input.id, input.data)),
-    updateStage: adminProcedure
+      .mutation(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.id)
+        await assertCustomerInScope(ctx.crmScope, input.data.customerId)
+        return projectsDataAccess.update(input.id, input.data)
+      }),
+    updateStage: crmWriteProcedure
       .input(z.object({ id: z.string(), stage: projectStageSchema }))
-      .mutation(({ input }) => projectsDataAccess.updateStage(input.id, input.stage)),
-    updateStatus: adminProcedure
+      .mutation(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.id)
+        return projectsDataAccess.updateStage(input.id, input.stage)
+      }),
+    updateStatus: crmWriteProcedure
       .input(z.object({ id: z.string(), status: z.enum(['active', 'paused', 'completed']) }))
-      .mutation(({ input }) => projectsDataAccess.updateStatus(input.id, input.status)),
-    stageCounts: protectedProcedure.query(() => projectsDataAccess.countByStage()),
-    listStaffFilterOptions: protectedProcedure.query(async ({ ctx }) => {
+      .mutation(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.id)
+        return projectsDataAccess.updateStatus(input.id, input.status)
+      }),
+    stageCounts: crmScopedProcedure.query(({ ctx }) =>
+      projectsDataAccess.countByStage(ctx.crmScope),
+    ),
+    listStaffFilterOptions: crmScopedProcedure.query(async ({ ctx }) => {
       const [staff, currentUserStaffId] = await Promise.all([
         projectsDataAccess.listStaffFilterOptions(),
         staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
       ])
       return { staff, currentUserStaffId }
     }),
-    listAccountManagerFilterOptions: protectedProcedure.query(async ({ ctx }) => {
+    listAccountManagerFilterOptions: crmScopedProcedure.query(async ({ ctx }) => {
       const [staff, currentUserStaffId] = await Promise.all([
         projectsDataAccess.listAccountManagerFilterOptions(),
         staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
       ])
       return { staff, currentUserStaffId }
     }),
-    getAccountManagerAssignment: protectedProcedure
+    getAccountManagerAssignment: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectAccountManagerDataAccess.getCurrent(input.projectId)),
-    changeAccountManager: adminProcedure
+    changeAccountManager: crmWriteProcedure
       .input(changeProjectAccountManagerSchema)
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
           await projectAccountManagerDataAccess.change({
             ...input,
             createdBy,
           })
-          return projectsDataAccess.getById(input.projectId)
+          return projectsDataAccess.getById(input.projectId, ctx.crmScope)
         } catch (e) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -306,19 +337,20 @@ export const crmRouter = createTRPCRouter({
           })
         }
       }),
-    getRevenueDepartmentAssignment: protectedProcedure
+    getRevenueDepartmentAssignment: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectRevenueDepartmentDataAccess.getCurrent(input.projectId)),
-    changeRevenueDepartment: adminProcedure
+    changeRevenueDepartment: crmWriteProcedure
       .input(changeProjectRevenueDepartmentSchema)
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
           await projectRevenueDepartmentDataAccess.change({
             ...input,
             createdBy,
           })
-          return projectsDataAccess.getById(input.projectId)
+          return projectsDataAccess.getById(input.projectId, ctx.crmScope)
         } catch (e) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -326,19 +358,20 @@ export const crmRouter = createTRPCRouter({
           })
         }
       }),
-    getOpportunitySourceAssignment: protectedProcedure
+    getOpportunitySourceAssignment: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectOpportunitySourceDataAccess.getCurrent(input.projectId)),
-    changeOpportunitySource: adminProcedure
+    changeOpportunitySource: crmWriteProcedure
       .input(changeProjectOpportunitySourceSchema)
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
           await projectOpportunitySourceDataAccess.change({
             ...input,
             createdBy,
           })
-          return projectsDataAccess.getById(input.projectId)
+          return projectsDataAccess.getById(input.projectId, ctx.crmScope)
         } catch (e) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -346,10 +379,10 @@ export const crmRouter = createTRPCRouter({
           })
         }
       }),
-    getConversionSetting: protectedProcedure
+    getConversionSetting: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectConversionSettingDataAccess.getByProjectId(input.projectId)),
-    hasRechargeOnConversionDate: protectedProcedure
+    hasRechargeOnConversionDate: crmScopedProcedure
       .input(
         z.object({
           projectId: z.string().min(1),
@@ -362,16 +395,17 @@ export const crmRouter = createTRPCRouter({
           input.conversionDate,
         ),
       ),
-    setConversionSetting: adminProcedure
+    setConversionSetting: crmWriteProcedure
       .input(setProjectConversionSettingSchema)
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           const createdBy = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
           await projectConversionSettingDataAccess.set({
             ...input,
             createdBy,
           })
-          return projectsDataAccess.getById(input.projectId)
+          return projectsDataAccess.getById(input.projectId, ctx.crmScope)
         } catch (e) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
@@ -379,13 +413,13 @@ export const crmRouter = createTRPCRouter({
           })
         }
       }),
-    getCommissionPhase: protectedProcedure
+    getCommissionPhase: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectCommissionPhaseDataAccess.resolve(input.projectId)),
-    listActivities: protectedProcedure
+    listActivities: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listActivitiesByProject(input.projectId)),
-    createActivity: protectedProcedure
+    createActivity: crmWriteProcedure
       .input(
         z.object({
           projectId: z.string(),
@@ -404,6 +438,7 @@ export const crmRouter = createTRPCRouter({
       )
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           return await projectActivitiesDataAccess.createComment({
             projectId: input.projectId,
             comment: input.comment,
@@ -417,7 +452,7 @@ export const crmRouter = createTRPCRouter({
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '发布动态失败' })
         }
       }),
-    updateActivity: protectedProcedure
+    updateActivity: crmWriteProcedure
       .input(
         z.object({
           projectId: z.string(),
@@ -427,6 +462,7 @@ export const crmRouter = createTRPCRouter({
       )
       .mutation(async ({ input, ctx }) => {
         try {
+          await assertProjectInScope(ctx.crmScope, input.projectId)
           return await projectActivitiesDataAccess.updateComment({
             projectId: input.projectId,
             activityId: input.activityId,
@@ -440,10 +476,10 @@ export const crmRouter = createTRPCRouter({
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '更新评论失败' })
         }
       }),
-    listConsumptions: protectedProcedure
+    listConsumptions: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listConsumptionsByProject(input.projectId)),
-    listDailyConsumptions: protectedProcedure
+    listDailyConsumptions: crmScopedProcedure
       .input(
         z.object({
           projectId: z.string(),
@@ -457,7 +493,7 @@ export const crmRouter = createTRPCRouter({
           usageMonth: input.usageMonth,
         }),
       ),
-    listBalanceSnapshots: protectedProcedure
+    listBalanceSnapshots: crmScopedProcedure
       .input(
         z.object({
           projectId: z.string(),
@@ -473,7 +509,7 @@ export const crmRouter = createTRPCRouter({
           usageDateTo: input.usageDateTo,
         }),
       ),
-    listDailyConsumptionDetails: protectedProcedure
+    listDailyConsumptionDetails: crmScopedProcedure
       .input(
         z.object({
           projectId: z.string(),
@@ -489,22 +525,22 @@ export const crmRouter = createTRPCRouter({
           productLine: input.productLine,
         }),
       ),
-    listTasks: protectedProcedure
+    listTasks: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listTasksByProject(input.projectId)),
-    listOrders: protectedProcedure
+    listOrders: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listOrdersByProject(input.projectId)),
-    listCoupons: protectedProcedure
+    listCoupons: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listCouponsByProject(input.projectId)),
-    listRecharges: protectedProcedure
+    listRecharges: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listRechargesByProject(input.projectId)),
-    listBills: protectedProcedure
+    listBills: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listBillsByProject(input.projectId)),
-    listMonthlyBills: protectedProcedure
+    listMonthlyBills: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listMonthlyBillsByProject(input.projectId)),
     previewTenantProjectImport: adminProcedure
@@ -571,7 +607,7 @@ export const crmRouter = createTRPCRouter({
           throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '租户项目查询失败' })
         }
       }),
-    listBillingTenants: protectedProcedure
+    listBillingTenants: crmScopedProcedure
       .input(z.object({ projectId: z.string().min(1) }))
       .query(({ input }) => projectsDataAccess.listBillingTenantsForProject(input.projectId)),
     syncBilling: adminProcedure
@@ -586,7 +622,7 @@ export const crmRouter = createTRPCRouter({
   }),
 
   tenants: createTRPCRouter({
-    list: protectedProcedure
+    list: crmScopedProcedure
       .input(
         z
           .object({
@@ -595,13 +631,16 @@ export const crmRouter = createTRPCRouter({
           })
           .optional(),
       )
-      .query(({ input }) => billingTenantsDataAccess.list(input)),
-    getById: protectedProcedure
+      .query(({ input, ctx }) => billingTenantsDataAccess.list(input, ctx.crmScope)),
+    getById: crmScopedProcedure
       .input(z.object({ id: z.string() }))
-      .query(({ input }) => billingTenantsDataAccess.getById(input.id)),
-    update: adminProcedure
+      .query(({ input, ctx }) => billingTenantsDataAccess.getById(input.id, ctx.crmScope)),
+    update: crmWriteProcedure
       .input(z.object({ id: z.string(), data: billingTenantUpdateSchema }))
-      .mutation(({ input }) => billingTenantsDataAccess.update(input.id, input.data)),
+      .mutation(async ({ input, ctx }) => {
+        await assertTenantInScope(ctx.crmScope, input.id)
+        return billingTenantsDataAccess.update(input.id, input.data)
+      }),
     updateInternalSetting: adminProcedure
       .input(z.object({ id: z.string(), data: billingTenantInternalSettingSchema }))
       .mutation(({ input }) =>
@@ -659,26 +698,26 @@ export const crmRouter = createTRPCRouter({
           mapBillingImportError(e)
         }
       }),
-    listRecharges: protectedProcedure
+    listRecharges: crmScopedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listRecharges(input.tenantId)),
-    listMonthlyBills: protectedProcedure
+    listMonthlyBills: crmScopedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listMonthlyBills(input.tenantId)),
-    getMonthlyBillDetails: protectedProcedure
+    getMonthlyBillDetails: crmScopedProcedure
       .input(z.object({ billId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.getMonthlyBillDetails(input.billId)),
-    listMetalOrders: protectedProcedure
+    listMetalOrders: crmScopedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listMetalOrders(input.tenantId)),
-    listReservedPackOrders: protectedProcedure
+    listReservedPackOrders: crmScopedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listReservedPackOrders(input.tenantId)),
   }),
 
   projectTags: createTRPCRouter({
-    list: protectedProcedure.query(() => projectTagsDataAccess.listAll()),
-    listByProject: protectedProcedure
+    list: crmScopedProcedure.query(() => projectTagsDataAccess.listAll()),
+    listByProject: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectTagsDataAccess.listByProjectId(input.projectId)),
     create: adminProcedure
@@ -692,11 +731,11 @@ export const crmRouter = createTRPCRouter({
   }),
 
   staff: createTRPCRouter({
-    list: protectedProcedure
+    list: adminProcedure
       .input(staffListSchema)
       .query(({ input }) => staffDataAccess.list(input ?? {})),
-    listActive: protectedProcedure.query(() => staffDataAccess.listActive()),
-    getById: protectedProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
+    listActive: sharedReadProcedure.query(() => staffDataAccess.listActive()),
+    getById: adminProcedure.input(z.object({ id: z.string() })).query(({ input }) =>
       staffDataAccess.getById(input.id),
     ),
     create: adminProcedure.input(staffUpsertSchema).mutation(({ input, ctx }) =>
@@ -723,50 +762,52 @@ export const crmRouter = createTRPCRouter({
     searchLinkableAuthUsers: adminProcedure
       .input(z.object({ query: z.string(), limit: z.number().int().min(1).max(50).optional() }))
       .query(({ input }) => staffDataAccess.searchLinkableAuthUsers(input.query, input.limit)),
-    listAssignments: protectedProcedure
+    listAssignments: adminProcedure
       .input(z.object({ staffId: z.string() }))
       .query(({ input }) => staffDataAccess.listAssignments(input.staffId)),
   }),
 
   businessLines: createTRPCRouter({
-    listActive: protectedProcedure.query(() => businessLinesDataAccess.listActive()),
+    listActive: crmScopedProcedure.query(() => businessLinesDataAccess.listActive()),
   }),
 
   contracts: createTRPCRouter({
-    list: protectedProcedure.query(() => contractsDataAccess.list()),
+    list: crmScopedProcedure.query(() => contractsDataAccess.list()),
   }),
 
   dashboard: createTRPCRouter({
-    summary: protectedProcedure.query(() => dashboardDataAccess.summary()),
-    recentProjects: protectedProcedure
+    summary: crmScopedProcedure.query(({ ctx }) => dashboardDataAccess.summary(ctx.crmScope)),
+    recentProjects: crmScopedProcedure
       .input(z.object({ limit: z.number().int().min(1).max(20).optional() }).optional())
-      .query(({ input }) => dashboardDataAccess.recentProjects(input?.limit)),
-    recentActivities: protectedProcedure
+      .query(({ input, ctx }) => dashboardDataAccess.recentProjects(input?.limit, ctx.crmScope)),
+    recentActivities: crmScopedProcedure
       .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
-      .query(({ input }) => dashboardDataAccess.recentActivities(input?.limit)),
-    pendingBills: protectedProcedure
+      .query(({ input, ctx }) => dashboardDataAccess.recentActivities(input?.limit, ctx.crmScope)),
+    pendingBills: crmScopedProcedure
       .input(z.object({ limit: z.number().int().min(1).max(50).optional() }).optional())
-      .query(({ input }) => dashboardDataAccess.pendingBills(input?.limit)),
+      .query(({ input, ctx }) => dashboardDataAccess.pendingBills(input?.limit, ctx.crmScope)),
   }),
 
   analytics: createTRPCRouter({
-    consumptionTrend: protectedProcedure
+    consumptionTrend: crmScopedProcedure
       .input(z.object({ months: z.number().int().min(1).max(24).optional() }).optional())
-      .query(({ input }) => dashboardDataAccess.consumptionTrend(input?.months)),
-    productLineBreakdown: protectedProcedure
+      .query(({ input, ctx }) => dashboardDataAccess.consumptionTrend(input?.months, ctx.crmScope)),
+    productLineBreakdown: crmScopedProcedure
       .input(z.object({ usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional())
-      .query(({ input }) => dashboardDataAccess.productLineBreakdown(input?.usageMonth)),
+      .query(({ input, ctx }) =>
+        dashboardDataAccess.productLineBreakdown(input?.usageMonth, ctx.crmScope),
+      ),
   }),
 
   calendar: createTRPCRouter({
-    listActivities: protectedProcedure
+    listActivities: crmScopedProcedure
       .input(z.object({ from: z.string().optional(), to: z.string().optional() }).optional())
       .query(({ input }) => calendarDataAccess.listActivities(input)),
-    listActivityTypes: protectedProcedure.query(() => calendarDataAccess.listActivityTypes()),
+    listActivityTypes: crmScopedProcedure.query(() => calendarDataAccess.listActivityTypes()),
   }),
 
   tenantProjectCost: createTRPCRouter({
-    getByProjectId: protectedProcedure
+    getByProjectId: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(async ({ input }) => {
         const context = await tenantProjectCostDataAccess.getContextByProjectId(input.projectId)
@@ -843,7 +884,7 @@ export const crmRouter = createTRPCRouter({
 
   tenantBlacklist: createTRPCRouter({
     getSyncDefaults: adminProcedure.query(() => tenantBlacklistDataAccess.getSyncDefaults()),
-    list: adminProcedure
+    list: sharedReadProcedure
       .input(
         z.object({
           status: z.string().optional(),

@@ -63,6 +63,8 @@ import {
 import type { Project } from '@/lib/data/types'
 import { TENANT_PROJECT_IMPORT_TAG_NAMES } from '@/lib/crm/tenant-project-import-utils'
 import { STAFF_DEPARTMENTS, type StaffDepartment } from '@/lib/crm/staff-constants'
+import { normalizeAppRole } from '@/lib/auth/app-role'
+import { authClient } from '@/lib/auth-client'
 import { trpc } from '@/lib/trpc/client'
 import { CreateProjectDialog } from './create-project-dialog'
 import { EditProjectDialog } from './edit-project-dialog'
@@ -95,6 +97,9 @@ function isConversionSettingComplete(project: Project): boolean {
 }
 
 export function ProjectsContent() {
+  const { data: session } = authClient.useSession()
+  const isAdmin = normalizeAppRole(session?.user?.role) === 'admin'
+
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const [search, setSearch] = useState('')
   const [stageFilter, setStageFilter] = useState<string>('all')
@@ -133,9 +138,12 @@ export function ProjectsContent() {
     return allTags.filter((tag) => allowed.has(tag.name))
   }, [allTags])
 
-  const { data: staffFilterOptions } = trpc.crm.projects.listStaffFilterOptions.useQuery()
+  const { data: staffFilterOptions } = trpc.crm.projects.listStaffFilterOptions.useQuery(
+    undefined,
+    { enabled: isAdmin },
+  )
   const { data: accountManagerFilterOptions } =
-    trpc.crm.projects.listAccountManagerFilterOptions.useQuery()
+    trpc.crm.projects.listAccountManagerFilterOptions.useQuery(undefined, { enabled: isAdmin })
 
   const effectiveStaffId =
     staffFilter === STAFF_FILTER_ME
@@ -550,51 +558,57 @@ export function ProjectsContent() {
                   <SelectItem value="completed">已完成</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={staffFilter} onValueChange={setStaffFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="负责人">{staffFilterLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={STAFF_FILTER_ALL}>全部负责人</SelectItem>
-                  {staffFilterOptions?.currentUserStaffId ? (
-                    <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
-                  ) : null}
-                  {staffFilterOptions?.staff.map((staff) => (
-                    <SelectItem key={staff.id} value={staff.id}>
-                      {staff.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={accountManagerFilter} onValueChange={setAccountManagerFilter}>
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="客户经理">{accountManagerFilterLabel}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={STAFF_FILTER_ALL}>全部客户经理</SelectItem>
-                  {accountManagerFilterOptions?.currentUserStaffId ? (
-                    <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
-                  ) : null}
-                  {accountManagerFilterOptions?.staff.map((staff) => (
-                    <SelectItem key={staff.id} value={staff.id}>
-                      {staff.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="归属部门" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEPARTMENT_FILTER_ALL}>全部部门</SelectItem>
-                  {STAFF_DEPARTMENTS.map((dept) => (
-                    <SelectItem key={dept} value={dept}>
-                      {dept}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {isAdmin ? (
+                <Select value={staffFilter} onValueChange={setStaffFilter}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="负责人">{staffFilterLabel}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={STAFF_FILTER_ALL}>全部负责人</SelectItem>
+                    {staffFilterOptions?.currentUserStaffId ? (
+                      <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
+                    ) : null}
+                    {staffFilterOptions?.staff.map((staff) => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {isAdmin ? (
+                <Select value={accountManagerFilter} onValueChange={setAccountManagerFilter}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="客户经理">{accountManagerFilterLabel}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={STAFF_FILTER_ALL}>全部客户经理</SelectItem>
+                    {accountManagerFilterOptions?.currentUserStaffId ? (
+                      <SelectItem value={STAFF_FILTER_ME}>我</SelectItem>
+                    ) : null}
+                    {accountManagerFilterOptions?.staff.map((staff) => (
+                      <SelectItem key={staff.id} value={staff.id}>
+                        {staff.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {isAdmin ? (
+                <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="归属部门" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={DEPARTMENT_FILTER_ALL}>全部部门</SelectItem>
+                    {STAFF_DEPARTMENTS.map((dept) => (
+                      <SelectItem key={dept} value={dept}>
+                        {dept}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" className="w-[180px] justify-between font-normal">

@@ -2,6 +2,7 @@ import { SidebarInset, SidebarProvider } from "@workspace/ui/components/sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { AppSidebar } from "@/components/app-sidebar"
 import { auth } from "@/lib/auth"
+import { normalizeAppRole } from "@/lib/auth/app-role"
 import { headers } from "next/headers"
 
 export default async function RootLayout({
@@ -20,6 +21,9 @@ export default async function RootLayout({
           image: session.user.image ?? null,
         }
       : null
+  const role = normalizeAppRole(
+    (session?.user as { role?: string } | undefined)?.role,
+  )
 
   return (
     <SidebarProvider
@@ -31,7 +35,7 @@ export default async function RootLayout({
         } as React.CSSProperties
       }
     >
-      <AppSidebar variant="inset" user={sidebarUser} />
+      <AppSidebar variant="inset" user={sidebarUser} role={role ?? undefined} />
       <SidebarInset className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <SiteHeader />
         <div

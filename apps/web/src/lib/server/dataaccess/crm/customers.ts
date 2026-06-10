@@ -15,6 +15,12 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
+import {
+  buildCustomerTableIdFilter,
+  filterCustomerGetById,
+  loadVisibleCustomerIds,
+  type CrmDataScope,
+} from '@/lib/server/auth/crm-data-scope'
 import { and, count, desc, eq, ilike, or, sum, type SQL } from 'drizzle-orm'
 
 export type CustomerListFilters = {
@@ -153,13 +159,20 @@ async function queryCustomersWithMetrics(
 }
 
 export const customersDataAccess = {
-  async list(filters: CustomerListFilters = {}): Promise<Customer[]> {
-    return queryCustomersWithMetrics(buildCustomerListConditions(filters))
+  async list(filters: CustomerListFilters = {}, scope?: CrmDataScope): Promise<Customer[]> {
+    const conditions = buildCustomerListConditions(filters)
+    const visibleCustomerIds = scope ? await loadVisibleCustomerIds(scope) : null
+    const scopeFilter = buildCustomerTableIdFilter(visibleCustomerIds)
+    if (scopeFilter) conditions.push(scopeFilter)
+    if (visibleCustomerIds && visibleCustomerIds.length === 0) return []
+    return queryCustomersWithMetrics(conditions)
   },
 
-  async getById(id: string): Promise<Customer | null> {
-    const rows = await queryCustomersWithMetrics([eq(customer.id, id)])
-    return rows[0] ?? null
+  async getById(id: string, scope?: CrmDataScope): Promise<Customer | null> {
+    return filterCustomerGetById(scope ?? { type: 'all' }, id, async () => {
+      const rows = await queryCustomersWithMetrics([eq(customer.id, id)])
+      return rows[0] ?? null
+    })
   },
 
   async create(input: CustomerUpsertInput): Promise<Customer> {

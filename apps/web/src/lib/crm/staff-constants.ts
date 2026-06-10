@@ -48,8 +48,9 @@ export function staffRolesRequireLogin(roles?: string[] | null): boolean {
 }
 
 /** 员工应用角色 → Better Auth users.role */
-export function resolveUserRoleFromStaffRoles(roles: string[]): 'admin' | 'user' {
+export function resolveUserRoleFromStaffRoles(roles: string[]): 'admin' | 'user' | 'member' {
   if (roles.includes('admin')) return 'admin'
+  if (roles.includes('member')) return 'member'
   return 'user'
 }
 

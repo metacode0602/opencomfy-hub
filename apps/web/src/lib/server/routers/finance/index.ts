@@ -9,7 +9,7 @@ import {
 import { SLOT_TO_FILE_TYPE } from '@/lib/server/dataaccess/finance/constants'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
-import { adminProcedure, createTRPCRouter, protectedProcedure } from '../trpc'
+import { adminProcedure, createTRPCRouter } from '../trpc'
 
 async function resolveFinanceActorId(user: { id: string; email?: string | null }) {
   return staffDataAccess.resolveStaffIdForAuthUser(user)
@@ -64,7 +64,7 @@ const allocationItemSchema = z.object({
 
 export const financeRouter = createTRPCRouter({
   periods: createTRPCRouter({
-    list: protectedProcedure.query(async () => {
+    list: adminProcedure.query(async () => {
       try {
         return await financeBillingPeriodsDataAccess.list()
       } catch (e) {
@@ -72,7 +72,7 @@ export const financeRouter = createTRPCRouter({
       }
     }),
 
-    getById: protectedProcedure
+    getById: adminProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -82,7 +82,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    getBundle: protectedProcedure
+    getBundle: adminProcedure
       .input(z.object({ id: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -92,7 +92,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    listCostSourceLines: protectedProcedure
+    listCostSourceLines: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -104,7 +104,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    listProjectCostMetadata: protectedProcedure
+    listProjectCostMetadata: adminProcedure
       .input(
         z.object({
           tenantPlatformIds: z.array(z.string()).max(2000),
@@ -119,7 +119,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    listImportTenantBindings: protectedProcedure
+    listImportTenantBindings: adminProcedure
       .input(
         z.object({
           billingPeriodId: z.string(),
@@ -183,7 +183,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    validateSingleIncome: protectedProcedure
+    validateSingleIncome: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -195,7 +195,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    previewSingleIncome: protectedProcedure
+    previewSingleIncome: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -283,7 +283,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    listTenantBindings: protectedProcedure
+    listTenantBindings: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -347,7 +347,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    detectPriceWindows: protectedProcedure
+    detectPriceWindows: adminProcedure
       .input(
         z.object({
           periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -362,7 +362,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    validate: protectedProcedure
+    validate: adminProcedure
       .input(
         z.object({
           billingPeriodId: z.string(),
@@ -450,7 +450,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    getPersonalBundle: protectedProcedure
+    getPersonalBundle: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -462,7 +462,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    validatePersonalIncome: protectedProcedure
+    validatePersonalIncome: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -518,7 +518,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    getByPeriod: protectedProcedure
+    getByPeriod: adminProcedure
       .input(z.object({ billingPeriodId: z.string() }))
       .query(async ({ input }) => {
         try {
@@ -528,7 +528,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    getAmPhaseSummary: protectedProcedure
+    getAmPhaseSummary: adminProcedure
       .input(
         z.object({
           billingPeriodId: z.string(),
@@ -546,7 +546,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    getDeptPhaseSummary: protectedProcedure
+    getDeptPhaseSummary: adminProcedure
       .input(
         z.object({
           billingPeriodId: z.string(),
@@ -564,7 +564,7 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
-    listProjectLines: protectedProcedure
+    listProjectLines: adminProcedure
       .input(
         z.object({
           billingPeriodId: z.string(),

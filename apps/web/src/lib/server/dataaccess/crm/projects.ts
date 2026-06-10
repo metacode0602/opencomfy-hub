@@ -17,6 +17,12 @@ import {
 function newId() {
   return crypto.randomUUID()
 }
+import {
+  buildProjectIdFilter,
+  filterProjectGetById,
+  loadVisibleProjectIds,
+  type CrmDataScope,
+} from '@/lib/server/auth/crm-data-scope'
 import { and, asc, count, desc, eq, ilike, inArray, isNull, ne, or, sql, sum } from 'drizzle-orm'
 import type { ProjectTag } from '@/lib/data/types'
 import type { StaffDepartment } from '@/lib/crm/staff-constants'
@@ -404,19 +410,27 @@ export const projectsDataAccess = {
       }))
   },
 
-  async listRecent(limit = 5): Promise<Project[]> {
+  async listRecent(limit = 5, scope?: CrmDataScope): Promise<Project[]> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) return []
+
     const rows = await db
       .select()
       .from(crmProject)
+      .where(buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds))
       .orderBy(desc(crmProject.updatedAt), desc(crmProject.createdAt))
       .limit(limit)
     const enrich = await loadProjectEnrichment(rows.map((r) => r.id))
     return rows.map((row) => mapToProject(row, enrich))
   },
 
-  async list(filters: ProjectListFilters = {}): Promise<Project[]> {
+  async list(filters: ProjectListFilters = {}, scope?: CrmDataScope): Promise<Project[]> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) return []
 
     const conditions = []
+    const scopeFilter = buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds)
+    if (scopeFilter) conditions.push(scopeFilter)
     if (filters.stage && filters.stage !== 'all') {
       conditions.push(eq(crmProject.stage, filters.stage))
     }
@@ -502,15 +516,27 @@ export const projectsDataAccess = {
     })
   },
 
-  async listByCustomerId(customerId: string): Promise<Project[]> {
-    const rows = await db.select().from(crmProject).where(eq(crmProject.customerId, customerId))
+  async listByCustomerId(customerId: string, scope?: CrmDataScope): Promise<Project[]> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) return []
+
+    const rows = await db
+      .select()
+      .from(crmProject)
+      .where(
+        and(
+          eq(crmProject.customerId, customerId),
+          buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds),
+        ),
+      )
     const enrich = await loadProjectEnrichment(rows.map((r) => r.id))
     return rows.map((row) => mapToProject(row, enrich))
   },
 
-  async getById(id: string): Promise<Project | null> {
-    const row = await db.query.crmProject.findFirst({ where: eq(crmProject.id, id) })
-    if (!row) return null
+  async getById(id: string, scope?: CrmDataScope): Promise<Project | null> {
+    return filterProjectGetById(scope ?? { type: 'all' }, id, async () => {
+      const row = await db.query.crmProject.findFirst({ where: eq(crmProject.id, id) })
+      if (!row) return null
     const enrich = await loadProjectEnrichment([id])
     const conversionRaw = await projectConversionSettingDataAccess.getByProjectId(id)
     const conversionSetting = conversionRaw
@@ -527,6 +553,7 @@ export const projectsDataAccess = {
     return mapToProject(row, enrich, {
       conversionSetting,
       commissionMonthPhase: phaseSnapshot.monthPhase ?? undefined,
+    })
     })
   },
 
@@ -679,11 +706,21 @@ export const projectsDataAccess = {
     return rows
   },
 
-  async countByStage(): Promise<{ lead: number; testing: number; converted: number }> {
+  async countByStage(scope?: CrmDataScope): Promise<{ lead: number; testing: number; converted: number }> {
+    const visibleProjectIds = scope ? await loadVisibleProjectIds(scope) : null
+    if (visibleProjectIds && visibleProjectIds.length === 0) {
+      return { lead: 0, testing: 0, converted: 0 }
+    }
+
     const rows = await db
       .select({ stage: crmProject.stage, value: count() })
       .from(crmProject)
-      .where(ne(crmProject.status, 'paused'))
+      .where(
+        and(
+          ne(crmProject.status, 'paused'),
+          buildProjectIdFilter(scope ?? { type: 'all' }, visibleProjectIds),
+        ),
+      )
       .groupBy(crmProject.stage)
     const map = new Map(rows.map((r) => [r.stage, Number(r.value)]))
     return {

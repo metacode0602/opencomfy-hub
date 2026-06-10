@@ -1,3 +1,4 @@
+import { normalizeAppRole } from '@/lib/auth/app-role'
 import { createTRPCContext, type AppRouter, createCallerFactory } from '@/lib/server/routers'
 import type { UserWithRole } from '@/lib/server/routers/trpc'
 import { createTRPCClient, httpBatchLink, loggerLink } from '@trpc/client'
@@ -45,11 +46,9 @@ export const createServerCaller = async () => {
 
   const user = authSession?.user
     ? ({
-      ...authSession.user,
-      role: (authSession.user.role === 'admin' || authSession.user.role === 'user'
-        ? authSession.user.role
-        : undefined) as 'admin' | 'user' | undefined,
-    } as UserWithRole)
+        ...authSession.user,
+        role: normalizeAppRole(authSession.user.role) ?? authSession.user.role,
+      } as UserWithRole)
     : null
 
   const ctx = await createTRPCContext({
@@ -73,11 +72,9 @@ export const createContextFromRequest = async (req: Request) => {
   // console.log("[route.ts] [createContextFromRequest] user", authSession);
   const user = authSession?.user
     ? ({
-      ...authSession.user,
-      role: (authSession.user.role === 'admin' || authSession.user.role === 'user'
-        ? authSession.user.role
-        : undefined) as 'admin' | 'user' | undefined,
-    } as UserWithRole)
+        ...authSession.user,
+        role: normalizeAppRole(authSession.user.role) ?? authSession.user.role,
+      } as UserWithRole)
     : null
   return createTRPCContext({ headers, req, user, session: authSession?.session })
 }

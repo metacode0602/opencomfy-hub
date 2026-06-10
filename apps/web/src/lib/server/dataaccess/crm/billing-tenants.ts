@@ -21,6 +21,12 @@ import {
   projectTagAssignment,
   projectTenant,
 } from '@workspace/db/schema'
+import {
+  buildTenantIdFilter,
+  filterTenantGetById,
+  loadVisibleTenantIds,
+  type CrmDataScope,
+} from '@/lib/server/auth/crm-data-scope'
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 
 export type {
@@ -268,11 +274,17 @@ function customerDisplayName(
 }
 
 export const billingTenantsDataAccess = {
-  async list(filters: { search?: string; tagId?: string } = {}): Promise<BillingTenantListItem[]> {
+  async list(
+    filters: { search?: string; tagId?: string } = {},
+    scope?: CrmDataScope,
+  ): Promise<BillingTenantListItem[]> {
     const q = filters.search?.trim()
     const tagId = filters.tagId?.trim()
     const tenantIdsWithTag = tagId ? await loadTenantIdsWithTag(tagId) : null
     if (tenantIdsWithTag && tenantIdsWithTag.size === 0) return []
+
+    const visibleTenantIds = scope ? await loadVisibleTenantIds(scope) : null
+    if (visibleTenantIds && visibleTenantIds.length === 0) return []
 
     const rows = await db
       .select({ tenant: billingTenant, cust: customer })
@@ -292,6 +304,7 @@ export const billingTenantsDataAccess = {
           tenantIdsWithTag
             ? inArray(billingTenant.id, [...tenantIdsWithTag])
             : undefined,
+          buildTenantIdFilter(scope ?? { type: 'all' }, visibleTenantIds),
         ),
       )
       .orderBy(desc(billingTenant.createdAt))
@@ -301,25 +314,27 @@ export const billingTenantsDataAccess = {
     return rows.map((r) => mapListRow(r.tenant, r.cust, tagMap.get(r.tenant.id) ?? []))
   },
 
-  async getById(id: string): Promise<BillingTenantDetail | null> {
-    const row = await db
-      .select({ tenant: billingTenant, cust: customer })
-      .from(billingTenant)
-      .innerJoin(customer, eq(customer.id, billingTenant.customerId))
-      .where(eq(billingTenant.id, id))
-      .limit(1)
+  async getById(id: string, scope?: CrmDataScope): Promise<BillingTenantDetail | null> {
+    return filterTenantGetById(scope ?? { type: 'all' }, id, async () => {
+      const row = await db
+        .select({ tenant: billingTenant, cust: customer })
+        .from(billingTenant)
+        .innerJoin(customer, eq(customer.id, billingTenant.customerId))
+        .where(eq(billingTenant.id, id))
+        .limit(1)
 
-    const hit = row[0]
-    if (!hit) return null
+      const hit = row[0]
+      if (!hit) return null
 
-    const base = mapListRow(hit.tenant, hit.cust)
-    return {
-      ...base,
-      customerType: hit.cust.type as 'B' | 'C',
-      customerStatus: hit.cust.status,
-      contactEmail: hit.cust.contactEmail ?? undefined,
-      updatedAt: hit.tenant.updatedAt.toISOString(),
-    }
+      const base = mapListRow(hit.tenant, hit.cust)
+      return {
+        ...base,
+        customerType: hit.cust.type as 'B' | 'C',
+        customerStatus: hit.cust.status,
+        contactEmail: hit.cust.contactEmail ?? undefined,
+        updatedAt: hit.tenant.updatedAt.toISOString(),
+      }
+    })
   },
 
   async update(id: string, input: BillingTenantUpdateInput): Promise<BillingTenantDetail> {
