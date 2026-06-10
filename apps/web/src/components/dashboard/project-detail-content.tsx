@@ -60,6 +60,7 @@ import { ProjectOrdersPanel } from '@/components/dashboard/project-orders-panel'
 import { ProjectCouponsPanel } from '@/components/dashboard/project-coupons-panel'
 import { ProjectRechargesPanel } from '@/components/dashboard/project-recharges-panel'
 import { ProjectBillsPanel } from '@/components/dashboard/project-bills-panel'
+import { ProjectMonthlyCostPanel } from '@/components/dashboard/project-monthly-cost-panel'
 import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
 import { ProjectMonthMetricCell } from '@/components/dashboard/project-month-metric-cell'
 import { ProjectBillingSyncDialog } from '@/components/dashboard/project-billing-sync-dialog'
@@ -104,6 +105,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
     'coupons',
     'recharges',
     'bills',
+    'finance',
   ])
   const [project, setProject] = useState(initialProject)
   const [activeTab, setActiveTab] = useState(
@@ -121,12 +123,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
     projectId: project.id,
   })
   const utils = trpc.useUtils()
-  const updateStageMutation = trpc.crm.projects.updateStage.useMutation({
-    onSuccess: (updated) => {
-      setProject(updated)
-      void utils.crm.projects.getById.invalidate({ id: project.id })
-    },
-  })
   const currentStageIndex = stageSteps.findIndex((s) => s.key === project.stage)
 
   return (
@@ -207,74 +203,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         </div>
       </div>
 
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center mb-4 gap-6">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium">项目阶段</h3>
-              <span className="text-sm text-muted-foreground">创建于 {project.createdAt}</span>
-            </div>
-            <div className="flex flex-row items-center gap-3">
-              <Building2 className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">所属客户</p>
-                <Link
-                  href={`/crm/customers/${project.customerId}`}
-                  className="font-medium hover:text-primary transition-colors"
-                >
-                  {project.customerName}
-                </Link>
-              </div>
-            </div>
-            <div className="flex flex-row items-center gap-2">
-              <span className="text-xs text-muted-foreground">平台租户Id：</span>
-              <span className="font-medium font-mono">{project.platformTenantId ?? '—'}</span>
-              {project.platformTenantId && <CopyToClipboard text={project.platformTenantId} />}
-            </div>
-          </div>
-          <div className="relative">
-            <div className="flex justify-between mb-2">
-              {stageSteps.map((step, index) => (
-                <div key={step.key} className="flex-1 text-center">
-                  <div
-                    className={`
-                    w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center
-                    ${index <= currentStageIndex
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground'
-                      }
-                  `}
-                  >
-                    {index < currentStageIndex ? (
-                      <CheckCircle className="w-5 h-5" />
-                    ) : (
-                      <span className="font-medium">{index + 1}</span>
-                    )}
-                  </div>
-                  <p
-                    className={`text-sm font-medium ${index <= currentStageIndex ? '' : 'text-muted-foreground'}`}
-                  >
-                    {step.name}
-                  </p>
-                  <div className="mt-2 space-y-1">
-                    {step.requirements.map((req) => (
-                      <p key={req} className="text-xs text-muted-foreground">
-                        {req}
-                      </p>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="absolute top-5 left-[10%] right-[10%] h-0.5 bg-muted -z-10">
-              <div
-                className="h-full bg-primary transition-all"
-                style={{ width: `${(currentStageIndex / (stageSteps.length - 1)) * 100}%` }}
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
 
       <EditProjectDialog
         open={editOpen}
@@ -299,50 +227,6 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">售前经理</p>
-                <p className="font-medium">{project.preSalesManager}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">客户经理</p>
-                <p className="font-medium">{project.accountManager}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">交付经理</p>
-                <p className="font-medium">{project.deliveryManager}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">项目经理</p>
-                <p className="font-medium">{project.projectManager}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
@@ -400,15 +284,64 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
           <TabsTrigger value="overview">概览</TabsTrigger>
           <TabsTrigger value="timeline">活动时间线</TabsTrigger>
           <TabsTrigger value="consumption">消费明细</TabsTrigger>
-          <TabsTrigger value="tasks">任务列表</TabsTrigger>
+          {/* <TabsTrigger value="tasks">任务列表</TabsTrigger> */}
           <TabsTrigger value="orders">订单列表</TabsTrigger>
           <TabsTrigger value="coupons">算力券</TabsTrigger>
           <TabsTrigger value="recharges">充值记录</TabsTrigger>
           <TabsTrigger value="bills">月度账单</TabsTrigger>
+          <TabsTrigger value="finance">收入/成本</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
+          <div className="grid grid-cols-4 gap-6">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">售前经理</p>
+                    <p className="font-medium">{project.preSalesManager}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">客户经理</p>
+                    <p className="font-medium">{project.accountManager}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">交付经理</p>
+                    <p className="font-medium">{project.deliveryManager}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">项目经理</p>
+                    <p className="font-medium">{project.projectManager}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
           <ProjectCommissionInfoCard project={project} />
+
+
           <div className="grid grid-cols-1 gap-6">
             <ProjectBalanceTrendChart projectId={project.id} />
           </div>
@@ -451,7 +384,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
             </Card>
           </div>
 
-          <Card>
+          {/* <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">运行中的任务</CardTitle>
               <Button variant="ghost" size="sm" onClick={() => setActiveTab('tasks')}>
@@ -494,6 +427,75 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
                 </TableBody>
               </Table>
             </CardContent>
+          </Card> */}
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center mb-4 gap-6">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium">项目阶段</h3>
+                  <span className="text-sm text-muted-foreground">创建于 {project.createdAt}</span>
+                </div>
+                <div className="flex flex-row items-center gap-3">
+                  <Building2 className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">所属客户</p>
+                    <Link
+                      href={`/crm/customers/${project.customerId}`}
+                      className="font-medium hover:text-primary transition-colors"
+                    >
+                      {project.customerName}
+                    </Link>
+                  </div>
+                </div>
+                <div className="flex flex-row items-center gap-2">
+                  <span className="text-xs text-muted-foreground">平台租户Id：</span>
+                  <span className="font-medium font-mono">{project.platformTenantId ?? '—'}</span>
+                  {project.platformTenantId && <CopyToClipboard text={project.platformTenantId} />}
+                </div>
+              </div>
+              <div className="relative">
+                <div className="flex justify-between mb-2">
+                  {stageSteps.map((step, index) => (
+                    <div key={step.key} className="flex-1 text-center">
+                      <div
+                        className={`
+                    w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center
+                    ${index <= currentStageIndex
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground'
+                          }
+                  `}
+                      >
+                        {index < currentStageIndex ? (
+                          <CheckCircle className="w-5 h-5" />
+                        ) : (
+                          <span className="font-medium">{index + 1}</span>
+                        )}
+                      </div>
+                      <p
+                        className={`text-sm font-medium ${index <= currentStageIndex ? '' : 'text-muted-foreground'}`}
+                      >
+                        {step.name}
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {step.requirements.map((req) => (
+                          <p key={req} className="text-xs text-muted-foreground">
+                            {req}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="absolute top-5 left-[10%] right-[10%] h-0.5 bg-muted -z-10">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${(currentStageIndex / (stageSteps.length - 1)) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -523,6 +525,10 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
 
         <TabsContent value="bills" className="mt-6">
           <ProjectBillsPanel project={project} />
+        </TabsContent>
+
+        <TabsContent value="finance" className="mt-6">
+          <ProjectMonthlyCostPanel project={project} />
         </TabsContent>
       </Tabs>
     </div>

@@ -35,13 +35,14 @@ import {
   TableHeader,
   TableRow,
 } from "@workspace/ui/components/table"
-import { ChevronDown, ChevronRight, Download } from "lucide-react"
+import { ChevronDown, ChevronRight, Download, Save } from "lucide-react"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
 type ProjectCostDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  billingPeriodId: string
   sourceLines: CostSourceLineDto[]
   periodCode: string
 }
@@ -146,9 +147,13 @@ function ProjectCostGroupRows({
 function ProjectCostResults({
   result,
   periodCode,
+  onSave,
+  saving,
 }: {
   result: ProjectCostResult
   periodCode: string
+  onSave: () => void
+  saving: boolean
 }) {
   const [openTenants, setOpenTenants] = useState<Set<string>>(() => new Set())
   const grandTotal = useMemo(
@@ -206,15 +211,27 @@ function ProjectCostResults({
         <p className="text-muted-foreground text-sm">
           共 {result.groups.length} 个项目，计算方式与成本毛利页客户经理汇总一致。
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          onClick={handleExportExcel}
-        >
-          <Download className="size-4" />
-          导出 Excel
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={handleExportExcel}
+          >
+            <Download className="size-4" />
+            导出 Excel
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            className="gap-2"
+            onClick={onSave}
+            disabled={saving}
+          >
+            <Save className="size-4" />
+            {saving ? "保存中…" : "保存数据"}
+          </Button>
+        </div>
       </div>
 
       <div className="overflow-x-auto overflow-y-auto max-h-[min(55vh,560px)] rounded-md border">
@@ -276,6 +293,7 @@ function ProjectCostResults({
 export function ProjectCostDialog({
   open,
   onOpenChange,
+  billingPeriodId,
   sourceLines,
   periodCode,
 }: ProjectCostDialogProps) {
@@ -283,7 +301,9 @@ export function ProjectCostDialog({
   const [allProjects, setAllProjects] = useState(false)
   const [result, setResult] = useState<ProjectCostResult | null>(null)
   const [computing, setComputing] = useState(false)
+  const [saving, setSaving] = useState(false)
   const utils = trpc.useUtils()
+  const saveMutation = trpc.finance.periods.saveProjectCostSnapshots.useMutation()
 
   const allProjectCount = useMemo(
     () => collectTenantPlatformIdsFromSourceLines(sourceLines).length,
@@ -362,6 +382,35 @@ export function ProjectCostDialog({
     }
   }
 
+  async function handleSave() {
+    if (!result || result.groups.length === 0) {
+      toast.error("请先完成计算")
+      return
+    }
+
+    setSaving(true)
+    try {
+      const payload = allProjects
+        ? { billingPeriodId, allProjects: true as const }
+        : {
+            billingPeriodId,
+            tenantPlatformIds: parseTenantPlatformIds(tenantIdInput),
+          }
+
+      const saved = await saveMutation.mutateAsync(payload)
+      let message = `已保存 ${saved.savedCount} 条 ${saved.settlementMonth} 月度成本快照`
+      if (saved.unmappedCount > 0) {
+        message += `（${saved.unmappedCount} 条未绑定 CRM 项目）`
+      }
+      toast.success(message)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "保存失败"
+      toast.error(message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function handleOpenChange(nextOpen: boolean) {
     onOpenChange(nextOpen)
     if (!nextOpen) {
@@ -377,7 +426,7 @@ export function ProjectCostDialog({
         <DialogHeader className="shrink-0">
           <DialogTitle>项目成本 · {periodCode}</DialogTitle>
           <DialogDescription>
-            可指定平台租户 ID，或勾选「当前全部项目」基于中间表实时计算成本与毛利，不写入数据库。
+            可指定平台租户 ID，或勾选「当前全部项目」基于中间表实时计算成本与毛利；计算后可保存至项目月度成本快照，供项目详情查看。
           </DialogDescription>
         </DialogHeader>
 
@@ -417,7 +466,14 @@ export function ProjectCostDialog({
             />
           </div>
 
-          {result ? <ProjectCostResults result={result} periodCode={periodCode} /> : null}
+          {result ? (
+            <ProjectCostResults
+              result={result}
+              periodCode={periodCode}
+              onSave={() => void handleSave()}
+              saving={saving}
+            />
+          ) : null}
         </div>
 
         <DialogFooter className="shrink-0 gap-2 sm:justify-between">

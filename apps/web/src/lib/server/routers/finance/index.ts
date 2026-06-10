@@ -119,6 +119,26 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    saveProjectCostSnapshots: adminProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          tenantPlatformIds: z.array(z.string()).max(2000).optional(),
+          allProjects: z.boolean().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const savedByStaffId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.saveProjectCostSnapshots({
+            ...input,
+            savedByStaffId,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     listImportTenantBindings: adminProcedure
       .input(
         z.object({

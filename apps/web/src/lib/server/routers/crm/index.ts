@@ -29,6 +29,7 @@ import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenan
 import { conversionQueryDataAccess } from '@/lib/server/dataaccess/crm/conversion-query'
 import { tenantProjectQueryDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-query'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
+import { listProjectMonthlyCostSnapshots } from '@/lib/server/dataaccess/finance/list-project-monthly-cost-snapshots'
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import { projectAccountManagerDataAccess } from '@/lib/server/dataaccess/crm/project-account-manager'
 import { projectRevenueDepartmentDataAccess } from '@/lib/server/dataaccess/crm/project-revenue-department'
@@ -509,6 +510,12 @@ export const crmRouter = createTRPCRouter({
           usageDateTo: input.usageDateTo,
         }),
       ),
+    listMonthlyCostSnapshots: crmScopedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.projectId)
+        return listProjectMonthlyCostSnapshots(input.projectId)
+      }),
     listDailyConsumptionDetails: crmScopedProcedure
       .input(
         z.object({

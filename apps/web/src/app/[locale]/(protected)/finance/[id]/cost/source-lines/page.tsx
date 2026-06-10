@@ -230,6 +230,7 @@ export default function FinanceCostSourceLinesPage() {
       <ProjectCostDialog
         open={projectCostOpen}
         onOpenChange={setProjectCostOpen}
+        billingPeriodId={id}
         sourceLines={sortedRows}
         periodCode={period?.period_code ?? id}
       />

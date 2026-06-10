@@ -713,6 +713,62 @@ export const billingTenantCostAllocation = pgTable(
   ],
 )
 
+/**
+ * 项目月度成本毛利快照 project_monthly_cost_snapshot
+ * 由财务「项目成本」弹窗人工确认后保存；供 CRM 项目详情查看。
+ */
+export const projectMonthlyCostSnapshot = pgTable(
+  "project_monthly_cost_snapshot",
+  {
+    id: text("id").primaryKey(),
+    billingPeriodId: text("billing_period_id")
+      .notNull()
+      .references(() => billingPeriod.id, { onDelete: "cascade" }),
+    settlementMonth: varchar("settlement_month", { length: 7 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    tenantPlatformId: varchar("tenant_platform_id", { length: 128 }).notNull(),
+    tenantName: varchar("tenant_name", { length: 255 }).notNull(),
+    projectId: text("project_id").references(() => crmProject.id, {
+      onDelete: "set null",
+    }),
+    projectName: varchar("project_name", { length: 255 }),
+    customerId: text("customer_id").references(() => customer.id, {
+      onDelete: "set null",
+    }),
+    customerFullName: varchar("customer_full_name", { length: 255 }),
+    accountManager: varchar("account_manager", { length: 128 }),
+    opportunitySource: varchar("opportunity_source", { length: 64 }),
+    monthPhaseLabel: varchar("month_phase_label", { length: 64 }),
+    balanceConsumption: money("balance_consumption").notNull().default("0"),
+    balanceCardHours: cardHours("balance_card_hours").notNull().default("0"),
+    voucherCardHours: cardHours("voucher_card_hours").notNull().default("0"),
+    confirmedRevenueExclTax: money("confirmed_revenue_excl_tax").notNull().default("0"),
+    soldDurationCostExclTax: money("sold_duration_cost_excl_tax").notNull().default("0"),
+    giftedDurationCostExclTax: money("gifted_duration_cost_excl_tax").notNull().default("0"),
+    grossProfit: money("gross_profit").notNull().default("0"),
+    metadata: jsonb("metadata").notNull().default({}),
+    savedBy: text("saved_by").references(() => userStaff.id, { onDelete: "set null" }),
+    savedAt: timestamp("saved_at", { withTimezone: true }).notNull(),
+    ...financeTimestamps,
+  },
+  (table) => [
+    uniqueIndex("project_monthly_cost_snapshot_period_tenant_uk").on(
+      table.billingPeriodId,
+      table.tenantPlatformId,
+    ),
+    index("project_monthly_cost_snapshot_project_month_idx").on(
+      table.projectId,
+      table.settlementMonth,
+    ),
+    index("project_monthly_cost_snapshot_tenant_month_idx").on(
+      table.tenantId,
+      table.settlementMonth,
+    ),
+  ],
+)
+
 // ---------------------------------------------------------------------------
 // 对账报告与操作审计（v1.4：不保留被 purge 的业务行副本）
 // ---------------------------------------------------------------------------
@@ -1023,6 +1079,7 @@ export const billingPeriodRelations = relations(billingPeriod, ({ one, many }) =
   operationLogs: many(billingPeriodOperationLog),
   personalIncomeSummaries: many(billingPeriodPersonalIncomeSummary),
   commissionDeriveRuns: many(platformCostCommissionDeriveRun),
+  projectMonthlyCostSnapshots: many(projectMonthlyCostSnapshot),
 }))
 
 export const billingPeriodPersonalIncomeSummaryRelations = relations(
@@ -1231,6 +1288,32 @@ export const billingPeriodOperationLogRelations = relations(
   }),
 )
 
+export const projectMonthlyCostSnapshotRelations = relations(
+  projectMonthlyCostSnapshot,
+  ({ one }) => ({
+    billingPeriod: one(billingPeriod, {
+      fields: [projectMonthlyCostSnapshot.billingPeriodId],
+      references: [billingPeriod.id],
+    }),
+    tenant: one(billingTenant, {
+      fields: [projectMonthlyCostSnapshot.tenantId],
+      references: [billingTenant.id],
+    }),
+    project: one(crmProject, {
+      fields: [projectMonthlyCostSnapshot.projectId],
+      references: [crmProject.id],
+    }),
+    customer: one(customer, {
+      fields: [projectMonthlyCostSnapshot.customerId],
+      references: [customer.id],
+    }),
+    savedByStaff: one(userStaff, {
+      fields: [projectMonthlyCostSnapshot.savedBy],
+      references: [userStaff.id],
+    }),
+  }),
+)
+
 export const tenantProjectCostRelations = relations(tenantProjectCost, ({ one }) => ({
   tenant: one(billingTenant, {
     fields: [tenantProjectCost.tenantId],
@@ -1266,6 +1349,7 @@ export type BillingPeriodTenantProjectEnrichmentRow =
   typeof billingPeriodTenantProjectEnrichment.$inferSelect
 export type BillingTenantCostAllocationRow = typeof billingTenantCostAllocation.$inferSelect
 export type TenantProjectCostRow = typeof tenantProjectCost.$inferSelect
+export type ProjectMonthlyCostSnapshotRow = typeof projectMonthlyCostSnapshot.$inferSelect
 export type BillingPeriodReconciliationReportRow =
   typeof billingPeriodReconciliationReport.$inferSelect
 export type BillingPeriodOperationLogRow = typeof billingPeriodOperationLog.$inferSelect
