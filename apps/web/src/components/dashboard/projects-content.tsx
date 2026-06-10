@@ -76,6 +76,7 @@ import { ProjectOpportunitySourceDialog } from './project-opportunity-source-dia
 import { ProjectConversionSettingDialog } from './project-conversion-setting-dialog'
 import { ProjectMonthMetricCell } from './project-month-metric-cell'
 import { CrmProjectImportDialog } from './crm-project-import-dialog'
+import { CrmOpportunityImportDialog } from './crm-opportunity-import-dialog'
 import { CrmTenantProjectImportDialog } from './crm-tenant-project-import-dialog'
 import { ConversionQueryDialog } from './conversion-query-dialog'
 import { TenantProjectQueryDialog } from './tenant-project-query-dialog'
@@ -125,6 +126,7 @@ export function ProjectsContent() {
   const [conversionProject, setConversionProject] = useState<Project | null>(null)
   const [testingProject, setTestingProject] = useState<Project | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [opportunityImportOpen, setOpportunityImportOpen] = useState(false)
   const [tenantProjectImportOpen, setTenantProjectImportOpen] = useState(false)
   const [conversionQueryOpen, setConversionQueryOpen] = useState(false)
   const [tenantProjectQueryOpen, setTenantProjectQueryOpen] = useState(false)
@@ -332,6 +334,18 @@ export function ProjectsContent() {
             <IconUpload className="size-4" />
             导入项目
           </Button>
+          {isAdmin ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              type="button"
+              onClick={() => setOpportunityImportOpen(true)}
+            >
+              <Handshake className="size-4" />
+              导入商机
+            </Button>
+          ) : null}
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
             新建项目
@@ -427,6 +441,12 @@ export function ProjectsContent() {
       <CrmProjectImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
+        onSuccess={() => void refetch()}
+      />
+
+      <CrmOpportunityImportDialog
+        open={opportunityImportOpen}
+        onOpenChange={setOpportunityImportOpen}
         onSuccess={() => void refetch()}
       />
 
