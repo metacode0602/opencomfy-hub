@@ -5,6 +5,7 @@ import {
   SuanliMerchantOpenApiError,
   type PlatformMerchantApiRecord,
 } from '@/lib/server/integrations/suanli-merchant-api'
+import { merchantContactsDataAccess } from '@/lib/server/dataaccess/merchant/merchant-contacts'
 import type {
   MerchantSyncAction,
   MerchantSyncCommitResult,
@@ -303,7 +304,15 @@ export const merchantPlatformSyncDataAccess = {
       try {
         if (!local) {
           const values = buildCreateValues(record, now)
-          await db.insert(merchant).values(values)
+          await db.transaction(async (tx) => {
+            await tx.insert(merchant).values(values)
+            await merchantContactsDataAccess.upsertPrimaryFromPlatform(
+              tx,
+              values.id,
+              values.contactUser ?? null,
+              values.contactPhone ?? null,
+            )
+          })
           await appendPlatformSyncActivity(
             values.id,
             '平台同步新建商户',
@@ -321,7 +330,17 @@ export const merchantPlatformSyncDataAccess = {
           continue
         }
 
-        await db.update(merchant).set(patch).where(eq(merchant.id, local.id))
+        await db.transaction(async (tx) => {
+          await tx.update(merchant).set(patch).where(eq(merchant.id, local.id))
+          if (syncChanges.includes('联系人') || syncChanges.includes('联系电话')) {
+            await merchantContactsDataAccess.upsertPrimaryFromPlatform(
+              tx,
+              local.id,
+              (patch.contactUser ?? local.contactUser) ?? null,
+              (patch.contactPhone ?? local.contactPhone) ?? null,
+            )
+          }
+        })
         await appendPlatformSyncActivity(
           local.id,
           '平台同步更新商户',

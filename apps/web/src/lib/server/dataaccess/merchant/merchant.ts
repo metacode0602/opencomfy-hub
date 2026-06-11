@@ -68,8 +68,6 @@ export type MerchantUpdateInput = {
   accessMode: Merchant['accessMode']
   type: Merchant['type']
   status: Merchant['status']
-  contactUser?: string
-  contactPhone?: string
   remark?: string
 }
 
@@ -139,8 +137,6 @@ export const merchantDataAccess = {
         accessMode: input.accessMode,
         type: input.type,
         status: input.status,
-        contactUser: input.contactUser ?? null,
-        contactPhone: input.contactPhone ?? null,
         remark: input.remark ?? null,
         updatedAt: now,
       })

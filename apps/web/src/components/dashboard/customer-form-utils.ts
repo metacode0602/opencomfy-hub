@@ -126,7 +126,5 @@ export function validateCustomerForm(values: CustomerFormValues): string | null 
   if (!values.name.trim() && !values.shortName.trim()) {
     return '客户名称与客户简称不能同时为空'
   }
-  if (!values.contactPerson.trim()) return '请填写联系人'
-  if (!values.contactPhone.trim()) return '请填写联系电话'
   return null
 }

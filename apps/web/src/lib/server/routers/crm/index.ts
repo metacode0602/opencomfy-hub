@@ -14,6 +14,8 @@ import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { customersDataAccess } from '@/lib/server/dataaccess/crm/customers'
 import { customerMergeDataAccess } from '@/lib/server/dataaccess/crm/customer-merge'
+import { customerContactsDataAccess } from '@/lib/server/dataaccess/crm/customer-contacts'
+import { tenantContactsDataAccess } from '@/lib/server/dataaccess/crm/tenant-contacts'
 import { projectsDataAccess } from '@/lib/server/dataaccess/crm/projects'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { contractsDataAccess } from '@/lib/server/dataaccess/crm/contracts'
@@ -68,6 +70,22 @@ import {
   staffListSchema,
   tenantProjectImportFormSchema,
 } from './schemas'
+import {
+  customerContactCreateSchema,
+  customerContactListSchema,
+  entityContactDeleteSchema,
+  entityContactSetPrimarySchema,
+  entityContactUpdateSchema,
+  tenantContactCreateSchema,
+  tenantContactListSchema,
+} from '../shared/entity-contact-schemas'
+
+function mapContactMutationError(e: unknown): never {
+  if (e instanceof Error) {
+    throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+  }
+  throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '操作失败' })
+}
 
 function mapPlatformImportError(e: unknown): never {
   if (e instanceof SuanliOpenApiError) {
@@ -268,6 +286,46 @@ export const crmRouter = createTRPCRouter({
           mapEnterpriseAuthError(e)
         }
       }),
+    contacts: createTRPCRouter({
+      list: crmScopedProcedure.input(customerContactListSchema).query(async ({ input, ctx }) => {
+        await assertCustomerInScope(ctx.crmScope, input.customerId)
+        return customerContactsDataAccess.list(input.customerId)
+      }),
+      create: crmWriteProcedure
+        .input(customerContactCreateSchema)
+        .mutation(async ({ input, ctx }) => {
+          await assertCustomerInScope(ctx.crmScope, input.customerId)
+          const { customerId, ...data } = input
+          try {
+            return await customerContactsDataAccess.create({ customerId, data })
+          } catch (e) {
+            mapContactMutationError(e)
+          }
+        }),
+      update: crmWriteProcedure.input(entityContactUpdateSchema).mutation(async ({ input }) => {
+        try {
+          return await customerContactsDataAccess.update(input)
+        } catch (e) {
+          mapContactMutationError(e)
+        }
+      }),
+      delete: crmWriteProcedure.input(entityContactDeleteSchema).mutation(async ({ input }) => {
+        try {
+          return await customerContactsDataAccess.delete(input)
+        } catch (e) {
+          mapContactMutationError(e)
+        }
+      }),
+      setPrimary: crmWriteProcedure
+        .input(entityContactSetPrimarySchema)
+        .mutation(async ({ input }) => {
+          try {
+            return await customerContactsDataAccess.setPrimary(input)
+          } catch (e) {
+            mapContactMutationError(e)
+          }
+        }),
+    }),
   }),
 
   projects: createTRPCRouter({
@@ -720,6 +778,44 @@ export const crmRouter = createTRPCRouter({
     listReservedPackOrders: crmScopedProcedure
       .input(z.object({ tenantId: z.string().min(1) }))
       .query(({ input }) => tenantBillingListsDataAccess.listReservedPackOrders(input.tenantId)),
+    contacts: createTRPCRouter({
+      list: crmScopedProcedure.input(tenantContactListSchema).query(async ({ input, ctx }) => {
+        await assertTenantInScope(ctx.crmScope, input.tenantId)
+        return tenantContactsDataAccess.list(input.tenantId)
+      }),
+      create: crmWriteProcedure.input(tenantContactCreateSchema).mutation(async ({ input, ctx }) => {
+        await assertTenantInScope(ctx.crmScope, input.tenantId)
+        const { tenantId, ...data } = input
+        try {
+          return await tenantContactsDataAccess.create({ tenantId, data })
+        } catch (e) {
+          mapContactMutationError(e)
+        }
+      }),
+      update: crmWriteProcedure.input(entityContactUpdateSchema).mutation(async ({ input }) => {
+        try {
+          return await tenantContactsDataAccess.update(input)
+        } catch (e) {
+          mapContactMutationError(e)
+        }
+      }),
+      delete: crmWriteProcedure.input(entityContactDeleteSchema).mutation(async ({ input }) => {
+        try {
+          return await tenantContactsDataAccess.delete(input)
+        } catch (e) {
+          mapContactMutationError(e)
+        }
+      }),
+      setPrimary: crmWriteProcedure
+        .input(entityContactSetPrimarySchema)
+        .mutation(async ({ input }) => {
+          try {
+            return await tenantContactsDataAccess.setPrimary(input)
+          } catch (e) {
+            mapContactMutationError(e)
+          }
+        }),
+    }),
   }),
 
   projectTags: createTRPCRouter({

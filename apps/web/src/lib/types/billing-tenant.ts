@@ -34,6 +34,9 @@ export type BillingTenantListItem = {
 export type BillingTenantDetail = BillingTenantListItem & {
   customerType: 'B' | 'C'
   customerStatus: string
+  customerContactPerson?: string
+  customerContactPhone?: string
+  customerContactEmail?: string
   contactEmail?: string
   updatedAt: string
 }
@@ -57,9 +60,6 @@ export type BillingTenantUpdateInput = {
   }
   customer: {
     type: 'B' | 'C'
-    contactPerson: string
-    contactPhone: string
-    contactEmail: string
     status: 'active' | 'inactive' | 'suspended'
   }
 }

@@ -39,8 +39,6 @@ export type MerchantEditDialogProps = {
     accessMode: MerchantAccessMode
     type: MerchantType
     status: MerchantStatus
-    contactUser: string
-    contactPhone: string
     remark: string
   }) => void | Promise<void>
 }
@@ -60,8 +58,6 @@ export function MerchantEditDialog({
   const [accessMode, setAccessMode] = useState<MerchantAccessMode>(merchant.accessMode)
   const [type, setType] = useState<MerchantType>(merchant.type)
   const [status, setStatus] = useState<MerchantStatus>(merchant.status)
-  const [contactUser, setContactUser] = useState(merchant.contactUser ?? '')
-  const [contactPhone, setContactPhone] = useState(merchant.contactPhone ?? '')
   const [remark, setRemark] = useState(merchant.remark ?? '')
   const [submitting, setSubmitting] = useState(false)
 
@@ -74,8 +70,6 @@ export function MerchantEditDialog({
     setAccessMode(merchant.accessMode)
     setType(merchant.type)
     setStatus(merchant.status)
-    setContactUser(merchant.contactUser ?? '')
-    setContactPhone(merchant.contactPhone ?? '')
     setRemark(merchant.remark ?? '')
   }, [open, merchant])
 
@@ -104,8 +98,6 @@ export function MerchantEditDialog({
         accessMode,
         type,
         status,
-        contactUser: contactUser.trim(),
-        contactPhone: contactPhone.trim(),
         remark: remark.trim(),
       })
       toast.success('商户信息已更新')
@@ -204,24 +196,6 @@ export function MerchantEditDialog({
               />
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 sm:gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="merchant-contact">联系人</Label>
-              <Input
-                id="merchant-contact"
-                value={contactUser}
-                onChange={(e) => setContactUser(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="merchant-phone">联系电话</Label>
-              <Input
-                id="merchant-phone"
-                value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-              />
-            </div>
-          </div>
           <div className="grid gap-2">
             <Label htmlFor="merchant-remark">备注</Label>
             <Textarea
@@ -232,7 +206,7 @@ export function MerchantEditDialog({
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            业务 Code、平台商户 ID 由平台同步维护，此处不可编辑。
+            联系人请在详情页「通讯录」维护。业务 Code、平台商户 ID 由平台同步维护，此处不可编辑。
           </p>
         </div>
 

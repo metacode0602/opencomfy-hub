@@ -20,6 +20,7 @@ import {
   projectTag,
   projectTagAssignment,
   projectTenant,
+  tenantContact,
 } from '@workspace/db/schema'
 import {
   buildTenantIdFilter,
@@ -27,6 +28,12 @@ import {
   loadVisibleTenantIds,
   type CrmDataScope,
 } from '@/lib/server/auth/crm-data-scope'
+import { loadPrimaryTenantContactsByTenantIds } from '@/lib/server/dataaccess/crm/tenant-contacts'
+import {
+  legacyContactToInput,
+  newContactId,
+  normalizeContactInput,
+} from '@/lib/server/dataaccess/shared/entity-contact-shared'
 import { and, asc, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 
 export type {
@@ -75,6 +82,7 @@ function mapListRow(
   t: typeof billingTenant.$inferSelect,
   c: typeof customer.$inferSelect,
   projectTags: BillingTenantListItem['projectTags'] = [],
+  tenantPrimary?: { name: string; phone: string },
 ): BillingTenantListItem {
   return {
     id: t.id,
@@ -93,8 +101,8 @@ function mapListRow(
     createdAt: t.createdAt.toISOString(),
     platformRegisteredAt: toIso(t.platformRegisteredAt ?? undefined),
     customerName: c.name,
-    contactPerson: c.contactPerson ?? undefined,
-    contactPhone: c.contactPhone ?? undefined,
+    contactPerson: tenantPrimary?.name ?? c.contactPerson ?? undefined,
+    contactPhone: tenantPrimary?.phone ?? c.contactPhone ?? undefined,
     projectTags,
   }
 }
@@ -310,8 +318,16 @@ export const billingTenantsDataAccess = {
       .orderBy(desc(billingTenant.createdAt))
 
     const tagMap = await loadProjectTagsByTenantIds(rows.map((r) => r.tenant.id))
+    const tenantPrimaryMap = await loadPrimaryTenantContactsByTenantIds(rows.map((r) => r.tenant.id))
 
-    return rows.map((r) => mapListRow(r.tenant, r.cust, tagMap.get(r.tenant.id) ?? []))
+    return rows.map((r) =>
+      mapListRow(
+        r.tenant,
+        r.cust,
+        tagMap.get(r.tenant.id) ?? [],
+        tenantPrimaryMap.get(r.tenant.id),
+      ),
+    )
   },
 
   async getById(id: string, scope?: CrmDataScope): Promise<BillingTenantDetail | null> {
@@ -331,6 +347,9 @@ export const billingTenantsDataAccess = {
         ...base,
         customerType: hit.cust.type as 'B' | 'C',
         customerStatus: hit.cust.status,
+        customerContactPerson: hit.cust.contactPerson ?? undefined,
+        customerContactPhone: hit.cust.contactPhone ?? undefined,
+        customerContactEmail: hit.cust.contactEmail ?? undefined,
         contactEmail: hit.cust.contactEmail ?? undefined,
         updatedAt: hit.tenant.updatedAt.toISOString(),
       }
@@ -362,9 +381,6 @@ export const billingTenantsDataAccess = {
         .update(customer)
         .set({
           type: input.customer.type,
-          contactPerson: input.customer.contactPerson.trim(),
-          contactPhone: input.customer.contactPhone.trim(),
-          contactEmail: input.customer.contactEmail.trim(),
           status: input.customer.status,
         })
         .where(eq(customer.id, existing.customerId))
@@ -465,9 +481,9 @@ export const billingTenantsDataAccess = {
               shortName: custName,
               type: 'C',
               status: 'active',
-              contactPerson: row.contactPerson?.trim() ?? '',
-              contactPhone: row.contactPhone?.trim() ?? '',
-              contactEmail: '',
+              contactPerson: null,
+              contactPhone: null,
+              contactEmail: null,
               industry: '',
               address: '',
             })
@@ -483,6 +499,24 @@ export const billingTenantsDataAccess = {
               overdue_at: row.overdueAt,
               credit_limit: row.creditLimit,
             })
+
+            const tenantContactPayload = legacyContactToInput({
+              contactPerson: row.contactPerson ?? undefined,
+              contactPhone: row.contactPhone ?? undefined,
+            })
+            if (tenantContactPayload) {
+              const normalized = normalizeContactInput(tenantContactPayload)
+              const now = new Date()
+              await tx.insert(tenantContact).values({
+                id: newContactId(),
+                tenantId,
+                ...normalized,
+                isPrimary: true,
+                sortOrder: 0,
+                createdAt: now,
+                updatedAt: now,
+              })
+            }
           })
           created++
         }

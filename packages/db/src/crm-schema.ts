@@ -134,6 +134,60 @@ export const billingTenant = pgTable(
   ],
 )
 
+/** 客户联系人（多值）；主联系人镜像至 customer.contact_* */
+export const customerContact = pgTable(
+  "customer_contact",
+  {
+    id: text("id").primaryKey(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customer.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 128 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    email: varchar("email", { length: 255 }),
+    wechatId: varchar("wechat_id", { length: 128 }),
+    title: varchar("title", { length: 64 }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    remark: text("remark"),
+    ...crmTimestamps,
+  },
+  (table) => [
+    index("customer_contact_customer_id_idx").on(table.customerId),
+    index("customer_contact_customer_sort_idx").on(table.customerId, table.sortOrder),
+    uniqueIndex("customer_contact_primary_uk")
+      .on(table.customerId)
+      .where(sql`${table.isPrimary} = true`),
+  ],
+)
+
+/** 计费租户联系人（多值）；与客户联系人独立 */
+export const tenantContact = pgTable(
+  "tenant_contact",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 128 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    email: varchar("email", { length: 255 }),
+    wechatId: varchar("wechat_id", { length: 128 }),
+    title: varchar("title", { length: 64 }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    remark: text("remark"),
+    ...crmTimestamps,
+  },
+  (table) => [
+    index("tenant_contact_tenant_id_idx").on(table.tenantId),
+    index("tenant_contact_tenant_sort_idx").on(table.tenantId, table.sortOrder),
+    uniqueIndex("tenant_contact_primary_uk")
+      .on(table.tenantId)
+      .where(sql`${table.isPrimary} = true`),
+  ],
+)
+
 /** 业务线字典 */
 export const businessLine = pgTable(
   "business_line",
@@ -1226,9 +1280,17 @@ export const customerRelations = relations(customer, ({ many, one }) => ({
   billingTenants: many(billingTenant),
   projects: many(crmProject),
   accountManagerAssignments: many(accountManagerAssignment),
+  contacts: many(customerContact),
   salesManager: one(userStaff, {
     fields: [customer.salesManagerId],
     references: [userStaff.id],
+  }),
+}))
+
+export const customerContactRelations = relations(customerContact, ({ one }) => ({
+  customer: one(customer, {
+    fields: [customerContact.customerId],
+    references: [customer.id],
   }),
 }))
 
@@ -1237,12 +1299,20 @@ export const billingTenantRelations = relations(billingTenant, ({ one, many }) =
     fields: [billingTenant.customerId],
     references: [customer.id],
   }),
+  contacts: many(tenantContact),
   recharges: many(recharge),
   projectLinks: many(projectTenant),
   billingSyncJobItems: many(billingSyncJobItem),
   balanceSnapshots: many(tenantBalanceSnapshot),
   balanceSnapshotJobItems: many(balanceSnapshotJobItem),
   platformBlacklistEntries: many(platformTenantBlacklist),
+}))
+
+export const tenantContactRelations = relations(tenantContact, ({ one }) => ({
+  tenant: one(billingTenant, {
+    fields: [tenantContact.tenantId],
+    references: [billingTenant.id],
+  }),
 }))
 
 export const platformTenantBlacklistRelations = relations(platformTenantBlacklist, ({ one }) => ({

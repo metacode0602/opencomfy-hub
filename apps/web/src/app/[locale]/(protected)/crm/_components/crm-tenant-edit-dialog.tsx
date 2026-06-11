@@ -34,9 +34,6 @@ type FormState = {
   creditLimit: string
   isDefault: boolean
   customerType: "B" | "C"
-  contactPerson: string
-  contactPhone: string
-  contactEmail: string
   customerStatus: "active" | "inactive" | "suspended"
 }
 
@@ -64,9 +61,6 @@ function formFromDetail(d: BillingTenantDetail): FormState {
     creditLimit: d.creditLimit != null ? String(d.creditLimit) : "",
     isDefault: d.isDefault,
     customerType: d.customerType,
-    contactPerson: d.contactPerson ?? "",
-    contactPhone: d.contactPhone ?? "",
-    contactEmail: d.contactEmail ?? "",
     customerStatus: d.customerStatus as FormState["customerStatus"],
   }
 }
@@ -91,9 +85,6 @@ function buildUpdatePayload(form: FormState): BillingTenantUpdateInput {
     },
     customer: {
       type: form.customerType,
-      contactPerson: form.contactPerson,
-      contactPhone: form.contactPhone,
-      contactEmail: form.contactEmail,
       status: form.customerStatus,
     },
   }
@@ -162,7 +153,7 @@ export function CrmTenantEditDialog({
         <DialogHeader>
           <DialogTitle>编辑租户信息</DialogTitle>
           <DialogDescription>
-            修改计费租户与关联客户信息。客户名称与内部/外部租户类型不可在此修改。
+            修改计费租户与关联客户状态。联系人请在详情页「租户通讯录」维护；客户名称与内部/外部租户类型不可在此修改。
           </DialogDescription>
         </DialogHeader>
 
@@ -246,25 +237,6 @@ export function CrmTenantEditDialog({
                     <SelectItem value="C">个人</SelectItem>
                   </SelectContent>
                 </Select>
-              </Field>
-              <Field label="联系人">
-                <Input
-                  value={form.contactPerson}
-                  onChange={(e) => patch({ contactPerson: e.target.value })}
-                />
-              </Field>
-              <Field label="联系人手机">
-                <Input
-                  value={form.contactPhone}
-                  onChange={(e) => patch({ contactPhone: e.target.value })}
-                />
-              </Field>
-              <Field label="联系邮箱">
-                <Input
-                  type="email"
-                  value={form.contactEmail}
-                  onChange={(e) => patch({ contactEmail: e.target.value })}
-                />
               </Field>
               <Field label="客户状态">
                 <Select

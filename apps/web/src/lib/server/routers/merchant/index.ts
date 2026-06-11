@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server'
 import { merchantActivityDataAccess } from '@/lib/server/dataaccess/merchant/merchant-activity'
+import { merchantContactsDataAccess } from '@/lib/server/dataaccess/merchant/merchant-contacts'
 import { merchantDataAccess } from '@/lib/server/dataaccess/merchant/merchant'
 import { merchantConsumptionDataAccess } from '@/lib/server/dataaccess/merchant/merchant-consumption'
 import { merchantPlatformSyncDataAccess } from '@/lib/server/dataaccess/merchant/merchant-platform-sync'
@@ -29,6 +30,13 @@ import {
   merchantSyncPreviewSchema,
   merchantUpdateSchema,
 } from './schemas'
+import {
+  entityContactDeleteSchema,
+  entityContactSetPrimarySchema,
+  entityContactUpdateSchema,
+  merchantContactCreateSchema,
+  merchantContactListSchema,
+} from '../shared/entity-contact-schemas'
 
 function mapMerchantSyncError(error: unknown): TRPCError {
   if (error instanceof SuanliMerchantOpenApiError) {
@@ -295,6 +303,53 @@ export const merchantRouter = createTRPCRouter({
         throw new TRPCError({
           code: 'BAD_REQUEST',
           message: error instanceof Error ? error.message : '加载租户消耗排行失败',
+        })
+      }
+    }),
+  }),
+
+  contacts: createTRPCRouter({
+    list: adminProcedure.input(merchantContactListSchema).query(async ({ input }) => {
+      return merchantContactsDataAccess.list(input.merchantId)
+    }),
+    create: adminProcedure.input(merchantContactCreateSchema).mutation(async ({ input }) => {
+      const { merchantId, ...data } = input
+      try {
+        return await merchantContactsDataAccess.create({ merchantId, data })
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '创建失败',
+        })
+      }
+    }),
+    update: adminProcedure.input(entityContactUpdateSchema).mutation(async ({ input }) => {
+      try {
+        return await merchantContactsDataAccess.update(input)
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '更新失败',
+        })
+      }
+    }),
+    delete: adminProcedure.input(entityContactDeleteSchema).mutation(async ({ input }) => {
+      try {
+        return await merchantContactsDataAccess.delete(input)
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '删除失败',
+        })
+      }
+    }),
+    setPrimary: adminProcedure.input(entityContactSetPrimarySchema).mutation(async ({ input }) => {
+      try {
+        return await merchantContactsDataAccess.setPrimary(input)
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '设置主联系人失败',
         })
       }
     }),

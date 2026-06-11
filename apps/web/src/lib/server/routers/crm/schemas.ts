@@ -45,9 +45,9 @@ export const customerUpsertSchema = z
     shortName: z.string().optional(),
     type: z.enum(['B', 'C']),
     status: z.enum(['active', 'inactive', 'suspended']).optional(),
-    contactPerson: z.string(),
-    contactPhone: z.string(),
-    contactEmail: z.string(),
+    contactPerson: z.string().optional(),
+    contactPhone: z.string().optional(),
+    contactEmail: z.string().optional(),
     industry: z.string(),
     address: z.string(),
     certCode: z.string().optional(),
@@ -226,9 +226,6 @@ export const billingTenantUpdateSchema = z.object({
   }),
   customer: z.object({
     type: z.enum(['B', 'C']),
-    contactPerson: z.string(),
-    contactPhone: z.string(),
-    contactEmail: z.string(),
     status: z.enum(['active', 'inactive', 'suspended']),
   }),
 })

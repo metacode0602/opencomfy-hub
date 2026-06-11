@@ -5,6 +5,7 @@ import { Loader2, Pencil } from 'lucide-react'
 import { LocaleLink } from '@/lib/i18n/navigation'
 import { trpc } from '@/lib/trpc/client'
 import { MerchantActivityPanel } from './merchant-activity-panel'
+import { MerchantContactsSection } from '@/components/dashboard/entity-contacts-section'
 import { MerchantDetailNav } from './merchant-detail-nav'
 import { MerchantEditDialog } from './merchant-edit-dialog'
 import {
@@ -78,8 +79,6 @@ export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
                 {merchantStatusLabels[merchant.status]}
               </Badge>
             </InfoRow>
-            <InfoRow label="联系人" value={merchant.contactUser ?? '—'} />
-            <InfoRow label="联系电话" value={merchant.contactPhone ?? '—'} />
             <InfoRow
               label="最近平台同步"
               value={
@@ -140,6 +139,8 @@ export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
         />
       </div>
 
+      <MerchantContactsSection merchantId={merchant.id} />
+
       <MerchantActivityPanel merchantId={merchant.id} />
 
       <MerchantEditDialog
@@ -151,8 +152,6 @@ export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
             id: merchant.id,
             ...input,
             merchantMark: input.merchantMark || undefined,
-            contactUser: input.contactUser || undefined,
-            contactPhone: input.contactPhone || undefined,
             remark: input.remark || undefined,
           })
         }}

@@ -21,6 +21,7 @@ import { CrmTenantRechargesList } from "./crm-tenant-recharges-list"
 import { CrmTenantMonthlyBillsList } from "./crm-tenant-monthly-bills-list"
 import { CrmTenantMetalOrdersList } from "./crm-tenant-metal-orders-list"
 import { CrmTenantReservedPackOrdersList } from "./crm-tenant-reserved-pack-orders-list"
+import { TenantContactsSection } from "@/components/dashboard/entity-contacts-section"
 
 function formatStatus(status: string) {
   switch (status) {
@@ -198,13 +199,17 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
           <CardContent className="space-y-4">
             <ReadOnly label="客户名称" value={data.customerName} />
             <ReadOnly label="客户类型" value={formatCustomerType(data.customerType)} />
-            <ReadOnly label="联系人" value={data.contactPerson ?? "—"} />
-            <ReadOnly label="联系人手机" value={data.contactPhone ?? "—"} />
-            <ReadOnly label="联系邮箱" value={data.contactEmail ?? "—"} />
+            <ReadOnly label="主联系人" value={data.customerContactPerson ?? "—"} />
+            <ReadOnly label="联系人手机" value={data.customerContactPhone ?? "—"} />
+            <ReadOnly label="联系邮箱" value={data.customerContactEmail ?? "—"} />
             <ReadOnly label="客户状态" value={formatStatus(data.customerStatus)} />
             <ReadOnly label="创建时间" value={formatDateTime(data.createdAt)} />
           </CardContent>
         </Card>
+      </div>
+
+      <div className="mt-6">
+        <TenantContactsSection tenantId={tenantId} />
       </div>
 
       <div className="mt-6 space-y-6">

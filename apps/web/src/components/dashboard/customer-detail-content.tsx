@@ -5,9 +5,6 @@ import Link from 'next/link'
 import { 
   ArrowLeft,
   Building2,
-  User,
-  Phone,
-  Mail,
   MapPin,
   Calendar,
   Wallet,
@@ -53,6 +50,7 @@ import { WORKBENCH_CHART_COLORS } from '@/components/dashboard/workbench/chart-u
 import { EditCustomerDialog } from './edit-customer-dialog'
 import { CustomerMergeDialog } from './customer-merge-dialog'
 import { CustomerDailyConsumptionPanel } from './customer-daily-consumption-panel'
+import { CustomerContactsSection } from './entity-contacts-section'
 import {
   customerToFormValues,
   formValuesToCustomerInput,
@@ -337,44 +335,21 @@ export function CustomerDetailContent({ customer: initialCustomer }: CustomerDet
         </Card>
       </div>
 
-      {/* Contact Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">联系信息</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+      <CustomerContactsSection customerId={customer.id} />
+
+      {customer.address ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">地址</CardTitle>
+          </CardHeader>
+          <CardContent>
             <div className="flex items-center gap-3">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">联系人</p>
-                <p className="font-medium">{customer.contactPerson}</p>
-              </div>
+              <MapPin className="h-4 w-4 text-muted-foreground" />
+              <p className="font-medium">{customer.address}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <Phone className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">电话</p>
-                <p className="font-medium">{customer.contactPhone}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Mail className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">邮箱</p>
-                <p className="font-medium">{customer.contactEmail}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <MapPin className="w-4 h-4 text-muted-foreground" />
-              <div>
-                <p className="text-xs text-muted-foreground">地址</p>
-                <p className="font-medium">{customer.address}</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>

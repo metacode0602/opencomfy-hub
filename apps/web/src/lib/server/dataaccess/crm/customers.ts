@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import type { Customer, CustomerExpectedScale } from '@/lib/data/types'
+import { customerContactsDataAccess } from '@/lib/server/dataaccess/crm/customer-contacts'
 import {
   mapCustomerRow,
   toIsoDateTime,
@@ -34,9 +35,9 @@ export type CustomerUpsertInput = {
   shortName?: string
   type: 'B' | 'C'
   status?: 'active' | 'inactive' | 'suspended'
-  contactPerson: string
-  contactPhone: string
-  contactEmail: string
+  contactPerson?: string
+  contactPhone?: string
+  contactEmail?: string
   industry: string
   address: string
   certCode?: string
@@ -186,9 +187,9 @@ export const customersDataAccess = {
         name: input.name.trim(),
         type: input.type,
         status: input.status ?? 'active',
-        contactPerson: input.contactPerson.trim(),
-        contactPhone: input.contactPhone.trim(),
-        contactEmail: input.contactEmail.trim(),
+        contactPerson: input.contactPerson?.trim() || null,
+        contactPhone: input.contactPhone?.trim() || null,
+        contactEmail: input.contactEmail?.trim() || null,
         industry: input.industry,
         address: input.address.trim(),
         certCode: input.certCode?.trim() || null,
@@ -204,6 +205,7 @@ export const customersDataAccess = {
         status: input.status ?? 'active',
         balance: '0',
       })
+      await customerContactsDataAccess.syncPrimaryFromLegacyFields(tx, id, input)
     })
 
     const created = await this.getById(id)
@@ -212,23 +214,26 @@ export const customersDataAccess = {
   },
 
   async update(id: string, input: CustomerUpsertInput): Promise<Customer> {
-    await db
-      .update(customer)
-      .set({
-        name: input.name.trim(),
-        type: input.type,
-        status: input.status ?? 'active',
-        contactPerson: input.contactPerson.trim(),
-        contactPhone: input.contactPhone.trim(),
-        contactEmail: input.contactEmail.trim(),
-        industry: input.industry,
-        address: input.address.trim(),
-        certCode: input.certCode?.trim() || null,
-        salesManagerId: input.salesManagerId || null,
-        expectedScale: input.expectedScale ?? null,
-        shortName: input.shortName?.trim() || null,
-      })
-      .where(eq(customer.id, id))
+    await db.transaction(async (tx) => {
+      await tx
+        .update(customer)
+        .set({
+          name: input.name.trim(),
+          type: input.type,
+          status: input.status ?? 'active',
+          contactPerson: input.contactPerson?.trim() || null,
+          contactPhone: input.contactPhone?.trim() || null,
+          contactEmail: input.contactEmail?.trim() || null,
+          industry: input.industry,
+          address: input.address.trim(),
+          certCode: input.certCode?.trim() || null,
+          salesManagerId: input.salesManagerId || null,
+          expectedScale: input.expectedScale ?? null,
+          shortName: input.shortName?.trim() || null,
+        })
+        .where(eq(customer.id, id))
+      await customerContactsDataAccess.syncPrimaryFromLegacyFields(tx, id, input)
+    })
 
     const updated = await this.getById(id)
     if (!updated) throw new Error('客户不存在')

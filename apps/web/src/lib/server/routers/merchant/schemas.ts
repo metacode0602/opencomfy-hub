@@ -17,8 +17,6 @@ export const merchantUpdateSchema = z.object({
   accessMode: z.enum(['oem', 'api', 'iframe']),
   type: z.enum(['platform_direct', 'partner']),
   status: z.enum(['active', 'inactive', 'suspended']),
-  contactUser: z.string().max(128).optional(),
-  contactPhone: z.string().max(32).optional(),
   remark: z.string().max(5000).optional(),
 })
 

@@ -61,6 +61,33 @@ export const merchant = pgTable(
   ],
 )
 
+/** 商户联系人（多值）；主联系人镜像至 merchant.contact_* */
+export const merchantContact = pgTable(
+  "merchant_contact",
+  {
+    id: text("id").primaryKey(),
+    merchantId: text("merchant_id")
+      .notNull()
+      .references(() => merchant.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 128 }).notNull(),
+    phone: varchar("phone", { length: 32 }),
+    email: varchar("email", { length: 255 }),
+    wechatId: varchar("wechat_id", { length: 128 }),
+    title: varchar("title", { length: 64 }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    remark: text("remark"),
+    ...merchantTimestamps,
+  },
+  (table) => [
+    index("merchant_contact_merchant_id_idx").on(table.merchantId),
+    index("merchant_contact_merchant_sort_idx").on(table.merchantId, table.sortOrder),
+    uniqueIndex("merchant_contact_primary_uk")
+      .on(table.merchantId)
+      .where(sql`${table.isPrimary} = true`),
+  ],
+)
+
 export const tenantMerchant = pgTable(
   "tenant_merchant",
   {
@@ -345,11 +372,19 @@ export const merchantActivityAttachment = pgTable(
 
 export const merchantRelations = relations(merchant, ({ many }) => ({
   tenantMerchants: many(tenantMerchant),
+  contacts: many(merchantContact),
   rechargeRecords: many(merchantRechargeRecord),
   activities: many(merchantActivity),
   datacenterRegions: many(merchantDatacenterRegion),
   purchasePrices: many(merchantPurchasePrice),
   purchasePriceRecords: many(merchantPurchasePriceRecord),
+}))
+
+export const merchantContactRelations = relations(merchantContact, ({ one }) => ({
+  merchant: one(merchant, {
+    fields: [merchantContact.merchantId],
+    references: [merchant.id],
+  }),
 }))
 
 export const merchantDatacenterRegionRelations = relations(
