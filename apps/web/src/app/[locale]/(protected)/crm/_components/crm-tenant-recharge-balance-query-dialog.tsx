@@ -260,7 +260,7 @@ export function CrmTenantRechargeBalanceQueryDialog({ open, onOpenChange, onImpo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-[calc(100vw-1.5rem)] max-w-6xl flex-col gap-4 overflow-hidden p-4 sm:w-full sm:p-6">
+      <DialogContent className="flex max-h-[90vh] min-w-[50vw] max-w-6xl flex-col gap-4 overflow-hidden p-4 sm:w-full sm:p-6">
         <DialogHeader className="shrink-0">
           <DialogTitle>租户充值与余额查询</DialogTitle>
           <DialogDescription>

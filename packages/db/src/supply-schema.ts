@@ -22,6 +22,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -1211,6 +1212,196 @@ export const supplierActivityAttachment = pgTable(
     storageUri: varchar("storage_uri", { length: 1024 }).notNull(),
   },
   (table) => [index("supplier_activity_attachment_activity_id_idx").on(table.activityId)],
+)
+
+// ---------------------------------------------------------------------------
+// §3.9 供应链线索
+// ---------------------------------------------------------------------------
+
+export const supplyChainLead = pgTable(
+  "supply_chain_lead",
+  {
+    id: text("id").primaryKey(),
+    type: varchar("type", { length: 16 }).notNull(),
+    code: varchar("code", { length: 64 }),
+    name: varchar("name", { length: 255 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull(),
+    priority: varchar("priority", { length: 16 }).notNull().default("medium"),
+    description: text("description"),
+    source: varchar("source", { length: 128 }),
+    province: varchar("province", { length: 64 }),
+    city: varchar("city", { length: 64 }),
+    address: text("address"),
+    supplierNameText: varchar("supplier_name_text", { length: 255 }),
+    linkedSupplierId: text("linked_supplier_id").references(() => supplier.id, {
+      onDelete: "set null",
+    }),
+    parentSupplierLeadId: text("parent_supplier_lead_id").references(
+      (): AnyPgColumn => supplyChainLead.id,
+      { onDelete: "set null" },
+    ),
+    dockingScope: varchar("docking_scope", { length: 32 }),
+    estimatedOnlineDate: date("estimated_online_date"),
+    ownerStaffId: text("owner_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    convertedSupplierId: text("converted_supplier_id").references(() => supplier.id, {
+      onDelete: "set null",
+    }),
+    convertedDataCenterId: text("converted_data_center_id").references(() => dataCenter.id, {
+      onDelete: "set null",
+    }),
+    convertedAt: timestamp("converted_at", { withTimezone: true }),
+    convertedBy: text("converted_by").references(() => userStaff.id, { onDelete: "set null" }),
+    lostReason: text("lost_reason"),
+    lostAt: timestamp("lost_at", { withTimezone: true }),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, { onDelete: "set null" }),
+    ...supplyTimestamps,
+  },
+  (table) => [
+    index("supply_chain_lead_type_status_idx").on(table.type, table.status),
+    index("supply_chain_lead_owner_staff_id_idx").on(table.ownerStaffId),
+    index("supply_chain_lead_last_activity_at_idx").on(table.lastActivityAt),
+    index("supply_chain_lead_linked_supplier_id_idx").on(table.linkedSupplierId),
+    index("supply_chain_lead_converted_supplier_id_idx").on(table.convertedSupplierId),
+    index("supply_chain_lead_converted_data_center_id_idx").on(table.convertedDataCenterId),
+  ],
+)
+
+export const supplyChainLeadContact = pgTable(
+  "supply_chain_lead_contact",
+  {
+    id: text("id").primaryKey(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => supplyChainLead.id, { onDelete: "cascade" }),
+    contactRole: varchar("contact_role", { length: 32 }).notNull(),
+    name: varchar("name", { length: 128 }).notNull(),
+    title: varchar("title", { length: 64 }),
+    phone: varchar("phone", { length: 32 }),
+    email: varchar("email", { length: 255 }),
+    wechatId: varchar("wechat_id", { length: 128 }),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("supply_chain_lead_contact_lead_id_idx").on(table.leadId),
+    uniqueIndex("supply_chain_lead_contact_primary_uk")
+      .on(table.leadId, table.contactRole)
+      .where(sql`${table.isPrimary} = true`),
+  ],
+)
+
+export const supplyChainLeadGpuSnapshot = pgTable(
+  "supply_chain_lead_gpu_snapshot",
+  {
+    id: text("id").primaryKey(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => supplyChainLead.id, { onDelete: "cascade" }),
+    gpuCardTypeId: text("gpu_card_type_id").references(() => gpuCardType.id, {
+      onDelete: "set null",
+    }),
+    cardTypeName: varchar("card_type_name", { length: 128 }).notNull(),
+    totalQuantity: integer("total_quantity").notNull().default(0),
+    idleQuantity: integer("idle_quantity").notNull().default(0),
+    reservedQuantity: integer("reserved_quantity").notNull().default(0),
+    inUseQuantity: integer("in_use_quantity").notNull().default(0),
+    unitPricePerHour: money("unit_price_per_hour"),
+    availableTime: varchar("available_time", { length: 255 }),
+    notes: text("notes"),
+    source: varchar("source", { length: 32 }).notNull().default("manual"),
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true }).defaultNow().notNull(),
+    createdBy: text("created_by").references(() => userStaff.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("supply_chain_lead_gpu_snapshot_lead_card_uk").on(table.leadId, table.cardTypeName),
+    index("supply_chain_lead_gpu_snapshot_lead_id_idx").on(table.leadId),
+    index("supply_chain_lead_gpu_snapshot_card_type_id_idx").on(table.gpuCardTypeId),
+  ],
+)
+
+export const supplyChainLeadTag = pgTable(
+  "supply_chain_lead_tag",
+  {
+    id: text("id").primaryKey(),
+    name: varchar("name", { length: 128 }).notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("supply_chain_lead_tag_name_uk").on(table.name)],
+)
+
+export const supplyChainLeadTagAssignment = pgTable(
+  "supply_chain_lead_tag_assignment",
+  {
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => supplyChainLead.id, { onDelete: "cascade" }),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => supplyChainLeadTag.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.leadId, table.tagId] }),
+    index("supply_chain_lead_tag_assignment_tag_id_idx").on(table.tagId),
+  ],
+)
+
+export const supplyChainLeadActivity = pgTable(
+  "supply_chain_lead_activity",
+  {
+    id: text("id").primaryKey(),
+    leadId: text("lead_id")
+      .notNull()
+      .references(() => supplyChainLead.id, { onDelete: "cascade" }),
+    type: varchar("type", { length: 32 }).notNull(),
+    title: varchar("title", { length: 255 }).notNull(),
+    description: text("description"),
+    authorStaffId: text("author_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    authorName: varchar("author_name", { length: 128 }),
+    authorRole: varchar("author_role", { length: 32 }),
+    metadata: jsonb("metadata"),
+    refDomain: varchar("ref_domain", { length: 64 }),
+    refId: text("ref_id"),
+    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("supply_chain_lead_activity_lead_occurred_idx").on(table.leadId, table.occurredAt),
+  ],
+)
+
+export const supplyChainLeadActivityAttachment = pgTable(
+  "supply_chain_lead_activity_attachment",
+  {
+    id: text("id").primaryKey(),
+    activityId: text("activity_id")
+      .notNull()
+      .references(() => supplyChainLeadActivity.id, { onDelete: "cascade" }),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    fileSize: bigint("file_size", { mode: "number" }),
+    mimeType: varchar("mime_type", { length: 128 }),
+    storageUri: varchar("storage_uri", { length: 1024 }).notNull(),
+  },
+  (table) => [
+    index("supply_chain_lead_activity_attachment_activity_id_idx").on(table.activityId),
+  ],
 )
 
 // ---------------------------------------------------------------------------

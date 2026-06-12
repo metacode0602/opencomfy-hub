@@ -29,6 +29,13 @@
       "when": 1781228148298,
       "tag": "0003_keen_natasha_romanoff",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1781253969778,
+      "tag": "0004_fuzzy_scarlet_witch",
+      "breakpoints": true
     }
   ]
 }

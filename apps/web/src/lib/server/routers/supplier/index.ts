@@ -102,6 +102,15 @@ import {
   supplierDataCleanupExecuteSchema,
   supplierDataCleanupPreviewSchema,
 } from '@/lib/server/routers/supplier/data-cleanup-schemas'
+import { supplyChainLeadsDataAccess } from '@/lib/server/dataaccess/supplier/supply-chain-leads'
+import {
+  supplyChainLeadActivityCreateSchema,
+  supplyChainLeadActivityUpdateSchema,
+  supplyChainLeadCreateSchema,
+  supplyChainLeadListSchema,
+  supplyChainLeadUpdateSchema,
+  supplyChainLeadUpdateStatusSchema,
+} from '@/lib/server/routers/supplier/supply-chain-leads-schemas'
 import { adminProcedure, createTRPCRouter, supplyProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -199,7 +208,13 @@ function mapImportError(error: unknown): never {
       message.includes('复制源') ||
       message.includes('结束时间') ||
       message.includes('Karmada') ||
-      message.includes('标签值')
+      message.includes('标签值') ||
+      message.includes('线索') ||
+      message.includes('资源对接人') ||
+      message.includes('对接范围') ||
+      message.includes('活动不存在') ||
+      message.includes('评论可编辑') ||
+      message.includes('已转正线索不可编辑')
     ) {
       throw new TRPCError({ code: 'BAD_REQUEST', message })
     }
@@ -1482,6 +1497,123 @@ export const supplierRouter = createTRPCRouter({
             gpuCardTypeId: input.gpuCardTypeId,
             periodId: input.periodId,
           })
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  supplyChainLeads: createTRPCRouter({
+    list: supplyProcedure.input(supplyChainLeadListSchema).query(async ({ input }) => {
+      try {
+        return await supplyChainLeadsDataAccess.list(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    stats: supplyProcedure.query(async () => {
+      try {
+        return await supplyChainLeadsDataAccess.stats()
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    listCardTypeFilterOptions: supplyProcedure.query(async () => {
+      try {
+        return await supplyChainLeadsDataAccess.listCardTypeFilterOptions()
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    getById: supplyProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const row = await supplyChainLeadsDataAccess.getById(input.id)
+          if (!row) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '线索不存在' })
+          }
+          return row
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    create: supplyProcedure
+      .input(supplyChainLeadCreateSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          return await supplyChainLeadsDataAccess.create(input, ctx.user)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    update: supplyProcedure
+      .input(supplyChainLeadUpdateSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { leadId, ...data } = input
+          return await supplyChainLeadsDataAccess.update(leadId, data, ctx.user)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    updateStatus: supplyProcedure
+      .input(supplyChainLeadUpdateStatusSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          await supplyChainLeadsDataAccess.updateStatus(
+            input.leadId,
+            input.status,
+            ctx.user,
+            input.lostReason,
+          )
+          return { ok: true as const }
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    listActivities: supplyProcedure
+      .input(z.object({ leadId: z.string().min(1), limit: z.number().int().min(1).max(200).optional() }))
+      .query(async ({ input }) => {
+        try {
+          return await supplyChainLeadsDataAccess.listActivities(input.leadId, input.limit)
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    createActivity: supplyProcedure
+      .input(supplyChainLeadActivityCreateSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          await supplyChainLeadsDataAccess.createActivity({
+            leadId: input.leadId,
+            description: input.description,
+            user: ctx.user,
+          })
+          return { ok: true as const }
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+
+    updateActivity: supplyProcedure
+      .input(supplyChainLeadActivityUpdateSchema)
+      .mutation(async ({ input, ctx }) => {
+        try {
+          await supplyChainLeadsDataAccess.updateActivity({
+            activityId: input.activityId,
+            description: input.description,
+            user: ctx.user,
+          })
+          return { ok: true as const }
+        } catch (e) {
           mapImportError(e)
         }
       }),

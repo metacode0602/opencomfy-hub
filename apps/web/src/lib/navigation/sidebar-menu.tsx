@@ -14,6 +14,7 @@ import {
   HelpCircle,
   History,
   LayoutDashboard,
+  Lightbulb,
   ListTodo,
   Server,
   Settings,
@@ -55,6 +56,7 @@ const navSupply: MenuItem[] = [
   { title: '设备库存', url: '/supplier/inventory', icon: <Cpu className="size-4" />, roles: ADMIN_MEMBER },
   { title: '计划批次', url: '/supplier/online-tasks', icon: <ListTodo className="size-4" />, roles: ADMIN_MEMBER },
   { title: '内部占用', url: '/supplier/test-holds', icon: <CheckCircleIcon className="size-4" />, roles: ADMIN_MEMBER },
+  { title: '供应链线索', url: '/supplier/leads', icon: <Lightbulb className="size-4" />, roles: ADMIN_MEMBER },
 ]
 
 const navCrm: MenuItem[] = [
