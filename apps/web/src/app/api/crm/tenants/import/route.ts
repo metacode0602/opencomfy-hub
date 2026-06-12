@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { auth } from '@/lib/auth'
+import { normalizeAppRole } from '@/lib/auth/app-role'
 import { billingTenantsDataAccess } from '@/lib/server/dataaccess/crm/billing-tenants'
 import { FinanceError } from '@/lib/server/dataaccess/finance/errors'
 
@@ -11,8 +12,8 @@ export async function POST(req: Request) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: '请先登录' }, { status: 401 })
   }
-  if (session.user.role === 'user') {
-    return NextResponse.json({ error: '暂无权限操作' }, { status: 403 })
+  if (normalizeAppRole(session.user.role) !== 'admin') {
+    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 })
   }
 
   let formData: FormData

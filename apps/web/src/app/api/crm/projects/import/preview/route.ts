@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+import { normalizeAppRole } from '@/lib/auth/app-role'
 import { auth } from '@/lib/auth'
 import { PROJECT_IMPORT_MAX_BYTES } from '@/lib/crm/project-import-utils'
 import { projectImportDataAccess } from '@/lib/server/dataaccess/crm/project-import'
@@ -9,8 +10,8 @@ export async function POST(req: Request) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: '请先登录' }, { status: 401 })
   }
-  if (session.user.role === 'user') {
-    return NextResponse.json({ error: '暂无权限操作' }, { status: 403 })
+  if (normalizeAppRole(session.user.role) !== 'admin') {
+    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 })
   }
 
   let formData: FormData

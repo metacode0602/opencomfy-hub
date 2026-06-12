@@ -293,48 +293,48 @@ export function ProjectsContent() {
           <h1 className="text-2xl font-bold">项目管理</h1>
           <p className="text-muted-foreground">管理所有项目，跟踪项目阶段和进度</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            type="button"
-            onClick={() => setTenantProjectQueryOpen(true)}
-          >
-            <IconUsersGroup className="size-4" />
-            租户项目查询
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            type="button"
-            onClick={() => setConversionQueryOpen(true)}
-          >
-            <IconClipboardSearch className="size-4" />
-            转正查询
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            type="button"
-            onClick={() => setTenantProjectImportOpen(true)}
-          >
-            <IconUpload className="size-4" />
-            导入租户项目
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-2"
-            type="button"
-            onClick={() => setImportOpen(true)}
-          >
-            <IconUpload className="size-4" />
-            导入项目
-          </Button>
-          {isAdmin ? (
+        {isAdmin ? (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              type="button"
+              onClick={() => setTenantProjectQueryOpen(true)}
+            >
+              <IconUsersGroup className="size-4" />
+              租户项目查询
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              type="button"
+              onClick={() => setConversionQueryOpen(true)}
+            >
+              <IconClipboardSearch className="size-4" />
+              转正查询
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              type="button"
+              onClick={() => setTenantProjectImportOpen(true)}
+            >
+              <IconUpload className="size-4" />
+              导入租户项目
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              type="button"
+              onClick={() => setImportOpen(true)}
+            >
+              <IconUpload className="size-4" />
+              导入项目
+            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -345,12 +345,12 @@ export function ProjectsContent() {
               <Handshake className="size-4" />
               导入商机
             </Button>
-          ) : null}
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            新建项目
-          </Button>
-        </div>
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              新建项目
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <CreateProjectDialog

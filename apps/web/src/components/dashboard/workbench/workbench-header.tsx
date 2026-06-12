@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { normalizeAppRole } from '@/lib/auth/app-role'
 import { authClient } from '@/lib/auth-client'
 import { trpc } from '@/lib/trpc/client'
 import { invalidateCrmWorkbench } from '@/lib/dashboard/invalidate-crm-workbench'
@@ -20,6 +21,7 @@ export function WorkbenchHeader() {
   const [createOpen, setCreateOpen] = useState(false)
 
   const userName = session?.user?.name ?? '用户'
+  const isAdmin = normalizeAppRole(session?.user?.role) === 'admin'
 
   return (
     <>
@@ -28,9 +30,11 @@ export function WorkbenchHeader() {
           <h1 className="text-2xl font-bold">工作台</h1>
           <p className="text-muted-foreground">欢迎回来，{userName}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button onClick={() => setCreateOpen(true)}>新建项目</Button>
-        </div>
+        {isAdmin ? (
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setCreateOpen(true)}>新建项目</Button>
+          </div>
+        ) : null}
       </div>
 
       <CreateProjectDialog

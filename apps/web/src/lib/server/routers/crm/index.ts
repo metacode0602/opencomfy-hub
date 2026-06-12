@@ -9,6 +9,7 @@ import {
   assertCustomerInScope,
   assertProjectInScope,
   assertTenantInScope,
+  resolveCrmDataScope,
 } from '@/lib/server/auth/crm-data-scope'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
@@ -30,6 +31,7 @@ import { platformTenantImportDataAccess } from '@/lib/server/dataaccess/crm/plat
 import { tenantProjectImportDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-import'
 import { conversionQueryDataAccess } from '@/lib/server/dataaccess/crm/conversion-query'
 import { tenantProjectQueryDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-query'
+import { tenantRechargeBalanceQueryDataAccess } from '@/lib/server/dataaccess/crm/tenant-recharge-balance-query'
 import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-project-cost'
 import { listProjectMonthlyCostSnapshots } from '@/lib/server/dataaccess/finance/list-project-monthly-cost-snapshots'
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
@@ -335,8 +337,9 @@ export const crmRouter = createTRPCRouter({
     getById: crmScopedProcedure.input(z.object({ id: z.string() })).query(({ input, ctx }) =>
       projectsDataAccess.getById(input.id, ctx.crmScope),
     ),
-    create: crmWriteProcedure.input(projectUpsertSchema).mutation(async ({ input, ctx }) => {
-      await assertCustomerInScope(ctx.crmScope, input.customerId)
+    create: adminProcedure.input(projectUpsertSchema).mutation(async ({ input, ctx }) => {
+      const crmScope = await resolveCrmDataScope(ctx.user)
+      await assertCustomerInScope(crmScope, input.customerId)
       return projectsDataAccess.create(input)
     }),
     update: crmWriteProcedure
@@ -711,6 +714,26 @@ export const crmRouter = createTRPCRouter({
       .mutation(({ input }) =>
         billingTenantsDataAccess.updateInternalSetting(input.id, input.data),
       ),
+    queryRechargeBalance: adminProcedure
+      .input(
+        z.object({
+          rawTenantIds: z.string(),
+          usageMonth: z.string().regex(/^\d{4}-\d{2}$/),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        try {
+          return await tenantRechargeBalanceQueryDataAccess.query(
+            input.rawTenantIds,
+            input.usageMonth,
+          )
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '租户充值余额查询失败' })
+        }
+      }),
     previewPlatformImport: adminProcedure
       .input(
         z.object({

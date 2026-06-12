@@ -28,10 +28,13 @@ import {
 } from "@workspace/ui/components/table"
 import { LocaleLink } from "@/lib/i18n/navigation"
 import { TENANT_PROJECT_IMPORT_TAG_NAMES } from "@/lib/crm/tenant-project-import-utils"
+import { normalizeAppRole } from "@/lib/auth/app-role"
+import { authClient } from "@/lib/auth-client"
 import { trpc } from "@/lib/trpc/client"
-import { IconCalendarOff, IconEye, IconPlus, IconUpload } from "@tabler/icons-react"
+import { IconCalendarOff, IconEye, IconPlus, IconSearch, IconUpload } from "@tabler/icons-react"
 import { CrmTenantImportDialog } from "./crm-tenant-import-dialog"
 import { CrmPlatformTenantImportDialog } from "./crm-platform-tenant-import-dialog"
+import { CrmTenantRechargeBalanceQueryDialog } from "./crm-tenant-recharge-balance-query-dialog"
 import {
   CrmTenantInternalSettingDialog,
   type TenantInternalSettingTarget,
@@ -91,12 +94,16 @@ function formatInternalExclusionSummary(t: BillingTenantListItem) {
 }
 
 export function CrmTenantsListClient() {
+  const { data: session } = authClient.useSession()
+  const isAdmin = normalizeAppRole(session?.user?.role) === "admin"
+
   const utils = trpc.useUtils()
   const [searchInput, setSearchInput] = React.useState("")
   const [search, setSearch] = React.useState("")
   const [tagFilter, setTagFilter] = React.useState(ALL_TAGS)
   const [platformImportOpen, setPlatformImportOpen] = React.useState(false)
   const [excelImportOpen, setExcelImportOpen] = React.useState(false)
+  const [rechargeBalanceQueryOpen, setRechargeBalanceQueryOpen] = React.useState(false)
   const [internalSettingTenant, setInternalSettingTenant] =
     React.useState<TenantInternalSettingTarget | null>(null)
 
@@ -134,32 +141,45 @@ export function CrmTenantsListClient() {
           <div>
             <CardTitle>计费租户</CardTitle>
             <CardDescription>
-              平台计费账户与客户关联；支持 Excel 批量导入（共 {tenants.length} 条
+              平台计费账户与客户关联
+              {isAdmin ? "；支持 Excel 批量导入" : ""}（共 {tenants.length} 条
               {isFetching && !isLoading ? "，刷新中…" : ""}）
             </CardDescription>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              type="button"
-              onClick={() => setPlatformImportOpen(true)}
-            >
-              <IconPlus className="size-4" />
-              导入租户
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              type="button"
-              onClick={() => setExcelImportOpen(true)}
-            >
-              <IconUpload className="size-4" />
-              导入 Excel
-            </Button>
-          </div>
+          {isAdmin ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                type="button"
+                onClick={() => setPlatformImportOpen(true)}
+              >
+                <IconPlus className="size-4" />
+                导入租户
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                type="button"
+                onClick={() => setExcelImportOpen(true)}
+              >
+                <IconUpload className="size-4" />
+                导入 Excel
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                type="button"
+                onClick={() => setRechargeBalanceQueryOpen(true)}
+              >
+                <IconSearch className="size-4" />
+                充值余额查询
+              </Button>
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -305,18 +325,25 @@ export function CrmTenantsListClient() {
         </CardContent>
       </Card>
 
-      {platformImportOpen ? (
+      {isAdmin && platformImportOpen ? (
         <CrmPlatformTenantImportDialog
           open
           onOpenChange={setPlatformImportOpen}
           onSuccess={onImportSuccess}
         />
       ) : null}
-      {excelImportOpen ? (
+      {isAdmin && excelImportOpen ? (
         <CrmTenantImportDialog
           open
           onOpenChange={setExcelImportOpen}
           onSuccess={onImportSuccess}
+        />
+      ) : null}
+      {isAdmin && rechargeBalanceQueryOpen ? (
+        <CrmTenantRechargeBalanceQueryDialog
+          open
+          onOpenChange={setRechargeBalanceQueryOpen}
+          onImported={onImportSuccess}
         />
       ) : null}
 
