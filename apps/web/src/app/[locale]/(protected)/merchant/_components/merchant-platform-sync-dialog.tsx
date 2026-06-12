@@ -133,7 +133,7 @@ export function MerchantPlatformSyncDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col">
+      <DialogContent className="max-w-5xl min-w-[50vw] max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>同步平台商户</DialogTitle>
           <DialogDescription>

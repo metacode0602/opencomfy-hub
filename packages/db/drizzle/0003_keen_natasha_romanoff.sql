@@ -1,3 +1,61 @@
+CREATE TABLE "customer_contact" (
+	"id" text PRIMARY KEY NOT NULL,
+	"customer_id" text NOT NULL,
+	"name" varchar(128) NOT NULL,
+	"phone" varchar(32),
+	"email" varchar(255),
+	"wechat_id" varchar(128),
+	"title" varchar(64),
+	"is_primary" boolean DEFAULT false NOT NULL,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"remark" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "tenant_contact" (
+	"id" text PRIMARY KEY NOT NULL,
+	"tenant_id" text NOT NULL,
+	"name" varchar(128) NOT NULL,
+	"phone" varchar(32),
+	"email" varchar(255),
+	"wechat_id" varchar(128),
+	"title" varchar(64),
+	"is_primary" boolean DEFAULT false NOT NULL,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"remark" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "project_monthly_cost_snapshot" (
+	"id" text PRIMARY KEY NOT NULL,
+	"billing_period_id" text NOT NULL,
+	"settlement_month" varchar(7) NOT NULL,
+	"tenant_id" text NOT NULL,
+	"tenant_platform_id" varchar(128) NOT NULL,
+	"tenant_name" varchar(255) NOT NULL,
+	"project_id" text,
+	"project_name" varchar(255),
+	"customer_id" text,
+	"customer_full_name" varchar(255),
+	"account_manager" varchar(128),
+	"opportunity_source" varchar(64),
+	"month_phase_label" varchar(64),
+	"balance_consumption" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"balance_card_hours" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"voucher_card_hours" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"confirmed_revenue_excl_tax" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"sold_duration_cost_excl_tax" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"gifted_duration_cost_excl_tax" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"gross_profit" numeric(15, 4) DEFAULT '0' NOT NULL,
+	"metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"saved_by" text,
+	"saved_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "merchant" (
 	"id" text PRIMARY KEY NOT NULL,
 	"platform_merchant_id" integer NOT NULL,
@@ -16,6 +74,18 @@ CREATE TABLE "merchant" (
 	"platform_synced_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "merchant_account_manager_assignment" (
+	"id" text PRIMARY KEY NOT NULL,
+	"merchant_id" text NOT NULL,
+	"user_staff_id" text NOT NULL,
+	"role_type" varchar(32) NOT NULL,
+	"effective_from" timestamp with time zone NOT NULL,
+	"effective_to" timestamp with time zone,
+	"remark" text,
+	"created_by_staff_id" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "merchant_activity" (
@@ -41,6 +111,21 @@ CREATE TABLE "merchant_activity_attachment" (
 	"file_size" bigint,
 	"mime_type" varchar(128),
 	"storage_uri" varchar(1024) NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "merchant_contact" (
+	"id" text PRIMARY KEY NOT NULL,
+	"merchant_id" text NOT NULL,
+	"name" varchar(128) NOT NULL,
+	"phone" varchar(32),
+	"email" varchar(255),
+	"wechat_id" varchar(128),
+	"title" varchar(64),
+	"is_primary" boolean DEFAULT false NOT NULL,
+	"sort_order" integer DEFAULT 0 NOT NULL,
+	"remark" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "merchant_datacenter_card_type" (
@@ -173,9 +258,20 @@ CREATE TABLE "supplier_ops_engineer" (
 ALTER TABLE "customer" ADD COLUMN "identity_verified" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "customer" ADD COLUMN "identity_verified_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "customer" ADD COLUMN "identity_verification_type" varchar(16);--> statement-breakpoint
+ALTER TABLE "customer_contact" ADD CONSTRAINT "customer_contact_customer_id_customer_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customer"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "tenant_contact" ADD CONSTRAINT "tenant_contact_tenant_id_tenant_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenant"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "project_monthly_cost_snapshot" ADD CONSTRAINT "project_monthly_cost_snapshot_billing_period_id_billing_period_id_fk" FOREIGN KEY ("billing_period_id") REFERENCES "public"."billing_period"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "project_monthly_cost_snapshot" ADD CONSTRAINT "project_monthly_cost_snapshot_tenant_id_tenant_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenant"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "project_monthly_cost_snapshot" ADD CONSTRAINT "project_monthly_cost_snapshot_project_id_project_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."project"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "project_monthly_cost_snapshot" ADD CONSTRAINT "project_monthly_cost_snapshot_customer_id_customer_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customer"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "project_monthly_cost_snapshot" ADD CONSTRAINT "project_monthly_cost_snapshot_saved_by_user_staff_id_fk" FOREIGN KEY ("saved_by") REFERENCES "public"."user_staff"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "merchant_account_manager_assignment" ADD CONSTRAINT "merchant_account_manager_assignment_merchant_id_merchant_id_fk" FOREIGN KEY ("merchant_id") REFERENCES "public"."merchant"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "merchant_account_manager_assignment" ADD CONSTRAINT "merchant_account_manager_assignment_user_staff_id_user_staff_id_fk" FOREIGN KEY ("user_staff_id") REFERENCES "public"."user_staff"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "merchant_account_manager_assignment" ADD CONSTRAINT "merchant_account_manager_assignment_created_by_staff_id_user_staff_id_fk" FOREIGN KEY ("created_by_staff_id") REFERENCES "public"."user_staff"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_activity" ADD CONSTRAINT "merchant_activity_merchant_id_merchant_id_fk" FOREIGN KEY ("merchant_id") REFERENCES "public"."merchant"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_activity" ADD CONSTRAINT "merchant_activity_author_staff_id_user_staff_id_fk" FOREIGN KEY ("author_staff_id") REFERENCES "public"."user_staff"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_activity_attachment" ADD CONSTRAINT "merchant_activity_attachment_activity_id_merchant_activity_id_fk" FOREIGN KEY ("activity_id") REFERENCES "public"."merchant_activity"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "merchant_contact" ADD CONSTRAINT "merchant_contact_merchant_id_merchant_id_fk" FOREIGN KEY ("merchant_id") REFERENCES "public"."merchant"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_datacenter_card_type" ADD CONSTRAINT "merchant_datacenter_card_type_merchant_datacenter_region_id_merchant_datacenter_region_id_fk" FOREIGN KEY ("merchant_datacenter_region_id") REFERENCES "public"."merchant_datacenter_region"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_datacenter_card_type" ADD CONSTRAINT "merchant_datacenter_card_type_gpu_card_type_id_gpu_card_type_id_fk" FOREIGN KEY ("gpu_card_type_id") REFERENCES "public"."gpu_card_type"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "merchant_datacenter_region" ADD CONSTRAINT "merchant_datacenter_region_merchant_id_merchant_id_fk" FOREIGN KEY ("merchant_id") REFERENCES "public"."merchant"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -204,15 +300,29 @@ ALTER TABLE "tenant_merchant" ADD CONSTRAINT "tenant_merchant_merchant_id_mercha
 ALTER TABLE "tenant_merchant" ADD CONSTRAINT "tenant_merchant_created_by_staff_id_user_staff_id_fk" FOREIGN KEY ("created_by_staff_id") REFERENCES "public"."user_staff"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "supplier_ops_engineer" ADD CONSTRAINT "supplier_ops_engineer_supplier_id_supplier_id_fk" FOREIGN KEY ("supplier_id") REFERENCES "public"."supplier"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "supplier_ops_engineer" ADD CONSTRAINT "supplier_ops_engineer_data_center_id_data_center_id_fk" FOREIGN KEY ("data_center_id") REFERENCES "public"."data_center"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "customer_contact_customer_id_idx" ON "customer_contact" USING btree ("customer_id");--> statement-breakpoint
+CREATE INDEX "customer_contact_customer_sort_idx" ON "customer_contact" USING btree ("customer_id","sort_order");--> statement-breakpoint
+CREATE UNIQUE INDEX "customer_contact_primary_uk" ON "customer_contact" USING btree ("customer_id") WHERE "customer_contact"."is_primary" = true;--> statement-breakpoint
+CREATE INDEX "tenant_contact_tenant_id_idx" ON "tenant_contact" USING btree ("tenant_id");--> statement-breakpoint
+CREATE INDEX "tenant_contact_tenant_sort_idx" ON "tenant_contact" USING btree ("tenant_id","sort_order");--> statement-breakpoint
+CREATE UNIQUE INDEX "tenant_contact_primary_uk" ON "tenant_contact" USING btree ("tenant_id") WHERE "tenant_contact"."is_primary" = true;--> statement-breakpoint
+CREATE UNIQUE INDEX "project_monthly_cost_snapshot_period_tenant_uk" ON "project_monthly_cost_snapshot" USING btree ("billing_period_id","tenant_platform_id");--> statement-breakpoint
+CREATE INDEX "project_monthly_cost_snapshot_project_month_idx" ON "project_monthly_cost_snapshot" USING btree ("project_id","settlement_month");--> statement-breakpoint
+CREATE INDEX "project_monthly_cost_snapshot_tenant_month_idx" ON "project_monthly_cost_snapshot" USING btree ("tenant_id","settlement_month");--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_platform_merchant_id_uk" ON "merchant" USING btree ("platform_merchant_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_code_uk" ON "merchant" USING btree ("code");--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_uscc_uk" ON "merchant" USING btree ("unified_social_credit_code");--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_is_default_uk" ON "merchant" USING btree ("is_default") WHERE is_default = true;--> statement-breakpoint
 CREATE INDEX "merchant_status_idx" ON "merchant" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "merchant_name_idx" ON "merchant" USING btree ("name");--> statement-breakpoint
+CREATE INDEX "merchant_account_manager_assignment_merchant_id_idx" ON "merchant_account_manager_assignment" USING btree ("merchant_id");--> statement-breakpoint
+CREATE INDEX "merchant_account_manager_assignment_user_staff_id_idx" ON "merchant_account_manager_assignment" USING btree ("user_staff_id");--> statement-breakpoint
 CREATE INDEX "merchant_activity_merchant_occurred_idx" ON "merchant_activity" USING btree ("merchant_id","occurred_at");--> statement-breakpoint
 CREATE INDEX "merchant_activity_ref_idx" ON "merchant_activity" USING btree ("ref_domain","ref_id");--> statement-breakpoint
 CREATE INDEX "merchant_activity_attachment_activity_id_idx" ON "merchant_activity_attachment" USING btree ("activity_id");--> statement-breakpoint
+CREATE INDEX "merchant_contact_merchant_id_idx" ON "merchant_contact" USING btree ("merchant_id");--> statement-breakpoint
+CREATE INDEX "merchant_contact_merchant_sort_idx" ON "merchant_contact" USING btree ("merchant_id","sort_order");--> statement-breakpoint
+CREATE UNIQUE INDEX "merchant_contact_primary_uk" ON "merchant_contact" USING btree ("merchant_id") WHERE "merchant_contact"."is_primary" = true;--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_datacenter_card_type_region_card_uk" ON "merchant_datacenter_card_type" USING btree ("merchant_datacenter_region_id","gpu_card_type_id");--> statement-breakpoint
 CREATE INDEX "merchant_datacenter_card_type_region_id_idx" ON "merchant_datacenter_card_type" USING btree ("merchant_datacenter_region_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "merchant_datacenter_region_merchant_dc_active_uk" ON "merchant_datacenter_region" USING btree ("merchant_id","data_center_id") WHERE effective_to IS NULL;--> statement-breakpoint

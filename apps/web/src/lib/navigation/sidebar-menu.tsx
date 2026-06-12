@@ -66,9 +66,12 @@ const navCrm: MenuItem[] = [
   { title: '员工', url: '/crm/staff', icon: <Users className="size-4" />, roles: ADMIN_ONLY },
 ]
 
+const navMerchant: MenuItem[] = [
+  { title: '商户管理', url: '/merchant', icon: <Store className="size-4" />, roles: ADMIN_USER },
+]
+
 const navMarketplace: MenuItem[] = [
   { title: '运营月报', url: '/finance', icon: <CreditCard className="size-4" />, roles: ADMIN_ONLY },
-  { title: '商户管理', url: '/merchant', icon: <Store className="size-4" />, roles: ADMIN_ONLY },
   { title: '系统卡型', url: '/supplier/gpu-card-types', icon: <Cpu className="size-4" />, roles: ADMIN_ONLY },
   { title: '平台定价', url: '/supplier/platform-pricing', icon: <Sparkles className="size-4" />, roles: ADMIN_ONLY },
   { title: '机房成本', url: '/supplier/unit-costs', icon: <DollarSignIcon className="size-4" />, roles: ADMIN_ONLY },
@@ -91,6 +94,7 @@ export function getSidebarMenu(role: AppRole | null) {
       [
         { key: 'supply', label: '算力供应链', items: navSupply },
         { key: 'crm', label: '客户经营 CRM', items: navCrm },
+        { key: 'merchant', label: '商户运营', items: navMerchant },
         { key: 'finance', label: '财务管理', items: navMarketplace },
       ],
       role,

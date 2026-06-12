@@ -1,9 +1,12 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { Loader2, Pencil } from 'lucide-react'
+import { Loader2, Pencil, UserCog } from 'lucide-react'
+import { authClient } from '@/lib/auth-client'
+import { normalizeAppRole } from '@/lib/auth/app-role'
 import { LocaleLink } from '@/lib/i18n/navigation'
 import { trpc } from '@/lib/trpc/client'
+import { MerchantAccountManagerDialog } from './merchant-account-manager-dialog'
 import { MerchantActivityPanel } from './merchant-activity-panel'
 import { MerchantContactsSection } from '@/components/dashboard/entity-contacts-section'
 import { MerchantDetailNav } from './merchant-detail-nav'
@@ -20,13 +23,18 @@ import { Button } from '@workspace/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 
 export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
+  const { data: session } = authClient.useSession()
+  const isAdmin = normalizeAppRole(session?.user?.role) === 'admin'
+
   const utils = trpc.useUtils()
   const { data: merchant, isLoading, isError } = trpc.merchant.getById.useQuery({ id: merchantId })
+  const { data: amAssignment } = trpc.merchant.getAccountManagerAssignment.useQuery({ id: merchantId })
   const tenantQuery = trpc.merchant.tenant.list.useQuery({ id: merchantId })
   const regionsQuery = trpc.merchant.region.list.useQuery({ merchantId })
   const pricingQuery = trpc.merchant.pricing.list.useQuery({ merchantId })
   const summaryQuery = trpc.merchant.consumption.summary.useQuery({ merchantId })
   const [editOpen, setEditOpen] = useState(false)
+  const [amOpen, setAmOpen] = useState(false)
 
   const updateMutation = trpc.merchant.update.useMutation({
     onSuccess: async () => {
@@ -88,6 +96,27 @@ export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
               }
             />
             <InfoRow label="备注" value={merchant.remark ?? '—'} className="sm:col-span-2" />
+            <InfoRow label="客户经理">
+              <div className="flex items-center gap-2">
+                <span>{amAssignment?.staffName ?? '未设置'}</span>
+                {amAssignment?.effectiveFrom ? (
+                  <span className="text-xs text-muted-foreground">
+                    （自 {amAssignment.effectiveFrom} 起）
+                  </span>
+                ) : null}
+                {isAdmin ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2"
+                    onClick={() => setAmOpen(true)}
+                  >
+                    <UserCog className="size-3.5" />
+                    设置
+                  </Button>
+                ) : null}
+              </div>
+            </InfoRow>
           </CardContent>
         </Card>
 
@@ -154,6 +183,17 @@ export function MerchantDetailContent({ merchantId }: { merchantId: string }) {
             merchantMark: input.merchantMark || undefined,
             remark: input.remark || undefined,
           })
+        }}
+      />
+
+      <MerchantAccountManagerDialog
+        open={amOpen}
+        onOpenChange={setAmOpen}
+        merchantId={merchant.id}
+        merchantName={merchant.name}
+        onSaved={async () => {
+          await utils.merchant.getAccountManagerAssignment.invalidate({ id: merchantId })
+          await utils.merchant.list.invalidate()
         }}
       />
     </div>

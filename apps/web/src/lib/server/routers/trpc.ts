@@ -3,6 +3,7 @@ import { ZodError } from 'zod'
 
 import { normalizeAppRole, type AppRole } from '@/lib/auth/app-role'
 import { resolveCrmDataScope, type CrmDataScope } from '@/lib/server/auth/crm-data-scope'
+import { resolveMerchantDataScope, type MerchantDataScope } from '@/lib/server/auth/merchant-data-scope'
 import { transformer } from './transformer'
 import type { Session, User } from 'better-auth'
 
@@ -17,6 +18,7 @@ interface CreateContextOptions<NextRequest> {
   apiKey?: string | null
   req?: NextRequest
   crmScope?: CrmDataScope
+  merchantScope?: MerchantDataScope
 }
 
 export const createInnerTRPCContext = <NextRequest>(opts: CreateContextOptions<NextRequest>) => {
@@ -185,6 +187,48 @@ export const crmWriteProcedure = t.procedure.use(async ({ ctx, next, path }) => 
       user: ctx.user as UserWithRole,
       session: ctx.session as Session,
       crmScope,
+    },
+  })
+})
+
+export const merchantScopedProcedure = t.procedure.use(async ({ ctx, next, path }) => {
+  assertAuthenticated(ctx)
+  assertPasswordChanged(ctx, path)
+  const role = getAppRole(ctx)
+  if (role === 'member') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '暂无商户访问权限',
+    })
+  }
+
+  const merchantScope = await resolveMerchantDataScope(ctx.user as UserWithRole)
+  return next({
+    ctx: {
+      user: ctx.user as UserWithRole,
+      session: ctx.session as Session,
+      merchantScope,
+    },
+  })
+})
+
+export const merchantWriteProcedure = t.procedure.use(async ({ ctx, next, path }) => {
+  assertAuthenticated(ctx)
+  assertPasswordChanged(ctx, path)
+  const role = getAppRole(ctx)
+  if (role === 'member') {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: '暂无商户写权限',
+    })
+  }
+
+  const merchantScope = await resolveMerchantDataScope(ctx.user as UserWithRole)
+  return next({
+    ctx: {
+      user: ctx.user as UserWithRole,
+      session: ctx.session as Session,
+      merchantScope,
     },
   })
 })

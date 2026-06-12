@@ -70,11 +70,21 @@ export function mapMerchantRow(row: MerchantRow): Merchant {
 
 export function mapMerchantListRow(
   row: MerchantRow,
-  stats: { tenantCount: number; openRegionCount: number; monthConsumption: number },
+  stats: {
+    tenantCount: number
+    openRegionCount: number
+    monthConsumption: number
+    accountManagerStaffId?: string | null
+    accountManagerName?: string | null
+  },
 ): MerchantListRow {
   return {
     ...mapMerchantRow(row),
-    ...stats,
+    tenantCount: stats.tenantCount,
+    openRegionCount: stats.openRegionCount,
+    monthConsumption: stats.monthConsumption,
+    accountManagerStaffId: stats.accountManagerStaffId ?? null,
+    accountManagerName: stats.accountManagerName ?? null,
   }
 }
 

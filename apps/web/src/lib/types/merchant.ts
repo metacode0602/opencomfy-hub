@@ -13,6 +13,7 @@ export type MerchantActivityType =
   | 'region_added'
   | 'platform_sync'
   | 'status_changed'
+  | 'account_manager_changed'
   | 'comment'
   | 'file'
 export type MerchantRegionStatus = 'open' | 'closed' | 'maintenance'
@@ -42,6 +43,8 @@ export type MerchantListRow = Merchant & {
   tenantCount: number
   openRegionCount: number
   monthConsumption: number
+  accountManagerStaffId?: string | null
+  accountManagerName?: string | null
 }
 
 export type TenantMerchantBinding = {

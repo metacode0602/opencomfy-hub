@@ -136,6 +136,7 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold">{project.name}</h1>
+            <CopyToClipboard text={project.name} tooltip="复制项目名称" />
             <StatusBadge status={project.stage} />
             <StatusBadge status={project.status} />
             <Badge variant="secondary">{project.businessLineName}</Badge>

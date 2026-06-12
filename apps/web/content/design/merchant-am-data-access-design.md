@@ -1,11 +1,11 @@
 # 商户 AM 数据权限设计方案
 
-> **版本**：v1.0（设计稿）  
+> **版本**：v1.1（已确认）  
 > **日期**：2026-06-11  
-> **状态**：**待确认 — 确认后实施**  
+> **状态**：**已实施（v1.1）**  
 > **关联**：`merchant-management-design.md`（商户域模型）、`role-menu-data-access-design.md`（CRM AM 与门禁分层）、`rbac-design.md`（行级隔离总则）
 
-**文档性质**：描述商户域 **客户经理（AM）分配** 与 **行级数据隔离** 方案；对齐现有 CRM `account_manager_assignment` / `crm-data-scope` 模式。**本文仅设计，不含代码变更。**
+**文档性质**：描述商户域 **客户经理（AM）分配** 与 **行级数据隔离** 方案；对齐现有 CRM `account_manager_assignment` / `crm-data-scope` 模式。
 
 ---
 
@@ -62,15 +62,13 @@
 - 新建商户、尚未绑定租户时，仍需指定 AM 并可见。  
 - 与现有 `account_manager_assignment` 模式一致，实施与运维成本低。
 
-### 3.2 默认商户（共绩科技）处理
+### 3.2 默认商户（共绩科技）处理（已确认）
 
 | 规则 | 说明 |
 |------|------|
-| **不自动全员可见** | `is_default = true` **不** 赋予所有 `user` 读权限 |
-| **按 AM 分配** | 共绩科技若需某 AM 可见，须 **显式分配** |
-| **admin 始终全量** | 财务 / 管理员不受 AM 限制 |
-
-> 若业务希望「所有 CRM user 可读共绩科技」，可在确认项 Q2 中改为特例规则。
+| **仅 admin 可见** | `is_default = true`（共绩科技）**仅管理员**可访问；`user` 即使被分配也不单独开放（通常不对共绩分配 AM） |
+| **伙伴商户按 AM** | 非默认商户：`user` 仅见 `merchant_account_manager_assignment` 中自己负责的记录 |
+| **admin 始终全量** | 管理员不受 AM 限制 |
 
 ### 3.3 与 CRM Scope 的关系
 
@@ -91,7 +89,7 @@
 
 **变更**：将 `/merchant` 从 `ROUTE_ACCESS.finance` **移出**，新增独立前缀 `merchant: ['/merchant']`，`canAccessPath` 规则为 `admin | user`。
 
-侧栏「商户管理」`roles` 改为 `['admin', 'user']`；可保留在「财务管理」分组下，或 **单独「商户运营」分组**（见 §9.1，待确认）。
+侧栏「商户管理」`roles` 改为 `['admin', 'user']`；**新建独立「商户运营」分组**（与「财务管理」分离）。
 
 ### 4.2 角色 × 数据范围
 
@@ -140,7 +138,7 @@ WHERE user_staff_id = :staffId
 | **平台同步**（`merchant.sync.*`） | ✓ | ✗ |
 | **新建商户**（若后续开放） | ✓ | ✗ |
 
-> 区域 / 进货价是否限制 `user` 写操作，见待确认 **Q3**。默认 **范围内可写**（伙伴 AM 日常运营需要）。
+> **已确认**：`user` 在范围内可修改 **机房区域 / 进货价**（伙伴 AM 日常运营需要）。
 
 ---
 
@@ -336,7 +334,7 @@ AM 筛选实现可 **复用** 项目列表 `STAFF_FILTER_ME` / `listAccountManag
 | 步骤 | 动作 |
 |------|------|
 | M1 | CREATE `merchant_account_manager_assignment` |
-| M2 | **不** 自动 backfill AM；由 admin 在 UI 逐户分配，或提供一次性 seed 脚本（CSV：merchant_code → staff_email） |
+| M2 | **不** 自动 backfill AM；由 admin 在 **商户详情 / 列表 UI 手工补录** AM 分配 |
 | M3 | 部署 scope 代码后，`user` 在无分配前看到 **空列表**（符合预期） |
 
 ---
@@ -356,16 +354,16 @@ AM 筛选实现可 **复用** 项目列表 `STAFF_FILTER_ME` / `listAccountManag
 
 ---
 
-## 11. 待确认项
+## 11. 已确认决策（2026-06-11）
 
-| # | 问题 | 建议默认 | 备选 |
-|---|------|----------|------|
-| **Q1** | `user` 是否开放商户模块菜单？ | **是** — 伙伴 AM 即 `user` 角色 | 仅 admin 内按 AM 过滤（不改角色矩阵） |
-| **Q2** | 默认商户「共绩科技」是否全员可见？ | **否** — 须显式分配 | 所有 `user` 自动可见 |
-| **Q3** | `user` 能否修改 **机房区域 / 进货价**？ | **能** — 范围内可写 | 只读，仅 admin 可改 |
-| **Q4** | 侧栏分组 | 保留在「财务管理」下 | 新建「商户运营」分组 |
-| **Q5** | 是否二期增加 **CRM 租户派生** 可见性？ | 本期不做 | A ∪ B 并集 |
-| **Q6** | 历史商户 AM backfill | 手工 + 可选 CSV 脚本 | 按 tenant→customer→客户 AM 自动推导 |
+| # | 问题 | **确认结论** |
+|---|------|-------------|
+| **Q1** | `user` 是否开放商户模块菜单？ | **是** — 伙伴 AM 使用 `user` 角色，可进入 `/merchant` |
+| **Q2** | 默认商户「共绩科技」可见性 | **否，仅 admin** — `user` 不可见共绩科技（`is_default = true` 排除在 AM 范围外） |
+| **Q3** | `user` 能否修改 **机房区域 / 进货价**？ | **能** — 负责范围内可写 |
+| **Q4** | 侧栏分组 | **新建「商户运营」分组**，与「财务管理」分离 |
+| **Q5** | CRM 租户派生可见性 | **二期做** — 本期仅商户级直接 AM 分配 |
+| **Q6** | 历史商户 AM backfill | **手工补录** — admin 在 UI 逐户设置 AM，不提供 CSV 脚本 |
 
 ---
 
@@ -383,16 +381,19 @@ AM 筛选实现可 **复用** 项目列表 `STAFF_FILTER_ME` / `listAccountManag
 
 ---
 
-## 13. 变更摘要（确认后实施）
+## 13. 实施记录
 
-确认本方案后，预期代码变更 **不涉及** 商户核心业务表结构（除新增 AM 分配表），主要包括：
+| 模块 | 路径 | 状态 |
+|------|------|------|
+| AM 分配表 | `packages/db/src/merchant-schema.ts` + `0006_merchant_account_manager_assignment.sql` | ✅ |
+| Data Scope | `apps/web/src/lib/server/auth/merchant-data-scope.ts` | ✅ |
+| AM 变更逻辑 | `apps/web/src/lib/server/dataaccess/merchant/merchant-account-manager.ts` | ✅ |
+| tRPC Procedure | `merchantScopedProcedure` / `merchantWriteProcedure` | ✅ |
+| Router 接入 | `apps/web/src/lib/server/routers/merchant/index.ts` | ✅ |
+| 路由 / 侧栏 | `route-access.ts` + `sidebar-menu.tsx`（商户运营分组） | ✅ |
+| 列表 / 详情 UI | AM 列、筛选、补录对话框 | ✅ |
+| 附件 API | scope 校验 | ✅ |
 
-1. `packages/db` — 新表 + 迁移  
-2. `merchant-data-scope.ts` — 新模块  
-3. `trpc.ts` — 三个新 Procedure  
-4. `merchant/*` DataAccess + Router — 接入 scope  
-5. `route-access.ts` + `sidebar-menu.tsx` — 开放 user 访问  
-6. 商户列表 / 详情 UI — AM 列、对话框、按钮权限  
-7. 附件 API — scope 校验  
+**待运维**：执行迁移 `0006_merchant_account_manager_assignment.sql`；admin 在 UI 手工补录历史 AM。
 
-**不在本期**：CRM 与商户 scope 联合查询、commercial 绑定、商户自助门户。
+**不在本期**：CRM 租户派生可见性（Q5 二期）、commercial 绑定、商户自助门户。

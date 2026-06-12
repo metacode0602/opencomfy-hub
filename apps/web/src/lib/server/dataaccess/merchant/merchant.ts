@@ -1,5 +1,12 @@
 import { db } from '@/lib/db'
+import type { MerchantDataScope } from '@/lib/server/auth/merchant-data-scope'
+import {
+  buildMerchantTableIdFilter,
+  filterMerchantGetById,
+  loadVisibleMerchantIds,
+} from '@/lib/server/auth/merchant-data-scope'
 import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
+import { merchantAccountManagerDataAccess } from '@/lib/server/dataaccess/merchant/merchant-account-manager'
 import { merchantConsumptionDataAccess } from '@/lib/server/dataaccess/merchant/merchant-consumption'
 import { merchantRegionDataAccess } from '@/lib/server/dataaccess/merchant/merchant-region'
 import {
@@ -11,11 +18,12 @@ import {
   billingTenant,
   customer,
   merchant,
+  merchantAccountManagerAssignment,
   merchantActivity,
   tenantMerchant,
   userStaff,
 } from '@workspace/db/schema'
-import { and, count, desc, eq, ilike, isNull, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, ilike, inArray, isNull, or, sql } from 'drizzle-orm'
 
 function newId() {
   return crypto.randomUUID()
@@ -72,23 +80,79 @@ export type MerchantUpdateInput = {
 }
 
 export const merchantDataAccess = {
-  async list(params?: { search?: string }): Promise<MerchantListRow[]> {
+  async list(
+    scope: MerchantDataScope,
+    params?: { search?: string; accountManagerStaffId?: string },
+  ): Promise<MerchantListRow[]> {
+    const visibleMerchantIds = await loadVisibleMerchantIds(scope)
     const q = params?.search?.trim()
+    const amStaffId = params?.accountManagerStaffId?.trim()
+
+    let amFilteredMerchantIds: string[] | null = null
+    if (amStaffId) {
+      const amRows = await db
+        .select({ merchantId: merchantAccountManagerAssignment.merchantId })
+        .from(merchantAccountManagerAssignment)
+        .where(
+          and(
+            eq(merchantAccountManagerAssignment.userStaffId, amStaffId),
+            eq(merchantAccountManagerAssignment.roleType, 'account_manager'),
+            isNull(merchantAccountManagerAssignment.effectiveTo),
+          ),
+        )
+      amFilteredMerchantIds = amRows.map((r) => r.merchantId)
+    }
+
+    let effectiveIds = visibleMerchantIds
+    if (amFilteredMerchantIds !== null) {
+      if (effectiveIds === null) {
+        effectiveIds = amFilteredMerchantIds
+      } else {
+        effectiveIds = effectiveIds.filter((id) => amFilteredMerchantIds!.includes(id))
+      }
+    }
+
     const rows = await db
       .select()
       .from(merchant)
       .where(
-        q
-          ? or(
-              ilike(merchant.name, `%${q}%`),
-              ilike(merchant.code, `%${q}%`),
-              ilike(merchant.companyFullName, `%${q}%`),
-              ilike(merchant.unifiedSocialCreditCode, `%${q}%`),
-              sql`CAST(${merchant.platformMerchantId} AS TEXT) LIKE ${`%${q}%`}`,
-            )
-          : undefined,
+        and(
+          buildMerchantTableIdFilter(effectiveIds),
+          q
+            ? or(
+                ilike(merchant.name, `%${q}%`),
+                ilike(merchant.code, `%${q}%`),
+                ilike(merchant.companyFullName, `%${q}%`),
+                ilike(merchant.unifiedSocialCreditCode, `%${q}%`),
+                sql`CAST(${merchant.platformMerchantId} AS TEXT) LIKE ${`%${q}%`}`,
+              )
+            : undefined,
+        ),
       )
       .orderBy(desc(merchant.updatedAt))
+
+    const merchantIds = rows.map((r) => r.id)
+    const amMap = new Map<string, { staffId: string; staffName: string }>()
+    if (merchantIds.length > 0) {
+      const amRows = await db
+        .select({
+          merchantId: merchantAccountManagerAssignment.merchantId,
+          staffId: merchantAccountManagerAssignment.userStaffId,
+          staffName: userStaff.displayName,
+        })
+        .from(merchantAccountManagerAssignment)
+        .innerJoin(userStaff, eq(merchantAccountManagerAssignment.userStaffId, userStaff.id))
+        .where(
+          and(
+            inArray(merchantAccountManagerAssignment.merchantId, merchantIds),
+            eq(merchantAccountManagerAssignment.roleType, 'account_manager'),
+            isNull(merchantAccountManagerAssignment.effectiveTo),
+          ),
+        )
+      for (const row of amRows) {
+        amMap.set(row.merchantId, { staffId: row.staffId, staffName: row.staffName })
+      }
+    }
 
     const result: MerchantListRow[] = []
     for (const row of rows) {
@@ -100,20 +164,29 @@ export const merchantDataAccess = {
         )
       const openRegionCount = await merchantRegionDataAccess.countOpenRegionsByMerchantId(row.id)
       const monthConsumption = await merchantConsumptionDataAccess.getMonthConsumption(row.id)
+      const am = amMap.get(row.id)
       result.push(
         mapMerchantListRow(row, {
           tenantCount: tenantStat?.count ?? 0,
           openRegionCount,
           monthConsumption,
+          accountManagerStaffId: am?.staffId ?? null,
+          accountManagerName: am?.staffName ?? null,
         }),
       )
     }
     return result
   },
 
-  async getById(id: string): Promise<Merchant | null> {
-    const row = await db.query.merchant.findFirst({ where: eq(merchant.id, id) })
-    return row ? mapMerchantRow(row) : null
+  async getById(scope: MerchantDataScope, id: string): Promise<Merchant | null> {
+    return filterMerchantGetById(scope, id, async () => {
+      const row = await db.query.merchant.findFirst({ where: eq(merchant.id, id) })
+      return row ? mapMerchantRow(row) : null
+    })
+  },
+
+  async getAccountManager(merchantId: string) {
+    return merchantAccountManagerDataAccess.getCurrent(merchantId)
   },
 
   async update(

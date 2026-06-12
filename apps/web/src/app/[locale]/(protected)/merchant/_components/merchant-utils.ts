@@ -33,6 +33,7 @@ export const merchantActivityTypeLabels: Record<MerchantActivityType, string> = 
   region_added: '区域配置',
   platform_sync: '平台同步',
   status_changed: '状态变更',
+  account_manager_changed: '客户经理变更',
   comment: '评论',
   file: '附件',
 }

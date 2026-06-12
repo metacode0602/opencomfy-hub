@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const merchantListSchema = z.object({
   search: z.string().max(200).optional(),
+  accountManagerStaffId: z.string().min(1).optional(),
 })
 
 export const merchantIdSchema = z.object({
@@ -149,4 +150,11 @@ export const merchantRegionPricingBatchUpsertSchema = z.object({
 
 export const merchantPricingListSchema = z.object({
   merchantId: z.string().min(1),
+})
+
+export const merchantChangeAccountManagerSchema = z.object({
+  merchantId: z.string().min(1),
+  staffId: z.string().min(1),
+  effectiveFrom: z.string().min(1),
+  remark: z.string().max(500).optional(),
 })

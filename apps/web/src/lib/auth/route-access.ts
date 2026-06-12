@@ -5,9 +5,9 @@ export const ROUTE_ACCESS = {
   supply: ['/supplier'],
   crm: ['/crm'],
   crmAdminOnly: ['/crm/staff'],
+  merchant: ['/merchant'],
   finance: [
     '/finance',
-    '/merchant',
     '/supplier/gpu-card-types',
     '/supplier/platform-pricing',
     '/supplier/unit-costs',
@@ -31,6 +31,10 @@ function isSharedPath(path: string): boolean {
 
 function isCommonPath(path: string): boolean {
   return ROUTE_ACCESS.common.some((prefix) => matchesPrefix(path, prefix))
+}
+
+function isMerchantPath(path: string): boolean {
+  return ROUTE_ACCESS.merchant.some((prefix) => matchesPrefix(path, prefix))
 }
 
 function isFinancePath(path: string): boolean {
@@ -72,6 +76,10 @@ export function canAccessPath(role: AppRole, path: string): boolean {
 
   if (isFinancePath(normalized) || isCrmAdminOnlyPath(normalized)) {
     return role === 'admin'
+  }
+
+  if (isMerchantPath(normalized)) {
+    return role === 'admin' || role === 'user'
   }
 
   if (isSupplyPath(normalized)) {

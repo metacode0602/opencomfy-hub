@@ -1,5 +1,7 @@
 import { TRPCError } from '@trpc/server'
+import { assertMerchantInScope } from '@/lib/server/auth/merchant-data-scope'
 import { merchantActivityDataAccess } from '@/lib/server/dataaccess/merchant/merchant-activity'
+import { merchantAccountManagerDataAccess } from '@/lib/server/dataaccess/merchant/merchant-account-manager'
 import { merchantContactsDataAccess } from '@/lib/server/dataaccess/merchant/merchant-contacts'
 import { merchantDataAccess } from '@/lib/server/dataaccess/merchant/merchant'
 import { merchantConsumptionDataAccess } from '@/lib/server/dataaccess/merchant/merchant-consumption'
@@ -7,11 +9,22 @@ import { merchantPlatformSyncDataAccess } from '@/lib/server/dataaccess/merchant
 import { merchantPricingDataAccess } from '@/lib/server/dataaccess/merchant/merchant-pricing'
 import { merchantRechargeDataAccess } from '@/lib/server/dataaccess/merchant/merchant-recharge'
 import { merchantRegionDataAccess } from '@/lib/server/dataaccess/merchant/merchant-region'
+import {
+  resolveMerchantIdForContact,
+  resolveMerchantIdForRecharge,
+} from '@/lib/server/dataaccess/merchant/merchant-scope-helpers'
+import { staffDataAccess } from '@/lib/server/dataaccess/crm/staff'
 import { SuanliMerchantOpenApiError } from '@/lib/server/integrations/suanli-merchant-api'
-import { adminProcedure, createTRPCRouter } from '../trpc'
+import {
+  adminProcedure,
+  createTRPCRouter,
+  merchantScopedProcedure,
+  merchantWriteProcedure,
+} from '../trpc'
 import {
   merchantActivityCreateSchema,
   merchantActivityListSchema,
+  merchantChangeAccountManagerSchema,
   merchantConsumptionDailySchema,
   merchantConsumptionQuerySchema,
   merchantIdSchema,
@@ -49,20 +62,56 @@ function mapMerchantSyncError(error: unknown): TRPCError {
 }
 
 export const merchantRouter = createTRPCRouter({
-  list: adminProcedure.input(merchantListSchema.optional()).query(async ({ input }) => {
-    return merchantDataAccess.list(input)
+  list: merchantScopedProcedure.input(merchantListSchema.optional()).query(async ({ input, ctx }) => {
+    return merchantDataAccess.list(ctx.merchantScope, input)
   }),
 
-  getById: adminProcedure.input(merchantIdSchema).query(async ({ input }) => {
-    const row = await merchantDataAccess.getById(input.id)
+  getById: merchantScopedProcedure.input(merchantIdSchema).query(async ({ input, ctx }) => {
+    const row = await merchantDataAccess.getById(ctx.merchantScope, input.id)
     if (!row) {
       throw new TRPCError({ code: 'NOT_FOUND', message: '商户不存在' })
     }
     return row
   }),
 
-  update: adminProcedure.input(merchantUpdateSchema).mutation(async ({ input, ctx }) => {
+  listAccountManagerFilterOptions: adminProcedure.query(async ({ ctx }) => {
+    const [staff, currentUserStaffId] = await Promise.all([
+      merchantAccountManagerDataAccess.listAccountManagerFilterOptions(),
+      staffDataAccess.resolveStaffIdForAuthUser(ctx.user),
+    ])
+    return { staff, currentUserStaffId }
+  }),
+
+  getAccountManagerAssignment: merchantScopedProcedure
+    .input(merchantIdSchema)
+    .query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.id)
+      return merchantDataAccess.getAccountManager(input.id)
+    }),
+
+  changeAccountManager: adminProcedure
+    .input(merchantChangeAccountManagerSchema)
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const createdByStaffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+        await merchantAccountManagerDataAccess.change({
+          merchantId: input.merchantId,
+          staffId: input.staffId,
+          effectiveFrom: input.effectiveFrom,
+          remark: input.remark,
+          createdByStaffId,
+        })
+      } catch (error) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: error instanceof Error ? error.message : '设置客户经理失败',
+        })
+      }
+    }),
+
+  update: merchantWriteProcedure.input(merchantUpdateSchema).mutation(async ({ input, ctx }) => {
     const { id, ...data } = input
+    await assertMerchantInScope(ctx.merchantScope, id)
     try {
       return await merchantDataAccess.update(id, data, ctx.user)
     } catch (error) {
@@ -74,19 +123,22 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   tenant: createTRPCRouter({
-    list: adminProcedure.input(merchantIdSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantIdSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.id)
       return merchantDataAccess.listTenantsByMerchantId(input.id)
     }),
   }),
 
   activity: createTRPCRouter({
-    list: adminProcedure.input(merchantActivityListSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantActivityListSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       return merchantActivityDataAccess.listByMerchantId(input)
     }),
 
-    createComment: adminProcedure
+    createComment: merchantWriteProcedure
       .input(merchantActivityCreateSchema)
       .mutation(async ({ input, ctx }) => {
+        await assertMerchantInScope(ctx.merchantScope, input.merchantId)
         try {
           return await merchantActivityDataAccess.createComment({
             merchantId: input.merchantId,
@@ -104,12 +156,14 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   recharge: createTRPCRouter({
-    list: adminProcedure.input(merchantRechargeListSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantRechargeListSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       return merchantRechargeDataAccess.listByMerchantId(input.merchantId)
     }),
 
-    create: adminProcedure.input(merchantRechargeCreateSchema).mutation(async ({ input, ctx }) => {
+    create: merchantWriteProcedure.input(merchantRechargeCreateSchema).mutation(async ({ input, ctx }) => {
       const { merchantId, files, ...data } = input
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantRechargeDataAccess.create(merchantId, { ...data, files }, ctx.user)
       } catch (error) {
@@ -120,8 +174,13 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    update: adminProcedure.input(merchantRechargeUpdateSchema).mutation(async ({ input, ctx }) => {
+    update: merchantWriteProcedure.input(merchantRechargeUpdateSchema).mutation(async ({ input, ctx }) => {
       const { rechargeId, files, keepAttachmentIds, ...data } = input
+      const merchantId = await resolveMerchantIdForRecharge(rechargeId)
+      if (!merchantId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '充值记录不存在' })
+      }
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantRechargeDataAccess.update(
           rechargeId,
@@ -136,15 +195,16 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    auditList: adminProcedure.input(merchantRechargeAuditSchema).query(async ({ input }) => {
+    auditList: merchantScopedProcedure.input(merchantRechargeAuditSchema).query(async ({ input, ctx }) => {
       if (input.rechargeId) {
+        const merchantId = await resolveMerchantIdForRecharge(input.rechargeId)
+        if (!merchantId) return []
+        await assertMerchantInScope(ctx.merchantScope, merchantId)
         return merchantRechargeDataAccess.listAuditByRechargeId(input.rechargeId)
       }
       if (input.merchantId) {
-        return merchantRechargeDataAccess.listAuditByMerchantId(
-          input.merchantId,
-          input.limit ?? 20,
-        )
+        await assertMerchantInScope(ctx.merchantScope, input.merchantId)
+        return merchantRechargeDataAccess.listAuditByMerchantId(input.merchantId, input.limit ?? 20)
       }
       return []
     }),
@@ -169,7 +229,8 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   region: createTRPCRouter({
-    list: adminProcedure.input(merchantRegionListSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantRegionListSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       try {
         return await merchantRegionDataAccess.listByMerchantId(input.merchantId)
       } catch (error) {
@@ -180,9 +241,10 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    listAvailableDatacenters: adminProcedure
+    listAvailableDatacenters: merchantScopedProcedure
       .input(merchantRegionListSchema)
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        await assertMerchantInScope(ctx.merchantScope, input.merchantId)
         try {
           return await merchantRegionDataAccess.listAvailableDatacenters(input.merchantId)
         } catch (error) {
@@ -193,8 +255,9 @@ export const merchantRouter = createTRPCRouter({
         }
       }),
 
-    create: adminProcedure.input(merchantRegionCreateSchema).mutation(async ({ input, ctx }) => {
+    create: merchantWriteProcedure.input(merchantRegionCreateSchema).mutation(async ({ input, ctx }) => {
       const { merchantId, ...data } = input
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantRegionDataAccess.create(merchantId, data, ctx.user)
       } catch (error) {
@@ -205,10 +268,11 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    updateCardTypes: adminProcedure
+    updateCardTypes: merchantWriteProcedure
       .input(merchantRegionUpdateCardTypesSchema)
       .mutation(async ({ input, ctx }) => {
         const { merchantId, regionId, enabledCardTypeIds } = input
+        await assertMerchantInScope(ctx.merchantScope, merchantId)
         try {
           return await merchantRegionDataAccess.updateEnabledCardTypes(
             merchantId,
@@ -226,7 +290,8 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   pricing: createTRPCRouter({
-    list: adminProcedure.input(merchantPricingListSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantPricingListSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       try {
         return await merchantPricingDataAccess.listByMerchantId(input.merchantId)
       } catch (error) {
@@ -237,9 +302,10 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    getRegionForm: adminProcedure
+    getRegionForm: merchantScopedProcedure
       .input(merchantRegionPricingFormSchema)
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
+        await assertMerchantInScope(ctx.merchantScope, input.merchantId)
         try {
           return await merchantPricingDataAccess.getRegionForm(input)
         } catch (error) {
@@ -250,9 +316,10 @@ export const merchantRouter = createTRPCRouter({
         }
       }),
 
-    batchUpsertForRegion: adminProcedure
+    batchUpsertForRegion: merchantWriteProcedure
       .input(merchantRegionPricingBatchUpsertSchema)
       .mutation(async ({ input, ctx }) => {
+        await assertMerchantInScope(ctx.merchantScope, input.merchantId)
         try {
           await merchantPricingDataAccess.batchUpsertForRegion(input, ctx.user)
         } catch (error) {
@@ -265,7 +332,8 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   consumption: createTRPCRouter({
-    daily: adminProcedure.input(merchantConsumptionDailySchema).query(async ({ input }) => {
+    daily: merchantScopedProcedure.input(merchantConsumptionDailySchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       try {
         return await merchantConsumptionDataAccess.getDailyByMerchantId(input.merchantId, {
           usageMonth: input.usageMonth,
@@ -279,12 +347,10 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    summary: adminProcedure.input(merchantConsumptionQuerySchema).query(async ({ input }) => {
+    summary: merchantScopedProcedure.input(merchantConsumptionQuerySchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       try {
-        return await merchantConsumptionDataAccess.getSummary(
-          input.merchantId,
-          input.usageMonth,
-        )
+        return await merchantConsumptionDataAccess.getSummary(input.merchantId, input.usageMonth)
       } catch (error) {
         throw new TRPCError({
           code: 'BAD_REQUEST',
@@ -293,7 +359,8 @@ export const merchantRouter = createTRPCRouter({
       }
     }),
 
-    tenantRank: adminProcedure.input(merchantConsumptionQuerySchema).query(async ({ input }) => {
+    tenantRank: merchantScopedProcedure.input(merchantConsumptionQuerySchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       try {
         return await merchantConsumptionDataAccess.listTenantRankByMerchantId(
           input.merchantId,
@@ -309,11 +376,13 @@ export const merchantRouter = createTRPCRouter({
   }),
 
   contacts: createTRPCRouter({
-    list: adminProcedure.input(merchantContactListSchema).query(async ({ input }) => {
+    list: merchantScopedProcedure.input(merchantContactListSchema).query(async ({ input, ctx }) => {
+      await assertMerchantInScope(ctx.merchantScope, input.merchantId)
       return merchantContactsDataAccess.list(input.merchantId)
     }),
-    create: adminProcedure.input(merchantContactCreateSchema).mutation(async ({ input }) => {
+    create: merchantWriteProcedure.input(merchantContactCreateSchema).mutation(async ({ input, ctx }) => {
       const { merchantId, ...data } = input
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantContactsDataAccess.create({ merchantId, data })
       } catch (error) {
@@ -323,7 +392,12 @@ export const merchantRouter = createTRPCRouter({
         })
       }
     }),
-    update: adminProcedure.input(entityContactUpdateSchema).mutation(async ({ input }) => {
+    update: merchantWriteProcedure.input(entityContactUpdateSchema).mutation(async ({ input, ctx }) => {
+      const merchantId = await resolveMerchantIdForContact(input.id)
+      if (!merchantId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '联系人不存在' })
+      }
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantContactsDataAccess.update(input)
       } catch (error) {
@@ -333,7 +407,12 @@ export const merchantRouter = createTRPCRouter({
         })
       }
     }),
-    delete: adminProcedure.input(entityContactDeleteSchema).mutation(async ({ input }) => {
+    delete: merchantWriteProcedure.input(entityContactDeleteSchema).mutation(async ({ input, ctx }) => {
+      const merchantId = await resolveMerchantIdForContact(input.id)
+      if (!merchantId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '联系人不存在' })
+      }
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantContactsDataAccess.delete(input)
       } catch (error) {
@@ -343,7 +422,12 @@ export const merchantRouter = createTRPCRouter({
         })
       }
     }),
-    setPrimary: adminProcedure.input(entityContactSetPrimarySchema).mutation(async ({ input }) => {
+    setPrimary: merchantWriteProcedure.input(entityContactSetPrimarySchema).mutation(async ({ input, ctx }) => {
+      const merchantId = await resolveMerchantIdForContact(input.id)
+      if (!merchantId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: '联系人不存在' })
+      }
+      await assertMerchantInScope(ctx.merchantScope, merchantId)
       try {
         return await merchantContactsDataAccess.setPrimary(input)
       } catch (error) {

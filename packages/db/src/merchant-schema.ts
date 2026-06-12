@@ -355,6 +355,32 @@ export const merchantPurchasePriceRecord = pgTable(
   ],
 )
 
+/** 商户级客户经理分配（主责 AM，含历史段） */
+export const merchantAccountManagerAssignment = pgTable(
+  "merchant_account_manager_assignment",
+  {
+    id: text("id").primaryKey(),
+    merchantId: text("merchant_id")
+      .notNull()
+      .references(() => merchant.id, { onDelete: "cascade" }),
+    userStaffId: text("user_staff_id")
+      .notNull()
+      .references(() => userStaff.id, { onDelete: "restrict" }),
+    roleType: varchar("role_type", { length: 32 }).notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    effectiveTo: timestamp("effective_to", { withTimezone: true }),
+    remark: text("remark"),
+    createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("merchant_account_manager_assignment_merchant_id_idx").on(table.merchantId),
+    index("merchant_account_manager_assignment_user_staff_id_idx").on(table.userStaffId),
+  ],
+)
+
 export const merchantActivityAttachment = pgTable(
   "merchant_activity_attachment",
   {
@@ -378,7 +404,22 @@ export const merchantRelations = relations(merchant, ({ many }) => ({
   datacenterRegions: many(merchantDatacenterRegion),
   purchasePrices: many(merchantPurchasePrice),
   purchasePriceRecords: many(merchantPurchasePriceRecord),
+  accountManagerAssignments: many(merchantAccountManagerAssignment),
 }))
+
+export const merchantAccountManagerAssignmentRelations = relations(
+  merchantAccountManagerAssignment,
+  ({ one }) => ({
+    merchant: one(merchant, {
+      fields: [merchantAccountManagerAssignment.merchantId],
+      references: [merchant.id],
+    }),
+    userStaff: one(userStaff, {
+      fields: [merchantAccountManagerAssignment.userStaffId],
+      references: [userStaff.id],
+    }),
+  }),
+)
 
 export const merchantContactRelations = relations(merchantContact, ({ one }) => ({
   merchant: one(merchant, {

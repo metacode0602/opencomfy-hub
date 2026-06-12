@@ -22,6 +22,7 @@ import { CrmTenantMonthlyBillsList } from "./crm-tenant-monthly-bills-list"
 import { CrmTenantMetalOrdersList } from "./crm-tenant-metal-orders-list"
 import { CrmTenantReservedPackOrdersList } from "./crm-tenant-reserved-pack-orders-list"
 import { TenantContactsSection } from "@/components/dashboard/entity-contacts-section"
+import { CopyToClipboard } from "@/components/shared/copy-to-clipboard"
 
 function formatStatus(status: string) {
   switch (status) {
@@ -200,8 +201,16 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
             <ReadOnly label="客户名称" value={data.customerName} />
             <ReadOnly label="客户类型" value={formatCustomerType(data.customerType)} />
             <ReadOnly label="主联系人" value={data.customerContactPerson ?? "—"} />
-            <ReadOnly label="联系人手机" value={data.customerContactPhone ?? "—"} />
-            <ReadOnly label="联系邮箱" value={data.customerContactEmail ?? "—"} />
+            <ReadOnly
+              label="联系人手机"
+              value={data.customerContactPhone ?? "—"}
+              copyText={data.customerContactPhone ?? undefined}
+            />
+            <ReadOnly
+              label="联系邮箱"
+              value={data.customerContactEmail ?? "—"}
+              copyText={data.customerContactEmail ?? undefined}
+            />
             <ReadOnly label="客户状态" value={formatStatus(data.customerStatus)} />
             <ReadOnly label="创建时间" value={formatDateTime(data.createdAt)} />
           </CardContent>
@@ -222,11 +231,24 @@ export function CrmTenantDetailClient({ tenantId }: { tenantId: string }) {
   )
 }
 
-function ReadOnly({ label, value }: { label: string; value: string }) {
+function ReadOnly({
+  label,
+  value,
+  copyText,
+}: {
+  label: string
+  value: string
+  copyText?: string
+}) {
   return (
     <div>
       <div className="text-muted-foreground mb-0.5 text-xs">{label}</div>
-      <div className="text-sm">{value}</div>
+      <div className="flex items-center gap-1 text-sm">
+        <span>{value}</span>
+        {copyText ? (
+          <CopyToClipboard text={copyText} tooltip={`复制${label}`} />
+        ) : null}
+      </div>
     </div>
   )
 }
