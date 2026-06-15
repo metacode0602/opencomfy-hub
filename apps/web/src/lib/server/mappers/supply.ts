@@ -404,16 +404,23 @@ export function mapChangelogFlowRecord(
       `生命周期 ${row.previousLifecycleStatus ?? '—'} → ${row.newLifecycleStatus ?? '—'}`,
     )
   }
-  const description =
-    row.changeContent ??
-    row.description ??
-    (statusParts.length > 0 ? statusParts.join(' · ') : null)
+  const statusSummary = statusParts.length > 0 ? statusParts.join(' · ') : null
 
   return {
     id: row.id,
     kind: 'changelog_import',
     title: row.changeAction,
-    description,
+    changeContent: row.changeContent,
+    detailDescription: row.description,
+    description: statusSummary,
+    externalDeviceId: row.externalDeviceId,
+    internalIp: row.internalIp,
+    attachmentNames: row.attachmentNames
+      ? row.attachmentNames
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : null,
     fromState: row.previousLifecycleStatus,
     toState: row.newLifecycleStatus,
     ticketNo: row.ticketNo,

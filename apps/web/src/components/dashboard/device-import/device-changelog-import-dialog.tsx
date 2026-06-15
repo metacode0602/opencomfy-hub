@@ -383,7 +383,9 @@ export function DeviceChangelogImportDialog({
                     <TableHead>操作时间</TableHead>
                     <TableHead>变更动作</TableHead>
                     <TableHead>变更内容</TableHead>
+                    <TableHead>详细说明</TableHead>
                     <TableHead>工单</TableHead>
+                    <TableHead>附件</TableHead>
                     <TableHead>校验</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -435,12 +437,19 @@ export function DeviceChangelogImportDialog({
                         )}
                       </TableCell>
                       <TableCell
-                        className="max-w-[200px] truncate text-xs"
+                        className="max-w-[200px] truncate text-xs whitespace-pre-wrap"
                         title={r.change_content ?? undefined}
                       >
                         {r.change_content ?? '—'}
                       </TableCell>
+                      <TableCell
+                        className="max-w-[200px] truncate text-xs whitespace-pre-wrap"
+                        title={r.description ?? undefined}
+                      >
+                        {r.description ?? '—'}
+                      </TableCell>
                       <TableCell>{r.ticket_no ?? '—'}</TableCell>
+                      <TableCell className="text-xs">{r.attachment_names ?? '—'}</TableCell>
                       <TableCell>
                         <div className="space-y-1">
                           <ParseStatusBadge status={r.parse_status} />

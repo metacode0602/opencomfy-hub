@@ -17,6 +17,7 @@ import {
   findDeviceByImportKeys,
   generateImportBatchCode,
   maskInventoryRowsForPreview,
+  parseChangelogOccurredAt,
   type ChangelogBusinessBatchLinkInput,
 } from '@/lib/supplier/device-import-utils'
 import {
@@ -824,12 +825,14 @@ export const deviceImportDataAccess = {
             supplierDeviceId: log.supplier_device_id,
             onboardingBatchId: batchId,
             businessOnboardingBatchId: log.business_onboarding_batch_id ?? null,
+            externalDeviceId: log.external_device_id,
             internalIp: log.internal_ip,
-            occurredAt: parseIsoDate(log.occurred_at) ?? now,
+            occurredAt: parseChangelogOccurredAt(log.occurred_at) ?? now,
             changeAction: log.change_action,
             changeContent: log.change_content,
             description: log.description,
             ticketNo: log.ticket_no,
+            attachmentNames: log.attachment_names,
             importRowNo: log.import_row_no,
             previousOpsStatus: log.previous_ops_status,
             newOpsStatus: log.new_ops_status,

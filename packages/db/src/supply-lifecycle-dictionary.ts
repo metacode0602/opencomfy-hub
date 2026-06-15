@@ -137,7 +137,7 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
   },
 ]
 
-/** device_change_action — 20 条 */
+/** device_change_action — 21 条 */
 export const DEVICE_CHANGE_ACTION_SEEDS: Array<{
   stateCode: string
   displayName: string
@@ -146,6 +146,12 @@ export const DEVICE_CHANGE_ACTION_SEEDS: Array<{
 }> = [
   { stateCode: "设备接收", displayName: "设备接收", sortOrder: 10, payload: { default_ops_status: "预留闲置中" } },
   { stateCode: "加入集群", displayName: "加入集群", sortOrder: 20, payload: { default_ops_status: "在集群中" } },
+  {
+    stateCode: "退出集群",
+    displayName: "退出集群",
+    sortOrder: 25,
+    payload: { default_ops_status: "预留闲置中" },
+  },
   { stateCode: "配置变更", displayName: "配置变更", sortOrder: 30, payload: {} },
   { stateCode: "故障维修", displayName: "故障维修", sortOrder: 40, payload: {} },
   { stateCode: "维护结束", displayName: "维护结束", sortOrder: 50, payload: {} },

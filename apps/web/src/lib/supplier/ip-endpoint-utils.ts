@@ -48,3 +48,12 @@ export function hasAnyEndpoint(
 ): boolean {
   return Boolean(trimLower(external) || trimLower(internal))
 }
+
+const IPV4_HOST = /^(\d{1,3}\.){3}\d{1,3}$/
+
+/** Excel 单元格是否可视为 IP 端点（含 IPv4:端口） */
+export function looksLikeIpAddress(value: string | null | undefined): boolean {
+  const host = parseEndpointHost(value)
+  if (!host) return false
+  return IPV4_HOST.test(host) || host.includes(':')
+}

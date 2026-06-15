@@ -6,6 +6,7 @@ import type {
 import {
   mapDeviceCooperationType,
   normalizeDeviceChangeAction,
+  normalizeChangelogRowIpFields,
   normalizeDeviceOpsStatus,
   resolveDeviceChangelogRowValidation,
 } from "@/lib/supplier/device-import-utils"
@@ -215,6 +216,7 @@ export function parseDeviceChangelogTable(
   const iContent = pickIndex(headers, ["变更内容", "change_content"])
   const iDesc = pickIndex(headers, ["详细说明", "description"])
   const iTicket = pickIndex(headers, ["工单", "ticket_no"])
+  const iAttachment = pickIndex(headers, ["附件", "attachment", "attachments"])
 
   if (iOccurred === -1 || iAction === -1) {
     return { ok: false, error: "未识别到必需列：操作时间、变更动作" }
@@ -227,26 +229,39 @@ export function parseDeviceChangelogTable(
     const rawChangeAction = cell(cells, iAction)
     const change_action = normalizeDeviceChangeAction(rawChangeAction)
     const external_device_id = cell(cells, iDeviceId) || undefined
-    const internal_ip = cell(cells, iInternalIp) || undefined
-    if (!occurred_at && !change_action && !external_device_id) continue
+    const rawInternalIp = cell(cells, iInternalIp) || undefined
+    const normalizedIp = normalizeChangelogRowIpFields({
+      external_device_id,
+      internal_ip: rawInternalIp,
+    })
+    const internal_ip = normalizedIp.internal_ip
+    if (!occurred_at && !change_action && !external_device_id && !internal_ip) continue
     const { parse_status, parse_message } = resolveDeviceChangelogRowValidation({
       occurred_at,
       change_action,
       raw_change_action: rawChangeAction,
-      external_device_id,
+      external_device_id: normalizedIp.external_device_id,
       internal_ip,
     })
+    let mergedMessage = parse_message
+    if (normalizedIp.ip_mismatch_warning) {
+      mergedMessage = mergedMessage
+        ? `${mergedMessage}；${normalizedIp.ip_mismatch_warning}`
+        : normalizedIp.ip_mismatch_warning
+    }
+    const attachment_names = cell(cells, iAttachment) || undefined
     rows.push({
       row_no: li + 1,
-      external_device_id,
+      external_device_id: normalizedIp.external_device_id,
       internal_ip,
       occurred_at,
       change_action,
       change_content: cell(cells, iContent) || undefined,
       description: cell(cells, iDesc) || undefined,
       ticket_no: cell(cells, iTicket) || undefined,
-      parse_status,
-      parse_message,
+      attachment_names,
+      parse_status: normalizedIp.ip_mismatch_warning && parse_status === "ok" ? "warning" : parse_status,
+      parse_message: mergedMessage,
     })
   }
   if (rows.length === 0) return { ok: false, error: "没有有效的数据行" }

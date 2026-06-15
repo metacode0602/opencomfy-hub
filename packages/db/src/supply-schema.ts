@@ -832,11 +832,15 @@ export const supplierDeviceChangeLog = pgTable(
       { onDelete: "set null" },
     ),
     internalIp: varchar("internal_ip", { length: 45 }),
+    /** Excel「设备ID」原文（常为 IP 或外部 ID） */
+    externalDeviceId: varchar("external_device_id", { length: 64 }),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     changeAction: varchar("change_action", { length: 64 }).notNull(),
     changeContent: text("change_content"),
     description: text("description"),
     ticketNo: varchar("ticket_no", { length: 64 }),
+    /** Excel「附件」列：逗号分隔文件名，只读展示 */
+    attachmentNames: text("attachment_names"),
     importRowNo: integer("import_row_no"),
     previousOpsStatus: varchar("previous_ops_status", { length: 64 }),
     newOpsStatus: varchar("new_ops_status", { length: 64 }),

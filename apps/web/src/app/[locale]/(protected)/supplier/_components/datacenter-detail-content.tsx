@@ -51,6 +51,7 @@ import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-cos
 import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-device-retire-dialog'
 import { DatacenterPlannedBatchesPanel } from './datacenter-planned-batches-panel'
 import { DatacenterOnboardingDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-onboarding-dialog'
+import { DatacenterOpsStatusDevicesDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-ops-status-devices-dialog'
 import { EditDatacenterDialog } from '@/components/dashboard/edit-datacenter-dialog'
 import { SupplierOpsEngineersList } from '@/components/dashboard/supplier-ops-engineers-list'
 import { toast } from 'sonner'
@@ -95,6 +96,9 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   const [onboardingDialogOpen, setOnboardingDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [statusConfirmTarget, setStatusConfirmTarget] = useState<'online' | 'offline' | null>(null)
+  const [opsStatusDevicesFilter, setOpsStatusDevicesFilter] = useState<string | 'all' | null>(
+    null,
+  )
   const utils = trpc.useUtils()
   const {
     data: detail,
@@ -315,6 +319,15 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         dataCenterId={dataCenter.id}
         dataCenterName={dataCenter.name}
         onSuccess={invalidateAfterImport}
+      />
+
+      <DatacenterOpsStatusDevicesDialog
+        open={opsStatusDevicesFilter !== null}
+        onOpenChange={(open) => !open && setOpsStatusDevicesFilter(null)}
+        dataCenterId={dataCenter.id}
+        dataCenterName={dataCenter.name}
+        supplierId={dataCenter.supplierId}
+        opsStatusFilter={opsStatusDevicesFilter}
       />
 
       <Card className="border-border bg-card">
@@ -629,15 +642,37 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
                     {opsStatusBreakdown.map((item) => (
                       <TableRow key={item.opsStatus} className="border-border">
                         <TableCell className="text-foreground">{item.opsStatus}</TableCell>
-                        <TableCell className="text-right font-medium tabular-nums text-foreground">
-                          {item.count.toLocaleString()}
+                        <TableCell className="text-right font-medium tabular-nums">
+                          {item.count > 0 ? (
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              onClick={() => setOpsStatusDevicesFilter(item.opsStatus)}
+                            >
+                              {item.count.toLocaleString()}
+                            </button>
+                          ) : (
+                            <span className="text-foreground">{item.count.toLocaleString()}</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
                     <TableRow className="border-border bg-muted/20 font-medium">
                       <TableCell className="text-foreground">合计</TableCell>
-                      <TableCell className="text-right tabular-nums text-foreground">
-                        {physicalDeviceStats.total.toLocaleString()}
+                      <TableCell className="text-right tabular-nums">
+                        {physicalDeviceStats.total > 0 ? (
+                          <button
+                            type="button"
+                            className="text-primary hover:underline"
+                            onClick={() => setOpsStatusDevicesFilter('all')}
+                          >
+                            {physicalDeviceStats.total.toLocaleString()}
+                          </button>
+                        ) : (
+                          <span className="text-foreground">
+                            {physicalDeviceStats.total.toLocaleString()}
+                          </span>
+                        )}
                       </TableCell>
                     </TableRow>
                   </TableBody>

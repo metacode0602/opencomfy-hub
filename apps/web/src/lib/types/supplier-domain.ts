@@ -145,6 +145,7 @@ export type DeviceChangelogParsedRow = {
   change_content?: string
   description?: string
   ticket_no?: string
+  attachment_names?: string
   parse_status: "ok" | "warning" | "error"
   parse_message?: string | null
 }
@@ -247,12 +248,14 @@ export type SupplierDeviceChangeLog = {
   supplier_device_id: string
   onboarding_batch_id: string
   business_onboarding_batch_id?: string | null
+  external_device_id?: string | null
   internal_ip?: string | null
   occurred_at: string
   change_action: string
   change_content?: string | null
   description?: string | null
   ticket_no?: string | null
+  attachment_names?: string | null
   import_row_no?: number | null
   previous_ops_status?: string | null
   new_ops_status?: string | null

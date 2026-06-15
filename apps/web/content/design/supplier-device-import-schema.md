@@ -73,7 +73,9 @@
 
 `lifecycle_state_definition.domain = device_change_action`；`supplier_device_change_log.change_action` 存原文。
 
-**种子数据（20 条）**：`设备接收`、`加入集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`网关直连裸金属上架中`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
+**种子数据（21 条）**：`设备接收`、`加入集群`、`退出集群`、`配置变更`、`故障维修`、`维护结束`、`状态更新`、`带宽组调整`、`带宽限制调整`、`上架接入平台网关`、`上架单机模式裸金属`、`上架网关代理裸金属`、`网关直连裸金属上架中`、`下架裸金属`、`线下裸金属交付`、`集群角色增加`、`集群角色删除`、`设备退订`、`非常规下线`、`交给其他部门使用`。
+
+> Excel 若填写 `退出集群`，解析时归一化为 `退出集群`。
 
 `payload.default_ops_status` / **`default_pool_bindings`** 用于 `commitChangelog` 在无「设备状态」变更内容时刷新 `supplier_device.ops_status` 并同步 `resource_pool_binding`（映射表见 [supplier-onboarding-plan-changelog-tracking-design.md §3.4.4](./supplier-onboarding-plan-changelog-tracking-design.md)）。
 
@@ -417,15 +419,49 @@
 
 | Excel 列 | 目标 |
 |----------|------|
-| 设备ID | → `supplier_device_id` |
-| 内网IP | `supplier_device_change_log.internal_ip` |
-| 操作时间 | `occurred_at` |
+| 设备ID | `supplier_device_change_log.external_device_id`（Excel 原文）；**匹配**见 §4.2.1 |
+| 内网IP | `supplier_device_change_log.internal_ip`；**匹配主键**见 §4.2.1 |
+| 操作时间 | `occurred_at`（`yyyy/MM/dd HH:mm` 等，按本地字面量解析） |
 | 变更动作 | `change_action` |
 | 变更内容 | `change_content` |
 | 详细说明 | `description` |
-| 工单 | **`ticket_no`** |
-| 附件 | **不落库** |
-| （批次） | **`onboarding_batch_id`**（`device_changelog` 批次） |
+| 工单 | `ticket_no` |
+| 附件 | `attachment_names`（逗号分隔文件名，**只读展示**，不下载） |
+| （批次） | `onboarding_batch_id`（`device_changelog` 批次） |
+
+#### 4.2.1 变更表设备匹配（commit）
+
+运维 Excel 中「设备ID」列常填写 **内网 IP**（与主数据 `external_device_id` 数值型 ID 不一致）。变更表 commit 使用 **`findDeviceByChangelogRow`**，优先级：
+
+1. **内网IP** → `supplier_device.internal_ip`（`endpointMatches` / `parseEndpointHost` 规范化，同机房池）
+2. **设备ID 形如 IP** → 按内网 IP 匹配（仅当「内网IP」列为空时，解析阶段将设备ID 提升到 `internal_ip`）
+3. **设备ID** → `supplier_device.external_device_id` 精确匹配（非 IP 形态）
+4. SN / `asset_no`（兜底）
+
+解析阶段：若「内网IP」为空且「设备ID」形如 IP，则复制到 `internal_ip`；两列均填 IP 但不一致时 → `warning`（不阻断）。
+
+同一机房 `internal_ip` 主机部分重复 → 该行 `error`，不入库。
+
+匹配失败行跳过并写入 `bindWarnings`（含行号、IP、机房）。
+
+#### 4.2.2 设备详情流转记录（读模型）
+
+`getPhysicalDeviceDetail.flowRecords` 中 `kind = changelog_import` 的行来源于 `supplier_device_change_log`，按 **`occurred_at` 倒序**。
+
+设备详情页「流转记录」Tab 以 **表格** 展示变更表记录，列与 Excel 对齐：
+
+| UI 列 | 字段 |
+|-------|------|
+| 设备ID | `externalDeviceId` |
+| 内网IP | `internalIp` |
+| 操作时间 | `occurredAt` |
+| 变更动作 | `title`（= `change_action`） |
+| 变更内容 | `changeContent` |
+| 详细说明 | `detailDescription` |
+| 工单 | `ticketNo` |
+| 附件 | `attachmentNames` |
+
+`state_transition` / `activity` 等同表展示，缺失列以 `—` 占位；`变更动作` 取 `title`，`详细说明` 取 `description`。
 
 ### 4.3 故障记录表
 
@@ -488,7 +524,9 @@ flowchart TB
 | **R-DI3** | `ops_status` 必须存在于 `lifecycle_state_definition`（`domain=device_ops_status`）；未知状态 → 解析失败 |
 | **R-DI4** | `in_maintenance = true` 时优先将 `lifecycle_status` 置为 `维护中` |
 | **R-DI5** | 故障记录导入 **必须** 经 `supplier_ops_upload_batch`（`kind=fault_records`）；`fault_incident.supplier_ops_upload_batch_id` 回填 |
-| **R-DI6** | 导入 **不写入** `entity_state_transition_log`；**不保存** 变更附件；登录凭据写入 `supplier_device`（阶段一明文，UI 脱敏展示） |
+| **R-DI6** | 导入 **不写入** `entity_state_transition_log`；变更表 **附件列仅保存文件名**（`attachment_names`），不存文件本体；登录凭据写入 `supplier_device`（阶段一明文，UI 脱敏展示） |
+| **R-DI9** | 变更表 commit **必须** 按 §4.2.1 内网 IP 优先匹配设备；`occurred_at` 使用操作时间字面量解析，不用 commit 时刻 |
+| **R-DI10** | 设备详情流转记录 **必须** 展示已入库的 `supplier_device_change_log`，`change_content` 与 `description` **分列**，不得合并为单一描述 |
 | **R-DI7** | `supplier_device` **不保存** 合作类型 |
 | **R-DI8** | 设备主数据导入：卡型解析顺序为 **手工选择 → Excel 自动匹配 → 同供应商 IP 已有设备**；仍未解析则 **失败** 并阻断入库（可下载失败明细、preview 下拉补选）；已成功行只读展示；字典 **不** 过滤 `status` |
 

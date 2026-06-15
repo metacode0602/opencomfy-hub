@@ -3,11 +3,9 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import {
-  Activity,
   ArrowLeft,
   CheckCircle2,
   ChevronRight,
-  Clock,
   Loader2,
   Server,
   Shield,
@@ -90,47 +88,84 @@ function getErrorMessage(error: unknown): string {
   return '加载失败，请稍后重试'
 }
 
-function FlowRecordItem({ record }: { record: PhysicalDeviceFlowRecord }) {
-  const reasonLabel = record.reasonCode ? reasonLabels[record.reasonCode] ?? record.reasonCode : null
-
+function FlowRecordsTable({
+  records,
+  deviceFallback,
+}: {
+  records: PhysicalDeviceFlowRecord[]
+  deviceFallback: { externalDeviceId?: string | null; internalIp?: string | null }
+}) {
   return (
-    <li className="relative pl-8 pb-8 last:pb-0">
-      <span className="absolute left-[11px] top-2 bottom-0 w-px bg-border last:hidden" />
-      <span className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-        <Activity className="w-3.5 h-3.5 text-primary" />
-      </span>
-      <div className="rounded-lg border border-border p-4 space-y-2">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div className="space-y-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-medium text-foreground">{record.title}</span>
-              <Badge variant="outline" className={`text-xs ${flowKindColors[record.kind]}`}>
-                {flowKindLabels[record.kind]}
-              </Badge>
-              {reasonLabel && (
-                <Badge variant="outline" className="text-xs">
-                  {reasonLabel}
-                </Badge>
-              )}
-            </div>
-          </div>
-          <span className="text-xs text-muted-foreground shrink-0 flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            {formatDt(record.occurredAt)}
-          </span>
-        </div>
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="whitespace-nowrap">设备ID</TableHead>
+            <TableHead className="whitespace-nowrap">内网IP</TableHead>
+            <TableHead className="whitespace-nowrap">操作时间</TableHead>
+            <TableHead className="whitespace-nowrap">变更动作</TableHead>
+            <TableHead className="min-w-[140px]">变更内容</TableHead>
+            <TableHead className="min-w-[140px]">详细说明</TableHead>
+            <TableHead className="whitespace-nowrap">工单</TableHead>
+            <TableHead className="whitespace-nowrap">附件</TableHead>
+            <TableHead className="whitespace-nowrap">来源</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {records.map((record) => {
+            const reasonLabel = record.reasonCode
+              ? (reasonLabels[record.reasonCode] ?? record.reasonCode)
+              : null
+            const externalDeviceId =
+              record.externalDeviceId ?? deviceFallback.externalDeviceId ?? '—'
+            const internalIp = record.internalIp ?? deviceFallback.internalIp ?? '—'
+            const changeContent =
+              record.kind === 'changelog_import'
+                ? (record.changeContent ?? '—')
+                : '—'
+            const detailText =
+              record.kind === 'changelog_import'
+                ? (record.detailDescription ?? record.description ?? '—')
+                : (record.detailDescription ?? record.description ?? '—')
+            const attachments =
+              record.attachmentNames && record.attachmentNames.length > 0
+                ? record.attachmentNames.join(', ')
+                : '—'
 
-        {record.description && (
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{record.description}</p>
-        )}
-
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {record.operatorName && <span>操作人：{record.operatorName}</span>}
-          {record.ticketNo && <span>工单：{record.ticketNo}</span>}
-          {record.batchCode && <span>批次：{record.batchCode}</span>}
-        </div>
-      </div>
-    </li>
+            return (
+              <TableRow key={`${record.kind}-${record.id}`}>
+                <TableCell className="font-mono text-xs">{externalDeviceId}</TableCell>
+                <TableCell className="font-mono text-xs">{internalIp}</TableCell>
+                <TableCell className="text-xs whitespace-nowrap">{formatDt(record.occurredAt)}</TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span>{record.title}</span>
+                    {reasonLabel && (
+                      <Badge variant="outline" className="text-xs">
+                        {reasonLabel}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-xs whitespace-pre-wrap align-top max-w-[220px]">
+                  {changeContent}
+                </TableCell>
+                <TableCell className="text-xs whitespace-pre-wrap align-top max-w-[220px]">
+                  {detailText}
+                </TableCell>
+                <TableCell className="text-xs">{record.ticketNo ?? '—'}</TableCell>
+                <TableCell className="text-xs">{attachments}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className={`text-xs ${flowKindColors[record.kind]}`}>
+                    {flowKindLabels[record.kind]}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </div>
   )
 }
 
@@ -340,11 +375,13 @@ export function PhysicalDeviceDetailContent({ deviceId }: { deviceId: string }) 
                   暂无流转记录，设备入库或状态变更后将在此展示
                 </p>
               ) : (
-                <ol className="space-y-0">
-                  {flowRecords.map((record) => (
-                    <FlowRecordItem key={`${record.kind}-${record.id}`} record={record} />
-                  ))}
-                </ol>
+                <FlowRecordsTable
+                  records={flowRecords}
+                  deviceFallback={{
+                    externalDeviceId: device.externalDeviceId,
+                    internalIp: device.internalIp,
+                  }}
+                />
               )}
             </CardContent>
           </Card>

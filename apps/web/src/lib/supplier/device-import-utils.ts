@@ -21,6 +21,11 @@ import {
 } from "@/lib/supplier/retire-changelog-utils"
 import { isOtherDeptOpsStatus } from "@/lib/server/aggregation/overview-aggregation"
 import {
+  endpointMatches,
+  looksLikeIpAddress,
+  parseEndpointHost,
+} from "@/lib/supplier/ip-endpoint-utils"
+import {
   CHANGE_ACTION_DEFAULT_OPS_FROM_SEEDS,
   DEVICE_CHANGE_ACTION_SEEDS,
   OPS_STATUS_TO_LIFECYCLE_FROM_SEEDS,
@@ -60,6 +65,130 @@ export function validateDeviceChangelogRowFields(input: {
   }
 
   return { parse_status, parse_message }
+}
+
+/** 变更表行：设备ID 为 IP 时提升到内网IP；两列 IP 不一致时附加 warning */
+export function normalizeChangelogRowIpFields(input: {
+  external_device_id?: string
+  internal_ip?: string
+}): {
+  external_device_id?: string
+  internal_ip?: string
+  ip_mismatch_warning?: string
+} {
+  const ext = input.external_device_id?.trim() || undefined
+  let ip = input.internal_ip?.trim() || undefined
+
+  if (!ip && ext && looksLikeIpAddress(ext)) {
+    ip = ext
+  }
+
+  if (
+    ext &&
+    ip &&
+    looksLikeIpAddress(ext) &&
+    looksLikeIpAddress(ip) &&
+    !endpointMatches(ext, ip)
+  ) {
+    return {
+      external_device_id: ext,
+      internal_ip: ip,
+      ip_mismatch_warning: `设备ID（${ext}）与内网IP（${ip}）不一致，将优先按内网IP匹配`,
+    }
+  }
+
+  return { external_device_id: ext, internal_ip: ip }
+}
+
+/** 解析变更表操作时间（yyyy/MM/dd HH:mm 等本地字面量） */
+export function parseChangelogOccurredAt(value: string | null | undefined): Date | null {
+  if (!value?.trim()) return null
+  const raw = value.trim()
+  const slashOrDash = /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(
+    raw,
+  )
+  if (slashOrDash) {
+    const year = Number(slashOrDash[1])
+    const month = Number(slashOrDash[2]) - 1
+    const day = Number(slashOrDash[3])
+    const hour = Number(slashOrDash[4] ?? 0)
+    const minute = Number(slashOrDash[5] ?? 0)
+    const second = Number(slashOrDash[6] ?? 0)
+    const d = new Date(year, month, day, hour, minute, second)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+export type ChangelogDeviceIpIndex = {
+  byHost: Map<string, SupplierDevice>
+  duplicateHosts: Set<string>
+}
+
+export function buildChangelogDeviceIpIndex(devices: SupplierDevice[]): ChangelogDeviceIpIndex {
+  const byHost = new Map<string, SupplierDevice>()
+  const duplicateHosts = new Set<string>()
+  for (const device of devices) {
+    const host = parseEndpointHost(device.internal_ip)
+    if (!host) continue
+    if (byHost.has(host)) {
+      duplicateHosts.add(host)
+    } else {
+      byHost.set(host, device)
+    }
+  }
+  return { byHost, duplicateHosts }
+}
+
+export function findDeviceByChangelogRow(
+  devices: SupplierDevice[],
+  ipIndex: ChangelogDeviceIpIndex,
+  row: {
+    external_device_id?: string | null
+    internal_ip?: string
+    sn?: string
+    asset_no?: string
+  },
+): { device?: SupplierDevice; matchWarning?: string } {
+  const ipCandidates = [
+    row.internal_ip,
+    looksLikeIpAddress(row.external_device_id) ? row.external_device_id : null,
+  ].filter((v): v is string => Boolean(v?.trim()))
+
+  for (const candidate of ipCandidates) {
+    const host = parseEndpointHost(candidate)
+    if (!host) continue
+    if (ipIndex.duplicateHosts.has(host)) {
+      return {
+        matchWarning: `内网 IP ${host} 在本机房存在多台设备，无法自动匹配`,
+      }
+    }
+    const indexed = ipIndex.byHost.get(host)
+    if (indexed) return { device: indexed }
+    const fuzzy = devices.find((d) => endpointMatches(d.internal_ip, candidate))
+    if (fuzzy) return { device: fuzzy }
+  }
+
+  const extId = row.external_device_id?.trim()
+  if (extId && !looksLikeIpAddress(extId)) {
+    const hit = devices.find((d) => d.external_device_id?.trim() === extId)
+    if (hit) return { device: hit }
+  }
+
+  const sn = row.sn?.trim()
+  if (sn) {
+    const hit = devices.find((d) => d.sn === sn)
+    if (hit) return { device: hit }
+  }
+
+  const asset = row.asset_no?.trim()
+  if (asset) {
+    const hit = devices.find((d) => d.asset_no === asset)
+    if (hit) return { device: hit }
+  }
+
+  return {}
 }
 
 /** 合并必填项与字段校验（Excel 解析与预览页手工修正共用） */
@@ -144,7 +273,9 @@ export function normalizeDeviceOpsStatus(raw: string): string {
 }
 
 export function normalizeDeviceChangeAction(raw: string): string {
-  return normalizeDeviceDictionaryText(raw)
+  const normalized = normalizeDeviceDictionaryText(raw)
+  if (normalized === "退出集群") return "退出集群"
+  return normalized
 }
 
 export const BATCH_KIND_LABELS: Record<OnboardingBatchKind, string> = {
@@ -450,10 +581,18 @@ export function buildChangeLogsFromChangelogImport(params: {
   const deviceLinks: ChangelogDeviceLinkUpsert[] = []
   const linkedDeviceBatchKeys = new Set<string>()
   const bindWarnings: string[] = []
+  const ipIndex = buildChangelogDeviceIpIndex(devices)
 
   for (const row of rows.filter((r) => r.parse_status !== "error")) {
-    const device = findDeviceByImportKeys(devices, row)
-    if (!device) continue
+    const { device, matchWarning } = findDeviceByChangelogRow(devices, ipIndex, row)
+    if (matchWarning) {
+      bindWarnings.push(`第 ${row.row_no} 行：${matchWarning}`)
+    }
+    if (!device) {
+      const ipLabel = row.internal_ip ?? row.external_device_id ?? "—"
+      bindWarnings.push(`第 ${row.row_no} 行：内网 IP / 设备ID ${ipLabel} 未匹配到本机房已有设备，已跳过`)
+      continue
+    }
 
     const logId = createId("dcl")
     const prevOps = device.ops_status ?? ""
@@ -523,12 +662,14 @@ export function buildChangeLogsFromChangelogImport(params: {
       supplier_device_id: device.id,
       onboarding_batch_id: batchId,
       business_onboarding_batch_id: rowBatch?.businessBatchId ?? null,
-      internal_ip: row.internal_ip ?? null,
+      external_device_id: row.external_device_id ?? null,
+      internal_ip: row.internal_ip ?? device.internal_ip ?? null,
       occurred_at: row.occurred_at,
       change_action: row.change_action,
       change_content: row.change_content ?? null,
       description: row.description ?? null,
       ticket_no: row.ticket_no ?? null,
+      attachment_names: row.attachment_names ?? null,
       import_row_no: row.row_no,
       previous_ops_status: prevOps || null,
       new_ops_status: statusChanged && newOps !== prevOps ? newOps : null,

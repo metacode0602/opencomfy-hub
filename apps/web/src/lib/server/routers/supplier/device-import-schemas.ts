@@ -40,6 +40,7 @@ export const deviceChangelogRowSchema = z.object({
   change_content: z.string().optional(),
   description: z.string().optional(),
   ticket_no: z.string().optional(),
+  attachment_names: z.string().optional(),
   parse_status: parseStatusSchema,
   parse_message: z.string().nullable().optional(),
 })

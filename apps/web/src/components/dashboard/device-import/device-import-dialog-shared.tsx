@@ -44,7 +44,7 @@ export const IMPORT_META: Record<
     tableTarget: 'supplier_device_change_log',
     batchTable: 'onboarding_batch（device_changelog）',
     columnsHint:
-      '设备ID、内网IP、操作时间、变更动作、变更内容、工单（WO- 或批次号）；设备须已在本机房主数据中登记',
+      '设备ID、内网IP、操作时间、变更动作、变更内容、详细说明、工单、附件；按内网IP匹配本机房设备（设备ID 为 IP 时可仅填一列）',
   },
   fault_records: {
     title: '故障记录表',

@@ -730,6 +730,11 @@ export interface PhysicalDeviceFlowRecord {
   kind: PhysicalDeviceFlowRecordKind
   title: string
   description?: string | null
+  changeContent?: string | null
+  detailDescription?: string | null
+  externalDeviceId?: string | null
+  internalIp?: string | null
+  attachmentNames?: string[] | null
   fromState?: string | null
   toState?: string | null
   reasonCode?: string | null
