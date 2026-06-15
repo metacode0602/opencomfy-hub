@@ -27,6 +27,7 @@ import {
   loadStagingInventory,
   matchBareMetalRow,
   pickUniqueOrAmbiguous,
+  purgeExcludedDeviceSnapshots,
   type StagedInventoryRow,
 } from '@/lib/server/dataaccess/supplier/device-platform-probe-staging'
 import { fetchDeviceProbeChannels } from '@/lib/server/integrations/suanli-device-probe-api'
@@ -356,6 +357,7 @@ export async function runScheduledDevicePlatformProbe(input: {
     })
 
     await upsertSnapshots(snapshots)
+    await purgeExcludedDeviceSnapshots(snapshotHour)
     await clearProbeStaging(jobRunId)
 
     const matchedProxyCount = snapshots.filter((s) => s.proxyMatched).length

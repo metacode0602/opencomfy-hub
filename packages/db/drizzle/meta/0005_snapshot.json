@@ -1,5 +1,5 @@
 {
-  "id": "c24be9d0-d5d7-4af3-8f91-72799b79e6fa",
+  "id": "520e3a85-edd5-4c97-99ba-944b205c0333",
   "prevId": "bb18915b-8057-427c-b348-7d1a07493a47",
   "version": "7",
   "dialect": "postgresql",
@@ -17253,6 +17253,1216 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.bare_metal_order": {
+      "name": "bare_metal_order",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "platform_order_id": {
+          "name": "platform_order_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_no": {
+          "name": "order_no",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "order_mark": {
+          "name": "order_mark",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform_tenant_id": {
+          "name": "platform_tenant_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data_center_id": {
+          "name": "data_center_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_id": {
+          "name": "supplier_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idc_code": {
+          "name": "idc_code",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "idc_name": {
+          "name": "idc_name",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pay_status": {
+          "name": "pay_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "billing_unit": {
+          "name": "billing_unit",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purchase_qty": {
+          "name": "purchase_qty",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "purchase_qty_text": {
+          "name": "purchase_qty_text",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_count": {
+          "name": "device_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "gpu_count": {
+          "name": "gpu_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "order_amount": {
+          "name": "order_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refund_amount": {
+          "name": "refund_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "final_amount": {
+          "name": "final_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "balance_amount": {
+          "name": "balance_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "coupon_amount": {
+          "name": "coupon_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "ordered_at": {
+          "name": "ordered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paid_at": {
+          "name": "paid_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rent_starts_at": {
+          "name": "rent_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rent_ends_at": {
+          "name": "rent_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "import_batch_id": {
+          "name": "import_batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commerce_order_id": {
+          "name": "commerce_order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'platform_sync'"
+        },
+        "platform_payload": {
+          "name": "platform_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "match_flags": {
+          "name": "match_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "remark": {
+          "name": "remark",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "bare_metal_order_platform_order_id_uk": {
+          "name": "bare_metal_order_platform_order_id_uk",
+          "columns": [
+            {
+              "expression": "platform_order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"bare_metal_order\".\"platform_order_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_order_no_uk": {
+          "name": "bare_metal_order_order_no_uk",
+          "columns": [
+            {
+              "expression": "order_no",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"bare_metal_order\".\"order_no\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_tenant_ordered_idx": {
+          "name": "bare_metal_order_tenant_ordered_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ordered_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_project_ordered_idx": {
+          "name": "bare_metal_order_project_ordered_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "ordered_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_data_center_idx": {
+          "name": "bare_metal_order_data_center_idx",
+          "columns": [
+            {
+              "expression": "data_center_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_status_idx": {
+          "name": "bare_metal_order_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_order_mark_idx": {
+          "name": "bare_metal_order_order_mark_idx",
+          "columns": [
+            {
+              "expression": "order_mark",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_ordered_at_idx": {
+          "name": "bare_metal_order_ordered_at_idx",
+          "columns": [
+            {
+              "expression": "ordered_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bare_metal_order_tenant_id_tenant_id_fk": {
+          "name": "bare_metal_order_tenant_id_tenant_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "tenant",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_customer_id_customer_id_fk": {
+          "name": "bare_metal_order_customer_id_customer_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "customer",
+          "columnsFrom": [
+            "customer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_project_id_project_id_fk": {
+          "name": "bare_metal_order_project_id_project_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_data_center_id_data_center_id_fk": {
+          "name": "bare_metal_order_data_center_id_data_center_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "data_center",
+          "columnsFrom": [
+            "data_center_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_supplier_id_supplier_id_fk": {
+          "name": "bare_metal_order_supplier_id_supplier_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "supplier",
+          "columnsFrom": [
+            "supplier_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_import_batch_id_bare_metal_order_import_batch_id_fk": {
+          "name": "bare_metal_order_import_batch_id_bare_metal_order_import_batch_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "bare_metal_order_import_batch",
+          "columnsFrom": [
+            "import_batch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_commerce_order_id_commerce_order_id_fk": {
+          "name": "bare_metal_order_commerce_order_id_commerce_order_id_fk",
+          "tableFrom": "bare_metal_order",
+          "tableTo": "commerce_order",
+          "columnsFrom": [
+            "commerce_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.bare_metal_order_device": {
+      "name": "bare_metal_order_device",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "bare_metal_order_id": {
+          "name": "bare_metal_order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "line_no": {
+          "name": "line_no",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "allocation_status": {
+          "name": "allocation_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'planned'"
+        },
+        "gpu_card_type_id": {
+          "name": "gpu_card_type_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_model_text": {
+          "name": "device_model_text",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gpu_count": {
+          "name": "gpu_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "platform_device_id": {
+          "name": "platform_device_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "supplier_device_id": {
+          "name": "supplier_device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "device_status": {
+          "name": "device_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sn": {
+          "name": "sn",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "asset_no": {
+          "name": "asset_no",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "external_ip": {
+          "name": "external_ip",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internal_ip": {
+          "name": "internal_ip",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "line_amount": {
+          "name": "line_amount",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_hours": {
+          "name": "duration_hours",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "unit_price_per_card_hour": {
+          "name": "unit_price_per_card_hour",
+          "type": "numeric(15, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rent_starts_at": {
+          "name": "rent_starts_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rent_ends_at": {
+          "name": "rent_ends_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linked_at": {
+          "name": "linked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "platform_payload": {
+          "name": "platform_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "match_flags": {
+          "name": "match_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "bare_metal_order_device_order_line_uk": {
+          "name": "bare_metal_order_device_order_line_uk",
+          "columns": [
+            {
+              "expression": "bare_metal_order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "line_no",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_device_order_id_idx": {
+          "name": "bare_metal_order_device_order_id_idx",
+          "columns": [
+            {
+              "expression": "bare_metal_order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_device_supplier_device_idx": {
+          "name": "bare_metal_order_device_supplier_device_idx",
+          "columns": [
+            {
+              "expression": "supplier_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_device_platform_device_uk": {
+          "name": "bare_metal_order_device_platform_device_uk",
+          "columns": [
+            {
+              "expression": "platform_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"bare_metal_order_device\".\"platform_device_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_device_gpu_card_type_idx": {
+          "name": "bare_metal_order_device_gpu_card_type_idx",
+          "columns": [
+            {
+              "expression": "gpu_card_type_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bare_metal_order_device_bare_metal_order_id_bare_metal_order_id_fk": {
+          "name": "bare_metal_order_device_bare_metal_order_id_bare_metal_order_id_fk",
+          "tableFrom": "bare_metal_order_device",
+          "tableTo": "bare_metal_order",
+          "columnsFrom": [
+            "bare_metal_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_device_gpu_card_type_id_gpu_card_type_id_fk": {
+          "name": "bare_metal_order_device_gpu_card_type_id_gpu_card_type_id_fk",
+          "tableFrom": "bare_metal_order_device",
+          "tableTo": "gpu_card_type",
+          "columnsFrom": [
+            "gpu_card_type_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_device_supplier_device_id_supplier_device_id_fk": {
+          "name": "bare_metal_order_device_supplier_device_id_supplier_device_id_fk",
+          "tableFrom": "bare_metal_order_device",
+          "tableTo": "supplier_device",
+          "columnsFrom": [
+            "supplier_device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.bare_metal_order_import_batch": {
+      "name": "bare_metal_order_import_batch",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bare_metal_order_id": {
+          "name": "bare_metal_order_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_uri": {
+          "name": "file_uri",
+          "type": "varchar(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "file_hash": {
+          "name": "file_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "row_count": {
+          "name": "row_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "committed_at": {
+          "name": "committed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_staff_id": {
+          "name": "created_by_staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "bare_metal_order_import_batch_project_id_idx": {
+          "name": "bare_metal_order_import_batch_project_id_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_order_import_batch_tenant_id_idx": {
+          "name": "bare_metal_order_import_batch_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bare_metal_order_import_batch_project_id_project_id_fk": {
+          "name": "bare_metal_order_import_batch_project_id_project_id_fk",
+          "tableFrom": "bare_metal_order_import_batch",
+          "tableTo": "project",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_import_batch_tenant_id_tenant_id_fk": {
+          "name": "bare_metal_order_import_batch_tenant_id_tenant_id_fk",
+          "tableFrom": "bare_metal_order_import_batch",
+          "tableTo": "tenant",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_import_batch_bare_metal_order_id_bare_metal_order_id_fk": {
+          "name": "bare_metal_order_import_batch_bare_metal_order_id_bare_metal_order_id_fk",
+          "tableFrom": "bare_metal_order_import_batch",
+          "tableTo": "bare_metal_order",
+          "columnsFrom": [
+            "bare_metal_order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bare_metal_order_import_batch_created_by_staff_id_user_staff_id_fk": {
+          "name": "bare_metal_order_import_batch_created_by_staff_id_user_staff_id_fk",
+          "tableFrom": "bare_metal_order_import_batch",
+          "tableTo": "user_staff",
+          "columnsFrom": [
+            "created_by_staff_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.bare_metal_sync_job_item": {
+      "name": "bare_metal_sync_job_item",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "job_run_id": {
+          "name": "job_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "platform_tenant_id": {
+          "name": "platform_tenant_id",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phase": {
+          "name": "phase",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "order_count": {
+          "name": "order_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error_message": {
+          "name": "error_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "bare_metal_sync_job_item_job_run_id_idx": {
+          "name": "bare_metal_sync_job_item_job_run_id_idx",
+          "columns": [
+            {
+              "expression": "job_run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_sync_job_item_platform_tenant_id_idx": {
+          "name": "bare_metal_sync_job_item_platform_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "platform_tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "bare_metal_sync_job_item_job_run_id_bare_metal_sync_job_run_id_fk": {
+          "name": "bare_metal_sync_job_item_job_run_id_bare_metal_sync_job_run_id_fk",
+          "tableFrom": "bare_metal_sync_job_item",
+          "tableTo": "bare_metal_sync_job_run",
+          "columnsFrom": [
+            "job_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "bare_metal_sync_job_item_tenant_id_tenant_id_fk": {
+          "name": "bare_metal_sync_job_item_tenant_id_tenant_id_fk",
+          "tableFrom": "bare_metal_sync_job_item",
+          "tableTo": "tenant",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.bare_metal_sync_job_run": {
+      "name": "bare_metal_sync_job_run",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "orders_fetched_count": {
+          "name": "orders_fetched_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "unknown_tenant_count": {
+          "name": "unknown_tenant_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "tenants_auto_imported_count": {
+          "name": "tenants_auto_imported_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "billing_sync_tenant_count": {
+          "name": "billing_sync_tenant_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "order_upserted_count": {
+          "name": "order_upserted_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "success_count": {
+          "name": "success_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "failed_count": {
+          "name": "failed_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error_summary": {
+          "name": "error_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "bare_metal_sync_job_run_started_at_idx": {
+          "name": "bare_metal_sync_job_run_started_at_idx",
+          "columns": [
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "bare_metal_sync_job_run_status_idx": {
+          "name": "bare_metal_sync_job_run_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.bare_metal_sync_state": {
+      "name": "bare_metal_sync_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_run_at": {
+          "name": "last_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_success_at": {
+          "name": "last_success_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.compute_node": {
       "name": "compute_node",
       "schema": "",
@@ -17617,6 +18827,571 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.device_platform_probe_job_run": {
+      "name": "device_platform_probe_job_run",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_hour": {
+          "name": "snapshot_hour",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inventory_device_count": {
+          "name": "inventory_device_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "proxy_fetched_count": {
+          "name": "proxy_fetched_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "k8s_fetched_count": {
+          "name": "k8s_fetched_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "bare_metal_hit_count": {
+          "name": "bare_metal_hit_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "matched_proxy_count": {
+          "name": "matched_proxy_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "matched_k8s_count": {
+          "name": "matched_k8s_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "matched_bare_metal_count": {
+          "name": "matched_bare_metal_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ambiguous_count": {
+          "name": "ambiguous_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "missing_platform_count": {
+          "name": "missing_platform_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "error_summary": {
+          "name": "error_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "device_platform_probe_job_run_started_at_idx": {
+          "name": "device_platform_probe_job_run_started_at_idx",
+          "columns": [
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_job_run_status_idx": {
+          "name": "device_platform_probe_job_run_status_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.device_platform_probe_snapshot": {
+      "name": "device_platform_probe_snapshot",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "job_run_id": {
+          "name": "job_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supplier_device_id": {
+          "name": "supplier_device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "supplier_id": {
+          "name": "supplier_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data_center_id": {
+          "name": "data_center_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sn": {
+          "name": "sn",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "internal_ip": {
+          "name": "internal_ip",
+          "type": "varchar(45)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data_center_name": {
+          "name": "data_center_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ops_status": {
+          "name": "ops_status",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lifecycle_status": {
+          "name": "lifecycle_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "snapshot_hour": {
+          "name": "snapshot_hour",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "probe_status": {
+          "name": "probe_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consistency_flag": {
+          "name": "consistency_flag",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "proxy_matched": {
+          "name": "proxy_matched",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "proxy_rent_status": {
+          "name": "proxy_rent_status",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "proxy_is_container_instance": {
+          "name": "proxy_is_container_instance",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "proxy_platform_device_id": {
+          "name": "proxy_platform_device_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "k8s_matched": {
+          "name": "k8s_matched",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "k8s_device_name": {
+          "name": "k8s_device_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "k8s_region": {
+          "name": "k8s_region",
+          "type": "varchar(128)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bare_metal_matched": {
+          "name": "bare_metal_matched",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "bare_metal_order_no": {
+          "name": "bare_metal_order_no",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bare_metal_order_status": {
+          "name": "bare_metal_order_status",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "suggested_action": {
+          "name": "suggested_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "match_flags": {
+          "name": "match_flags",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "proxy_payload": {
+          "name": "proxy_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "k8s_payload": {
+          "name": "k8s_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bare_metal_payload": {
+          "name": "bare_metal_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "device_platform_probe_snapshot_device_hour_uk": {
+          "name": "device_platform_probe_snapshot_device_hour_uk",
+          "columns": [
+            {
+              "expression": "supplier_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_snapshot_hour_supplier_idx": {
+          "name": "device_platform_probe_snapshot_hour_supplier_idx",
+          "columns": [
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "supplier_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_snapshot_hour_dc_idx": {
+          "name": "device_platform_probe_snapshot_hour_dc_idx",
+          "columns": [
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "data_center_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_snapshot_hour_probe_status_idx": {
+          "name": "device_platform_probe_snapshot_hour_probe_status_idx",
+          "columns": [
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "probe_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_snapshot_hour_consistency_idx": {
+          "name": "device_platform_probe_snapshot_hour_consistency_idx",
+          "columns": [
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "consistency_flag",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_platform_probe_snapshot_device_hour_desc_idx": {
+          "name": "device_platform_probe_snapshot_device_hour_desc_idx",
+          "columns": [
+            {
+              "expression": "supplier_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "snapshot_hour",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "device_platform_probe_snapshot_job_run_id_device_platform_probe_job_run_id_fk": {
+          "name": "device_platform_probe_snapshot_job_run_id_device_platform_probe_job_run_id_fk",
+          "tableFrom": "device_platform_probe_snapshot",
+          "tableTo": "device_platform_probe_job_run",
+          "columnsFrom": [
+            "job_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "device_platform_probe_snapshot_supplier_device_id_supplier_device_id_fk": {
+          "name": "device_platform_probe_snapshot_supplier_device_id_supplier_device_id_fk",
+          "tableFrom": "device_platform_probe_snapshot",
+          "tableTo": "supplier_device",
+          "columnsFrom": [
+            "supplier_device_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "device_platform_probe_snapshot_supplier_id_supplier_id_fk": {
+          "name": "device_platform_probe_snapshot_supplier_id_supplier_id_fk",
+          "tableFrom": "device_platform_probe_snapshot",
+          "tableTo": "supplier",
+          "columnsFrom": [
+            "supplier_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "device_platform_probe_snapshot_data_center_id_data_center_id_fk": {
+          "name": "device_platform_probe_snapshot_data_center_id_data_center_id_fk",
+          "tableFrom": "device_platform_probe_snapshot",
+          "tableTo": "data_center",
+          "columnsFrom": [
+            "data_center_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.device_platform_probe_state": {
+      "name": "device_platform_probe_state",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "last_run_at": {
+          "name": "last_run_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_success_at": {
+          "name": "last_success_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_snapshot_hour": {
+          "name": "last_snapshot_hour",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

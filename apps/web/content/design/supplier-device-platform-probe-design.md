@@ -1,8 +1,9 @@
 # 供应域 — 库存设备平台状态探测定时任务设计方案
 
-> 版本：v1.4  
+> 版本：v1.5（草案）  
 > 日期：2026-06-15  
-> 状态：**已确认 — 待实施**  
+> 状态：**v1.5 待确认 — CM-7 四方全景对账（孤儿记录）**  
+> 变更：v1.5 — CM-7：在 CRM 锚点对账之外，增加平台/裸金属 **孤儿记录** 反扫与 **四方存在矩阵**（`presence_*`）；列表可完整看到「设备在 CRM / 接入端 / K8s / 裸金属 哪几方出现」  
 > 变更：v1.4 — CM-5 修订：`rent_status` 仅 Idle/ElasticRenting；以 `is_container_instance` 区分裸金属与弹性服务；snapshot 落库两字段供页面展示  
 > 性质：在既有 `supplier_device` 主数据之上，通过算算力 OpenAPI 三路数据源交叉比对，生成 **平台侧可观测状态** 并 **小时级落库**；**不替代** Excel 主数据导入，**不自动回写** `supplier_device.ops_status`。
 
@@ -36,6 +37,8 @@
 | G3 | **统一匹配键** | 机房维度 + 内网 IP；主路径用 `ip_host` 等值 Join；边缘 case 用 `endpointMatches` 复核（PO-4） |
 | G4 | **结果存库** | 每次 job 写入运行日志 + 设备级快照；保留历史供对账与 UI 展示 |
 | G5 | **可观测** | 汇总 matched / unmatched / ambiguous 计数；失败可重跑 |
+| **G6** | **四方全覆盖（v1.5）** | 除 CRM 锚点行外，反扫 staging 中 **未被任何 CRM 库存行匹配** 的接入端 / K8s / 裸金属记录，写入 **孤儿 snapshot**，避免「平台有、CRM 无」遗漏 |
+| **G7** | **位置矩阵（v1.5）** | 每条 snapshot 用 `presence_crm` / `presence_proxy` / `presence_k8s` / `presence_bare_metal` 四布尔标明 **在何处存在**，UI 一眼可见设备所处位置 |
 
 ### 1.2 非目标（本期）
 
@@ -72,7 +75,8 @@ activeInventoryDeviceFilter()
 |----|------|
 | 必须有内网 IP | `internal_ip` 非空；否则写入 snapshot 且 `probe_status=no_internal_ip`，不参与三路 Join |
 | 必须可映射机房 | `data_center_id` 非空且机房配置完整；否则 `probe_status=dc_unmapped`，**不做**全平台 IP 扫描（CM-6 ✅） |
-| 已退订设备 | 排除 |
+| 已退订设备 | 排除（不参与 CRM 锚点 staging；已写入 snapshot 的同行由 purge 清理，见 §8.8） |
+| CPU/infra 设备 | 排除（`device_role=infra` 或卡型名/编码含 `cpu`；KPI 单独统计 `cpuCount`） |
 
 ### 2.2 平台数据源
 

@@ -510,7 +510,7 @@ export async function fetchSupplierApplicationList(
     const name = params.name?.trim() ?? ""
     const data = await supplyInstance.get<unknown>("/supply/supplier_application/list", {
       params: {
-        name: name ? encodeURIComponent(name) : "",
+        name,
         types: params.types ?? "",
         status: "Pass", //只抓取审核通过的数据
         split_modes: params.split_modes ?? "",
@@ -605,7 +605,7 @@ export async function fetchIdcInfoList(
     const name = params.name?.trim() ?? ""
     const data = await supplyInstance.get<unknown>("/supply/idc_info/list", {
       params: {
-        name: name ? encodeURIComponent(name) : "",
+        name,
         container_instance_region: params.container_instance_region ?? "",
         zone_ids: params.zone_ids ?? "",
         status: params.status ?? "",

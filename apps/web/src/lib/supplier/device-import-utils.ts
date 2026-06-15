@@ -313,6 +313,53 @@ export function resolveLifecycleStatus(opsStatus: string, inMaintenance: boolean
   return OPS_STATUS_TO_LIFECYCLE[normalizeDeviceOpsStatus(opsStatus)] ?? "待接入"
 }
 
+/** 与 supply-schema compute_node 列宽一致 */
+export const COMPUTE_NODE_FIELD_LIMITS = {
+  nodeRole: 32,
+  mgmtIp: 45,
+  clusterName: 128,
+  nodeName: 128,
+  expectedService: 255,
+  clusterId: 64,
+  lifecycleStatus: 32,
+} as const
+
+export function assertComputeNodeFieldLengths(params: {
+  rowNo: number
+  node: Pick<
+    ComputeNode,
+    | "node_role"
+    | "mgmt_ip"
+    | "cluster_name"
+    | "node_name"
+    | "expected_service"
+    | "cluster_id"
+    | "lifecycle_status"
+  >
+}): void {
+  const { rowNo, node } = params
+  const checks: Array<[label: string, value: string | null | undefined, max: number]> = [
+    ["集群角色（node_role）", node.node_role, COMPUTE_NODE_FIELD_LIMITS.nodeRole],
+    ["管理 IP（mgmt_ip）", node.mgmt_ip, COMPUTE_NODE_FIELD_LIMITS.mgmtIp],
+    ["K8s 集群（cluster_name）", node.cluster_name, COMPUTE_NODE_FIELD_LIMITS.clusterName],
+    ["集群中节点名称（node_name）", node.node_name, COMPUTE_NODE_FIELD_LIMITS.nodeName],
+    [
+      "预期集群提供服务（expected_service）",
+      node.expected_service,
+      COMPUTE_NODE_FIELD_LIMITS.expectedService,
+    ],
+    ["集群 ID（cluster_id）", node.cluster_id, COMPUTE_NODE_FIELD_LIMITS.clusterId],
+    ["生命周期（lifecycle_status）", node.lifecycle_status, COMPUTE_NODE_FIELD_LIMITS.lifecycleStatus],
+  ]
+  for (const [label, value, max] of checks) {
+    if (value != null && value.length > max) {
+      throw new Error(
+        `第 ${rowNo} 行 ${label} 超过 ${max} 个字符（当前 ${value.length} 个字符），请缩短后重试`,
+      )
+    }
+  }
+}
+
 export function mapDeviceCooperationType(raw: string | undefined): {
   type: DeviceCooperationType
   warning?: string
@@ -485,17 +532,19 @@ export function buildDevicesFromInventoryImport(params: {
     const hasCluster =
       row.cluster_name || row.node_name || row.node_role || row.expected_service
     if (hasCluster) {
-      nodes.push({
+      const node: ComputeNode = {
         id: createId("node"),
         device_id: deviceId,
-        node_role: row.node_role ?? "Worker",
+        node_role: row.node_role?.trim() || "Worker",
         mgmt_ip: row.internal_ip ?? "",
         cluster_id: row.cluster_name ?? "",
         lifecycle_status: lifecycle,
         cluster_name: row.cluster_name ?? null,
         node_name: row.node_name ?? null,
         expected_service: row.expected_service ?? null,
-      })
+      }
+      assertComputeNodeFieldLengths({ rowNo: row.row_no, node })
+      nodes.push(node)
     }
   })
   return { devices, nodes }

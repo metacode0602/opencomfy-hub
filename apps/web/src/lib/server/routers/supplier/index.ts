@@ -105,6 +105,7 @@ import {
 import { supplyChainLeadsDataAccess } from '@/lib/server/dataaccess/supplier/supply-chain-leads'
 import { bareMetalOrderDataAccess } from '@/lib/server/dataaccess/supplier/bare-metal-order'
 import { devicePlatformProbeDataAccess } from '@/lib/server/dataaccess/supplier/device-platform-probe'
+import { runLiveDevicePlatformProbe } from '@/lib/server/dataaccess/supplier/device-platform-probe-live'
 import { runScheduledDevicePlatformProbe } from '@/lib/server/dataaccess/supplier/device-platform-probe-scheduled'
 import {
   supplyChainLeadActivityCreateSchema,
@@ -1667,6 +1668,19 @@ export const supplierRouter = createTRPCRouter({
           throw new TRPCError({ code: 'NOT_FOUND', message: '探测记录不存在' })
         }
         return row
+      }),
+
+    reprobeLive: supplyProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        try {
+          return await runLiveDevicePlatformProbe(input.id)
+        } catch (error) {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: error instanceof Error ? error.message : '实时探测失败',
+          })
+        }
       }),
 
     runNow: adminProcedure.mutation(async () => {

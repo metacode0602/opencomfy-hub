@@ -14,6 +14,8 @@ export type DevicePlatformProbeStatsDto = {
   consistent: number
   needsAction: number
   notEvaluated: number
+  /** 有效库存中的 CPU/infra 设备台数（不参与平台比对） */
+  cpuCount: number
 }
 
 export type DevicePlatformProbeStateDto = {
@@ -26,6 +28,24 @@ export type DevicePlatformProbeStateDto = {
 
 export type DevicePlatformProbeDetailDto = DevicePlatformProbeDetail & {
   compareRows: ProbeCompareRow[]
+}
+
+export type DevicePlatformProbeLiveResultDto = {
+  probedAt: string
+  fetchScope: {
+    dataCenterName: string
+    containerInstanceRegion: string
+  }
+  apiFetch: {
+    proxyFetchedCount: number
+    k8sFetchedCount: number
+    bareMetalFetchedCount: number
+    proxyError: string | null
+    k8sError: string | null
+  }
+  bareMetalStale: boolean
+  matchFlags: Record<string, unknown>
+  detail: DevicePlatformProbeDetailDto
 }
 
 export type DevicePlatformProbeJobRunDto = {

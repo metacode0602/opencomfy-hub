@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { ArrowLeft, History, Loader2, Server } from 'lucide-react'
+import { ArrowLeft, History, Loader2, RefreshCw, Server } from 'lucide-react'
+import { toast } from 'sonner'
+import { Alert, AlertDescription, AlertTitle } from '@workspace/ui/components/alert'
 import { Badge } from '@workspace/ui/components/badge'
 import { Button } from '@workspace/ui/components/button'
 import { Separator } from '@workspace/ui/components/separator'
@@ -26,6 +28,7 @@ import {
   type DevicePlatformProbeDetail,
   type ProbeCompareRow,
 } from '@/lib/supplier/device-platform-probe-utils'
+import type { DevicePlatformProbeLiveResultDto } from '@/lib/types/device-platform-probe-api'
 import { trpc } from '@/lib/trpc/client'
 import { DevicePlatformProbeChangelogDialog } from './device-platform-probe-changelog-dialog'
 
@@ -179,7 +182,13 @@ function PlatformTabs({ detail }: { detail: DevicePlatformProbeDetail }) {
   )
 }
 
-function CrmPanel({ detail }: { detail: DevicePlatformProbeDetail }) {
+function CrmPanel({
+  detail,
+  title = 'CRM 主数据（探测快照时）',
+}: {
+  detail: DevicePlatformProbeDetail
+  title?: string
+}) {
   const { crm } = detail
   const dash = (v: string | number | boolean | null | undefined) =>
     v === null || v === undefined || v === '' ? '—' : String(v)
@@ -188,7 +197,7 @@ function CrmPanel({ detail }: { detail: DevicePlatformProbeDetail }) {
     <div className="rounded-lg border p-4 space-y-3 bg-muted/30">
       <div className="flex items-center gap-2">
         <Server className="size-4 text-muted-foreground" />
-        <p className="text-sm font-medium">CRM 主数据（探测快照时）</p>
+        <p className="text-sm font-medium">{title}</p>
       </div>
       <FieldGrid
         items={[
@@ -209,9 +218,131 @@ function CrmPanel({ detail }: { detail: DevicePlatformProbeDetail }) {
   )
 }
 
-function ProbeDetailBody({ detail }: { detail: DevicePlatformProbeDetail & { compareRows: ProbeCompareRow[] } }) {
+function LiveProbeApiSummary({ result }: { result: DevicePlatformProbeLiveResultDto }) {
+  const { apiFetch, bareMetalStale, matchFlags, fetchScope } = result
+  const hasError = Boolean(apiFetch.proxyError || apiFetch.k8sError)
+  const flagEntries = Object.entries(matchFlags)
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3 text-sm">
+      <p className="font-medium">平台 API 请求结果</p>
+      <p className="text-xs text-muted-foreground">
+        范围：机房 {fetchScope.dataCenterName} · 容器 region {fetchScope.containerInstanceRegion}
+      </p>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+        <div>
+          <dt className="text-muted-foreground text-xs">
+            GET /admin/device_info/list?idc_name={fetchScope.dataCenterName}
+          </dt>
+          <dd className="mt-0.5">
+            本机房 {apiFetch.proxyFetchedCount} 条
+            {apiFetch.proxyError ? (
+              <span className="text-destructive ml-1">（失败：{apiFetch.proxyError}）</span>
+            ) : (
+              <span className="text-muted-foreground ml-1">成功</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">
+            GET /admin/node_device/list?region={fetchScope.containerInstanceRegion}
+          </dt>
+          <dd className="mt-0.5">
+            本 region {apiFetch.k8sFetchedCount} 条
+            {apiFetch.k8sError ? (
+              <span className="text-destructive ml-1">（失败：{apiFetch.k8sError}）</span>
+            ) : (
+              <span className="text-muted-foreground ml-1">成功</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground text-xs">裸金属订单（本地 DB · 同机房）</dt>
+          <dd className="mt-0.5">
+            本机房 {apiFetch.bareMetalFetchedCount} 条
+            {bareMetalStale ? (
+              <span className="text-amber-600 dark:text-amber-400 ml-1">· 同步数据可能已过期</span>
+            ) : (
+              <span className="text-muted-foreground ml-1">· 数据在有效期内</span>
+            )}
+          </dd>
+        </div>
+        {flagEntries.length > 0 && (
+          <div>
+            <dt className="text-muted-foreground text-xs">匹配标记</dt>
+            <dd className="mt-0.5 font-mono text-xs break-all">
+              {flagEntries.map(([k, v]) => `${k}=${String(v)}`).join(' · ')}
+            </dd>
+          </div>
+        )}
+      </dl>
+      {hasError && (
+        <p className="text-xs text-muted-foreground">
+          部分 API 拉取失败时，仍会用已成功通道的数据进行比对。
+        </p>
+      )}
+    </div>
+  )
+}
+
+function LiveProbeResultSection({ result }: { result: DevicePlatformProbeLiveResultDto }) {
+  const r = result.detail.row
+
+  return (
+    <section className="space-y-4 rounded-lg border border-dashed border-primary/40 p-4 bg-primary/5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">实时探测结果</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            于 {formatProbeDateTime(result.probedAt)} 调用平台 API 重新比对（不写入快照）
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge variant={CONSISTENCY_FLAG_VARIANT[r.consistencyFlag]}>
+            {CONSISTENCY_FLAG_LABELS[r.consistencyFlag]}
+          </Badge>
+          <Badge variant="outline">{PROBE_STATUS_LABELS[r.probeStatus]}</Badge>
+        </div>
+      </div>
+
+      <p className="text-sm text-muted-foreground">{r.suggestedAction}</p>
+
+      <LiveProbeApiSummary result={result} />
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">实时关键字段横向比对</h3>
+        <CompareSection rows={result.detail.compareRows} />
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <CrmPanel detail={result.detail} title="CRM 主数据（当前）" />
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold">实时平台 API 抓取原文</h3>
+          <PlatformTabs detail={result.detail} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ProbeDetailBody({
+  detail,
+  probeId,
+}: {
+  detail: DevicePlatformProbeDetail & { compareRows: ProbeCompareRow[] }
+  probeId: string
+}) {
   const [changelogOpen, setChangelogOpen] = useState(false)
+  const [liveResult, setLiveResult] = useState<DevicePlatformProbeLiveResultDto | null>(null)
   const r = detail.row
+
+  const reprobeMutation = trpc.supplier.devicePlatformProbe.reprobeLive.useMutation({
+    onSuccess: (result) => {
+      setLiveResult(result)
+      toast.success('实时探测完成')
+    },
+    onError: (err) => toast.error(err.message),
+  })
 
   return (
     <>
@@ -228,15 +359,42 @@ function ProbeDetailBody({ detail }: { detail: DevicePlatformProbeDetail & { com
             快照 {formatSnapshotHourLabel(r.snapshotHour)} · {r.suggestedAction}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setChangelogOpen(true)}>
-          <History className="size-4 mr-2" />
-          设备变更记录
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => reprobeMutation.mutate({ id: probeId })}
+            disabled={reprobeMutation.isPending}
+          >
+            {reprobeMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin mr-2" />
+            ) : (
+              <RefreshCw className="size-4 mr-2" />
+            )}
+            实时重新探测
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setChangelogOpen(true)}>
+            <History className="size-4 mr-2" />
+            设备变更记录
+          </Button>
+        </div>
       </div>
+
+      {reprobeMutation.isPending && (
+        <Alert>
+          <Loader2 className="size-4 animate-spin" />
+          <AlertTitle>正在调用平台 API…</AlertTitle>
+          <AlertDescription>
+            正在按当前设备机房拉取 device_info / node_device 并与 CRM 主数据比对。
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {liveResult && <LiveProbeResultSection result={liveResult} />}
 
       <div className="space-y-6">
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold">关键字段横向比对</h2>
+          <h2 className="text-sm font-semibold">快照关键字段横向比对</h2>
           <CompareSection rows={detail.compareRows} />
         </section>
 
@@ -245,7 +403,7 @@ function ProbeDetailBody({ detail }: { detail: DevicePlatformProbeDetail & { com
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
           <CrmPanel detail={detail} />
           <section className="space-y-2">
-            <h2 className="text-sm font-semibold">平台 API 抓取原文</h2>
+            <h2 className="text-sm font-semibold">快照平台 API 抓取原文</h2>
             <PlatformTabs detail={detail} />
           </section>
         </div>
@@ -300,7 +458,7 @@ export function DevicePlatformProbeDetailContent({ probeId }: Props) {
           平台存在状态
         </Button>
       </Link>
-      <ProbeDetailBody detail={detail} />
+      <ProbeDetailBody detail={detail} probeId={probeId} />
     </div>
   )
 }

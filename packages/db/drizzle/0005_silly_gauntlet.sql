@@ -1,3 +1,17 @@
+CREATE TABLE "user_site_message" (
+	"id" text PRIMARY KEY NOT NULL,
+	"user_id" text NOT NULL,
+	"title" varchar(200) NOT NULL,
+	"summary" text NOT NULL,
+	"content" text NOT NULL,
+	"category" varchar(32),
+	"links" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"read" boolean DEFAULT false NOT NULL,
+	"read_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "bare_metal_order" (
 	"id" text PRIMARY KEY NOT NULL,
 	"platform_order_id" varchar(64),
@@ -113,6 +127,68 @@ CREATE TABLE "bare_metal_sync_state" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "device_platform_probe_job_run" (
+	"id" text PRIMARY KEY NOT NULL,
+	"trigger" varchar(16) NOT NULL,
+	"snapshot_hour" timestamp with time zone NOT NULL,
+	"started_at" timestamp with time zone NOT NULL,
+	"finished_at" timestamp with time zone,
+	"status" varchar(16) NOT NULL,
+	"inventory_device_count" integer DEFAULT 0 NOT NULL,
+	"proxy_fetched_count" integer DEFAULT 0 NOT NULL,
+	"k8s_fetched_count" integer DEFAULT 0 NOT NULL,
+	"bare_metal_hit_count" integer DEFAULT 0 NOT NULL,
+	"matched_proxy_count" integer DEFAULT 0 NOT NULL,
+	"matched_k8s_count" integer DEFAULT 0 NOT NULL,
+	"matched_bare_metal_count" integer DEFAULT 0 NOT NULL,
+	"ambiguous_count" integer DEFAULT 0 NOT NULL,
+	"missing_platform_count" integer DEFAULT 0 NOT NULL,
+	"error_summary" text
+);
+--> statement-breakpoint
+CREATE TABLE "device_platform_probe_snapshot" (
+	"id" text PRIMARY KEY NOT NULL,
+	"job_run_id" text NOT NULL,
+	"supplier_device_id" text NOT NULL,
+	"supplier_id" text NOT NULL,
+	"data_center_id" text,
+	"sn" varchar(64) NOT NULL,
+	"internal_ip" varchar(45),
+	"data_center_name" varchar(255),
+	"ops_status" varchar(64) NOT NULL,
+	"lifecycle_status" varchar(32) NOT NULL,
+	"snapshot_hour" timestamp with time zone NOT NULL,
+	"probe_status" varchar(32) NOT NULL,
+	"consistency_flag" varchar(32) NOT NULL,
+	"proxy_matched" boolean DEFAULT false NOT NULL,
+	"proxy_rent_status" varchar(64),
+	"proxy_is_container_instance" boolean,
+	"proxy_platform_device_id" varchar(64),
+	"k8s_matched" boolean DEFAULT false NOT NULL,
+	"k8s_device_name" varchar(255),
+	"k8s_region" varchar(128),
+	"bare_metal_matched" boolean DEFAULT false NOT NULL,
+	"bare_metal_order_no" varchar(64),
+	"bare_metal_order_status" varchar(32),
+	"suggested_action" text,
+	"match_flags" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"proxy_payload" jsonb,
+	"k8s_payload" jsonb,
+	"bare_metal_payload" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "device_platform_probe_state" (
+	"id" text PRIMARY KEY NOT NULL,
+	"last_run_at" timestamp with time zone,
+	"last_success_at" timestamp with time zone,
+	"last_snapshot_hour" timestamp with time zone,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+ALTER TABLE "supplier_device_change_log" ADD COLUMN "external_device_id" varchar(64);--> statement-breakpoint
+ALTER TABLE "supplier_device_change_log" ADD COLUMN "attachment_names" text;--> statement-breakpoint
+ALTER TABLE "user_site_message" ADD CONSTRAINT "user_site_message_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bare_metal_order" ADD CONSTRAINT "bare_metal_order_tenant_id_tenant_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenant"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bare_metal_order" ADD CONSTRAINT "bare_metal_order_customer_id_customer_id_fk" FOREIGN KEY ("customer_id") REFERENCES "public"."customer"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bare_metal_order" ADD CONSTRAINT "bare_metal_order_project_id_project_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."project"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -129,6 +205,12 @@ ALTER TABLE "bare_metal_order_import_batch" ADD CONSTRAINT "bare_metal_order_imp
 ALTER TABLE "bare_metal_order_import_batch" ADD CONSTRAINT "bare_metal_order_import_batch_created_by_staff_id_user_staff_id_fk" FOREIGN KEY ("created_by_staff_id") REFERENCES "public"."user_staff"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bare_metal_sync_job_item" ADD CONSTRAINT "bare_metal_sync_job_item_job_run_id_bare_metal_sync_job_run_id_fk" FOREIGN KEY ("job_run_id") REFERENCES "public"."bare_metal_sync_job_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "bare_metal_sync_job_item" ADD CONSTRAINT "bare_metal_sync_job_item_tenant_id_tenant_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenant"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_platform_probe_snapshot" ADD CONSTRAINT "device_platform_probe_snapshot_job_run_id_device_platform_probe_job_run_id_fk" FOREIGN KEY ("job_run_id") REFERENCES "public"."device_platform_probe_job_run"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_platform_probe_snapshot" ADD CONSTRAINT "device_platform_probe_snapshot_supplier_device_id_supplier_device_id_fk" FOREIGN KEY ("supplier_device_id") REFERENCES "public"."supplier_device"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_platform_probe_snapshot" ADD CONSTRAINT "device_platform_probe_snapshot_supplier_id_supplier_id_fk" FOREIGN KEY ("supplier_id") REFERENCES "public"."supplier"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_platform_probe_snapshot" ADD CONSTRAINT "device_platform_probe_snapshot_data_center_id_data_center_id_fk" FOREIGN KEY ("data_center_id") REFERENCES "public"."data_center"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "user_site_message_user_created_idx" ON "user_site_message" USING btree ("user_id","created_at");--> statement-breakpoint
+CREATE INDEX "user_site_message_user_read_idx" ON "user_site_message" USING btree ("user_id","read");--> statement-breakpoint
 CREATE UNIQUE INDEX "bare_metal_order_platform_order_id_uk" ON "bare_metal_order" USING btree ("platform_order_id") WHERE "bare_metal_order"."platform_order_id" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "bare_metal_order_order_no_uk" ON "bare_metal_order" USING btree ("order_no") WHERE "bare_metal_order"."order_no" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "bare_metal_order_tenant_ordered_idx" ON "bare_metal_order" USING btree ("tenant_id","ordered_at");--> statement-breakpoint
@@ -147,4 +229,120 @@ CREATE INDEX "bare_metal_order_import_batch_tenant_id_idx" ON "bare_metal_order_
 CREATE INDEX "bare_metal_sync_job_item_job_run_id_idx" ON "bare_metal_sync_job_item" USING btree ("job_run_id");--> statement-breakpoint
 CREATE INDEX "bare_metal_sync_job_item_platform_tenant_id_idx" ON "bare_metal_sync_job_item" USING btree ("platform_tenant_id");--> statement-breakpoint
 CREATE INDEX "bare_metal_sync_job_run_started_at_idx" ON "bare_metal_sync_job_run" USING btree ("started_at");--> statement-breakpoint
-CREATE INDEX "bare_metal_sync_job_run_status_idx" ON "bare_metal_sync_job_run" USING btree ("status");
+CREATE INDEX "bare_metal_sync_job_run_status_idx" ON "bare_metal_sync_job_run" USING btree ("status");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_job_run_started_at_idx" ON "device_platform_probe_job_run" USING btree ("started_at");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_job_run_status_idx" ON "device_platform_probe_job_run" USING btree ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "device_platform_probe_snapshot_device_hour_uk" ON "device_platform_probe_snapshot" USING btree ("supplier_device_id","snapshot_hour");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_snapshot_hour_supplier_idx" ON "device_platform_probe_snapshot" USING btree ("snapshot_hour","supplier_id");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_snapshot_hour_dc_idx" ON "device_platform_probe_snapshot" USING btree ("snapshot_hour","data_center_id");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_snapshot_hour_probe_status_idx" ON "device_platform_probe_snapshot" USING btree ("snapshot_hour","probe_status");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_snapshot_hour_consistency_idx" ON "device_platform_probe_snapshot" USING btree ("snapshot_hour","consistency_flag");--> statement-breakpoint
+CREATE INDEX "device_platform_probe_snapshot_device_hour_desc_idx" ON "device_platform_probe_snapshot" USING btree ("supplier_device_id","snapshot_hour");
+
+
+-- device platform probe: normalize helpers, latest view, UNLOGGED staging tables
+-- consumed by apps/web/src/lib/server/dataaccess/supplier/device-platform-probe-staging.ts
+
+CREATE OR REPLACE FUNCTION normalize_idc_key(input text) RETURNS text AS $$
+  SELECT CASE
+    WHEN input IS NULL OR btrim(input) = '' THEN NULL
+    ELSE lower(regexp_replace(btrim(input), '\s+', ' ', 'g'))
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION normalize_region_key(input text) RETURNS text AS $$
+  SELECT CASE
+    WHEN input IS NULL OR btrim(input) = '' THEN NULL
+    ELSE lower(btrim(input))
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION normalize_ip_host(input text) RETURNS text AS $$
+  SELECT CASE
+    WHEN input IS NULL OR btrim(input) = '' THEN NULL
+    WHEN btrim(input) ~ '^\[.+\]' THEN lower(substring(btrim(input) from 2 for position(']' in btrim(input)) - 2))
+    WHEN btrim(input) ~ '^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$' THEN lower(split_part(btrim(input), ':', 1))
+    ELSE lower(btrim(input))
+  END;
+$$ LANGUAGE sql IMMUTABLE;
+--> statement-breakpoint
+CREATE OR REPLACE VIEW device_platform_probe_latest AS
+SELECT DISTINCT ON (supplier_device_id)
+  *
+FROM device_platform_probe_snapshot
+ORDER BY supplier_device_id, snapshot_hour DESC;
+--> statement-breakpoint
+CREATE UNLOGGED TABLE device_platform_probe_staging_inventory (
+  job_run_id text NOT NULL,
+  supplier_device_id text NOT NULL,
+  supplier_id text NOT NULL,
+  data_center_id text,
+  internal_ip varchar(45),
+  ip_host text,
+  idc_key text,
+  region_key text,
+  bm_region_key text,
+  ops_status varchar(64) NOT NULL,
+  lifecycle_status varchar(32) NOT NULL,
+  in_maintenance boolean NOT NULL DEFAULT false,
+  sn varchar(64) NOT NULL,
+  data_center_name varchar(255),
+  external_ip varchar(45),
+  idc_code varchar(64),
+  gpu_card_type_name varchar(128),
+  gpu_count integer,
+  container_instance_region varchar(128),
+  bare_metal_region varchar(128)
+);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_inventory_job_idx ON device_platform_probe_staging_inventory (job_run_id);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_inventory_idc_ip_idx ON device_platform_probe_staging_inventory (job_run_id, idc_key, ip_host);
+--> statement-breakpoint
+CREATE UNLOGGED TABLE device_platform_probe_staging_proxy (
+  job_run_id text NOT NULL,
+  platform_device_id varchar(64),
+  idc_key text,
+  ip_host text,
+  raw_inner_ip varchar(45),
+  rent_status varchar(64),
+  is_container_instance boolean,
+  payload jsonb
+);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_proxy_job_idc_ip_idx ON device_platform_probe_staging_proxy (job_run_id, idc_key, ip_host);
+--> statement-breakpoint
+CREATE UNLOGGED TABLE device_platform_probe_staging_k8s (
+  job_run_id text NOT NULL,
+  platform_node_id varchar(64),
+  region_key text,
+  ip_host text,
+  raw_inner_ip varchar(45),
+  device_name varchar(255),
+  gpu_name varchar(128),
+  gpu_count integer,
+  hash varchar(128),
+  payload jsonb
+);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_k8s_job_region_ip_idx ON device_platform_probe_staging_k8s (job_run_id, region_key, ip_host);
+--> statement-breakpoint
+CREATE UNLOGGED TABLE device_platform_probe_staging_bare_metal (
+  job_run_id text NOT NULL,
+  bare_metal_order_id text,
+  bare_metal_order_device_id text,
+  bm_region_key text,
+  idc_key text,
+  ip_host text,
+  order_no varchar(64),
+  order_status varchar(32),
+  tenant_name varchar(255),
+  rent_ends_at timestamp with time zone,
+  payload jsonb
+);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_bm_job_region_ip_idx ON device_platform_probe_staging_bare_metal (job_run_id, bm_region_key, ip_host);
+--> statement-breakpoint
+CREATE INDEX device_platform_probe_staging_bm_job_idc_ip_idx ON device_platform_probe_staging_bare_metal (job_run_id, idc_key, ip_host);
+--> statement-breakpoint
+INSERT INTO device_platform_probe_state (id) VALUES ('default') ON CONFLICT DO NOTHING;

@@ -181,7 +181,13 @@ async function listSupplierDevicesForImport(
 function formatDeviceImportDbError(error: unknown): Error {
   const err = error as {
     message?: string
-    cause?: { code?: string; constraint?: string; detail?: string }
+    cause?: {
+      code?: string
+      constraint?: string
+      detail?: string
+      column?: string
+      table?: string
+    }
   }
   const pg = err?.cause
   if (pg?.code === '23505') {
@@ -196,7 +202,27 @@ function formatDeviceImportDbError(error: unknown): Error {
     }
     return new Error(`数据唯一性冲突，无法入库。${detail || pg.constraint || ''}`)
   }
-  if (error instanceof Error) return error
+  if (pg?.code === '22001') {
+    const table = pg.table === 'compute_node' ? '计算节点（compute_node）' : pg.table ?? '数据表'
+    return new Error(
+      `${table}字段内容过长，无法入库。${pg.detail ?? ''}（集群角色≤32字、预期集群提供服务≤255字、IP/管理IP≤45字）`.trim(),
+    )
+  }
+  if (pg?.code === '23502') {
+    const col = pg.column ? `列 ${pg.column}` : ''
+    return new Error(`必填字段为空，无法入库。${col} ${pg.detail ?? ''}`.trim())
+  }
+  if (pg?.code === '23503') {
+    return new Error(
+      `关联数据不存在，无法入库。${pg.detail ?? pg.constraint ?? ''}（若发生在 compute_node，请确认对应 supplier_device 已成功写入）`.trim(),
+    )
+  }
+  if (error instanceof Error) {
+    if (pg?.detail) {
+      return new Error(`${error.message} — ${pg.detail}`)
+    }
+    return error
+  }
   return new Error(String(error))
 }
 

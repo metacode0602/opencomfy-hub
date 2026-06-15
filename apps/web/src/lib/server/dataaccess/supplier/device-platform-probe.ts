@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { isNeedsActionConsistency } from '@/lib/server/dataaccess/supplier/device-platform-probe-consistency'
+import { countActiveCpuInventoryDevices } from '@/lib/server/dataaccess/supplier/device-platform-probe-staging'
 import { getDevicePlatformProbeConfig } from '@/lib/server/dataaccess/supplier/device-platform-probe-config'
 import type { DevicePlatformProbeListInput } from '@/lib/server/routers/supplier/device-platform-probe-schemas'
 import type {
@@ -189,12 +190,13 @@ export const devicePlatformProbeDataAccess = {
     stats: DevicePlatformProbeStatsDto
   }> {
     const snapshotHour = await resolveSnapshotHour(input.snapshotHour)
+    const cpuCount = await countActiveCpuInventoryDevices()
     if (!snapshotHour) {
       return {
         items: [],
         total: 0,
         snapshotHour: null,
-        stats: { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0 },
+        stats: { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0, cpuCount },
       }
     }
 
@@ -256,6 +258,7 @@ export const devicePlatformProbeDataAccess = {
         .filter((r) => isNeedsActionConsistency(r.consistencyFlag as never))
         .reduce((sum, r) => sum + Number(r.total), 0),
       notEvaluated: Number(statsRows.find((r) => r.consistencyFlag === 'not_evaluated')?.total ?? 0),
+      cpuCount,
     }
 
     return {

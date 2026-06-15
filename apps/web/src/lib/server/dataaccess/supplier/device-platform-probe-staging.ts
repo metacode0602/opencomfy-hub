@@ -1,7 +1,50 @@
 import { db } from '@/lib/db'
 import { endpointMatches } from '@/lib/supplier/ip-endpoint-utils'
 import type { StagedK8sRow, StagedProxyRow } from '@/lib/server/integrations/suanli-device-probe-api'
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
+
+/** 与 resolveGpuCardTypeRole === 'infra' 口径一致（device_role 或名称/编码含 cpu） */
+export function sqlIsInfraGpuCardType(gctAlias = 'gct'): SQL {
+  return sql.raw(`
+    COALESCE(${gctAlias}.device_role, 'compute') = 'infra'
+    OR LOWER(COALESCE(${gctAlias}.name, '') || ' ' || COALESCE(${gctAlias}.code, '')) LIKE '%cpu%'
+  `)
+}
+
+export async function countActiveCpuInventoryDevices(): Promise<number> {
+  const result = await db.execute<{ count: string }>(sql`
+    SELECT count(*)::text AS count
+    FROM supplier_device sd
+    LEFT JOIN gpu_card_type gct ON gct.id = sd.gpu_card_type_id
+    WHERE sd.lifecycle_status <> '退订'
+      AND sd.ops_status <> '已退订'
+      AND (${sqlIsInfraGpuCardType()})
+  `)
+  return Number(result.rows[0]?.count ?? 0)
+}
+
+/** 与 activeInventoryDeviceFilter 排除口径一致 */
+export function sqlIsRetiredSupplierDevice(sdAlias = 'sd'): SQL {
+  return sql.raw(`
+    ${sdAlias}.lifecycle_status = '退订'
+    OR ${sdAlias}.ops_status = '已退订'
+  `)
+}
+
+/** 移除当前快照小时内不应参与比对的设备行（已退订、CPU/infra） */
+export async function purgeExcludedDeviceSnapshots(snapshotHour: Date): Promise<void> {
+  await db.execute(sql`
+    DELETE FROM device_platform_probe_snapshot dps
+    USING supplier_device sd
+    LEFT JOIN gpu_card_type gct ON gct.id = sd.gpu_card_type_id
+    WHERE dps.supplier_device_id = sd.id
+      AND dps.snapshot_hour = ${snapshotHour}
+      AND (
+        (${sqlIsRetiredSupplierDevice()})
+        OR (${sqlIsInfraGpuCardType()})
+      )
+  `)
+}
 
 export type StagedInventoryRow = {
   supplierDeviceId: string
@@ -87,6 +130,7 @@ export async function insertStagingInventory(jobRunId: string): Promise<number> 
       LEFT JOIN gpu_card_type gct ON gct.id = sd.gpu_card_type_id
       WHERE sd.lifecycle_status <> '退订'
         AND sd.ops_status <> '已退订'
+        AND NOT (${sqlIsInfraGpuCardType()})
       RETURNING 1
     )
     SELECT count(*)::text AS count FROM inserted

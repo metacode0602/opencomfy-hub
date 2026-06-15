@@ -112,7 +112,7 @@ export function DevicePlatformProbeContent() {
     onError: (err) => toast.error(err.message),
   })
 
-  const stats = data?.stats ?? { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0 }
+  const stats = data?.stats ?? { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0, cpuCount: 0 }
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -182,11 +182,17 @@ export function DevicePlatformProbeContent() {
           </Alert>
         )}
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
           <Card>
             <CardContent className="p-4">
               <p className="text-2xl font-semibold">{stats.total}</p>
-              <p className="text-xs text-muted-foreground">库存设备（本快照）</p>
+              <p className="text-xs text-muted-foreground">算力设备（本快照）</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-2xl font-semibold text-muted-foreground">{stats.cpuCount}</p>
+              <p className="text-xs text-muted-foreground">CPU 设备（不参与比对）</p>
             </CardContent>
           </Card>
           <Card>

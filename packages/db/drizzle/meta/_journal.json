@@ -40,29 +40,15 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1781496338768,
-      "tag": "0005_old_marvel_zombies",
+      "when": 1781516030664,
+      "tag": "0005_silly_gauntlet",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1781500658940,
-      "tag": "0006_perpetual_millenium_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
       "when": 1781600000000,
-      "tag": "0007_device_platform_probe",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1781515517405,
-      "tag": "0008_lowly_hiroim",
+      "tag": "0006_device_platform_probe_staging",
       "breakpoints": true
     }
   ]
