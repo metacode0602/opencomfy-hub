@@ -308,6 +308,56 @@ export async function fetchPlatformMetalOrders(input: {
   return rows.filter((r) => r.order_no)
 }
 
+/** 全平台裸金属订单列表（不按租户过滤） */
+export async function fetchPlatformMetalOrdersGlobal(input: {
+  traceId: string
+}): Promise<PlatformMetalOrderRecord[]> {
+  const rows = await fetchAllPages<PlatformMetalOrderRecord>(
+    'metal_orders_global',
+    input.traceId,
+    async (page) => {
+      const data = await throttledPost<unknown>('metal_orders_global', '/admin/metal_order/list', {
+        page,
+        page_size: PAGE_SIZE,
+        // condition: "", status: "", idc_ids: "", is_paid: true, start_time: "", end_time: ""
+        conditional: {
+          condition: '',
+          idc_ids: '',
+          status: '',
+          is_paid: true,
+          start_time: '',
+          end_time: '',
+        },
+      })
+      console.log('metal_orders_global data:', data)
+      const parsed = paginatedSchema.safeParse(data)
+      if (!parsed.success) {
+        throw new SuanliBillingApiError('裸金属订单全量列表返回格式异常')
+      }
+      const results = (parsed.data.results ?? []).map((row) => {
+        const gpu = z.array(gpuModelSchema).optional().parse(row.gpu_models)
+        return {
+          order_id: Number(row.order_id),
+          order_no: String(row.order_no ?? ''),
+          status: String(row.status ?? ''),
+          tenant_id: Number(row.tenant_id),
+          buy_count: row.buy_count != null ? Number(row.buy_count) : undefined,
+          device_count: row.device_count != null ? Number(row.device_count) : undefined,
+          total_price: Number(row.total_price ?? 0),
+          create_time: String(row.create_time ?? ''),
+          billing_type: row.billing_type != null ? String(row.billing_type) : undefined,
+          idc_name: row.idc_name != null ? String(row.idc_name) : undefined,
+          gpu_models: gpu,
+          is_paid: row.is_paid === true,
+        } satisfies PlatformMetalOrderRecord
+      })
+      return { count: parsed.data.count ?? undefined, results }
+    },
+  )
+
+  return rows.filter((r) => r.order_no && Number.isFinite(r.tenant_id))
+}
+
 export async function fetchPlatformMonthlyBills(input: {
   platformTenantId: string
   startDate?: string

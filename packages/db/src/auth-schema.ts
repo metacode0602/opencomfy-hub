@@ -262,3 +262,50 @@ export enum Role {
   Admin = 'admin',
   Member = 'member',
 }
+
+export type SiteMessageLinkRecord = {
+  label: string
+  href: string
+  external?: boolean
+}
+
+/**
+ * CRM 用户站内信（收件箱）
+ */
+export const userSiteMessage = pgTable(
+  'user_site_message',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 200 }).notNull(),
+    summary: text('summary').notNull(),
+    content: text('content').notNull(),
+    category: varchar('category', { length: 32 }),
+    links: jsonb('links').$type<SiteMessageLinkRecord[]>().notNull().default([]),
+    read: boolean('read').notNull().default(false),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    index('user_site_message_user_created_idx').on(table.userId, table.createdAt),
+    index('user_site_message_user_read_idx').on(table.userId, table.read),
+  ],
+)
+
+export const userSiteMessageRelations = relations(userSiteMessage, ({ one }) => ({
+  user: one(user, {
+    fields: [userSiteMessage.userId],
+    references: [user.id],
+  }),
+}))
+
+export type UserSiteMessage = typeof userSiteMessage.$inferSelect
+export type NewUserSiteMessage = typeof userSiteMessage.$inferInsert

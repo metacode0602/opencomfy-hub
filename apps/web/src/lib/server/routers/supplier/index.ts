@@ -103,6 +103,7 @@ import {
   supplierDataCleanupPreviewSchema,
 } from '@/lib/server/routers/supplier/data-cleanup-schemas'
 import { supplyChainLeadsDataAccess } from '@/lib/server/dataaccess/supplier/supply-chain-leads'
+import { bareMetalOrderDataAccess } from '@/lib/server/dataaccess/supplier/bare-metal-order'
 import {
   supplyChainLeadActivityCreateSchema,
   supplyChainLeadActivityUpdateSchema,
@@ -111,6 +112,9 @@ import {
   supplyChainLeadUpdateSchema,
   supplyChainLeadUpdateStatusSchema,
 } from '@/lib/server/routers/supplier/supply-chain-leads-schemas'
+import {
+  bareMetalOrderListSchema,
+} from '@/lib/server/routers/supplier/bare-metal-order-schemas'
 import { adminProcedure, createTRPCRouter, supplyProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -1613,6 +1617,30 @@ export const supplierRouter = createTRPCRouter({
             user: ctx.user,
           })
           return { ok: true as const }
+        } catch (e) {
+          mapImportError(e)
+        }
+      }),
+  }),
+
+  bareMetalOrder: createTRPCRouter({
+    list: supplyProcedure.input(bareMetalOrderListSchema).query(async ({ input }) => {
+      try {
+        return await bareMetalOrderDataAccess.list(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+    getById: supplyProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(async ({ input }) => {
+        try {
+          const row = await bareMetalOrderDataAccess.getById(input.id)
+          if (!row) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: '裸金属订单不存在' })
+          }
+          return row
         } catch (e) {
           mapImportError(e)
         }

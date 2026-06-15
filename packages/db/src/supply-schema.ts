@@ -3,7 +3,8 @@
  *
  * 设计依据：apps/web/content/design/supplier-database.md（v1.2）、
  *   supplier-onboarding-plan-changelog-tracking-design.md（v2.2）、
- *   supplier-device-import-schema.md（v1.1）
+ *   supplier-device-import-schema.md（v1.1）、
+ *   bare-metal-order-schema-design.md（v1.3）
  * 领域模型：Supplier → DataCenter → Device / GPU Inventory；合同与刊例价/成交价；接入批次
  *
  * 约定：
@@ -30,7 +31,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core"
 
-import { userStaff } from "./crm-schema"
+import { billingTenant, commerceOrder, crmProject, customer, userStaff } from "./crm-schema"
 
 /** 金额 decimal(15,4) */
 const money = (name: string) => numeric(name, { precision: 15, scale: 4 })
@@ -1161,7 +1162,202 @@ export const supplierBillDetail = pgTable(
 )
 
 // ---------------------------------------------------------------------------
-// §3.8 供应商活动时间线
+// §3.8 租户裸金属订单（bare-metal-order-schema-design.md v1.3）
+// ---------------------------------------------------------------------------
+
+export const bareMetalOrderImportBatch = pgTable(
+  "bare_metal_order_import_batch",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => crmProject.id, { onDelete: "restrict" }),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    bareMetalOrderId: text("bare_metal_order_id").references((): AnyPgColumn => bareMetalOrder.id, {
+      onDelete: "set null",
+    }),
+    fileName: varchar("file_name", { length: 255 }).notNull(),
+    fileUri: varchar("file_uri", { length: 1024 }),
+    fileHash: varchar("file_hash", { length: 64 }),
+    rowCount: integer("row_count").notNull().default(0),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("bare_metal_order_import_batch_project_id_idx").on(table.projectId),
+    index("bare_metal_order_import_batch_tenant_id_idx").on(table.tenantId),
+  ],
+)
+
+export const bareMetalOrder = pgTable(
+  "bare_metal_order",
+  {
+    id: text("id").primaryKey(),
+    platformOrderId: varchar("platform_order_id", { length: 64 }),
+    orderNo: varchar("order_no", { length: 128 }),
+    orderMark: varchar("order_mark", { length: 16 }).notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => billingTenant.id, { onDelete: "restrict" }),
+    platformTenantId: varchar("platform_tenant_id", { length: 128 }).notNull(),
+    customerId: text("customer_id").references(() => customer.id, { onDelete: "set null" }),
+    projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, { onDelete: "set null" }),
+    supplierId: text("supplier_id").references(() => supplier.id, { onDelete: "set null" }),
+    idcCode: varchar("idc_code", { length: 64 }),
+    idcName: varchar("idc_name", { length: 128 }),
+    status: varchar("status", { length: 32 }).notNull(),
+    payStatus: varchar("pay_status", { length: 32 }).notNull(),
+    billingUnit: varchar("billing_unit", { length: 16 }).notNull(),
+    purchaseQty: integer("purchase_qty"),
+    purchaseQtyText: varchar("purchase_qty_text", { length: 128 }),
+    deviceCount: integer("device_count").notNull().default(0),
+    gpuCount: integer("gpu_count").notNull().default(0),
+    orderAmount: money("order_amount"),
+    refundAmount: money("refund_amount").notNull().default("0"),
+    finalAmount: money("final_amount").notNull(),
+    balanceAmount: money("balance_amount").notNull().default("0"),
+    couponAmount: money("coupon_amount").notNull().default("0"),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }).notNull(),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    rentStartsAt: timestamp("rent_starts_at", { withTimezone: true }),
+    rentEndsAt: timestamp("rent_ends_at", { withTimezone: true }),
+    importBatchId: text("import_batch_id").references(() => bareMetalOrderImportBatch.id, {
+      onDelete: "set null",
+    }),
+    commerceOrderId: text("commerce_order_id").references(() => commerceOrder.id, {
+      onDelete: "set null",
+    }),
+    source: varchar("source", { length: 32 }).notNull().default("platform_sync"),
+    platformPayload: jsonb("platform_payload").notNull().default({}),
+    matchFlags: jsonb("match_flags").notNull().default({}),
+    remark: text("remark"),
+    ...supplyTimestamps,
+  },
+  (table) => [
+    uniqueIndex("bare_metal_order_platform_order_id_uk")
+      .on(table.platformOrderId)
+      .where(sql`${table.platformOrderId} IS NOT NULL`),
+    uniqueIndex("bare_metal_order_order_no_uk")
+      .on(table.orderNo)
+      .where(sql`${table.orderNo} IS NOT NULL`),
+    index("bare_metal_order_tenant_ordered_idx").on(table.tenantId, table.orderedAt),
+    index("bare_metal_order_project_ordered_idx").on(table.projectId, table.orderedAt),
+    index("bare_metal_order_data_center_idx").on(table.dataCenterId),
+    index("bare_metal_order_status_idx").on(table.status),
+    index("bare_metal_order_order_mark_idx").on(table.orderMark),
+    index("bare_metal_order_ordered_at_idx").on(table.orderedAt),
+  ],
+)
+
+export const bareMetalOrderDevice = pgTable(
+  "bare_metal_order_device",
+  {
+    id: text("id").primaryKey(),
+    bareMetalOrderId: text("bare_metal_order_id")
+      .notNull()
+      .references(() => bareMetalOrder.id, { onDelete: "cascade" }),
+    lineNo: integer("line_no").notNull(),
+    allocationStatus: varchar("allocation_status", { length: 32 }).notNull().default("planned"),
+    gpuCardTypeId: text("gpu_card_type_id").references(() => gpuCardType.id, {
+      onDelete: "set null",
+    }),
+    deviceModelText: varchar("device_model_text", { length: 128 }),
+    gpuCount: integer("gpu_count").notNull().default(0),
+    platformDeviceId: varchar("platform_device_id", { length: 128 }),
+    supplierDeviceId: text("supplier_device_id").references(() => supplierDevice.id, {
+      onDelete: "set null",
+    }),
+    deviceStatus: varchar("device_status", { length: 32 }),
+    sn: varchar("sn", { length: 64 }),
+    assetNo: varchar("asset_no", { length: 64 }),
+    externalIp: varchar("external_ip", { length: 45 }),
+    internalIp: varchar("internal_ip", { length: 45 }),
+    lineAmount: money("line_amount"),
+    durationHours: money("duration_hours"),
+    unitPricePerCardHour: money("unit_price_per_card_hour"),
+    rentStartsAt: timestamp("rent_starts_at", { withTimezone: true }),
+    rentEndsAt: timestamp("rent_ends_at", { withTimezone: true }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    platformPayload: jsonb("platform_payload").notNull().default({}),
+    matchFlags: jsonb("match_flags").notNull().default({}),
+    ...supplyTimestamps,
+  },
+  (table) => [
+    uniqueIndex("bare_metal_order_device_order_line_uk").on(
+      table.bareMetalOrderId,
+      table.lineNo,
+    ),
+    index("bare_metal_order_device_order_id_idx").on(table.bareMetalOrderId),
+    index("bare_metal_order_device_supplier_device_idx").on(table.supplierDeviceId),
+    uniqueIndex("bare_metal_order_device_platform_device_uk")
+      .on(table.platformDeviceId)
+      .where(sql`${table.platformDeviceId} IS NOT NULL`),
+    index("bare_metal_order_device_gpu_card_type_idx").on(table.gpuCardTypeId),
+  ],
+)
+
+export const bareMetalSyncJobRun = pgTable(
+  "bare_metal_sync_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 16 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 16 }).notNull(),
+    ordersFetchedCount: integer("orders_fetched_count").notNull().default(0),
+    unknownTenantCount: integer("unknown_tenant_count").notNull().default(0),
+    tenantsAutoImportedCount: integer("tenants_auto_imported_count").notNull().default(0),
+    billingSyncTenantCount: integer("billing_sync_tenant_count").notNull().default(0),
+    orderUpsertedCount: integer("order_upserted_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("bare_metal_sync_job_run_started_at_idx").on(table.startedAt),
+    index("bare_metal_sync_job_run_status_idx").on(table.status),
+  ],
+)
+
+export const bareMetalSyncJobItem = pgTable(
+  "bare_metal_sync_job_item",
+  {
+    id: text("id").primaryKey(),
+    jobRunId: text("job_run_id")
+      .notNull()
+      .references(() => bareMetalSyncJobRun.id, { onDelete: "cascade" }),
+    platformTenantId: varchar("platform_tenant_id", { length: 128 }).notNull(),
+    tenantId: text("tenant_id").references(() => billingTenant.id, { onDelete: "set null" }),
+    phase: varchar("phase", { length: 32 }).notNull(),
+    status: varchar("status", { length: 16 }).notNull(),
+    orderCount: integer("order_count").notNull().default(0),
+    errorMessage: text("error_message"),
+  },
+  (table) => [
+    index("bare_metal_sync_job_item_job_run_id_idx").on(table.jobRunId),
+    index("bare_metal_sync_job_item_platform_tenant_id_idx").on(table.platformTenantId),
+  ],
+)
+
+export const bareMetalSyncState = pgTable("bare_metal_sync_state", {
+  id: text("id").primaryKey(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+// ---------------------------------------------------------------------------
+// §3.9 供应商活动时间线
 // ---------------------------------------------------------------------------
 
 export const supplierActivityTypeDefinition = pgTable(
@@ -1610,6 +1806,82 @@ export const supplierActivityRelations = relations(supplierActivity, ({ one, man
   attachments: many(supplierActivityAttachment),
 }))
 
+export const bareMetalOrderImportBatchRelations = relations(
+  bareMetalOrderImportBatch,
+  ({ one }) => ({
+    project: one(crmProject, {
+      fields: [bareMetalOrderImportBatch.projectId],
+      references: [crmProject.id],
+    }),
+    tenant: one(billingTenant, {
+      fields: [bareMetalOrderImportBatch.tenantId],
+      references: [billingTenant.id],
+    }),
+    bareMetalOrder: one(bareMetalOrder, {
+      fields: [bareMetalOrderImportBatch.bareMetalOrderId],
+      references: [bareMetalOrder.id],
+    }),
+    createdBy: one(userStaff, {
+      fields: [bareMetalOrderImportBatch.createdByStaffId],
+      references: [userStaff.id],
+    }),
+  }),
+)
+
+export const bareMetalOrderRelations = relations(bareMetalOrder, ({ one, many }) => ({
+  tenant: one(billingTenant, {
+    fields: [bareMetalOrder.tenantId],
+    references: [billingTenant.id],
+  }),
+  project: one(crmProject, {
+    fields: [bareMetalOrder.projectId],
+    references: [crmProject.id],
+  }),
+  customer: one(customer, {
+    fields: [bareMetalOrder.customerId],
+    references: [customer.id],
+  }),
+  dataCenter: one(dataCenter, {
+    fields: [bareMetalOrder.dataCenterId],
+    references: [dataCenter.id],
+  }),
+  importBatch: one(bareMetalOrderImportBatch, {
+    fields: [bareMetalOrder.importBatchId],
+    references: [bareMetalOrderImportBatch.id],
+  }),
+  devices: many(bareMetalOrderDevice),
+}))
+
+export const bareMetalOrderDeviceRelations = relations(bareMetalOrderDevice, ({ one }) => ({
+  bareMetalOrder: one(bareMetalOrder, {
+    fields: [bareMetalOrderDevice.bareMetalOrderId],
+    references: [bareMetalOrder.id],
+  }),
+  gpuCardType: one(gpuCardType, {
+    fields: [bareMetalOrderDevice.gpuCardTypeId],
+    references: [gpuCardType.id],
+  }),
+  supplierDevice: one(supplierDevice, {
+    fields: [bareMetalOrderDevice.supplierDeviceId],
+    references: [supplierDevice.id],
+  }),
+}))
+
+export const bareMetalSyncJobRunRelations = relations(bareMetalSyncJobRun, ({ many }) => ({
+  items: many(bareMetalSyncJobItem),
+}))
+
+export const bareMetalSyncJobItemRelations = relations(bareMetalSyncJobItem, ({ one }) => ({
+  jobRun: one(bareMetalSyncJobRun, {
+    fields: [bareMetalSyncJobItem.jobRunId],
+    references: [bareMetalSyncJobRun.id],
+  }),
+  tenant: one(billingTenant, {
+    fields: [bareMetalSyncJobItem.tenantId],
+    references: [billingTenant.id],
+  }),
+}))
+
 // ---------------------------------------------------------------------------
 // 类型导出
 // ---------------------------------------------------------------------------
@@ -1627,6 +1899,12 @@ export type SupplierDeviceChangeLogRow = typeof supplierDeviceChangeLog.$inferSe
 export type LifecycleStateDefinitionRow = typeof lifecycleStateDefinition.$inferSelect
 export type SupplierOpsUploadBatchRow = typeof supplierOpsUploadBatch.$inferSelect
 export type SupplierUnitCostRow = typeof supplierUnitCost.$inferSelect
+export type BareMetalOrderRow = typeof bareMetalOrder.$inferSelect
+export type NewBareMetalOrderRow = typeof bareMetalOrder.$inferInsert
+export type BareMetalOrderDeviceRow = typeof bareMetalOrderDevice.$inferSelect
+export type NewBareMetalOrderDeviceRow = typeof bareMetalOrderDevice.$inferInsert
+export type BareMetalOrderImportBatchRow = typeof bareMetalOrderImportBatch.$inferSelect
+export type BareMetalSyncJobRunRow = typeof bareMetalSyncJobRun.$inferSelect
 export type SupplierGpuInventoryRow = typeof supplierGpuInventory.$inferSelect
 export type InternalTestHoldRow = typeof internalTestHold.$inferSelect
 export type InternalTestHoldDeviceLinkRow = typeof internalTestHoldDeviceLink.$inferSelect

@@ -40,6 +40,9 @@ import { projectRevenueDepartmentDataAccess } from '@/lib/server/dataaccess/crm/
 import { projectOpportunitySourceDataAccess } from '@/lib/server/dataaccess/crm/project-opportunity-source'
 import { projectConversionSettingDataAccess } from '@/lib/server/dataaccess/crm/project-conversion-setting'
 import { projectCommissionPhaseDataAccess } from '@/lib/server/dataaccess/crm/project-commission-phase'
+import { bareMetalOrderOfflineImportDataAccess } from '@/lib/server/dataaccess/crm/bare-metal-order-offline-import'
+import { bareMetalOrderDataAccess } from '@/lib/server/dataaccess/supplier/bare-metal-order'
+import { bareMetalOrderSyncSettingsDataAccess } from '@/lib/server/dataaccess/supplier/bare-metal-order-sync-settings'
 import {
   SuanliBillingApiError,
   tenantBillingImportDataAccess,
@@ -611,6 +614,49 @@ export const crmRouter = createTRPCRouter({
     listMonthlyBills: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => billingDataAccess.listMonthlyBillsByProject(input.projectId)),
+    listBareMetalOrders: crmScopedProcedure
+      .input(z.object({ projectId: z.string() }))
+      .query(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.projectId)
+        return bareMetalOrderDataAccess.listByProject(input.projectId)
+      }),
+    previewOfflineBareMetalOrders: adminProcedure
+      .input(
+        z.object({
+          projectId: z.string().min(1),
+          tenantId: z.string().min(1),
+          fileName: z.string().min(1),
+          fileBase64: z.string().min(1),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const crmScope = await resolveCrmDataScope(ctx.user)
+          await assertProjectInScope(crmScope, input.projectId)
+          return await bareMetalOrderOfflineImportDataAccess.preview(input)
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '预览失败' })
+        }
+      }),
+    commitOfflineBareMetalOrders: adminProcedure
+      .input(z.object({ previewToken: z.string().min(1) }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const staffId = await staffDataAccess.resolveStaffIdForAuthUser(ctx.user)
+          return await bareMetalOrderOfflineImportDataAccess.commit({
+            previewToken: input.previewToken,
+            operatorStaffId: staffId,
+          })
+        } catch (e) {
+          if (e instanceof Error) {
+            throw new TRPCError({ code: 'BAD_REQUEST', message: e.message })
+          }
+          throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '导入失败' })
+        }
+      }),
     previewTenantProjectImport: adminProcedure
       .input(
         z.object({
@@ -902,7 +948,23 @@ export const crmRouter = createTRPCRouter({
   }),
 
   dashboard: createTRPCRouter({
-    summary: crmScopedProcedure.query(({ ctx }) => dashboardDataAccess.summary(ctx.crmScope)),
+    summary: crmScopedProcedure
+      .input(
+        z
+          .object({
+            startDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+            endDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+            preset: z.enum(['today', 'last7days', 'thisMonth', 'custom']).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input, ctx }) => dashboardDataAccess.summary(ctx.crmScope, input)),
     recentProjects: crmScopedProcedure
       .input(z.object({ limit: z.number().int().min(1).max(20).optional() }).optional())
       .query(({ input, ctx }) => dashboardDataAccess.recentProjects(input?.limit, ctx.crmScope)),
@@ -916,13 +978,38 @@ export const crmRouter = createTRPCRouter({
 
   analytics: createTRPCRouter({
     consumptionTrend: crmScopedProcedure
-      .input(z.object({ months: z.number().int().min(1).max(24).optional() }).optional())
-      .query(({ input, ctx }) => dashboardDataAccess.consumptionTrend(input?.months, ctx.crmScope)),
+      .input(
+        z
+          .union([
+            z.object({ months: z.number().int().min(1).max(24).optional() }),
+            z.object({
+              startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+              endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+            }),
+          ])
+          .optional(),
+      )
+      .query(({ input, ctx }) => dashboardDataAccess.consumptionTrend(input, ctx.crmScope)),
     productLineBreakdown: crmScopedProcedure
-      .input(z.object({ usageMonth: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional())
-      .query(({ input, ctx }) =>
-        dashboardDataAccess.productLineBreakdown(input?.usageMonth, ctx.crmScope),
-      ),
+      .input(
+        z
+          .object({
+            usageMonth: z
+              .string()
+              .regex(/^\d{4}-\d{2}$/)
+              .optional(),
+            startDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+            endDate: z
+              .string()
+              .regex(/^\d{4}-\d{2}-\d{2}$/)
+              .optional(),
+          })
+          .optional(),
+      )
+      .query(({ input, ctx }) => dashboardDataAccess.productLineBreakdown(input, ctx.crmScope)),
   }),
 
   calendar: createTRPCRouter({
@@ -1074,5 +1161,23 @@ export const crmRouter = createTRPCRouter({
     getRunById: adminProcedure
       .input(z.object({ id: z.string().min(1) }))
       .query(({ input }) => balanceSnapshotDataAccess.getRunById(input.id)),
+  }),
+
+  bareMetalOrderSync: createTRPCRouter({
+    getConfig: adminProcedure.query(() => bareMetalOrderSyncSettingsDataAccess.getConfig()),
+    runNow: adminProcedure.mutation(() => bareMetalOrderSyncSettingsDataAccess.runNow()),
+    listRuns: adminProcedure
+      .input(
+        z
+          .object({
+            limit: z.number().int().min(1).max(100).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => bareMetalOrderSyncSettingsDataAccess.listRuns(input)),
+    getRunById: adminProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(({ input }) => bareMetalOrderSyncSettingsDataAccess.getRunById(input.id)),
   }),
 })

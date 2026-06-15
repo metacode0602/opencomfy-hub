@@ -91,6 +91,7 @@ async function loadMonthlyRechargeByTenantIds(tenantIds: string[], usageMonth: s
     .where(
       and(
         inArray(recharge.tenantId, tenantIds),
+        eq(recharge.status, 'paid'),
         isNotNull(recharge.completedAt),
         gte(recharge.completedAt, start),
         lt(recharge.completedAt, new Date(end.getTime() + 1)),
@@ -110,7 +111,13 @@ async function loadFirstRechargeAtByTenantIds(tenantIds: string[]) {
       firstRechargeAt: min(recharge.completedAt),
     })
     .from(recharge)
-    .where(and(inArray(recharge.tenantId, tenantIds), isNotNull(recharge.completedAt)))
+    .where(
+      and(
+        inArray(recharge.tenantId, tenantIds),
+        eq(recharge.status, 'paid'),
+        isNotNull(recharge.completedAt),
+      ),
+    )
     .groupBy(recharge.tenantId)
 
   return new Map(

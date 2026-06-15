@@ -2,14 +2,21 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { Skeleton } from '@workspace/ui/components/skeleton'
+import { formatWorkbenchPeriodLabel } from '@/lib/crm/workbench-date-range'
 import { productLineNames } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { WORKBENCH_CHART_COLORS, WORKBENCH_TOOLTIP_STYLE } from './chart-utils'
+import { useWorkbenchPeriod } from './workbench-period-context'
 
 export function WorkbenchProductLineCard() {
-  const { data: productLineRaw = [], isLoading } =
-    trpc.crm.analytics.productLineBreakdown.useQuery({})
+  const { queryInput } = useWorkbenchPeriod()
+  const { data: productLineRaw = [], isLoading } = trpc.crm.analytics.productLineBreakdown.useQuery(
+    {
+      startDate: queryInput.startDate,
+      endDate: queryInput.endDate,
+    },
+  )
 
   const productLineData = productLineRaw.map((entry, index) => ({
     name: productLineNames[entry.name] ?? entry.name,
@@ -17,17 +24,22 @@ export function WorkbenchProductLineCard() {
     color: WORKBENCH_CHART_COLORS[index % WORKBENCH_CHART_COLORS.length]!,
   }))
 
+  const subtitle = formatWorkbenchPeriodLabel(queryInput.startDate, queryInput.endDate)
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base font-medium">产品线消费分布</CardTitle>
+        <div>
+          <CardTitle className="text-base font-medium">产品线消费分布</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
+        </div>
       </CardHeader>
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-[240px] w-full" />
         ) : productLineData.length === 0 ? (
           <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">
-            本月暂无消费数据
+            该时段暂无消费数据
           </div>
         ) : (
           <div className="h-[240px]">

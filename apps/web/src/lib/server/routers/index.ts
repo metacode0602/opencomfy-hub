@@ -9,6 +9,7 @@ import { crmRouter } from './crm'
 import { financeRouter } from './finance'
 import { merchantRouter } from './merchant'
 import { supplierRouter } from './supplier'
+import { siteMessagesRouter } from './web/site-messages'
 
 export * from './trpc'
 export type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
@@ -23,6 +24,7 @@ export const appRouter = router({
   finance: financeRouter,
   merchant: merchantRouter,
   supplier: supplierRouter,
+  siteMessages: siteMessagesRouter,
   // Admin routes
   admin: router({
   }),

@@ -95,7 +95,12 @@ export function AnalyticsContent() {
   const [period, setPeriod] = useState('month')
   const { data: summary } = trpc.crm.dashboard.summary.useQuery()
   const { data: productLineRaw = [] } = trpc.crm.analytics.productLineBreakdown.useQuery()
-  const { data: monthlyTrend = [] } = trpc.crm.analytics.consumptionTrend.useQuery()
+  const { data: monthlyTrendRaw = [] } = trpc.crm.analytics.consumptionTrend.useQuery()
+  const monthlyTrend = monthlyTrendRaw.map((row) =>
+    'month' in row
+      ? { month: row.month, consumption: row.consumption }
+      : { month: row.date.slice(0, 7), consumption: row.consumption },
+  )
 
   const productLineData = productLineRaw.map((p, i) => ({
     name: p.name,

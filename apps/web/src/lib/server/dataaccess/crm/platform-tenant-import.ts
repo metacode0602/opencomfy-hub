@@ -375,4 +375,130 @@ export const platformTenantImportDataAccess = {
       errors,
     }
   },
+
+  /** cron 裸金属同步：未知平台租户自动建档（无人工确认） */
+  async autoImportTenantsForBareMetalSync(
+    platformTenantIds: string[],
+    traceId: string,
+  ): Promise<{
+    tenantIdByPlatformId: Map<string, string>
+    importedCount: number
+    errors: Array<{ platformTenantId: string; message: string }>
+  }> {
+    const uniqueIds = [...new Set(platformTenantIds.map((id) => id.trim()).filter(Boolean))]
+    if (uniqueIds.length === 0) {
+      return { tenantIdByPlatformId: new Map(), importedCount: 0, errors: [] }
+    }
+
+    const localMap = await loadLocalTenantsByPlatformIds(uniqueIds)
+    const tenantIdByPlatformId = new Map<string, string>()
+    for (const [platformId, local] of localMap) {
+      tenantIdByPlatformId.set(platformId, local.tenantId)
+    }
+
+    const missing = uniqueIds.filter((id) => !tenantIdByPlatformId.has(id))
+    if (missing.length === 0) {
+      return { tenantIdByPlatformId, importedCount: 0, errors: [] }
+    }
+
+    let platformMap: Map<string, PlatformTenantApiRecord>
+    try {
+      platformMap = await fetchPlatformTenantsByIds(missing)
+    } catch (e) {
+      crmError('platform-import', 'bare-metal auto import api failed', e, { traceId })
+      throw e instanceof SuanliOpenApiError
+        ? e
+        : new Error(e instanceof Error ? e.message : '拉取平台租户失败')
+    }
+
+    let importedCount = 0
+    const errors: Array<{ platformTenantId: string; message: string }> = []
+
+    for (const platformTenantId of missing) {
+      const fields = (() => {
+        try {
+          const api = platformMap.get(platformTenantId)
+          if (!api) return null
+          return { api, fields: mapRecordToTenantFields(api) }
+        } catch {
+          return null
+        }
+      })()
+
+      try {
+        if (!fields) {
+          errors.push({ platformTenantId, message: '平台未返回该租户' })
+          continue
+        }
+
+        const { api, fields: tenantFields } = fields
+        const customerName =
+          api.company_name?.trim() ||
+          resolveTenantName(api) ||
+          `租户-${platformTenantId}`
+
+        let createdTenantId: string | undefined
+        let createdCustomerId: string | undefined
+
+        await db.transaction(async (tx) => {
+          const customerId = newId()
+          await tx.insert(customer).values({
+            id: customerId,
+            name: customerName,
+            shortName: customerName.slice(0, 64),
+            type: 'B',
+            status: 'active',
+            contactPerson: api.contact_user?.trim() ?? '',
+            contactPhone: api.contact_phone?.trim() || api.admin_phone?.trim() || '',
+            contactEmail: '',
+            industry: '',
+            address: '',
+          })
+
+          const tenantId = newId()
+          await tx.insert(billingTenant).values({
+            id: tenantId,
+            customerId,
+            name: tenantFields.name,
+            platformTenantId,
+            phone: tenantFields.phone,
+            isDefault: true,
+            status: 'active',
+            balance: tenantFields.balance,
+            overdue_at: tenantFields.overdue_at,
+            credit_limit: tenantFields.credit_limit,
+            platformRegisteredAt: tenantFields.platformRegisteredAt,
+          })
+          createdTenantId = tenantId
+          createdCustomerId = customerId
+        })
+
+        if (createdTenantId && createdCustomerId) {
+          await writeBalanceSnapshotAfterImport({
+            tenantId: createdTenantId,
+            customerId: createdCustomerId,
+            platformTenantId,
+            balance: tenantFields.balance,
+            creditLimit: tenantFields.credit_limit,
+            traceId,
+          })
+          tenantIdByPlatformId.set(platformTenantId, createdTenantId)
+          importedCount++
+        }
+      } catch (e) {
+        errors.push({
+          platformTenantId,
+          message: e instanceof Error ? e.message : '自动导入失败',
+        })
+      }
+    }
+
+    crmLog('platform-import', 'bare-metal auto import done', {
+      traceId,
+      importedCount,
+      errors: errors.length,
+    })
+
+    return { tenantIdByPlatformId, importedCount, errors }
+  },
 }

@@ -534,7 +534,7 @@ export const recharge = pgTable(
     projectId: text("project_id").references(() => crmProject.id, { onDelete: "set null" }),
     amount: money("amount").notNull(), //充值金额
     paymentMethod: varchar("payment_method", { length: 32 }).notNull(), //支付方式：银行转账、支付宝、微信、发票
-    status: varchar("status", { length: 32 }).notNull(), //充值状态：待支付、已支付、已取消
+    status: varchar("status", { length: 32 }).notNull(), //充值状态：pending | paid | cancelled | failed
     transactionId: varchar("transaction_id", { length: 128 }), //交易流水号
     refundId: varchar("refund_id", { length: 128 }), //退款流水号
     refundAmount: money("refund_amount").notNull().default("0"), //退款金额

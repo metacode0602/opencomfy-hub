@@ -58,7 +58,7 @@ async function sumRechargeByProject(
     .where(
       and(
         inArray(recharge.projectId, projectIds),
-        eq(recharge.status, 'completed'),
+        eq(recharge.status, 'paid'),
         gte(recharge.completedAt, start),
         lt(recharge.completedAt, new Date(end.getTime() + 1)),
       ),

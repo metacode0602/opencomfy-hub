@@ -3,6 +3,7 @@
 import { TrendingUp } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@workspace/ui/components/card'
 import { Skeleton } from '@workspace/ui/components/skeleton'
+import { formatWorkbenchPeriodLabel } from '@/lib/crm/workbench-date-range'
 import { trpc } from '@/lib/trpc/client'
 import {
   Area,
@@ -13,21 +14,31 @@ import {
   YAxis,
 } from 'recharts'
 import { WORKBENCH_TOOLTIP_STYLE } from './chart-utils'
+import { useWorkbenchPeriod } from './workbench-period-context'
 
 export function WorkbenchConsumptionTrendCard() {
+  const { queryInput } = useWorkbenchPeriod()
   const { data: consumptionTrend = [], isLoading } = trpc.crm.analytics.consumptionTrend.useQuery(
-    { months: 12 },
+    {
+      startDate: queryInput.startDate,
+      endDate: queryInput.endDate,
+    },
   )
 
   const chartData = consumptionTrend.map((row) => ({
-    month: row.month.slice(5),
+    label: 'date' in row ? row.date.slice(5) : row.month.slice(5),
     consumption: row.consumption,
   }))
+
+  const subtitle = formatWorkbenchPeriodLabel(queryInput.startDate, queryInput.endDate)
 
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base font-medium">消费趋势</CardTitle>
+        <div>
+          <CardTitle className="text-base font-medium">消费趋势</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
+        </div>
         <TrendingUp className="w-4 h-4 text-muted-foreground" />
       </CardHeader>
       <CardContent>
@@ -44,7 +55,7 @@ export function WorkbenchConsumptionTrendCard() {
                   </linearGradient>
                 </defs>
                 <XAxis
-                  dataKey="month"
+                  dataKey="label"
                   axisLine={false}
                   tickLine={false}
                   tick={{ fill: '#71717a', fontSize: 12 }}

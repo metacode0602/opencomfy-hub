@@ -132,7 +132,7 @@ async function loadRechargeStatsByTenantIds(tenantIds: string[]) {
       rechargeTotal: sum(recharge.amount),
     })
     .from(recharge)
-    .where(and(inArray(recharge.tenantId, tenantIds), eq(recharge.status, 'completed')))
+    .where(and(inArray(recharge.tenantId, tenantIds), eq(recharge.status, 'paid')))
     .groupBy(recharge.tenantId)
 
   const map = new Map<string, { rechargeCount: number; rechargeTotal: number }>()

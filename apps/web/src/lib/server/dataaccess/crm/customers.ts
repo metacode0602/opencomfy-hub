@@ -51,7 +51,7 @@ const rechargeByTenant = db
     totalRecharge: sum(recharge.amount).as('total_recharge'),
   })
   .from(recharge)
-  .where(eq(recharge.status, 'completed'))
+  .where(eq(recharge.status, 'paid'))
   .groupBy(recharge.tenantId)
   .as('recharge_by_tenant')
 

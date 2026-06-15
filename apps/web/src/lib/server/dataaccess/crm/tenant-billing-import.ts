@@ -16,8 +16,8 @@ import {
   payChannelLabel,
   platformBillingValueToMoneyString,
   platformBillingValueToRmb,
-  platformOrderAmountToMoneyString,
-  platformOrderAmountToRmb,
+  platformMetalOrderListAmountToMoneyString,
+  platformMetalOrderListAmountToRmb,
   platformRechargeAmountToMoneyString,
   platformRechargeAmountToRmb,
   summarizeSection,
@@ -228,7 +228,7 @@ function buildMetalPreview(
   const cached: CachedBillingImport['metalOrders'] = []
 
   for (const record of records) {
-    const amount = platformOrderAmountToMoneyString(record.total_price)
+    const amount = platformMetalOrderListAmountToMoneyString(record.total_price)
     const existing = existingByOrderNo.get(record.order_no)
     let action: TenantBillingImportAction = 'create'
     if (existing) {
@@ -242,7 +242,7 @@ function buildMetalPreview(
       orderNo: record.order_no,
       status: record.status === 'Finished' ? '已完成' : record.status,
       idcName: record.idc_name ?? '—',
-      amountRmb: platformOrderAmountToRmb(record.total_price),
+      amountRmb: platformMetalOrderListAmountToRmb(record.total_price),
       deviceCount: record.device_count ?? 0,
       gpuSummary: formatGpuSummary(record.gpu_models),
       createTime: record.create_time.replace(' +00:00', '').slice(0, 19),
@@ -1054,7 +1054,7 @@ export const tenantBillingImportDataAccess = {
           if (item.action === 'skip') continue
           try {
             const { record } = item
-            const amount = platformOrderAmountToMoneyString(record.total_price)
+            const amount = platformMetalOrderListAmountToMoneyString(record.total_price)
             const orderId = `metal-${record.order_id}`
             const existing = await tx.query.commerceOrder.findFirst({
               where: eq(commerceOrder.orderNo, record.order_no),
@@ -1108,14 +1108,16 @@ export const tenantBillingImportDataAccess = {
 
             for (let i = 0; i < models.length; i++) {
               const g = models[i]!
-              const lineTotal = platformOrderAmountToMoneyString(g.total_price ?? record.total_price)
+              const lineTotal = platformMetalOrderListAmountToMoneyString(
+                g.total_price ?? record.total_price,
+              )
               const qty = g.gpu_count ?? 1
               await tx.insert(commerceOrderItem).values({
                 id: `${targetOrderId}-item-${i}`,
                 orderId: targetOrderId,
                 name: g.gpu_model ?? 'GPU',
                 quantity: String(qty),
-                unitPrice: platformOrderAmountToRmb(Number(lineTotal) / qty).toFixed(4),
+                unitPrice: (Number(lineTotal) / qty).toFixed(4),
                 total: lineTotal,
                 sortOrder: i,
               })

@@ -23,8 +23,11 @@ export function formatBillingCommitSummary(result: TenantBillingImportCommitResu
 /** billing_value / total_billing_value / discount_value — 10^6 平台单位 = 1 元 */
 export const PLATFORM_BILLING_VALUE_DIVISOR = 1_000_000
 
-/** total_price（裸金属）— 10^4 平台单位 = 1 元 */
+/** total_price（裸金属，非 metal_order/list 等路径的历史口径）— 10^4 平台单位 = 1 元 */
 export const PLATFORM_ORDER_AMOUNT_DIVISOR = 10_000
+
+/** POST /admin/metal_order/list 的 total_price — 10^6 平台单位 = 1 元（如 643200000 → 643.20） */
+export const PLATFORM_METAL_ORDER_LIST_AMOUNT_DIVISOR = 1_000_000
 
 /** total_amount（充值）— 1 分 = 0.01 元 */
 export const PLATFORM_RECHARGE_AMOUNT_DIVISOR = 100
@@ -52,6 +55,17 @@ export function platformOrderAmountToMoneyString(
   raw: number | null | undefined,
 ): string {
   return platformOrderAmountToRmb(raw).toFixed(4)
+}
+
+export function platformMetalOrderListAmountToRmb(raw: number | null | undefined): number {
+  if (raw == null || Number.isNaN(raw)) return 0
+  return raw / PLATFORM_METAL_ORDER_LIST_AMOUNT_DIVISOR
+}
+
+export function platformMetalOrderListAmountToMoneyString(
+  raw: number | null | undefined,
+): string {
+  return platformMetalOrderListAmountToRmb(raw).toFixed(4)
 }
 
 /** 充值 total_amount：第三方金额，单位为分，÷100 为元 */

@@ -36,6 +36,20 @@
       "when": 1781253969778,
       "tag": "0004_fuzzy_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781496338768,
+      "tag": "0005_old_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781500658940,
+      "tag": "0006_perpetual_millenium_guard",
+      "breakpoints": true
     }
   ]
 }

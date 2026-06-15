@@ -69,7 +69,7 @@ export const projectConversionSettingDataAccess = {
       .where(
         and(
           inArray(recharge.tenantId, tenantIds),
-          eq(recharge.status, 'completed'),
+          eq(recharge.status, 'paid'),
           isNotNull(recharge.completedAt),
           gte(recharge.completedAt, start),
           lt(recharge.completedAt, new Date(end.getTime() + 1)),

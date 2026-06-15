@@ -8,9 +8,7 @@ import { cn } from "@workspace/ui/lib/utils"
 import { GlobalDashboardHeader } from "@/app/[locale]/(protected)/dashboard/global/_components/global-dashboard-header"
 
 import { ThemeToggle } from "./theme-toggle"
-import { Button } from "@workspace/ui/components/button"
-import { Badge } from "@workspace/ui/components/badge"
-import { Bell } from "lucide-react"
+import { SiteMessagesPanel } from "./site-messages"
 import { SiteHeaderSearch } from "./site-header-search"
 import { GlobalDashboardProvider } from "@/app/[locale]/(protected)/dashboard/global/_lib/global-dashboard-context"
 
@@ -34,8 +32,8 @@ export function SiteHeader() {
         <div className="flex h-(--header-height) shrink-0 items-center gap-2 border-b px-4 lg:px-6">
           <SidebarTrigger className="-ml-1" />
           <div className="min-w-0 flex-1">
-          <GlobalDashboardProvider>
-            <GlobalDashboardHeader />
+            <GlobalDashboardProvider>
+              <GlobalDashboardHeader />
             </GlobalDashboardProvider>
           </div>
           <ThemeToggle />
@@ -56,12 +54,7 @@ export function SiteHeader() {
         <div className="min-w-0 flex-1">
           <SiteHeaderSearch />
         </div>
-        <Button variant="ghost" size="icon" className="relative shrink-0">
-          <Bell className="h-5 w-5" />
-          <Badge className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center p-0 text-xs">
-            3
-          </Badge>
-        </Button>
+        <SiteMessagesPanel />
         <ThemeToggle />
       </div>
     </header>
