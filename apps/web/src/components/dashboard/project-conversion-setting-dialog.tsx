@@ -137,9 +137,9 @@ function ProjectConversionSettingForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>项目转正设置</DialogTitle>
+        <DialogTitle>激励开始设置</DialogTitle>
         <DialogDescription>
-          项目「{project.name}」：登记转正原因与日期，并将阶段更新为已转正。
+          项目「{project.name}」：登记激励开始原因与日期，并将阶段更新为已激励开始。
         </DialogDescription>
       </DialogHeader>
 
@@ -149,10 +149,10 @@ function ProjectConversionSettingForm({
           <StatusBadge status={project.stage} />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="project-conversion-reason">转正原因</Label>
+          <Label htmlFor="project-conversion-reason">激励开始原因</Label>
           <Select value={reason} onValueChange={(v) => setReason(v as ConversionReason)}>
             <SelectTrigger id="project-conversion-reason" className="w-full">
-              <SelectValue placeholder="请选择转正原因" />
+              <SelectValue placeholder="请选择激励开始原因" />
             </SelectTrigger>
             <SelectContent>
               {CONVERSION_REASON_VALUES.map((value) => (
@@ -164,7 +164,7 @@ function ProjectConversionSettingForm({
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="project-conversion-signed">签约日期</Label>
+          <Label htmlFor="project-conversion-signed">激励开始日期</Label>
           <Input
             id="project-conversion-signed"
             type="date"
@@ -176,7 +176,7 @@ function ProjectConversionSettingForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="project-conversion-date">转正日期</Label>
+          <Label htmlFor="project-conversion-date">激励开始日期</Label>
           <Input
             id="project-conversion-date"
             type="date"
@@ -187,7 +187,7 @@ function ProjectConversionSettingForm({
             }}
           />
           <p className="text-xs text-muted-foreground">
-            转正日期用于经营留痕；提成月序分段按成交锚定月（首消月）计算。
+            激励开始日期用于经营留痕；提成月序分段按成交锚定月（首消月）计算。
           </p>
         </div>
         {anchorMonthDisplay ? (
@@ -197,7 +197,7 @@ function ProjectConversionSettingForm({
             <p className="text-xs text-muted-foreground">
               {project.dealClosedMonth
                 ? '已按首月消费锚定'
-                : '根据转正日期预览；首月有消费后将写入项目主数据'}
+                : '根据激励开始日期预览；首月有消费后将写入项目主数据'}
             </p>
           </div>
         ) : null}
@@ -256,8 +256,8 @@ function ProjectConversionSettingDialogBody({
     return (
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>项目转正设置</DialogTitle>
-          <DialogDescription>项目转正设置</DialogDescription>
+          <DialogTitle>激励开始设置</DialogTitle>
+          <DialogDescription>激励开始设置</DialogDescription>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-4">加载中…</p>
         <DialogFooter>

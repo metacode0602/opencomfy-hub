@@ -170,7 +170,7 @@ export interface Project {
   dealClosedMonth?: string
   /** 提成月序分段（第 7 月起固化） */
   commissionMonthPhase?: CommissionMonthPhase
-  /** 项目转正设置 */
+  /** 项目激励开始设置 */
   conversionSetting?: {
     reason: ConversionReason
     signedOn: string

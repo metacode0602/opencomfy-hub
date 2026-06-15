@@ -36,6 +36,7 @@ import { tenantProjectCostDataAccess } from '@/lib/server/dataaccess/crm/tenant-
 import { listProjectMonthlyCostSnapshots } from '@/lib/server/dataaccess/finance/list-project-monthly-cost-snapshots'
 import { projectActivitiesDataAccess } from '@/lib/server/dataaccess/crm/project-activities'
 import { projectAccountManagerDataAccess } from '@/lib/server/dataaccess/crm/project-account-manager'
+import { projectStaffAssignmentDataAccess } from '@/lib/server/dataaccess/crm/project-staff-assignment'
 import { projectRevenueDepartmentDataAccess } from '@/lib/server/dataaccess/crm/project-revenue-department'
 import { projectOpportunitySourceDataAccess } from '@/lib/server/dataaccess/crm/project-opportunity-source'
 import { projectConversionSettingDataAccess } from '@/lib/server/dataaccess/crm/project-conversion-setting'
@@ -67,6 +68,7 @@ import {
   projectStageSchema,
   projectUpsertSchema,
   changeProjectAccountManagerSchema,
+  listProjectStaffAssignmentHistorySchema,
   changeProjectRevenueDepartmentSchema,
   changeProjectOpportunitySourceSchema,
   setProjectConversionSettingSchema,
@@ -384,6 +386,12 @@ export const crmRouter = createTRPCRouter({
     getAccountManagerAssignment: crmScopedProcedure
       .input(z.object({ projectId: z.string() }))
       .query(({ input }) => projectAccountManagerDataAccess.getCurrent(input.projectId)),
+    listStaffAssignmentHistory: crmScopedProcedure
+      .input(listProjectStaffAssignmentHistorySchema)
+      .query(async ({ input, ctx }) => {
+        await assertProjectInScope(ctx.crmScope, input.projectId)
+        return projectStaffAssignmentDataAccess.listHistory(input.projectId, input.roleType)
+      }),
     changeAccountManager: crmWriteProcedure
       .input(changeProjectAccountManagerSchema)
       .mutation(async ({ input, ctx }) => {
@@ -474,7 +482,7 @@ export const crmRouter = createTRPCRouter({
         } catch (e) {
           throw new TRPCError({
             code: 'BAD_REQUEST',
-            message: e instanceof Error ? e.message : '项目转正设置失败',
+            message: e instanceof Error ? e.message : '项目激励开始设置失败',
           })
         }
       }),

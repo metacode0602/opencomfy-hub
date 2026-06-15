@@ -1,4 +1,5 @@
 import {
+  Activity,
   Ban,
   ArrowDownToLineIcon,
   BarChart3,
@@ -54,6 +55,7 @@ const navSupply: MenuItem[] = [
   { title: '商务合同', url: '/supplier/contracts', icon: <FileText className="size-4" />, roles: ADMIN_MEMBER },
   { title: '机房管理', url: '/supplier/datacenters', icon: <Server className="size-4" />, roles: ADMIN_MEMBER },
   { title: '设备管理', url: '/supplier/devices', icon: <Computer className="size-4" />, roles: ADMIN_MEMBER },
+  { title: '平台存在状态', url: '/supplier/device-platform-probe', icon: <Activity className="size-4" />, roles: ADMIN_MEMBER },
   { title: '裸金属订单', url: '/supplier/bare-metal-orders', icon: <ShoppingCart className="size-4" />, roles: ADMIN_MEMBER },
   { title: '设备库存', url: '/supplier/inventory', icon: <Cpu className="size-4" />, roles: ADMIN_MEMBER },
   { title: '计划批次', url: '/supplier/online-tasks', icon: <ListTodo className="size-4" />, roles: ADMIN_MEMBER },

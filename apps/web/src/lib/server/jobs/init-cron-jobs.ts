@@ -6,6 +6,8 @@ import { registerBalanceSnapshotCron } from '@/lib/server/jobs/register-balance-
 import { registerBillingSyncCron } from '@/lib/server/jobs/register-billing-sync-cron'
 import { registerBareMetalOrderSyncCron } from '@/lib/server/jobs/register-bare-metal-order-sync-cron'
 import { isBareMetalOrderSyncEnabled } from '@/lib/server/dataaccess/supplier/bare-metal-order-sync-config'
+import { isDevicePlatformProbeEnabled } from '@/lib/server/dataaccess/supplier/device-platform-probe-config'
+import { registerDevicePlatformProbeCron } from '@/lib/server/jobs/register-device-platform-probe-cron'
 
 export type CronInitResult = {
   ok: true
@@ -15,6 +17,7 @@ export type CronInitResult = {
     balanceSnapshot: { enabled: boolean }
     deviceMasterdataSnapshot: { enabled: boolean }
     bareMetalOrderSync: { enabled: boolean }
+    devicePlatformProbe: { enabled: boolean }
   }
 }
 
@@ -26,6 +29,7 @@ function runInit(): CronInitResult {
   registerBalanceSnapshotCron()
   registerDashboardMasterdataSnapshotCron()
   registerBareMetalOrderSyncCron()
+  registerDevicePlatformProbeCron()
 
   initialized = true
   return {
@@ -36,6 +40,7 @@ function runInit(): CronInitResult {
       balanceSnapshot: { enabled: isBalanceSnapshotEnabled() },
       deviceMasterdataSnapshot: { enabled: isDeviceMasterdataSnapshotEnabled() },
       bareMetalOrderSync: { enabled: isBareMetalOrderSyncEnabled() },
+      devicePlatformProbe: { enabled: isDevicePlatformProbeEnabled() },
     },
   }
 }
@@ -50,6 +55,7 @@ export function initCronJobs(): Promise<CronInitResult> {
         balanceSnapshot: { enabled: isBalanceSnapshotEnabled() },
         deviceMasterdataSnapshot: { enabled: isDeviceMasterdataSnapshotEnabled() },
         bareMetalOrderSync: { enabled: isBareMetalOrderSyncEnabled() },
+        devicePlatformProbe: { enabled: isDevicePlatformProbeEnabled() },
       },
     })
   }

@@ -14,6 +14,7 @@ import {
   Download,
   Ticket,
   CheckCircle,
+  History,
 } from 'lucide-react'
 import { Button } from '@workspace/ui/components/button'
 import { Badge } from '@workspace/ui/components/badge'
@@ -65,6 +66,10 @@ import { EditProjectDialog } from '@/components/dashboard/edit-project-dialog'
 import { ProjectMonthMetricCell } from '@/components/dashboard/project-month-metric-cell'
 import { ProjectBillingSyncDialog } from '@/components/dashboard/project-billing-sync-dialog'
 import { ProjectCommissionInfoCard } from '@/components/dashboard/project-commission-info-card'
+import {
+  ProjectStaffAssignmentHistoryDialog,
+} from '@/components/dashboard/project-staff-assignment-history-dialog'
+import type { ProjectStaffRoleType } from '@/lib/crm/project-staff-roles'
 import { IconCloudDownload } from '@tabler/icons-react'
 import { CopyToClipboard } from '@/components/shared/copy-to-clipboard'
 
@@ -114,6 +119,18 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
   const [isStageDialogOpen, setIsStageDialogOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [billingSyncOpen, setBillingSyncOpen] = useState(false)
+  const [staffHistoryRole, setStaffHistoryRole] = useState<ProjectStaffRoleType | null>(null)
+
+  const staffRoleCards: {
+    roleType: ProjectStaffRoleType
+    label: string
+    name: string
+  }[] = [
+    { roleType: 'pre_sales', label: '售前经理', name: project.preSalesManager },
+    { roleType: 'account_manager', label: '客户经理', name: project.accountManager },
+    { roleType: 'delivery_manager', label: '交付经理', name: project.deliveryManager },
+    { roleType: 'project_manager', label: '项目经理', name: project.projectManager },
+  ]
 
   const { data: businessLines = [] } = trpc.crm.businessLines.listActive.useQuery()
   const { data: activities = [] } = trpc.crm.projects.listActivities.useQuery({
@@ -227,6 +244,18 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
         }}
       />
 
+      {staffHistoryRole && (
+        <ProjectStaffAssignmentHistoryDialog
+          open={staffHistoryRole !== null}
+          onOpenChange={(open) => {
+            if (!open) setStaffHistoryRole(null)
+          }}
+          projectId={project.id}
+          projectName={project.name}
+          roleType={staffHistoryRole}
+        />
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
@@ -295,50 +324,30 @@ export function ProjectDetailContent({ project: initialProject }: ProjectDetailC
 
         <TabsContent value="overview" className="space-y-6 mt-6">
           <div className="grid grid-cols-4 gap-6">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">售前经理</p>
-                    <p className="font-medium">{project.preSalesManager}</p>
+            {staffRoleCards.map((card) => (
+              <Card key={card.roleType}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <User className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">{card.label}</p>
+                        <p className="font-medium truncate">{card.name}</p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2 text-muted-foreground"
+                      onClick={() => setStaffHistoryRole(card.roleType)}
+                    >
+                      <History className="w-3.5 h-3.5 mr-1" />
+                      历史
+                    </Button>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">客户经理</p>
-                    <p className="font-medium">{project.accountManager}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">交付经理</p>
-                    <p className="font-medium">{project.deliveryManager}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">项目经理</p>
-                    <p className="font-medium">{project.projectManager}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ))}
           </div>
           <ProjectCommissionInfoCard project={project} />
 

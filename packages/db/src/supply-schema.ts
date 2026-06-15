@@ -1357,6 +1357,116 @@ export const bareMetalSyncState = pgTable("bare_metal_sync_state", {
 })
 
 // ---------------------------------------------------------------------------
+// §3.8.1 设备平台探测（supplier-device-platform-probe-design.md）
+// ---------------------------------------------------------------------------
+
+export const devicePlatformProbeState = pgTable("device_platform_probe_state", {
+  id: text("id").primaryKey(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastSnapshotHour: timestamp("last_snapshot_hour", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .$onUpdate(() => new Date())
+    .notNull(),
+})
+
+export const devicePlatformProbeJobRun = pgTable(
+  "device_platform_probe_job_run",
+  {
+    id: text("id").primaryKey(),
+    trigger: varchar("trigger", { length: 16 }).notNull(),
+    snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    status: varchar("status", { length: 16 }).notNull(),
+    inventoryDeviceCount: integer("inventory_device_count").notNull().default(0),
+    proxyFetchedCount: integer("proxy_fetched_count").notNull().default(0),
+    k8sFetchedCount: integer("k8s_fetched_count").notNull().default(0),
+    bareMetalHitCount: integer("bare_metal_hit_count").notNull().default(0),
+    matchedProxyCount: integer("matched_proxy_count").notNull().default(0),
+    matchedK8sCount: integer("matched_k8s_count").notNull().default(0),
+    matchedBareMetalCount: integer("matched_bare_metal_count").notNull().default(0),
+    ambiguousCount: integer("ambiguous_count").notNull().default(0),
+    missingPlatformCount: integer("missing_platform_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+  },
+  (table) => [
+    index("device_platform_probe_job_run_started_at_idx").on(table.startedAt),
+    index("device_platform_probe_job_run_status_idx").on(table.status),
+  ],
+)
+
+export const devicePlatformProbeSnapshot = pgTable(
+  "device_platform_probe_snapshot",
+  {
+    id: text("id").primaryKey(),
+    jobRunId: text("job_run_id")
+      .notNull()
+      .references(() => devicePlatformProbeJobRun.id, { onDelete: "cascade" }),
+    supplierDeviceId: text("supplier_device_id")
+      .notNull()
+      .references(() => supplierDevice.id, { onDelete: "cascade" }),
+    supplierId: text("supplier_id")
+      .notNull()
+      .references(() => supplier.id, { onDelete: "cascade" }),
+    dataCenterId: text("data_center_id").references(() => dataCenter.id, {
+      onDelete: "set null",
+    }),
+    sn: varchar("sn", { length: 64 }).notNull(),
+    internalIp: varchar("internal_ip", { length: 45 }),
+    dataCenterName: varchar("data_center_name", { length: 255 }),
+    opsStatus: varchar("ops_status", { length: 64 }).notNull(),
+    lifecycleStatus: varchar("lifecycle_status", { length: 32 }).notNull(),
+    snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
+    probeStatus: varchar("probe_status", { length: 32 }).notNull(),
+    consistencyFlag: varchar("consistency_flag", { length: 32 }).notNull(),
+    proxyMatched: boolean("proxy_matched").notNull().default(false),
+    proxyRentStatus: varchar("proxy_rent_status", { length: 64 }),
+    proxyIsContainerInstance: boolean("proxy_is_container_instance"),
+    proxyPlatformDeviceId: varchar("proxy_platform_device_id", { length: 64 }),
+    k8sMatched: boolean("k8s_matched").notNull().default(false),
+    k8sDeviceName: varchar("k8s_device_name", { length: 255 }),
+    k8sRegion: varchar("k8s_region", { length: 128 }),
+    bareMetalMatched: boolean("bare_metal_matched").notNull().default(false),
+    bareMetalOrderNo: varchar("bare_metal_order_no", { length: 64 }),
+    bareMetalOrderStatus: varchar("bare_metal_order_status", { length: 32 }),
+    suggestedAction: text("suggested_action"),
+    matchFlags: jsonb("match_flags").$type<Record<string, unknown>>().notNull().default({}),
+    proxyPayload: jsonb("proxy_payload").$type<Record<string, unknown>>(),
+    k8sPayload: jsonb("k8s_payload").$type<Record<string, unknown>>(),
+    bareMetalPayload: jsonb("bare_metal_payload").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("device_platform_probe_snapshot_device_hour_uk").on(
+      table.supplierDeviceId,
+      table.snapshotHour,
+    ),
+    index("device_platform_probe_snapshot_hour_supplier_idx").on(
+      table.snapshotHour,
+      table.supplierId,
+    ),
+    index("device_platform_probe_snapshot_hour_dc_idx").on(
+      table.snapshotHour,
+      table.dataCenterId,
+    ),
+    index("device_platform_probe_snapshot_hour_probe_status_idx").on(
+      table.snapshotHour,
+      table.probeStatus,
+    ),
+    index("device_platform_probe_snapshot_hour_consistency_idx").on(
+      table.snapshotHour,
+      table.consistencyFlag,
+    ),
+    index("device_platform_probe_snapshot_device_hour_desc_idx").on(
+      table.supplierDeviceId,
+      table.snapshotHour,
+    ),
+  ],
+)
+
+// ---------------------------------------------------------------------------
 // §3.9 供应商活动时间线
 // ---------------------------------------------------------------------------
 

@@ -88,7 +88,7 @@ const STAFF_FILTER_ALL = 'all'
 const STAFF_FILTER_ME = '__me__'
 const DEPARTMENT_FILTER_ALL = 'all'
 
-/** 已转正且已配置转正日期与成交锚定月时，不再展示「项目转正设置」 */
+/** 已激励开始且已配置激励开始日期与成交锚定月时，不再展示「项目激励开始设置」 */
 function isConversionSettingComplete(project: Project): boolean {
   return (
     project.stage === 'converted' &&
@@ -822,7 +822,7 @@ export function ProjectsContent() {
                         {!isConversionSettingComplete(project) ? (
                           <DropdownMenuItem onClick={() => openConversionSetting(project)}>
                             <FileCheck className="size-4 shrink-0" />
-                            项目转正设置
+                            激励开始设置
                           </DropdownMenuItem>
                         ) : null}
                         <DropdownMenuSeparator />

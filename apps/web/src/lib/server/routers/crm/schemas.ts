@@ -110,6 +110,18 @@ const effectiveDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, '请选择有效的生效日期')
 
+export const projectStaffRoleTypeSchema = z.enum([
+  'pre_sales',
+  'account_manager',
+  'delivery_manager',
+  'project_manager',
+])
+
+export const listProjectStaffAssignmentHistorySchema = z.object({
+  projectId: z.string().min(1),
+  roleType: projectStaffRoleTypeSchema,
+})
+
 export const changeProjectAccountManagerSchema = z.object({
   projectId: z.string().min(1),
   staffId: z.string().min(1),

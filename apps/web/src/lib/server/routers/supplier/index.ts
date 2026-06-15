@@ -104,6 +104,8 @@ import {
 } from '@/lib/server/routers/supplier/data-cleanup-schemas'
 import { supplyChainLeadsDataAccess } from '@/lib/server/dataaccess/supplier/supply-chain-leads'
 import { bareMetalOrderDataAccess } from '@/lib/server/dataaccess/supplier/bare-metal-order'
+import { devicePlatformProbeDataAccess } from '@/lib/server/dataaccess/supplier/device-platform-probe'
+import { runScheduledDevicePlatformProbe } from '@/lib/server/dataaccess/supplier/device-platform-probe-scheduled'
 import {
   supplyChainLeadActivityCreateSchema,
   supplyChainLeadActivityUpdateSchema,
@@ -115,6 +117,7 @@ import {
 import {
   bareMetalOrderListSchema,
 } from '@/lib/server/routers/supplier/bare-metal-order-schemas'
+import { devicePlatformProbeListSchema } from '@/lib/server/routers/supplier/device-platform-probe-schemas'
 import { adminProcedure, createTRPCRouter, supplyProcedure } from '../trpc'
 
 const importFileSchema = z.object({
@@ -1645,6 +1648,30 @@ export const supplierRouter = createTRPCRouter({
           mapImportError(e)
         }
       }),
+  }),
+
+  devicePlatformProbe: createTRPCRouter({
+    getState: supplyProcedure.query(async () => {
+      return devicePlatformProbeDataAccess.getState()
+    }),
+
+    list: supplyProcedure.input(devicePlatformProbeListSchema).query(async ({ input }) => {
+      return devicePlatformProbeDataAccess.list(input)
+    }),
+
+    getById: supplyProcedure
+      .input(z.object({ id: z.string().min(1) }))
+      .query(async ({ input }) => {
+        const row = await devicePlatformProbeDataAccess.getById(input.id)
+        if (!row) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: '探测记录不存在' })
+        }
+        return row
+      }),
+
+    runNow: adminProcedure.mutation(async () => {
+      return runScheduledDevicePlatformProbe({ trigger: 'manual' })
+    }),
   }),
 
   dataCleanup: createTRPCRouter({

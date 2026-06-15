@@ -330,7 +330,7 @@ export const projectOpportunitySourceAssignment = pgTable(
 )
 
 /**
- * 项目转正设置（经营转正主数据，含转正原因与日期）
+ * 项目激励开始设置（经营激励开始主数据，含激励开始原因与日期）
  * 每项目至多一条
  */
 export const projectConversionSetting = pgTable(
@@ -342,7 +342,7 @@ export const projectConversionSetting = pgTable(
       .references(() => crmProject.id, { onDelete: "cascade" }),
     reason: varchar("reason", { length: 32 }).notNull(),
     signedOn: date("signed_on").notNull(),
-    /** 转正生效日期（经营口径） */
+    /** 激励开始生效日期（经营口径） */
     conversionDate: date("conversion_date").notNull(),
     remark: text("remark"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
