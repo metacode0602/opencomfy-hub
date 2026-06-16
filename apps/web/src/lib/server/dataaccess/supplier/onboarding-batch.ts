@@ -30,6 +30,11 @@ import { DEFAULT_GPU_PER_DEVICE, TERMINAL_BATCH_STATUSES } from '@/lib/server/ag
 import { isInfraCardType, resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { assertSupplierWorkOrderUnique } from '@/lib/server/dataaccess/supplier/work-order-uniqueness'
+import { createFeishuApprovalForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-approval'
+import {
+  isFeishuAutoCreateEnabled,
+  loadFeishuRuntimeConfig,
+} from '@/lib/server/integrations/feishu/config'
 import {
   accessConditionSheet,
   gpuCardType,
@@ -202,7 +207,7 @@ async function insertInternalOccupancyHolds(
     batchId: string
     supplierId: string
     dataCenterId: string
-    workOrderNo: string
+    workOrderNo: string | null
     userName: string
     department: NonNullable<OnboardingBatchCreateInput['department']>
     settlementMode: NonNullable<OnboardingBatchCreateInput['settlementMode']>
@@ -530,10 +535,18 @@ export const onboardingBatchDataAccess = {
 
     const batchId = newId()
     const batchCode = generateBatchCode(input.batchKind)
-    const workOrderNo = input.workOrderNo.trim()
+    const feishuConfig = loadFeishuRuntimeConfig()
+    const autoCreateFeishu = isFeishuAutoCreateEnabled(feishuConfig)
+    const manualWorkOrderNo = input.workOrderNo?.trim() ?? ''
+    if (!autoCreateFeishu && !manualWorkOrderNo) {
+      throw new Error('请填写飞书审批工单号')
+    }
+    const workOrderNo = autoCreateFeishu ? null : manualWorkOrderNo
     const now = new Date()
 
-    await assertSupplierWorkOrderUnique(input.supplierId, workOrderNo)
+    if (workOrderNo) {
+      await assertSupplierWorkOrderUnique(input.supplierId, workOrderNo)
+    }
 
     const isInternalOccupancy = input.batchKind === 'internal_occupancy'
     let holdWindow: { holdFrom: Date; holdUntil: Date | null } | null = null
@@ -599,6 +612,9 @@ export const onboardingBatchDataAccess = {
           parsedSuccessCount: 0,
           committedDeviceCount: 0,
           createdByStaffId: input.operatorStaffId ?? null,
+          metadata: autoCreateFeishu
+            ? { feishu: { create_status: 'pending' as const } }
+            : {},
           createdAt: now,
           updatedAt: now,
         })
@@ -628,8 +644,8 @@ export const onboardingBatchDataAccess = {
           type: 'batch_started',
           title: `${kindLabel}批次 ${batchCode} 已创建`,
           description: isInternalOccupancy
-            ? `计划占用 ${plannedDeviceCount} 台；工单号 ${workOrderNo} · ${input.userName!.trim()} · ${INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[input.department!]} · ${INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[input.settlementMode!]}`
-            : `计划上架 ${plannedDeviceCount} 台；工单号 ${workOrderNo}`,
+            ? `计划占用 ${plannedDeviceCount} 台${workOrderNo ? `；工单号 ${workOrderNo}` : '；飞书工单创建中'} · ${input.userName!.trim()} · ${INTERNAL_TEST_HOLD_DEPARTMENT_LABELS[input.department!]} · ${INTERNAL_TEST_HOLD_SETTLEMENT_LABELS[input.settlementMode!]}`
+            : `计划上架 ${plannedDeviceCount} 台${workOrderNo ? `；工单号 ${workOrderNo}` : '；飞书工单创建中'}`,
           authorStaffId: input.operatorStaffId ?? null,
           authorName: '运营',
           authorRole: 'ops',
@@ -654,7 +670,13 @@ export const onboardingBatchDataAccess = {
 
     supplierLog('onboarding-batch', 'create done', { batchId, batchCode, plannedDeviceCount })
 
-    return { batchId, batchCode, workOrderNo, plannedDeviceCount }
+    let finalWorkOrderNo = workOrderNo ?? ''
+    if (autoCreateFeishu) {
+      const feishuResult = await createFeishuApprovalForBatch(batchId)
+      finalWorkOrderNo = feishuResult.workOrderNo ?? ''
+    }
+
+    return { batchId, batchCode, workOrderNo: finalWorkOrderNo, plannedDeviceCount }
   },
 
   async list(params: {

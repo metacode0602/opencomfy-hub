@@ -8,6 +8,8 @@ import { registerBareMetalOrderSyncCron } from '@/lib/server/jobs/register-bare-
 import { isBareMetalOrderSyncEnabled } from '@/lib/server/dataaccess/supplier/bare-metal-order-sync-config'
 import { isDevicePlatformProbeEnabled } from '@/lib/server/dataaccess/supplier/device-platform-probe-config'
 import { registerDevicePlatformProbeCron } from '@/lib/server/jobs/register-device-platform-probe-cron'
+import { registerFeishuBitableSyncCron } from '@/lib/server/jobs/register-feishu-bitable-sync-cron'
+import { isFeishuBitableSyncEnabled } from '@/lib/server/jobs/feishu-bitable-sync/bitable-sync-config'
 
 export type CronInitResult = {
   ok: true
@@ -18,6 +20,7 @@ export type CronInitResult = {
     deviceMasterdataSnapshot: { enabled: boolean }
     bareMetalOrderSync: { enabled: boolean }
     devicePlatformProbe: { enabled: boolean }
+    feishuBitableSync: { enabled: boolean }
   }
 }
 
@@ -30,6 +33,7 @@ function runInit(): CronInitResult {
   registerDashboardMasterdataSnapshotCron()
   registerBareMetalOrderSyncCron()
   registerDevicePlatformProbeCron()
+  registerFeishuBitableSyncCron()
 
   initialized = true
   return {
@@ -41,6 +45,7 @@ function runInit(): CronInitResult {
       deviceMasterdataSnapshot: { enabled: isDeviceMasterdataSnapshotEnabled() },
       bareMetalOrderSync: { enabled: isBareMetalOrderSyncEnabled() },
       devicePlatformProbe: { enabled: isDevicePlatformProbeEnabled() },
+      feishuBitableSync: { enabled: isFeishuBitableSyncEnabled() },
     },
   }
 }
@@ -56,6 +61,7 @@ export function initCronJobs(): Promise<CronInitResult> {
         deviceMasterdataSnapshot: { enabled: isDeviceMasterdataSnapshotEnabled() },
         bareMetalOrderSync: { enabled: isBareMetalOrderSyncEnabled() },
         devicePlatformProbe: { enabled: isDevicePlatformProbeEnabled() },
+        feishuBitableSync: { enabled: isFeishuBitableSyncEnabled() },
       },
     })
   }

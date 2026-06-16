@@ -30,8 +30,8 @@ export type OnboardingBatchCreateInput = {
     cooperationType: DeviceCooperationType
     plannedQuantity: number
   }>
-  /** 飞书审批工单号（商务手动录入，supplier 内唯一） */
-  workOrderNo: string
+  /** 飞书审批工单号（手工模式必填；自动建单时可省略） */
+  workOrderNo?: string
   operatorStaffId?: string | null
   /** internal_occupancy：占用登记字段，写入 internal_test_hold */
   userName?: string

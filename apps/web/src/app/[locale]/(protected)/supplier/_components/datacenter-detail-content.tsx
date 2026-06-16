@@ -47,6 +47,7 @@ import { trpc } from '@/lib/trpc/client'
 import { DEVICE_OPS_STATUS_SEEDS } from '@workspace/db/schema'
 import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
+import { FeishuBitableSyncPanel } from '@/components/settings/feishu-bitable-sync-panel'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
 import { DatacenterDeviceRetireDialog } from '@/app/[locale]/(protected)/supplier/_components/datacenter-device-retire-dialog'
 import { DatacenterPlannedBatchesPanel } from './datacenter-planned-batches-panel'
@@ -410,6 +411,13 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         onSuccess={invalidateAfterImport}
         sectionTitle="运维数据导入"
         sectionDescription="在本机房下导入设备主数据、变更记录或故障记录，导入完成后将自动刷新库存与设备统计"
+      />
+
+      <FeishuBitableSyncPanel
+        supplierId={dataCenter.supplierId}
+        dataCenterId={dataCenter.id}
+        dataCenterName={dataCenter.name}
+        onSyncSuccess={invalidateAfterImport}
       />
 
       <DatacenterPlannedBatchesPanel dataCenterId={dataCenterId} />

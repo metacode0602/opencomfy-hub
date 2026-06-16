@@ -11,6 +11,7 @@ import {
   mergeRetireProgressFlags,
   type RetireProgressFlags,
 } from '@/lib/supplier/retire-changelog-utils'
+import { FEISHU_TERMINAL_BATCH_STATUSES } from '@/lib/server/integrations/feishu/types'
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
@@ -173,11 +174,17 @@ async function refreshDeviceRetireBatchProgress(
 
   const prevStatus = batch.batchStatus
   let batchStatus = batch.batchStatus
-  if (planned > 0 && touched >= planned) {
-    batchStatus = '已完成'
-    progressFlags = mergeRetireProgressFlags(progressFlags, { completion_mode: 'auto' })
-  } else if (touched > 0 && batchStatus === '待开始') {
-    batchStatus = '下架中'
+  const isTerminalFromWebhook = FEISHU_TERMINAL_BATCH_STATUSES.has(batch.batchStatus)
+
+  if (!isTerminalFromWebhook) {
+    if (planned > 0 && touched >= planned) {
+      batchStatus = '已完成'
+      progressFlags = mergeRetireProgressFlags(progressFlags, { completion_mode: 'auto' })
+    } else if (touched > 0 && batchStatus === '待开始') {
+      batchStatus = '下架中'
+    }
+  } else if (batchStatus === '已完成' && planned > 0 && touched < planned) {
+    progressFlags = mergeRetireProgressFlags(progressFlags, { needs_review: true })
   }
 
   await runner
@@ -254,10 +261,14 @@ async function refreshInternalOccupancyBatchProgress(
 
   const prevStatus = batch.batchStatus
   let batchStatus = batch.batchStatus
-  if (planned > 0 && touched >= planned) {
-    batchStatus = '已完成'
-  } else if (touched > 0 && batchStatus === '待开始') {
-    batchStatus = '占用中'
+  const isTerminalFromWebhook = FEISHU_TERMINAL_BATCH_STATUSES.has(batch.batchStatus)
+
+  if (!isTerminalFromWebhook) {
+    if (planned > 0 && touched >= planned) {
+      batchStatus = '已完成'
+    } else if (touched > 0 && batchStatus === '待开始') {
+      batchStatus = '占用中'
+    }
   }
 
   await runner

@@ -36,6 +36,7 @@ import { Alert, AlertDescription, AlertTitle } from '@workspace/ui/components/al
 import { Checkbox } from '@workspace/ui/components/checkbox'
 import { trpc } from '@/lib/trpc/client'
 import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
+import { useFeishuIntegrationConfig } from '@/lib/integrations/use-feishu-integration-config'
 import {
   DEVICE_COOPERATION_TYPE_LABELS,
   type DeviceCooperationType,
@@ -154,6 +155,7 @@ export function DatacenterDeviceRetireDialog({
   const [commitResult, setCommitResult] = useState<DatacenterRetireCommitResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [sampleDownloading, setSampleDownloading] = useState(false)
+  const { manualWorkOrderRequired } = useFeishuIntegrationConfig(open)
 
   const {
     data: context,
@@ -238,7 +240,7 @@ export function DatacenterDeviceRetireDialog({
 
   const metaFormValid =
     Boolean(retireReason) &&
-    Boolean(workOrderNo.trim()) &&
+    Boolean(manualWorkOrderRequired ? workOrderNo.trim() : true) &&
     Boolean(expectedCompletionDate) &&
     (isDatacenterClosure
       ? snapshotTotal > 0
@@ -262,7 +264,7 @@ export function DatacenterDeviceRetireDialog({
         reason: retireReason,
         retireActionType: actionType,
         expectedCompletionDate,
-        workOrderNo: workOrderNo.trim(),
+        workOrderNo: workOrderNo.trim() || '',
         remark: remark.trim() || undefined,
       },
       planLines: isDatacenterClosure
@@ -452,14 +454,22 @@ export function DatacenterDeviceRetireDialog({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
-                <Label>
-                  飞书审批工单号 <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  placeholder="运维变更表须填写相同工单号"
-                  value={workOrderNo}
-                  onChange={(e) => setWorkOrderNo(e.target.value)}
-                />
+                {manualWorkOrderRequired ? (
+                  <>
+                    <Label>
+                      飞书审批工单号 <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      placeholder="运维变更表须填写相同工单号"
+                      value={workOrderNo}
+                      onChange={(e) => setWorkOrderNo(e.target.value)}
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                    提交后将自动创建飞书审批工单（末级节点：验收完成）
+                  </p>
+                )}
               </div>
               <div className="space-y-2 sm:col-span-2">
                 <Label>

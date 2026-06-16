@@ -49,6 +49,18 @@ function readImportTable(buffer: ArrayBuffer, fileName: string): string[][] {
   return importMatrixToTable(readExcelMatrix(buffer, fileName))
 }
 
+/** 将行对象组装为与 Excel/CSV 相同的二维表结构 */
+export function buildImportTableFromRows(
+  headers: string[],
+  rows: Record<string, string>[],
+): string[][] {
+  const table: string[][] = [headers]
+  for (const row of rows) {
+    table.push(headers.map((header) => row[header] ?? ''))
+  }
+  return table
+}
+
 export function parseDeviceImportFile(
   buffer: ArrayBuffer,
   fileName: string,

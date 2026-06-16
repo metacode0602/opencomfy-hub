@@ -534,6 +534,8 @@ export const onboardingBatch = pgTable(
     retiredDeviceCount: integer("retired_device_count").notNull().default(0),
     /** 自动结案 / 动作不一致 / 超额挂接等排查标记 */
     progressFlagsJson: jsonb("progress_flags_json"),
+    /** 扩展元数据（飞书集成 feishu.* 等） */
+    metadata: jsonb("metadata").notNull().default({}),
     createdByStaffId: text("created_by_staff_id").references(() => userStaff.id, {
       onDelete: "set null",
     }),

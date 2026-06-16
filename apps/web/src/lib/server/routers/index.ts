@@ -10,6 +10,7 @@ import { financeRouter } from './finance'
 import { merchantRouter } from './merchant'
 import { supplierRouter } from './supplier'
 import { siteMessagesRouter } from './web/site-messages'
+import { integrationFeishuRouter } from './integration/feishu'
 
 export * from './trpc'
 export type { inferRouterInputs, inferRouterOutputs } from '@trpc/server'
@@ -25,6 +26,9 @@ export const appRouter = router({
   merchant: merchantRouter,
   supplier: supplierRouter,
   siteMessages: siteMessagesRouter,
+  integration: router({
+    feishu: integrationFeishuRouter,
+  }),
   // Admin routes
   admin: router({
   }),

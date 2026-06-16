@@ -47,6 +47,7 @@ import {
 import { trpc } from '@/lib/trpc/client'
 import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
 import { batchKindFromRoute } from '@/lib/supplier/onboarding-batch-utils'
+import { useFeishuIntegrationConfig } from '@/lib/integrations/use-feishu-integration-config'
 
 type WizardStep = 'meta' | 'upload' | 'preview'
 
@@ -158,6 +159,7 @@ export function OnboardingBatchWizardDialog({
   const createMutation = trpc.supplier.onboardingBatch.create.useMutation()
   const parseListMutation = trpc.supplier.onboardingBatch.parseList.useMutation()
   const commitListMutation = trpc.supplier.onboardingBatch.commitList.useMutation()
+  const { manualWorkOrderRequired, autoCreateEnabled } = useFeishuIntegrationConfig(open)
 
   const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -274,7 +276,7 @@ export function OnboardingBatchWizardDialog({
       plannedReadyAt: plannedReady || undefined,
       onlineReason: isOnlineTasks ? onlineReason : undefined,
       orderNo: isOrderAccess ? orderNo.trim() : undefined,
-      workOrderNo: workOrderNo.trim(),
+      workOrderNo: workOrderNo.trim() || undefined,
       remark: remark.trim() || undefined,
       uploadList,
       planLines: planValidation.normalized.map((line) => {
@@ -308,14 +310,14 @@ export function OnboardingBatchWizardDialog({
     const result = await submitCreate()
     if (!result) return
     toast.success(
-      `已创建批次 ${result.batchCode}，计划上架 ${result.plannedDeviceCount} 台（工单 ${result.workOrderNo}）`,
+      `已创建批次 ${result.batchCode}，计划上架 ${result.plannedDeviceCount} 台${result.workOrderNo ? `（工单 ${result.workOrderNo}）` : '（飞书工单创建中）'}`,
     )
     onSuccess?.()
     handleOpenChange(false)
   }
 
   const onMetaNext = async () => {
-    if (!workOrderNo.trim()) {
+    if (manualWorkOrderRequired && !workOrderNo.trim()) {
       toast.error('请填写飞书审批工单号')
       return
     }
@@ -475,12 +477,21 @@ export function OnboardingBatchWizardDialog({
                 </Select>
               </div>
               <div className="space-y-2 col-span-2">
-                <Label>飞书审批工单号</Label>
-                <Input
-                  placeholder="请输入飞书审批工单号（供应商内唯一）"
-                  value={workOrderNo}
-                  onChange={(e) => setWorkOrderNo(e.target.value)}
-                />
+                {manualWorkOrderRequired ? (
+                  <>
+                    <Label>飞书审批工单号</Label>
+                    <Input
+                      placeholder="请输入飞书审批工单号（供应商内唯一）"
+                      value={workOrderNo}
+                      onChange={(e) => setWorkOrderNo(e.target.value)}
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                    提交后将自动创建飞书审批工单（末级节点：验收完成）
+                    {autoCreateEnabled ? '' : '（集成未启用时将回退手工填单）'}
+                  </p>
+                )}
               </div>
               <div className="space-y-2 col-span-2">
                 <Label>计划完成时间（可选）</Label>

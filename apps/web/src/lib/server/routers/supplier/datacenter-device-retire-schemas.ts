@@ -18,7 +18,7 @@ export const datacenterRetireMetaSchema = z.object({
   reason: z.enum(retireReasonValues),
   retireActionType: z.enum(retireActionTypeValues).optional(),
   expectedCompletionDate: z.string().min(1, '请选择期望完成日期'),
-  workOrderNo: z.string().trim().min(1, '请填写飞书审批工单号'),
+  workOrderNo: z.string().trim().optional(),
   remark: z.string().max(2000).optional(),
 })
 

@@ -28,6 +28,7 @@ import type {
 } from '@/lib/types/supplier-domain'
 import { trpc } from '@/lib/trpc/client'
 import { invalidateGlobalDashboard } from '@/lib/dashboard/invalidate-global-dashboard'
+import { useFeishuIntegrationConfig } from '@/lib/integrations/use-feishu-integration-config'
 
 const DEPARTMENT_OPTIONS: { value: InternalTestHoldDepartment; label: string }[] = [
   { value: 'product', label: '产品' },
@@ -108,6 +109,7 @@ export function InternalOccupancyBatchCreateDialog({
     },
     onError: (e) => toast.error(e.message),
   })
+  const { manualWorkOrderRequired } = useFeishuIntegrationConfig(open)
 
   useEffect(() => {
     if (!open) return
@@ -182,7 +184,7 @@ export function InternalOccupancyBatchCreateDialog({
     Boolean(
       resolvedSupplierId &&
         resolvedDataCenterId &&
-        workOrderNo.trim() &&
+        (manualWorkOrderRequired ? workOrderNo.trim() : true) &&
         userName.trim() &&
         department &&
         settlementMode &&
@@ -251,13 +253,21 @@ export function InternalOccupancyBatchCreateDialog({
           )}
 
           <div className="grid gap-2">
-            <Label htmlFor="io-work-order">飞书工单号</Label>
-            <Input
-              id="io-work-order"
-              value={workOrderNo}
-              onChange={(e) => setWorkOrderNo(e.target.value)}
-              placeholder="与变更表 ticket_no 一致"
-            />
+            {manualWorkOrderRequired ? (
+              <>
+                <Label htmlFor="io-work-order">飞书工单号</Label>
+                <Input
+                  id="io-work-order"
+                  value={workOrderNo}
+                  onChange={(e) => setWorkOrderNo(e.target.value)}
+                  placeholder="与变更表 ticket_no 一致"
+                />
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground rounded-md border border-dashed px-3 py-2">
+                提交后将自动创建飞书审批工单（末级节点：验收完成）
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -436,7 +446,7 @@ export function InternalOccupancyBatchCreateDialog({
                 supplierId: resolvedSupplierId,
                 dataCenterId: resolvedDataCenterId,
                 accessMethod: 'manual',
-                workOrderNo: workOrderNo.trim(),
+                workOrderNo: workOrderNo.trim() || undefined,
                 uploadList: false,
                 userName: userName.trim(),
                 department,

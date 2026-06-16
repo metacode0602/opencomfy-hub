@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Settings, User, Key, Bell, Palette, Globe, RefreshCw, Eraser } from "lucide-react"
+import { Settings, User, Key, Bell, Palette, Globe, RefreshCw, Eraser, Table2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Input } from "@workspace/ui/components/input"
 import { cn } from "@workspace/ui/lib/utils"
 import { authClient } from "@/lib/auth-client"
 import { BillingSyncSettingsContent } from "@/components/settings/billing-sync-settings-content"
+import { FeishuBitableSyncSettingsContent } from "@/components/settings/feishu-bitable-sync-settings-content"
 import { SupplierDataCleanupSettingsContent } from "@/components/settings/supplier-data-cleanup-settings-content"
 
 const settingsSections = [
@@ -17,6 +18,7 @@ const settingsSections = [
   { id: "appearance", label: "外观设置", icon: Palette },
   { id: "language", label: "语言设置", icon: Globe },
   { id: "billing-sync", label: "账单同步", icon: RefreshCw },
+  { id: "feishu-bitable-sync", label: "飞书多维表格", icon: Table2, adminOnly: true },
   { id: "supplier-data-cleanup", label: "供应商数据清理", icon: Eraser, adminOnly: true },
 ] as const
 
@@ -228,6 +230,16 @@ export function SettingsPageClient() {
             {activeSection === "billing-sync" && (
               <div className="p-6 rounded-xl border border-border bg-card">
                 <BillingSyncSettingsContent />
+              </div>
+            )}
+
+            {activeSection === "feishu-bitable-sync" && (
+              <div className="p-6 rounded-xl border border-border bg-card">
+                {canAccessAdminSettings ? (
+                  <FeishuBitableSyncSettingsContent />
+                ) : (
+                  <p className="text-sm text-muted-foreground">仅管理员可配置飞书多维表格同步。</p>
+                )}
               </div>
             )}
 

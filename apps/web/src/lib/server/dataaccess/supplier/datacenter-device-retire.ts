@@ -29,6 +29,11 @@ import {
   type DeviceCooperationType,
 } from '@/lib/types/supplier-domain'
 import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
+import { createFeishuApprovalForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-approval'
+import {
+  isFeishuAutoCreateEnabled,
+  loadFeishuRuntimeConfig,
+} from '@/lib/server/integrations/feishu/config'
 import { supplierLog, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { resolveOnboardingBatchRefs } from '@/lib/server/dataaccess/supplier/physical-devices'
 import { mapDbDeviceToDomain } from '@/lib/server/dataaccess/supplier/datacenter-retire-shared'
@@ -49,7 +54,7 @@ export type DatacenterRetireRequestInput = {
     reason: DeviceRetireReason
     retireActionType?: RetireActionType
     expectedCompletionDate: string
-    workOrderNo: string
+    workOrderNo?: string
     remark?: string
   }
   planLines: Array<{
@@ -341,7 +346,7 @@ async function buildPreview(
       reason: input.meta.reason,
       retireActionType: actionType,
       expectedCompletionDate: input.meta.expectedCompletionDate,
-      workOrderNo: input.meta.workOrderNo.trim(),
+      workOrderNo: input.meta.workOrderNo?.trim() ?? '',
       remark: input.meta.remark?.trim(),
     },
     retireActionType: actionType,
@@ -469,8 +474,16 @@ export const datacenterDeviceRetireDataAccess = {
     })
     if (!supplierRow) throw new Error('供应商不存在')
 
-    const workOrderNo = input.meta.workOrderNo.trim()
-    await assertWorkOrderUnique(supplierRow.id, workOrderNo)
+    const feishuConfig = loadFeishuRuntimeConfig()
+    const autoCreateFeishu = isFeishuAutoCreateEnabled(feishuConfig)
+    const manualWorkOrderNo = input.meta.workOrderNo?.trim() ?? ''
+    if (!autoCreateFeishu && !manualWorkOrderNo) {
+      throw new Error('请填写飞书审批工单号')
+    }
+    const workOrderNo = autoCreateFeishu ? null : manualWorkOrderNo
+    if (workOrderNo) {
+      await assertWorkOrderUnique(supplierRow.id, workOrderNo)
+    }
 
     const { contractId, accessSheetId } = await resolveOnboardingBatchRefs(supplierRow.id)
     parseExpectedDate(input.meta.expectedCompletionDate)
@@ -519,6 +532,7 @@ export const datacenterDeviceRetireDataAccess = {
           remark: input.meta.remark?.trim() || null,
           listUploadMode: input.uploadList ? 'simplified_csv' : 'none',
           progressFlagsJson: {},
+          metadata: autoCreateFeishu ? { feishu: { create_status: 'pending' as const } } : {},
           createdByStaffId: input.operatorStaffId ?? null,
           createdAt: now,
           updatedAt: now,
@@ -529,7 +543,7 @@ export const datacenterDeviceRetireDataAccess = {
           supplierId: supplierRow.id,
           type: 'device_retire',
           title: `机房 ${hit.dataCenter.name} ${preview.scenarioLabel}计划已创建`,
-          description: `${getDeviceRetireReasonLabel(input.meta.reason)} · 工单 ${workOrderNo} · 计划 ${plannedDeviceCount} 台 · 请运维通过变更表更新设备状态`,
+          description: `${getDeviceRetireReasonLabel(input.meta.reason)} · ${workOrderNo ? `工单 ${workOrderNo}` : '飞书工单创建中'} · 计划 ${plannedDeviceCount} 台 · 请运维通过变更表更新设备状态`,
           authorStaffId: input.operatorStaffId ?? null,
           authorName: input.operatorName ?? '运营',
           authorRole: 'ops',
@@ -570,6 +584,14 @@ export const datacenterDeviceRetireDataAccess = {
       hasList,
     })
 
+    let finalWorkOrderNo = workOrderNo ?? preview.meta.workOrderNo
+    if (autoCreateFeishu) {
+      const feishuResult = await createFeishuApprovalForBatch(batchId)
+      if (feishuResult.workOrderNo) {
+        finalWorkOrderNo = feishuResult.workOrderNo
+      }
+    }
+
     return {
       batchCount: 1,
       retiredCount: 0,
@@ -579,7 +601,7 @@ export const datacenterDeviceRetireDataAccess = {
       batchId,
       dataCenterId: hit.dataCenter.id,
       dataCenterName: hit.dataCenter.name,
-      workOrderNo: preview.meta.workOrderNo,
+      workOrderNo: finalWorkOrderNo,
       plannedLines: preview.planLines,
       totalPlannedQuantity: plannedDeviceCount,
       retirePlanMode: preview.retirePlanMode,

@@ -247,6 +247,21 @@ export function OnboardingBatchDetailContent({
   const canAdjustPlan = !TERMINAL_BATCH_STATUSES.includes(
     batch.batchStatus as (typeof TERMINAL_BATCH_STATUSES)[number],
   )
+  const progressFlags =
+    batch.progressFlagsJson && typeof batch.progressFlagsJson === 'object'
+      ? (batch.progressFlagsJson as { needs_review?: boolean; completion_source?: string })
+      : null
+  const feishuMeta =
+    batch.metadata && typeof batch.metadata === 'object'
+      ? ((batch.metadata as { feishu?: { create_status?: string; last_feishu_status?: string; last_webhook_at?: string } }).feishu ?? null)
+      : null
+  const retryFeishuMutation = trpc.integration.feishu.retryBatchApproval.useMutation({
+    onSuccess: () => {
+      toast.success('已重新发起飞书工单')
+      void refetch()
+    },
+    onError: (e) => toast.error(e.message),
+  })
 
   return (
     <div className="space-y-6">
@@ -264,14 +279,34 @@ export function OnboardingBatchDetailContent({
                 {IMPORT_STATUS_LABELS[batch.importStatus] ?? batch.importStatus}
               </Badge>
               <Badge variant="secondary">{batch.batchStatus}</Badge>
+              {progressFlags?.needs_review && (
+                <Badge variant="outline" className="border-amber-500 text-amber-600">
+                  工单已结案，设备进度未达标
+                </Badge>
+              )}
+              {feishuMeta?.create_status === 'failed' && (
+                <Badge variant="destructive">飞书建单失败</Badge>
+              )}
             </div>
             <p className="text-sm text-muted-foreground mt-2">
               {batch.supplierShortName} · {batch.idcCode} · {batch.dataCenterName}
-              {batch.workOrderNo ? ` · 工单 ${batch.workOrderNo}` : ''}
+              {batch.workOrderNo ? ` · 工单 ${batch.workOrderNo}` : feishuMeta ? ' · 飞书工单处理中' : ''}
+              {feishuMeta?.last_webhook_at
+                ? ` · 最近同步 ${new Date(feishuMeta.last_webhook_at).toLocaleString('zh-CN')}`
+                : ''}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
+          {feishuMeta?.create_status === 'failed' && (
+            <Button
+              variant="outline"
+              disabled={retryFeishuMutation.isPending}
+              onClick={() => retryFeishuMutation.mutate({ batchId: batch.id })}
+            >
+              {retryFeishuMutation.isPending ? '重试中…' : '重试飞书建单'}
+            </Button>
+          )}
           {canAdjustPlan && (
             <Button variant="outline" className="gap-2" onClick={() => setAdjustOpen(true)}>
               <SlidersHorizontal className="w-4 h-4" />

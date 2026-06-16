@@ -24,9 +24,10 @@ export type BatchProgressEventType =
   | 'status_changed'
   | 'batch_completed'
   | 'batch_cancelled'
+  | 'work_order_closed'
 
 export type BatchProgressEventPayload = {
-  source?: 'manual_ui' | 'system' | 'changelog'
+  source?: 'manual_ui' | 'system' | 'changelog' | 'feishu_webhook'
   reason?: string
   activity_id?: string
   operator_staff_id?: string
@@ -210,4 +211,5 @@ export const BATCH_PROGRESS_EVENT_TYPE_LABELS: Record<BatchProgressEventType, st
   status_changed: '状态变更',
   batch_completed: '批次完成',
   batch_cancelled: '批次取消',
+  work_order_closed: '工单结案',
 }

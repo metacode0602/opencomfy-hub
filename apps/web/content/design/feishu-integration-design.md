@@ -52,7 +52,7 @@
 
 ### 1.3 应用场景（本期范围）
 
-1. **计划批次 ↔ 工单**：设备上架 / 设备下架 / 机房裁撤 / 内部占用 — 创建时发起工单；工单结束后自动拉取摘要写入 **对应机房** 时间线（`supplier_activity`，`metadata.idc_code` / `data_center_id`）。
+1. **计划批次 ↔ 工单**：设备上架 / 设备下架 / 机房裁撤 / 内部占用 — 创建时发起工单；工单结束后自动拉取摘要写入 **对应机房** 时间线（`supplier_activity`，`metadata.idc_code` / `data_center_id`）。**主入口**含供应域列表 Wizard 与 **机房详情页**「设备上架/接入」「设备下架/裁撤」（§5.8）。
 2. **批次评论/附件 ↔ 工单**：在批次详情（或机房计划面板）发表评论、上传文件，同步至飞书工单评论/附件区。
 3. **定时多维表格同步**：Cron 读取 Bitable，按 [supplier-device-import-schema.md](./supplier-device-import-schema.md) 表头映射，自动走与 Excel 上传相同的 preview → commit 逻辑（可配置为仅 preview 告警或自动 commit）。
 
@@ -63,6 +63,7 @@
 - 在 Bitable 同步路径开放 **显卡型号 / 显卡数量** 的绕过写入（仍遵守 D1 / 主数据导入规则）
 - 多飞书租户（一个企业一个飞书应用实例即可；多企业另立项）
 - 飞书即时消息（IM）机器人推送（可作 P2）
+- 飞书服务台（Helpdesk）工单（ADR-F2 已确认仅用 **飞书审批**）
 
 ### 1.5 设计原则
 
@@ -93,7 +94,7 @@
 - **推荐**：存飞书 **`instance_code`**（审批实例对外编号，与运营口头「工单号」一致）→ 写入 `work_order_no`。
 - **并存**：`onboarding_batch.metadata.feishu_instance_id` 存内部 `instance_id`，便于 API 回调关联。
 
-若租户实际使用 **飞书服务台（Helpdesk）** 而非审批，则映射为 Helpdesk Ticket API；本文默认 **审批实例** 模型，实施前需与运营确认工单产品形态。
+**工单产品形态（ADR-F2，已确认）**：本期统一采用 **飞书审批**（`approval/v4` 实例模型）；飞书服务台（Helpdesk）不在本期范围，若未来接入需另立项替换 API 层。
 
 ### 2.2 多维表格（Bitable）能力
 
@@ -184,6 +185,8 @@ flowchart TB
 | `encrypt_key` | varchar | 事件解密 |
 | `verification_token` | varchar | 事件验签 |
 | `default_approval_codes` | jsonb | `{ "online": "...", "device_retire": "...", ... }` |
+| `approval_form_mapping_json` | jsonb | CRM 字段 → 飞书审批控件映射，见 §5.10 |
+| `webhook_policy_json` | jsonb | 见 §5.4.1；默认 `{ "auto_complete_on_approval": true, "auto_create_enabled": true }` |
 | `enabled` | boolean | 总开关 |
 | `created_at` / `updated_at` | timestamptz | |
 
@@ -262,10 +265,10 @@ flowchart TB
 
 | `batch_kind` | 创建入口 | 飞书审批模板（配置键） |
 |--------------|----------|------------------------|
-| `online` | 上架 Wizard | `default_approval_codes.online` |
-| `order_access` | 订单接入 Wizard | `default_approval_codes.order_access` |
-| `device_retire` | 机房下架 Dialog（含裁撤） | `default_approval_codes.device_retire` |
-| `internal_occupancy` | 内部占用 Dialog | `default_approval_codes.internal_occupancy` |
+| `online` | 上架 Wizard；**机房详情** → 设备上架（§5.8） | `default_approval_codes.online` |
+| `order_access` | 订单接入 Wizard；**机房详情** → 订单接入 | `default_approval_codes.order_access` |
+| `device_retire` | 机房下架 Dialog（含裁撤）；**机房详情** → 设备下架/裁撤 | `default_approval_codes.device_retire` |
+| `internal_occupancy` | 内部占用 Dialog；**机房详情** → 内部占用 | `default_approval_codes.internal_occupancy` |
 
 ### 5.2 创建流程（目标态）
 
@@ -290,16 +293,90 @@ sequenceDiagram
 
 ### 5.3 表单字段映射（CRM → 飞书审批）
 
-| 飞书表单字段（示例） | CRM 来源 |
-|--------------------|----------|
-| 供应商 | `supplier.name` |
-| 机房 / IDC | `data_center.name` / `idc_code` |
-| 批次类型 | `batch_kind` 中文 |
-| 计划明细 | `planned_lines_json` 渲染文本 |
-| 期望完成日 | 下架/占用场景 |
-| 下架原因 / 场景 | `retire_reason` / `retire_plan_mode` |
-| 内部占用登记 | `internal_test_hold` 摘要 |
-| CRM 批次链接 | 详情页 URL（便于飞书内跳转） |
+> **Phase 1 现状**：建单时将批次摘要写入**单个 textarea**（`FEISHU_APPROVAL_FORM_FIELD_ID` 或降级无 id）。  
+> **Phase 1.5 目标**：CRM 表单**每个业务字段**按映射表同步至飞书审批对应控件（§5.10）。
+
+#### 5.3.1 映射原则
+
+1. **飞书表单在管理后台维护**；CRM 只负责按 `field_id` 填值，不改造审批流。
+2. 映射配置按 **`batch_kind`**（及必要时 `retire_plan_mode`）分场景；同一飞书模板可服务多 kind，也可一 kind 一模板。
+3. 值为空且配置 `optional: true` 的字段**跳过**，不阻断建单。
+4. 映射缺失或飞书 API 拒收某字段时：**降级**为摘要 textarea + `feishu_integration_job_run` 告警，批次仍落库。
+5. **末级审批节点**已确认为「验收完成」（ADR-F8）；映射与 Webhook 语义不变。
+
+#### 5.3.2 上架（`batch_kind=online`）
+
+| 映射键 `field_key` | 飞书控件建议 | CRM 来源 |
+|--------------------|-------------|----------|
+| `supplier_name` | 单行文本 | `onboarding_batch.supplier_name` |
+| `data_center_name` | 单行文本 | `onboarding_batch.data_center_name` |
+| `idc_code` | 单行文本 | `onboarding_batch.idc_code` |
+| `batch_kind_label` | 单行文本 | 固定「设备上架」 |
+| `batch_code` | 单行文本 | `onboarding_batch.batch_code` |
+| `planned_lines` | 多行文本 | `planned_lines_json` 渲染：卡型 × 合作类型 × 数量 |
+| `planned_device_count` | 数字 | `planned_device_count` |
+| `online_reason` | 单选/文本 | `online_reason` → 中文标签 |
+| `access_method` | 单选/文本 | `access_method` → 中文标签 |
+| `planned_ready_at` | 日期 | `planned_ready_at`（ISO8601 +08:00） |
+| `contract_no` | 单行文本（optional） | join `supplier_contract.contract_no` |
+| `remark` | 多行文本（optional） | `remark` |
+| `crm_batch_url` | 链接/文本 | `{APP_BASE_URL}/supplier/.../batches/{id}` |
+
+#### 5.3.3 订单接入（`batch_kind=order_access`）
+
+在 §5.3.2 基础上：
+
+| 映射键 | 飞书控件 | CRM 来源 |
+|--------|----------|----------|
+| `batch_kind_label` | 单行文本 | 固定「订单接入」 |
+| `order_no` | 单行文本 | `order_no` |
+| `remark` | 多行文本 | **必填**场景下的 `remark` |
+
+#### 5.3.4 内部占用（`batch_kind=internal_occupancy`）
+
+| 映射键 | 飞书控件 | CRM 来源 |
+|--------|----------|----------|
+| `batch_kind_label` | 单行文本 | 固定「内部占用」 |
+| `user_name` | 单行文本 | `internal_test_hold.user_name`（首条或拼接） |
+| `department` | 单选/文本 | `department` → 中文 |
+| `settlement_mode` | 单选/文本 | `settlement_mode` → 中文 |
+| `hold_from` / `hold_until` | 日期 | hold 时间窗 |
+| `planned_lines` / `planned_device_count` | 同 §5.3.2 | 计划行 |
+
+#### 5.3.5 下架 / 机房裁撤（`batch_kind=device_retire`）
+
+| 映射键 | 飞书控件 | CRM 来源 |
+|--------|----------|----------|
+| `supplier_name` / `data_center_name` / `idc_code` | 单行文本 | 批次冗余字段 |
+| `batch_kind_label` | 单行文本 | `retire_plan_mode=datacenter_closure` →「机房裁撤」；否则「设备下架」 |
+| `retire_reason` | 单选/文本 | `retire_reason` → 中文 |
+| `retire_plan_mode` | 单行文本 | `line_plan` / `datacenter_closure` 中文 |
+| `retire_action_type` | 单行文本 | `device_unsubscribe` / `bare_metal_offboard` 中文 |
+| `expected_completion_date` | 日期 | `expected_completion_date` |
+| `planned_lines` / `planned_device_count` | 多行/数字 | 计划行 |
+| `list_summary` | 多行文本（optional） | 有建议清单时：`fileName`、解析行数、成功数；**不传全量设备明细** |
+| `retire_remark` | 多行文本（optional） | `retire_remark` / `remark` |
+| `crm_batch_url` | 链接/文本 | 批次详情 URL |
+
+#### 5.3.6 配置示例 `approval_form_mapping_json`
+
+```json
+{
+  "online": {
+    "approval_code": "7C35A7CC-...",
+    "fields": {
+      "supplier_name": { "field_id": "widget_1", "type": "input" },
+      "data_center_name": { "field_id": "widget_2", "type": "input" },
+      "planned_lines": { "field_id": "widget_3", "type": "textarea" },
+      "planned_device_count": { "field_id": "widget_4", "type": "number" },
+      "crm_batch_url": { "field_id": "widget_5", "type": "input" }
+    }
+  },
+  "device_retire": { "...": "..." }
+}
+```
+
+实施前须与运营在飞书后台导出各 `approval_code` 的 widget 定义，填入真实 `field_id`（见 §5.10.3）。
 
 ### 5.4 Webhook 处理规则
 
@@ -311,20 +388,40 @@ sequenceDiagram
 2. 写入 `feishu_integration_job_run`（`job_kind=webhook`）
 3. 解析 `instance_code` / `instance_id` → 查 `feishu_external_link` 或 `onboarding_batch.work_order_no`
 4. **幂等键**：`(event_type, instance_id, status, update_time)`
-5. 按飞书状态映射 CRM 动作：
+5. 按飞书状态映射 CRM 动作（**ADR-F3**，见 §5.4.1）：
 
-| 飞书审批状态 | CRM `batch_status`（上架/接入） | CRM `batch_status`（下架） | 其他动作 |
-|--------------|--------------------------------|----------------------------|----------|
-| 审批中 / 进行中 | 保持或 → `接入中`/`下架中`（可配置） | 同左 | 写 `supplier_activity` |
-| 已通过 | → `已完成`（或仅标记工单结束，进度仍靠变更表） | → `已完成` | §5.5 |
-| 已拒绝 / 已撤回 | → `已取消` | → `已取消` | 写时间线 + 通知创建人 |
-| 未知 | 仅记日志 | | 不抛错给飞书（仍返回 200） |
+> **已确认**：飞书审批流 **末级节点为「验收完成」**；`APPROVED` 事件语义与 ops-panorama §7.3「工单执行结束」对齐。
 
-> **与 §7.3 方案 A 对齐**：若运营希望「开始执行工单 / 工单执行结束」与飞书节点 **一一对应**，可在飞书流程中增加自定义节点名称，Webhook 解析 `task_name` 映射为 `开始执行工单` / `工单执行结束` 语义，仅更新 `batch_status` + `progress_event`，**不改设备 lifecycle**。
+| 飞书审批状态 | CRM `batch_status`（默认 `auto_complete_on_approval=true`） | 其他动作 |
+|--------------|-----------------------------------------------------------|----------|
+| 审批中 / 进行中 | 保持或 → `接入中`/`下架中`（可配置中间态映射） | 可选写 `supplier_activity` |
+| 已通过 | → `已完成`（保守模式见 §5.4.1，不更新状态） | **始终** §5.5 写时间线 + `progress_event` |
+| 已拒绝 / 已撤回 | → `已取消` | 写时间线 + 通知创建人 |
+| 未知 | 不变更 | 仅记日志；仍返回 200 |
+
+> **与 [supplier-device-management-ops-panorama.md §7.3](./supplier-device-management-ops-panorama.md) 方案 A 对齐**：Webhook 只更新 **`batch_status`** 与时间线，**不改**设备 `lifecycle_status` / `ops_status`。若运营希望「开始执行工单 / 工单执行结束」与飞书节点 **一一对应**，可在飞书流程中增加自定义节点，Webhook 解析 `task_name` 映射中间态（`接入中`/`下架中`）与终态（`已完成`），**不改设备 lifecycle**。
+
+### 5.4.1 审批通过策略（ADR-F3，已确认）
+
+| 配置项 | 位置 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `auto_complete_on_approval` | `feishu_integration_config.webhook_policy_json` | **`true`** | 飞书 `APPROVED` 时是否将 `batch_status` → `已完成` |
+| `auto_complete_batch_kinds` | 同上 | 全部计划批次 kind | 可按 `batch_kind` 白名单限制自动完工 |
+| `write_timeline_on_approval` | 同上 | **`true`**（固定，不可关） | 审批通过 **始终** 写 §5.5 机房时间线 |
+
+**默认行为（F3）**：飞书审批通过 → **写机房时间线** + **`batch_status=已完成`** + `work_order_closed` 进度事件。
+
+**保守模式**（`auto_complete_on_approval=false`）：仅写时间线与 `work_order_closed` 事件，**不**改 `batch_status`；批次终态仍由变更表挂接 + `refreshBatchProgress` 或人工结案驱动（与现网一致）。
+
+**与 `refreshBatchProgress` 的优先级**：
+
+1. 若 Webhook 已将批次置为 `已完成`，后续 `refreshBatchProgress` **不得回退** 状态。
+2. 若保守模式未自动完工，`refreshBatchProgress` 在 `touched ≥ planned` 时仍可自动 → `已完成`（`completion_mode=auto`）。
+3. 两种路径均可能触发 `已完成` 时，以 **先到达者** 为准；后到达者仅刷新 `touched_*` 计数，并视情况置 `progress_flags_json.needs_review`（见 §12.1）。
 
 ### 5.5 工单结束后写入机房时间线
 
-触发：`APPROVED` 或配置的「结束节点」。
+触发：飞书 `APPROVED`（或配置的「结束节点」）；**与 ADR-F3 是否自动改 `batch_status` 无关，时间线始终写入**。
 
 **写入 `supplier_activity`**（幂等：`metadata.feishu_instance_id` + `type=work_order_completed`）：
 
@@ -351,14 +448,131 @@ sequenceDiagram
 
 | 现网 | 目标态 |
 |------|--------|
-| 必填「飞书审批工单号」 | **默认隐藏**；展示「提交后将自动创建飞书工单」 |
-| 手工填工单（兼容） | Settings 开关 `feishu.auto_create_enabled=false` 时回退现网 |
-| 创建失败 | 批次仍落库，`metadata.feishu.create_status=failed`；UI 提示重试 / 手工补号 |
-| 详情页 | 展示飞书工单链接、同步状态、最近 Webhook 时间 |
+| 必填「飞书审批工单号」 | **默认自动建单**；见 §5.9 双模式 |
+| 手工填工单（兼容） | 表单内 **「手工填写已有工单号」** 选项 + 租户级 `auto_create_enabled=false` 总闸 |
+| 审批通过行为 | Settings 可切换 `auto_complete_on_approval`（默认开：时间线 + 自动完工） |
+| 创建失败 | 批次仍落库，`metadata.feishu.create_status=failed`；详情页重试 / 补录工单号 |
+| 详情页 | 飞书同步状态、最近 Webhook 时间、`needs_review` Badge |
+| 机房详情入口 | §5.8；子 Dialog 锁定供应商/机房，默认自动建单 |
 
 ### 5.7 与变更表挂接（不变）
 
 运维上传变更表或 Bitable 同步后，`ticket_no` 仍匹配 `work_order_no`（即 `instance_code`）。**设备进度** 仍由 `commitChangelog` → `refreshBatchProgress` 驱动。
+
+### 5.8 机房详情入口（`datacenter-detail-content`）
+
+**代码锚点**：`apps/web/src/app/[locale]/(protected)/supplier/_components/datacenter-detail-content.tsx`
+
+| 按钮 | 子组件 | 可选子场景 | `batch_kind` |
+|------|--------|------------|--------------|
+| 设备上架 / 接入 | `DatacenterOnboardingDialog` | 设备上架 / 订单接入 / 内部占用 | `online` / `order_access` / `internal_occupancy` |
+| 设备下架 / 裁撤 | `DatacenterDeviceRetireDialog` | 行计划下架 / 机房裁撤 | `device_retire`（`retire_plan_mode` 区分） |
+
+**组件链**：
+
+```text
+datacenter-detail-content.tsx
+  ├─ DatacenterOnboardingDialog（mode picker）
+  │    ├─ OnboardingBatchWizardDialog（online / order_access，lockContext）
+  │    └─ InternalOccupancyBatchCreateDialog（lockContext）
+  └─ DatacenterDeviceRetireDialog（lockContext）
+```
+
+**机房上下文约束**（`lockContext=true`）：
+
+- `supplierId`、`dataCenterId` 由机房详情传入，表单内**不可改**。
+- 飞书映射中的 `supplier_name`、`data_center_name`、`idc_code` 取自批次落库冗余字段，避免用户选错机房。
+- 创建成功后 `invalidateAfterImport` 刷新机房计划面板与库存。
+
+**本入口不要求新增 Dialog**；在现有三个子 Dialog 内统一接入 §5.9 工单模式组件与 §5.10 字段映射即可。
+
+### 5.9 工单创建方式（auto / manual，ADR-F9）
+
+#### 5.9.1 双模式定义
+
+| 模式 | 请求字段 | 服务端行为 | 适用 |
+|------|----------|------------|------|
+| **`auto`（默认）** | `workOrderMode=auto`，不传 `workOrderNo` | INSERT 批次 → `createFeishuApprovalForBatch` → 回填 `work_order_no` | 新流程、机房详情入口 |
+| **`manual`** | `workOrderMode=manual`，`workOrderNo` 必填 | 校验供应商内唯一 → INSERT，**不调**飞书建单 API | 历史补录、线下已建审批 |
+
+#### 5.9.2 优先级与总闸
+
+```text
+FEISHU_INTEGRATION_ENABLED=false  → 仅 manual（集成不可用）
+FEISHU_AUTO_CREATE_ENABLED=false  → 全局强制 manual，UI 不展示 auto 选项
+否则                               → UI 默认选中 auto，用户可切 manual
+```
+
+#### 5.9.3 共享 UI 组件
+
+新建 `FeishuWorkOrderModeField`（路径建议：`supplier/_components/feishu-work-order-mode-field.tsx`）：
+
+- **auto**：展示说明文案「提交后将自动创建飞书审批（末级节点：验收完成）」
+- **manual**：展示工单号 `Input`，提交前校验非空
+
+**接入位置**（与机房详情入口共用）：
+
+1. `onboarding-batch-wizard-dialog.tsx`
+2. `internal-occupancy-batch-create-dialog.tsx`
+3. `datacenter-device-retire-dialog.tsx`
+
+#### 5.9.4 API / Schema 扩展
+
+```ts
+// onboarding-batch create / datacenter retire commit
+workOrderMode: z.enum(['auto', 'manual']).default('auto')
+workOrderNo: z.string().trim().optional()
+// superRefine: manual 时 workOrderNo 必填
+```
+
+#### 5.9.5 建单失败与补录
+
+| 状态 | UI |
+|------|-----|
+| `metadata.feishu.create_status=failed` | 批次详情「重试飞书建单」 |
+| 仍失败或运营坚持线下工单 | 「补录工单号」→ tRPC `integration.feishu.linkManualWorkOrder`（校验唯一性，写 `work_order_no`，`external_type=manual_link`） |
+
+### 5.10 审批表单字段映射器（Phase 1.5b）
+
+#### 5.10.1 模块职责
+
+路径建议：`apps/web/src/lib/server/integrations/feishu/approval-form-mapper.ts`
+
+```text
+buildApprovalFormPayload(batchKind, batchRow, extras?)
+  → 读 approval_form_mapping_json[batchKind]
+  → field_key 值提取器（batch + join）
+  → 按 type 格式化（input / textarea / number / date / single_select）
+  → FeishuFormField[] → JSON.stringify → POST instances.form
+```
+
+替换 Phase 1 的 `buildFeishuApprovalFormJson` 单 textarea 实现。
+
+#### 5.10.2 值提取器（`field_key` 注册表）
+
+| `field_key` | 提取逻辑 |
+|-------------|----------|
+| `planned_lines` | `renderPlanLines(planned_lines_json)` |
+| `batch_kind_label` | `FEISHU_BATCH_KIND_LABELS` + retire 场景覆盖 |
+| `crm_batch_url` | `config.appBaseUrl` + 批次详情 path |
+| `contract_no` | 创建时 join contract（extras 传入） |
+| `list_summary` | retire 清单 meta，无则 skip |
+
+#### 5.10.3 与飞书后台对齐流程（实施门禁）
+
+1. 运营提供各场景 `approval_code` 及表单截图。
+2. 开发调用 `GET /approval/v4/approvals/:approval_code` 获取 widget 列表。
+3. 将 widget id 填入 `approval_form_mapping_json`（或 Settings 向导，Phase 1.5d）。
+4. **试发空实例**（admin）：用 fixture 批次数据验证各字段在飞书侧可见。
+5. 上线后字段变更走配置版本化，不硬编码在业务代码。
+
+#### 5.10.4 降级策略
+
+| 条件 | 行为 |
+|------|------|
+| 无 `approval_form_mapping_json` | 回退 Phase 1 摘要 textarea |
+| 某 `field_id` 飞书返回校验错误 | 跳过该字段 + job_run 记录；其余字段仍提交 |
+| 全部字段失败 | `create_status=failed`，批次可重试 / manual 补号 |
 
 ---
 
@@ -561,6 +775,7 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 
 - 飞书应用连接测试（get tenant token）
 - 审批模板 code 配置与 **「试发空实例」**（仅 admin）
+- **审批表单字段映射向导**（Phase 1.5d）：选 `approval_code` → 拉 widget → 绑定 `field_key`（§5.10.3）
 - Bitable 映射向导：选 app → 表 → 自动拉字段 → 映射 Excel 列 → 试跑 preview
 - Job 运行历史列表（复用 billing sync job 表格样式）
 
@@ -570,13 +785,54 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 
 ### Phase 1 — 工单出站 + Webhook（MVP）
 
-- [ ] `packages/integrations/feishu` 基础客户端
-- [ ] 创建批次时自动发起审批 + 回填 `work_order_no`
-- [ ] Webhook 路由 + 批次状态 + `supplier_activity` + `progress_event`
-- [ ] 上架 / 下架 / 内部占用入口；机房裁撤走 `device_retire` + `retire_plan_mode=datacenter_closure`
-- [ ] 手工填工单兼容开关
+- [x] 飞书 HTTP 客户端（`apps/web/src/lib/server/integrations/feishu/*`）
+- [x] 创建批次时自动发起审批 + 回填 `work_order_no`
+- [x] Webhook 路由 + 批次状态 + `supplier_activity` + `progress_event`
+- [x] 上架 / 下架 / 内部占用入口；机房裁撤走 `device_retire` + `retire_plan_mode=datacenter_closure`
+- [x] 手工填工单兼容开关（`FEISHU_AUTO_CREATE_ENABLED=false`）
+- [x] `needs_review` 标记 + 详情 Badge（L2–L3）
 
-**验收**：创建批次后飞书可见审批；审批通过后 CRM 批次态与时间线自动更新；变更表仍可用工单号挂批。
+**验收**：创建批次后飞书可见审批；审批通过后 CRM **时间线自动写入**且 **默认** `batch_status=已完成`；保守模式可关自动完工；变更表仍可用工单号挂批。
+
+### Phase 1.5 — 机房入口 + 字段同步 + 双模式工单（待实施）
+
+> 针对机房详情「设备上架/接入」「设备下架/裁撤」及同源 Wizard，在 Phase 1 基础上补齐 **表单内 auto/manual** 与 **逐字段飞书映射**。
+
+#### Phase 1.5a — 工单双模式 UI + API
+
+- [ ] `FeishuWorkOrderModeField` 共享组件
+- [ ] `workOrderMode` / 条件校验 `workOrderNo`（`onboarding-batch-schemas`、`datacenter-device-retire-schemas`）
+- [ ] `onboarding-batch.ts` / `datacenter-device-retire.ts` 按 mode 分支建单
+- [ ] 接入：`onboarding-batch-wizard-dialog`、`internal-occupancy-batch-create-dialog`、`datacenter-device-retire-dialog`
+- [ ] `integration.feishu.linkManualWorkOrder`（补录工单号）
+
+**验收**：机房详情两按钮打开的子 Dialog 默认 auto；可切 manual 填历史工单号；`FEISHU_AUTO_CREATE_ENABLED=false` 时仅 manual。
+
+#### Phase 1.5b — 审批表单字段映射器
+
+- [ ] `approval-form-mapper.ts` + `field_key` 提取器注册表
+- [ ] `feishu_integration_config.approval_form_mapping_json`（或 env `FEISHU_APPROVAL_FORM_MAPPING` 过渡）
+- [ ] `createFeishuApprovalForBatch` 改用映射器输出 `form` JSON
+- [ ] 映射缺失时降级 textarea + job_run 告警
+
+**验收**：飞书审批实例中可见 §5.3.2–5.3.5 各字段（非仅摘要块）；与 CRM 表单提交值一致。
+
+#### Phase 1.5c — 运营对齐飞书表单
+
+- [ ] 四场景 `approval_code` + widget `field_id` 定稿
+- [ ] 填入 `approval_form_mapping_json`
+- [ ] 试发空实例通过
+
+#### Phase 1.5d — Settings 映射向导（可选，可并入 Phase 2 前）
+
+- [ ] 拉取审批定义 → 下拉绑定 `field_key` → 保存映射
+- [ ] Job 历史展示建单字段摘要 / 降级原因
+
+**机房详情专项验收**（§5.8）：
+
+1. 锁定供应商/机房，提交后自动建单，飞书表单字段与 CRM 一致。
+2. manual 模式可绑定已有工单号，变更表 `ticket_no` 挂批正常。
+3. 裁撤与行计划下架均走正确 `batch_kind_label` / `retire_plan_mode` 映射。
 
 ### Phase 2 — 评论/附件同步
 
@@ -605,6 +861,8 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 |------|------|
 | 单元 | field_mapper、Webhook 状态机、幂等键 |
 | 集成 | Mock 飞书 API：创建实例 → 模拟 Webhook → 断言 batch + activity |
+| 映射 | 各 `batch_kind` fixture → `approval-form-mapper` 输出与飞书 widget 类型一致 |
+| 机房入口 | `lockContext` 创建 online + device_retire；auto/manual 双模式 |
 | 导入 | Bitable fixture 行 → parse 结果与同名 Excel 一致 |
 | 回归 | 关闭集成开关后，现网手工工单 + Excel 上传路径不变 |
 | 安全 | 错误验签拒绝；secret 不入日志 |
@@ -613,15 +871,31 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 
 ## 12. 已确认决策（ADR，待评审）
 
-| # | 议题 | 建议决策 |
-|---|------|----------|
-| **F1** | `work_order_no` 存什么 | 飞书 **`instance_code`**（对外工单号）；`instance_id` 放 metadata |
-| **F2** | 工单产品形态 | 默认 **飞书审批**；若运营确认用服务台，Phase 1 前替换 API 层 |
-| **F3** | 审批通过是否自动 `batch_status=已完成` | **可配置**；默认 **仅写时间线**，批次完工仍靠变更表进度（保守）；激进模式自动完工 |
-| **F4** | Bitable 同步默认 | `auto_commit=false`，试运行通过后再开 |
-| **F5** | 时间线存储 | 复用 **`supplier_activity`** + `metadata.data_center_id`，不新建 `datacenter_activity` 表 |
-| **F6** | Cron 宿主 | **Web 进程内** `node-cron`（与账单同步一致），不启用 `apps/workers` |
-| **F7** | 发起人 | 映射 CRM 登录用户 → `feishu_open_id`；缺失时用 **应用机器人身份** + 表单注明「CRM 代发」 |
+| # | 议题 | 决策 | 状态 |
+|---|------|------|------|
+| **F1** | `work_order_no` 存什么 | 飞书 **`instance_code`**（对外工单号）；`instance_id` 放 metadata | 建议 |
+| **F2** | 工单产品形态 | **飞书审批**（`approval/v4`）；服务台不在本期范围 | **已确认** |
+| **F3** | 审批通过后 CRM 动作 | **可配置**；默认 **写机房时间线 + `batch_status=已完成`**；保守模式（`auto_complete_on_approval=false`）仅写时间线 | **已确认** |
+| **F8** | 飞书审批末级节点 | **「验收完成」**（与 §7.3 工单执行结束语义对齐） | **已确认** |
+| **F9** | 工单创建方式 | 表单内 **`auto`（默认）/ `manual`**；租户级 `auto_create_enabled` 为总闸；见 §5.9 | **建议** |
+| **F4** | Bitable 同步默认 | `auto_commit=false`，试运行通过后再开 | 建议 |
+| **F5** | 时间线存储 | 复用 **`supplier_activity`** + `metadata.data_center_id`，不新建 `datacenter_activity` 表 | 建议 |
+| **F6** | Cron 宿主 | **Web 进程内** `node-cron`（与账单同步一致），不启用 `apps/workers` | 建议 |
+| **F7** | 发起人 | 映射 CRM 登录用户 → `feishu_open_id`；缺失时用 **应用机器人身份** + 表单注明「CRM 代发」 | 建议 |
+
+### 12.1 F2 / F3 逻辑与设计问题（评审须关注）
+
+| # | 问题 | 说明 | 缓解 / 实施要求 |
+|---|------|------|------------------|
+| **L1** | ~~语义映射~~ | **已确认**：飞书审批流 **末级节点为「验收完成」**；`APPROVED` 与 ops-panorama §7.3「工单执行结束」语义对齐，F3 默认行为可实施 | 实施时 Webhook 仍记录 `task_name` 便于审计；若未来流程变更，可改 `task_name` 白名单 |
+| **L2** | **双路径完工**：Webhook vs `refreshBatchProgress` | F3 默认可能在 `touched < planned` 时即将批次标为 `已完成`；变更表路径亦可在挂接达标时自动完工 | 见 §5.4.1 优先级；`已完成` 且 `touched < planned` 时 **必须** 写 `progress_flags_json.needs_review=true` |
+| **L3** | **进度展示分裂** | 批次态已是 `已完成`，但 `online`/`retired` 计数未达标，列表 KPI 与详情进度条不一致 | UI 并列展示「批次态 / 数量进度 / 目标 ops 达标率」（§7.3.6）；详情 Badge「工单已结案，设备进度未达标」 |
+| **L4** | **中间态缺失** | 若仅订阅终态 `APPROVED`，无法自动写入 `接入中`/`下架中`（对应变更表「开始执行工单」） | Phase 1 可接受：中间态仍靠变更表首行挂接触发；P1 增强：解析飞书 `task_name` 或增加中间 Webhook 节点 |
+| **L5** | **保守模式与 F3 默认的运维预期** | 关 `auto_complete_on_approval` 后，商务在 CRM 看到批次仍「进行中」，与飞书侧「已通过」不一致 | 时间线文案明确「飞书审批已通过（CRM 批次待变更表结案）」；Settings 说明两种模式差异 |
+| **L6** | **`internal_occupancy` 特例** | 内部占用批次 `refreshBatchProgress` 逻辑独立（`占用中` → `已完成`） | `auto_complete_batch_kinds` 默认含全部 kind；若占用场景审批语义不同，可单独排除或覆写 |
+| **L7** | **重复事件** | Webhook 自动完工与 `refreshBatchProgress` 自动完工均可能写 `batch_completed` | 幂等：`batch_status` 已是 `已完成` 时跳过状态迁移；`batch_completed` 事件按 `(batch_id, source)` 去重 |
+
+**结论**：F2 无逻辑冲突。**L1 已确认**（末级节点「验收完成」），F3 默认行为与 §7.3「完工 = 工单执行结束」一致。**L2、L3 为必做**：Phase 1 须含 `needs_review` 标记与 UI 并列展示，避免运营误判批次已设备级完工。
 
 ---
 
@@ -630,7 +904,8 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 | 风险 | 缓解 |
 |------|------|
 | 飞书表单字段变更 | 映射配置版本化；建单失败告警 |
-| 审批流与 CRM 状态语义不一致 | 运营共建状态映射表；文档化 §7.3 边界 |
+| 审批流与 CRM 状态语义不一致（F3 / L1） | **已确认**末级节点「验收完成」；流程变更时更新 `task_name` 审计或改保守模式 |
+| Webhook 提前完工 vs 设备进度未达标（F3 / L2–L3） | `progress_flags_json.needs_review` + 详情并列展示批次态与数量进度 |
 | Bitable 大表超时 | 增量 + 分页；单次 sync 行数上限（如 5000） |
 | 多副本 Webhook 重复 | 幂等表 + DB 唯一约束 |
 | 用户无 feishu_open_id | 首期允许 service account 代发 |
@@ -643,7 +918,10 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 
 | 概念 | 现网 | 飞书集成后 |
 |------|------|------------|
-| 工单桥接键 | 手工 `work_order_no` | API 回填 `instance_code` |
+| 工单桥接键 | 手工 `work_order_no` | API 回填 `instance_code`；manual 模式手工录入 |
+| 建单方式 | 仅手工 | **auto 默认** + manual 兼容（§5.9） |
+| 飞书表单 | 无 | **逐字段映射**（§5.3 / §5.10）；Phase 1 为摘要 textarea |
+| 机房详情入口 | 手工填工单 | `DatacenterOnboardingDialog` / `DatacenterDeviceRetireDialog` + lockContext（§5.8） |
 | 批次进度 | 变更表 + `refreshBatchProgress` | **不变** |
 | 设备主数据 | Excel → `device_inventory` | Bitable → 同一 commit |
 | 设备变更 | Excel → `device_changelog` | Bitable → 同一 commit |
