@@ -1389,6 +1389,8 @@ export const devicePlatformProbeJobRun = pgTable(
     matchedBareMetalCount: integer("matched_bare_metal_count").notNull().default(0),
     ambiguousCount: integer("ambiguous_count").notNull().default(0),
     missingPlatformCount: integer("missing_platform_count").notNull().default(0),
+    orphanCount: integer("orphan_count").notNull().default(0),
+    missingCrmCount: integer("missing_crm_count").notNull().default(0),
     errorSummary: text("error_summary"),
   },
   (table) => [
@@ -1404,23 +1406,28 @@ export const devicePlatformProbeSnapshot = pgTable(
     jobRunId: text("job_run_id")
       .notNull()
       .references(() => devicePlatformProbeJobRun.id, { onDelete: "cascade" }),
-    supplierDeviceId: text("supplier_device_id")
-      .notNull()
-      .references(() => supplierDevice.id, { onDelete: "cascade" }),
-    supplierId: text("supplier_id")
-      .notNull()
-      .references(() => supplier.id, { onDelete: "cascade" }),
+    /** crm_inventory=库存锚点；platform_orphan=平台/订单孤儿（CM-7） */
+    recordKind: varchar("record_kind", { length: 16 }).notNull().default("crm_inventory"),
+    supplierDeviceId: text("supplier_device_id").references(() => supplierDevice.id, {
+      onDelete: "cascade",
+    }),
+    supplierId: text("supplier_id").references(() => supplier.id, { onDelete: "cascade" }),
     dataCenterId: text("data_center_id").references(() => dataCenter.id, {
       onDelete: "set null",
     }),
     sn: varchar("sn", { length: 64 }).notNull(),
     internalIp: varchar("internal_ip", { length: 45 }),
     dataCenterName: varchar("data_center_name", { length: 255 }),
-    opsStatus: varchar("ops_status", { length: 64 }).notNull(),
-    lifecycleStatus: varchar("lifecycle_status", { length: 32 }).notNull(),
+    opsStatus: varchar("ops_status", { length: 64 }),
+    lifecycleStatus: varchar("lifecycle_status", { length: 32 }),
     snapshotHour: timestamp("snapshot_hour", { withTimezone: true }).notNull(),
     probeStatus: varchar("probe_status", { length: 32 }).notNull(),
     consistencyFlag: varchar("consistency_flag", { length: 32 }).notNull(),
+    presenceCrm: boolean("presence_crm").notNull().default(false),
+    presenceProxy: boolean("presence_proxy").notNull().default(false),
+    presenceK8s: boolean("presence_k8s").notNull().default(false),
+    presenceBareMetal: boolean("presence_bare_metal").notNull().default(false),
+    orphanMergeKey: varchar("orphan_merge_key", { length: 128 }),
     proxyMatched: boolean("proxy_matched").notNull().default(false),
     proxyRentStatus: varchar("proxy_rent_status", { length: 64 }),
     proxyIsContainerInstance: boolean("proxy_is_container_instance"),
@@ -1439,9 +1446,15 @@ export const devicePlatformProbeSnapshot = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("device_platform_probe_snapshot_device_hour_uk").on(
-      table.supplierDeviceId,
+    uniqueIndex("device_platform_probe_snapshot_crm_uk")
+      .on(table.supplierDeviceId, table.snapshotHour)
+      .where(sql`record_kind = 'crm_inventory' AND supplier_device_id IS NOT NULL`),
+    uniqueIndex("device_platform_probe_snapshot_orphan_uk")
+      .on(table.snapshotHour, table.orphanMergeKey)
+      .where(sql`record_kind = 'platform_orphan' AND orphan_merge_key IS NOT NULL`),
+    index("device_platform_probe_snapshot_hour_record_kind_idx").on(
       table.snapshotHour,
+      table.recordKind,
     ),
     index("device_platform_probe_snapshot_hour_supplier_idx").on(
       table.snapshotHour,

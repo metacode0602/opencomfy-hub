@@ -400,6 +400,7 @@ function buildLiveDetail(
   return {
     row: {
       id: probeId,
+      recordKind: 'crm_inventory' as const,
       supplierDeviceId: inv.supplierDeviceId,
       sn: inv.sn,
       internalIp: inv.internalIp,
@@ -409,6 +410,12 @@ function buildLiveDetail(
       snapshotHour: probedAt,
       probeStatus: match.probeStatus,
       consistencyFlag: match.consistencyFlag,
+      presence: {
+        crm: true,
+        proxy: match.proxyMatched,
+        k8s: match.k8sMatched,
+        bareMetal: match.bareMetalMatched,
+      },
       proxyMatched: match.proxyMatched,
       proxyRentStatus: match.proxyRentStatus,
       proxyIsContainerInstance: match.proxyIsContainerInstance,
@@ -435,6 +442,10 @@ export async function runLiveDevicePlatformProbe(probeId: string): Promise<Devic
   })
   if (!snapshot) {
     throw new Error('探测记录不存在')
+  }
+
+  if (snapshot.recordKind === 'platform_orphan' || !snapshot.supplierDeviceId) {
+    throw new Error('平台孤儿记录不支持实时重新探测')
   }
 
   const inv = await loadInventoryForDevice(snapshot.supplierDeviceId)

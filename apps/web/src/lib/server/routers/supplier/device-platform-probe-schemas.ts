@@ -9,6 +9,7 @@ export const devicePlatformProbeListSchema = z.object({
       'unexpected_platform',
       'multi_channel_conflict',
       'not_evaluated',
+      'missing_crm',
     ])
     .optional(),
   probeStatus: z
@@ -26,7 +27,9 @@ export const devicePlatformProbeListSchema = z.object({
       'ambiguous',
     ])
     .optional(),
+  recordKind: z.enum(['crm_inventory', 'platform_orphan']).optional(),
   needsActionOnly: z.boolean().optional(),
+  orphansOnly: z.boolean().optional(),
   snapshotHour: z.string().datetime().optional(),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(1).max(100).default(20),

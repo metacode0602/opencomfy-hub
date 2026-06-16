@@ -14,8 +14,9 @@ export type DevicePlatformProbeStatsDto = {
   consistent: number
   needsAction: number
   notEvaluated: number
-  /** 有效库存中的 CPU/infra 设备台数（不参与平台比对） */
   cpuCount: number
+  orphanCount: number
+  missingCrmCount: number
 }
 
 export type DevicePlatformProbeStateDto = {
@@ -64,6 +65,8 @@ export type DevicePlatformProbeJobRunDto = {
   matchedBareMetalCount: number
   ambiguousCount: number
   missingPlatformCount: number
+  orphanCount: number
+  missingCrmCount: number
   errorSummary: string | null
 }
 

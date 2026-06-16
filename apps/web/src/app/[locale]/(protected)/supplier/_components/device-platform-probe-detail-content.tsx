@@ -335,6 +335,7 @@ function ProbeDetailBody({
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [liveResult, setLiveResult] = useState<DevicePlatformProbeLiveResultDto | null>(null)
   const r = detail.row
+  const isOrphan = r.recordKind === 'platform_orphan'
 
   const reprobeMutation = trpc.supplier.devicePlatformProbe.reprobeLive.useMutation({
     onSuccess: (result) => {
@@ -360,27 +361,31 @@ function ProbeDetailBody({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => reprobeMutation.mutate({ id: probeId })}
-            disabled={reprobeMutation.isPending}
-          >
-            {reprobeMutation.isPending ? (
-              <Loader2 className="size-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="size-4 mr-2" />
-            )}
-            实时重新探测
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setChangelogOpen(true)}>
-            <History className="size-4 mr-2" />
-            设备变更记录
-          </Button>
+          {!isOrphan && (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => reprobeMutation.mutate({ id: probeId })}
+                disabled={reprobeMutation.isPending}
+              >
+                {reprobeMutation.isPending ? (
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                ) : (
+                  <RefreshCw className="size-4 mr-2" />
+                )}
+                实时重新探测
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setChangelogOpen(true)}>
+                <History className="size-4 mr-2" />
+                设备变更记录
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      {reprobeMutation.isPending && (
+      {reprobeMutation.isPending && !isOrphan && (
         <Alert>
           <Loader2 className="size-4 animate-spin" />
           <AlertTitle>正在调用平台 API…</AlertTitle>
@@ -390,7 +395,16 @@ function ProbeDetailBody({
         </Alert>
       )}
 
-      {liveResult && <LiveProbeResultSection result={liveResult} />}
+      {liveResult && !isOrphan && <LiveProbeResultSection result={liveResult} />}
+
+      {isOrphan && (
+        <Alert>
+          <AlertTitle>平台孤儿记录</AlertTitle>
+          <AlertDescription>
+            该记录在接入端 / K8s / 裸金属至少一处有信号，但 CRM 有效库存中无对应设备。请补主数据或确认平台是否应下线。
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="space-y-6">
         <section className="space-y-2">
@@ -409,12 +423,14 @@ function ProbeDetailBody({
         </div>
       </div>
 
-      <DevicePlatformProbeChangelogDialog
-        open={changelogOpen}
-        onOpenChange={setChangelogOpen}
-        sn={r.sn}
-        changeLogs={detail.changeLogs}
-      />
+      {!isOrphan && (
+        <DevicePlatformProbeChangelogDialog
+          open={changelogOpen}
+          onOpenChange={setChangelogOpen}
+          sn={r.sn}
+          changeLogs={detail.changeLogs}
+        />
+      )}
     </>
   )
 }

@@ -157,6 +157,10 @@ export function deriveConsistencyFlag(input: {
   return 'multi_channel_conflict'
 }
 
+export function deriveOrphanSuggestedAction(): string {
+  return '平台/订单有记录但 CRM 无对应库存设备，请补主数据或确认平台是否应下线'
+}
+
 export function deriveSuggestedAction(input: {
   probeStatus: ProbeStatus
   consistencyFlag: ConsistencyFlag
@@ -178,5 +182,7 @@ export function deriveSuggestedAction(input: {
 }
 
 export function isNeedsActionConsistency(flag: ConsistencyFlag): boolean {
-  return ['missing_platform', 'unexpected_platform', 'multi_channel_conflict'].includes(flag)
+  return ['missing_platform', 'unexpected_platform', 'multi_channel_conflict', 'missing_crm'].includes(
+    flag,
+  )
 }

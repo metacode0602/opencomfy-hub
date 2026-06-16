@@ -1,6 +1,10 @@
 import { db } from '@/lib/db'
+import { crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import { endpointMatches } from '@/lib/supplier/ip-endpoint-utils'
+import { normalizeIdcKey } from '@/lib/server/dataaccess/supplier/device-platform-probe-keys'
+import type { IdcDataCenterRef } from '@/lib/server/dataaccess/supplier/device-platform-probe-build'
 import type { StagedK8sRow, StagedProxyRow } from '@/lib/server/integrations/suanli-device-probe-api'
+import { dataCenter } from '@workspace/db/schema'
 import { sql, type SQL } from 'drizzle-orm'
 
 /** 与 resolveGpuCardTypeRole === 'infra' 口径一致（device_role 或名称/编码含 cpu） */
@@ -31,7 +35,7 @@ export function sqlIsRetiredSupplierDevice(sdAlias = 'sd'): SQL {
   `)
 }
 
-/** 移除当前快照小时内不应参与比对的设备行（已退订、CPU/infra） */
+/** 移除当前快照小时内不应参与比对的 CRM 锚点行（已退订、CPU/infra） */
 export async function purgeExcludedDeviceSnapshots(snapshotHour: Date): Promise<void> {
   await db.execute(sql`
     DELETE FROM device_platform_probe_snapshot dps
@@ -39,11 +43,41 @@ export async function purgeExcludedDeviceSnapshots(snapshotHour: Date): Promise<
     LEFT JOIN gpu_card_type gct ON gct.id = sd.gpu_card_type_id
     WHERE dps.supplier_device_id = sd.id
       AND dps.snapshot_hour = ${snapshotHour}
+      AND dps.record_kind = 'crm_inventory'
       AND (
         (${sqlIsRetiredSupplierDevice()})
         OR (${sqlIsInfraGpuCardType()})
       )
   `)
+}
+
+/** 删除当前快照小时内全部孤儿行（重建前幂等清理） */
+export async function deleteOrphanSnapshotsForHour(snapshotHour: Date): Promise<void> {
+  await db.execute(sql`
+    DELETE FROM device_platform_probe_snapshot
+    WHERE snapshot_hour = ${snapshotHour}
+      AND record_kind = 'platform_orphan'
+  `)
+}
+
+/** idc_key → 机房，供孤儿行反查 supplier / 机房名 */
+export async function loadIdcKeyDataCenterMap(): Promise<Map<string, IdcDataCenterRef>> {
+  const rows = await db
+    .select({
+      id: dataCenter.id,
+      supplierId: dataCenter.supplierId,
+      name: dataCenter.name,
+    })
+    .from(dataCenter)
+
+  const map = new Map<string, IdcDataCenterRef>()
+  for (const row of rows) {
+    const key = normalizeIdcKey(row.name)
+    if (key && !map.has(key)) {
+      map.set(key, { id: row.id, supplierId: row.supplierId, name: row.name })
+    }
+  }
+  return map
 }
 
 export type StagedInventoryRow = {
@@ -365,36 +399,49 @@ export async function cleanupOldFailedStaging(retentionHours: number): Promise<v
     finished_at IS NOT NULL
     AND finished_at < now() - (${retentionHours}::text || ' hours')::interval
   `
-  await Promise.all([
-    db.execute(sql`
+  const deletes = [
+    sql`
       DELETE FROM device_platform_probe_staging_inventory
       WHERE job_run_id IN (
         SELECT id FROM device_platform_probe_job_run
         WHERE status IN ('failed', 'partial') AND ${retentionFilter}
       )
-    `),
-    db.execute(sql`
+    `,
+    sql`
       DELETE FROM device_platform_probe_staging_proxy
       WHERE job_run_id IN (
         SELECT id FROM device_platform_probe_job_run
         WHERE status IN ('failed', 'partial') AND ${retentionFilter}
       )
-    `),
-    db.execute(sql`
+    `,
+    sql`
       DELETE FROM device_platform_probe_staging_k8s
       WHERE job_run_id IN (
         SELECT id FROM device_platform_probe_job_run
         WHERE status IN ('failed', 'partial') AND ${retentionFilter}
       )
-    `),
-    db.execute(sql`
+    `,
+    sql`
       DELETE FROM device_platform_probe_staging_bare_metal
       WHERE job_run_id IN (
         SELECT id FROM device_platform_probe_job_run
         WHERE status IN ('failed', 'partial') AND ${retentionFilter}
       )
-    `),
-  ])
+    `,
+  ]
+
+  for (const statement of deletes) {
+    try {
+      await db.execute(statement)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.includes('does not exist')) {
+        crmWarn('device-platform-probe', 'staging cleanup skipped (tables missing)', { message })
+        return
+      }
+      throw error
+    }
+  }
 }
 
 export async function cleanupExpiredSnapshots(retentionDays: number): Promise<number> {

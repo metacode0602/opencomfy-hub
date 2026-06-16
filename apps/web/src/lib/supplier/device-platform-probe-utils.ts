@@ -19,6 +19,16 @@ export type ConsistencyFlag =
   | 'unexpected_platform'
   | 'multi_channel_conflict'
   | 'not_evaluated'
+  | 'missing_crm'
+
+export type ProbeRecordKind = 'crm_inventory' | 'platform_orphan'
+
+export type ProbePresence = {
+  crm: boolean
+  proxy: boolean
+  k8s: boolean
+  bareMetal: boolean
+}
 
 export type ProxyRentStatus = 'Idle' | 'ElasticRenting'
 
@@ -104,15 +114,17 @@ export type DevicePlatformProbeDetail = {
 
 export type DevicePlatformProbeRow = {
   id: string
-  supplierDeviceId: string
+  recordKind: ProbeRecordKind
+  supplierDeviceId: string | null
   sn: string
   internalIp: string | null
   dataCenterName: string | null
-  opsStatus: string
-  lifecycleStatus: string
+  opsStatus: string | null
+  lifecycleStatus: string | null
   snapshotHour: string
   probeStatus: ProbeStatus
   consistencyFlag: ConsistencyFlag
+  presence: ProbePresence
   proxyMatched: boolean
   proxyRentStatus: ProxyRentStatus | null
   proxyIsContainerInstance: boolean | null
@@ -143,7 +155,20 @@ export const CONSISTENCY_FLAG_LABELS: Record<ConsistencyFlag, string> = {
   unexpected_platform: '平台异常信号',
   multi_channel_conflict: '租赁态冲突',
   not_evaluated: '未评估',
+  missing_crm: '缺 CRM 主数据',
 }
+
+export const RECORD_KIND_LABELS: Record<ProbeRecordKind, string> = {
+  crm_inventory: '库存设备',
+  platform_orphan: '平台孤儿',
+}
+
+export const PRESENCE_LABELS = {
+  crm: 'CRM',
+  proxy: '接入端',
+  k8s: 'K8s',
+  bareMetal: '裸金属',
+} as const
 
 /** 页面 Badge 语义色 */
 export const CONSISTENCY_FLAG_VARIANT: Record<
@@ -154,6 +179,7 @@ export const CONSISTENCY_FLAG_VARIANT: Record<
   missing_platform: 'destructive',
   unexpected_platform: 'destructive',
   multi_channel_conflict: 'outline',
+  missing_crm: 'destructive',
   not_evaluated: 'outline',
 }
 

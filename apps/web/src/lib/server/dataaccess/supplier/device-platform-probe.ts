@@ -48,6 +48,7 @@ async function resolveSnapshotHour(inputHour?: string): Promise<Date | null> {
 function mapListRow(row: typeof devicePlatformProbeSnapshot.$inferSelect): DevicePlatformProbeListItemDto {
   return {
     id: row.id,
+    recordKind: (row.recordKind ?? 'crm_inventory') as DevicePlatformProbeListItemDto['recordKind'],
     supplierDeviceId: row.supplierDeviceId,
     sn: row.sn,
     internalIp: row.internalIp,
@@ -57,6 +58,12 @@ function mapListRow(row: typeof devicePlatformProbeSnapshot.$inferSelect): Devic
     snapshotHour: toIso(row.snapshotHour)!,
     probeStatus: row.probeStatus as DevicePlatformProbeListItemDto['probeStatus'],
     consistencyFlag: row.consistencyFlag as DevicePlatformProbeListItemDto['consistencyFlag'],
+    presence: {
+      crm: row.presenceCrm,
+      proxy: row.presenceProxy,
+      k8s: row.presenceK8s,
+      bareMetal: row.presenceBareMetal,
+    },
     proxyMatched: row.proxyMatched,
     proxyRentStatus: (row.proxyRentStatus as ProxyRentStatus | null) ?? null,
     proxyIsContainerInstance: row.proxyIsContainerInstance,
@@ -98,8 +105,8 @@ function buildDetailFromSnapshot(
   const bareMetalPayload = (row.bareMetalPayload ?? {}) as Record<string, unknown>
 
   const crm: CrmProbeSnapshot = {
-    opsStatus: row.opsStatus,
-    lifecycleStatus: row.lifecycleStatus,
+    opsStatus: row.opsStatus ?? '—',
+    lifecycleStatus: row.lifecycleStatus ?? '—',
     inMaintenance: crmExtra.inMaintenance,
     internalIp: row.internalIp,
     externalIp: crmExtra.externalIp,
@@ -196,7 +203,7 @@ export const devicePlatformProbeDataAccess = {
         items: [],
         total: 0,
         snapshotHour: null,
-        stats: { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0, cpuCount },
+        stats: { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0, cpuCount, orphanCount: 0, missingCrmCount: 0 },
       }
     }
 
@@ -213,9 +220,15 @@ export const devicePlatformProbeDataAccess = {
     if (input.probeStatus) {
       filters.push(eq(devicePlatformProbeSnapshot.probeStatus, input.probeStatus))
     }
+    if (input.recordKind) {
+      filters.push(eq(devicePlatformProbeSnapshot.recordKind, input.recordKind))
+    }
+    if (input.orphansOnly) {
+      filters.push(eq(devicePlatformProbeSnapshot.recordKind, 'platform_orphan'))
+    }
     if (input.needsActionOnly) {
       filters.push(
-        sql`${devicePlatformProbeSnapshot.consistencyFlag} IN ('missing_platform', 'unexpected_platform', 'multi_channel_conflict')`,
+        sql`${devicePlatformProbeSnapshot.consistencyFlag} IN ('missing_platform', 'unexpected_platform', 'multi_channel_conflict', 'missing_crm')`,
       )
     }
     if (q) {
@@ -226,13 +239,14 @@ export const devicePlatformProbeDataAccess = {
           ilike(devicePlatformProbeSnapshot.dataCenterName, `%${q}%`),
           ilike(devicePlatformProbeSnapshot.opsStatus, `%${q}%`),
           ilike(devicePlatformProbeSnapshot.bareMetalOrderNo, `%${q}%`),
+          ilike(devicePlatformProbeSnapshot.k8sDeviceName, `%${q}%`),
         )!,
       )
     }
 
     const whereClause = and(...filters)
 
-    const [rows, totalRow, statsRows] = await Promise.all([
+    const [rows, totalRow, statsRows, orphanRow, crmTotalRow] = await Promise.all([
       db
         .select()
         .from(devicePlatformProbeSnapshot)
@@ -249,16 +263,36 @@ export const devicePlatformProbeDataAccess = {
         .from(devicePlatformProbeSnapshot)
         .where(eq(devicePlatformProbeSnapshot.snapshotHour, snapshotHour))
         .groupBy(devicePlatformProbeSnapshot.consistencyFlag),
+      db
+        .select({ total: count() })
+        .from(devicePlatformProbeSnapshot)
+        .where(
+          and(
+            eq(devicePlatformProbeSnapshot.snapshotHour, snapshotHour),
+            eq(devicePlatformProbeSnapshot.recordKind, 'platform_orphan'),
+          ),
+        ),
+      db
+        .select({ total: count() })
+        .from(devicePlatformProbeSnapshot)
+        .where(
+          and(
+            eq(devicePlatformProbeSnapshot.snapshotHour, snapshotHour),
+            eq(devicePlatformProbeSnapshot.recordKind, 'crm_inventory'),
+          ),
+        ),
     ])
 
     const stats: DevicePlatformProbeStatsDto = {
-      total: statsRows.reduce((sum, r) => sum + Number(r.total), 0),
+      total: Number(crmTotalRow[0]?.total ?? 0),
       consistent: Number(statsRows.find((r) => r.consistencyFlag === 'consistent')?.total ?? 0),
       needsAction: statsRows
         .filter((r) => isNeedsActionConsistency(r.consistencyFlag as never))
         .reduce((sum, r) => sum + Number(r.total), 0),
       notEvaluated: Number(statsRows.find((r) => r.consistencyFlag === 'not_evaluated')?.total ?? 0),
       cpuCount,
+      orphanCount: Number(orphanRow[0]?.total ?? 0),
+      missingCrmCount: Number(statsRows.find((r) => r.consistencyFlag === 'missing_crm')?.total ?? 0),
     }
 
     return {
@@ -275,46 +309,62 @@ export const devicePlatformProbeDataAccess = {
     })
     if (!row) return null
 
-    const [deviceRow] = await db
-      .select({
-        externalIp: supplierDevice.externalIp,
-        idcCode: supplierDevice.idcCode,
-        inMaintenance: supplierDevice.inMaintenance,
-        gpuCount: supplierDevice.gpuCount,
-        gpuCardTypeName: gpuCardType.name,
-        containerInstanceRegion: dataCenter.containerInstanceRegion,
-        bareMetalRegion: dataCenter.bareMetalRegion,
-      })
-      .from(supplierDevice)
-      .leftJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
-      .leftJoin(dataCenter, eq(supplierDevice.dataCenterId, dataCenter.id))
-      .where(eq(supplierDevice.id, row.supplierDeviceId))
-      .limit(1)
+    const isOrphan = row.recordKind === 'platform_orphan' || !row.supplierDeviceId
 
-    const changeLogRows = await db
-      .select({
-        id: supplierDeviceChangeLog.id,
-        occurredAt: supplierDeviceChangeLog.occurredAt,
-        changeAction: supplierDeviceChangeLog.changeAction,
-        changeContent: supplierDeviceChangeLog.changeContent,
-        description: supplierDeviceChangeLog.description,
-        ticketNo: supplierDeviceChangeLog.ticketNo,
-        internalIp: supplierDeviceChangeLog.internalIp,
-      })
-      .from(supplierDeviceChangeLog)
-      .where(eq(supplierDeviceChangeLog.supplierDeviceId, row.supplierDeviceId))
-      .orderBy(desc(supplierDeviceChangeLog.occurredAt))
-      .limit(50)
+    let deviceRow: {
+      externalIp: string | null
+      idcCode: string | null
+      inMaintenance: boolean
+      gpuCount: number | null
+      gpuCardTypeName: string | null
+      containerInstanceRegion: string | null
+      bareMetalRegion: string | null
+    } | undefined
 
-    const changeLogs: DeviceProbeChangeLog[] = changeLogRows.map((log) => ({
-      id: log.id,
-      occurredAt: toIso(log.occurredAt)!,
-      changeAction: log.changeAction,
-      changeContent: log.changeContent,
-      description: log.description,
-      ticketNo: log.ticketNo,
-      internalIp: log.internalIp,
-    }))
+    let changeLogs: DeviceProbeChangeLog[] = []
+
+    if (!isOrphan && row.supplierDeviceId) {
+      ;[deviceRow] = await db
+        .select({
+          externalIp: supplierDevice.externalIp,
+          idcCode: supplierDevice.idcCode,
+          inMaintenance: supplierDevice.inMaintenance,
+          gpuCount: supplierDevice.gpuCount,
+          gpuCardTypeName: gpuCardType.name,
+          containerInstanceRegion: dataCenter.containerInstanceRegion,
+          bareMetalRegion: dataCenter.bareMetalRegion,
+        })
+        .from(supplierDevice)
+        .leftJoin(gpuCardType, eq(supplierDevice.gpuCardTypeId, gpuCardType.id))
+        .leftJoin(dataCenter, eq(supplierDevice.dataCenterId, dataCenter.id))
+        .where(eq(supplierDevice.id, row.supplierDeviceId))
+        .limit(1)
+
+      const changeLogRows = await db
+        .select({
+          id: supplierDeviceChangeLog.id,
+          occurredAt: supplierDeviceChangeLog.occurredAt,
+          changeAction: supplierDeviceChangeLog.changeAction,
+          changeContent: supplierDeviceChangeLog.changeContent,
+          description: supplierDeviceChangeLog.description,
+          ticketNo: supplierDeviceChangeLog.ticketNo,
+          internalIp: supplierDeviceChangeLog.internalIp,
+        })
+        .from(supplierDeviceChangeLog)
+        .where(eq(supplierDeviceChangeLog.supplierDeviceId, row.supplierDeviceId))
+        .orderBy(desc(supplierDeviceChangeLog.occurredAt))
+        .limit(50)
+
+      changeLogs = changeLogRows.map((log) => ({
+        id: log.id,
+        occurredAt: toIso(log.occurredAt)!,
+        changeAction: log.changeAction,
+        changeContent: log.changeContent,
+        description: log.description,
+        ticketNo: log.ticketNo,
+        internalIp: log.internalIp,
+      }))
+    }
 
     return buildDetailFromSnapshot(row, {
       externalIp: deviceRow?.externalIp ?? null,

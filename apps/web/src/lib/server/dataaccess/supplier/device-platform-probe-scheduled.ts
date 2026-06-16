@@ -1,11 +1,11 @@
 import { db } from '@/lib/db'
 import { crmError, crmLog, crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
-  deriveConsistencyFlag,
-  deriveProbeStatus,
-  deriveSuggestedAction,
-  isNeedsActionConsistency,
-} from '@/lib/server/dataaccess/supplier/device-platform-probe-consistency'
+  buildCrmSnapshots,
+  buildOrphanSnapshots,
+  type ProbeSnapshotInsert,
+} from '@/lib/server/dataaccess/supplier/device-platform-probe-build'
+import { isNeedsActionConsistency } from '@/lib/server/dataaccess/supplier/device-platform-probe-consistency'
 import {
   DEVICE_PLATFORM_PROBE_LOCK_KEY,
   getDevicePlatformProbeBareMetalStaleHours,
@@ -17,21 +17,17 @@ import {
   cleanupExpiredSnapshots,
   cleanupOldFailedStaging,
   clearProbeStaging,
-  endpointReviewMatch,
-  groupByKey,
+  deleteOrphanSnapshotsForHour,
   insertStagingBareMetal,
   insertStagingInventory,
   insertStagingK8s,
   insertStagingProxy,
+  loadIdcKeyDataCenterMap,
   loadStagingBareMetal,
   loadStagingInventory,
-  matchBareMetalRow,
-  pickUniqueOrAmbiguous,
   purgeExcludedDeviceSnapshots,
-  type StagedInventoryRow,
 } from '@/lib/server/dataaccess/supplier/device-platform-probe-staging'
 import { fetchDeviceProbeChannels } from '@/lib/server/integrations/suanli-device-probe-api'
-import type { ProxyRentStatus } from '@/lib/supplier/device-platform-probe-utils'
 import {
   devicePlatformProbeJobRun,
   devicePlatformProbeSnapshot,
@@ -81,19 +77,6 @@ async function touchProbeState(partial: {
     .where(sql`id = 'default'`)
 }
 
-function hasInternalIp(ip: string | null | undefined): boolean {
-  return Boolean(ip?.trim())
-}
-
-function hasDcMapping(inv: StagedInventoryRow): boolean {
-  return Boolean(inv.dataCenterId && inv.idcKey && inv.regionKey)
-}
-
-function toProxyRentStatus(value: string | null | undefined): ProxyRentStatus | null {
-  if (value === 'Idle' || value === 'ElasticRenting') return value
-  return null
-}
-
 async function isBareMetalSyncStale(): Promise<boolean> {
   const state = await db.query.bareMetalSyncState.findFirst({
     where: (t, { eq }) => eq(t.id, 'default'),
@@ -103,157 +86,7 @@ async function isBareMetalSyncStale(): Promise<boolean> {
   return Date.now() - state.lastSuccessAt.getTime() > staleMs
 }
 
-type BuiltSnapshot = typeof devicePlatformProbeSnapshot.$inferInsert
-
-function buildSnapshots(params: {
-  jobRunId: string
-  snapshotHour: Date
-  inventory: StagedInventoryRow[]
-  proxyRows: Awaited<ReturnType<typeof fetchDeviceProbeChannels>>['proxyRows']
-  k8sRows: Awaited<ReturnType<typeof fetchDeviceProbeChannels>>['k8sRows']
-  bareMetalRows: Awaited<ReturnType<typeof loadStagingBareMetal>>
-  bareMetalStale: boolean
-}): BuiltSnapshot[] {
-  const proxyByKey = groupByKey(
-    params.proxyRows,
-    (r) => r.idcKey,
-    (r) => r.ipHost,
-  )
-  const k8sByKey = groupByKey(
-    params.k8sRows,
-    (r) => r.regionKey,
-    (r) => r.ipHost,
-  )
-  const bareMetalByBm = groupByKey(
-    params.bareMetalRows,
-    (r) => r.bmRegionKey,
-    (r) => r.ipHost,
-  )
-  const bareMetalByIdc = groupByKey(
-    params.bareMetalRows,
-    (r) => r.idcKey,
-    (r) => r.ipHost,
-  )
-
-  return params.inventory.map((inv) => {
-    let proxyAmbiguous = false
-    let k8sAmbiguous = false
-    let bareMetalAmbiguous = false
-    let proxyMatched = false
-    let k8sMatched = false
-    let bareMetalMatched = false
-    let proxyRow = null as (typeof params.proxyRows)[number] | null
-    let k8sRow = null as (typeof params.k8sRows)[number] | null
-    let bareMetalRow = null as (typeof params.bareMetalRows)[number] | null
-    const matchFlags: Record<string, unknown> = {}
-
-    if (hasInternalIp(inv.internalIp) && hasDcMapping(inv)) {
-      const proxyExact = pickUniqueOrAmbiguous(
-        inv.idcKey && inv.ipHost ? proxyByKey.get(`${inv.idcKey}::${inv.ipHost}`) : undefined,
-      )
-      proxyAmbiguous = proxyExact.ambiguous
-      proxyRow = proxyExact.row
-
-      if (!proxyRow && !proxyAmbiguous && inv.idcKey) {
-        const reviewed = endpointReviewMatch(
-          inv.internalIp,
-          inv.idcKey && inv.ipHost ? proxyByKey.get(`${inv.idcKey}::${inv.ipHost}`) : undefined,
-          params.proxyRows,
-          (row) => row.idcKey === inv.idcKey,
-        )
-        if (reviewed.row) {
-          proxyRow = reviewed.row
-          if (reviewed.reviewed) matchFlags.endpoint_review = true
-        }
-      }
-
-      const k8sExact = pickUniqueOrAmbiguous(
-        inv.regionKey && inv.ipHost ? k8sByKey.get(`${inv.regionKey}::${inv.ipHost}`) : undefined,
-      )
-      k8sAmbiguous = k8sExact.ambiguous
-      k8sRow = k8sExact.row
-
-      if (!k8sRow && !k8sAmbiguous && inv.regionKey) {
-        const reviewed = endpointReviewMatch(
-          inv.internalIp,
-          inv.regionKey && inv.ipHost ? k8sByKey.get(`${inv.regionKey}::${inv.ipHost}`) : undefined,
-          params.k8sRows,
-          (row) => row.regionKey === inv.regionKey,
-        )
-        if (reviewed.row) {
-          k8sRow = reviewed.row
-          if (reviewed.reviewed) matchFlags.endpoint_review = true
-        }
-      }
-
-      const bmHit = matchBareMetalRow(inv, bareMetalByBm, bareMetalByIdc)
-      bareMetalAmbiguous = bmHit.ambiguous
-      bareMetalRow = bmHit.row
-
-      proxyMatched = Boolean(proxyRow)
-      k8sMatched = Boolean(k8sRow)
-      bareMetalMatched = Boolean(bareMetalRow)
-    }
-
-    if (params.bareMetalStale) matchFlags.bare_metal_stale = true
-
-    const ambiguous = proxyAmbiguous || k8sAmbiguous || bareMetalAmbiguous
-    const probeStatus = deriveProbeStatus({
-      hasInternalIp: hasInternalIp(inv.internalIp),
-      hasDcMapping: hasDcMapping(inv),
-      proxyMatched,
-      k8sMatched,
-      bareMetalMatched,
-      ambiguous,
-    })
-
-    const proxyRentStatus = proxyRow ? toProxyRentStatus(proxyRow.rentStatus) : null
-    const consistencyFlag = deriveConsistencyFlag({
-      probeStatus,
-      opsStatus: inv.opsStatus,
-      proxyMatched,
-      proxyRentStatus,
-      proxyIsContainerInstance: proxyRow?.isContainerInstance ?? null,
-      k8sMatched,
-      bareMetalMatched,
-    })
-
-    const suggestedAction = deriveSuggestedAction({ probeStatus, consistencyFlag })
-
-    return {
-      id: newId(),
-      jobRunId: params.jobRunId,
-      supplierDeviceId: inv.supplierDeviceId,
-      supplierId: inv.supplierId,
-      dataCenterId: inv.dataCenterId,
-      sn: inv.sn,
-      internalIp: inv.internalIp,
-      dataCenterName: inv.dataCenterName,
-      opsStatus: inv.opsStatus,
-      lifecycleStatus: inv.lifecycleStatus,
-      snapshotHour: params.snapshotHour,
-      probeStatus,
-      consistencyFlag,
-      proxyMatched,
-      proxyRentStatus,
-      proxyIsContainerInstance: proxyRow?.isContainerInstance ?? null,
-      proxyPlatformDeviceId: proxyRow?.platformDeviceId ?? null,
-      k8sMatched,
-      k8sDeviceName: k8sRow?.deviceName ?? null,
-      k8sRegion: k8sRow?.regionKey ?? null,
-      bareMetalMatched,
-      bareMetalOrderNo: bareMetalRow?.orderNo ?? null,
-      bareMetalOrderStatus: bareMetalRow?.orderStatus ?? null,
-      suggestedAction,
-      matchFlags,
-      proxyPayload: proxyRow?.payload ?? null,
-      k8sPayload: k8sRow?.payload ?? null,
-      bareMetalPayload: bareMetalRow?.payload ?? null,
-    }
-  })
-}
-
-async function upsertSnapshots(rows: BuiltSnapshot[]): Promise<void> {
+async function upsertCrmSnapshots(rows: ProbeSnapshotInsert[]): Promise<void> {
   const chunkSize = 100
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize)
@@ -261,14 +94,18 @@ async function upsertSnapshots(rows: BuiltSnapshot[]): Promise<void> {
       .insert(devicePlatformProbeSnapshot)
       .values(chunk)
       .onConflictDoUpdate({
-        target: [
-          devicePlatformProbeSnapshot.supplierDeviceId,
-          devicePlatformProbeSnapshot.snapshotHour,
-        ],
+        target: [devicePlatformProbeSnapshot.supplierDeviceId, devicePlatformProbeSnapshot.snapshotHour],
+        targetWhere: sql`record_kind = 'crm_inventory' AND supplier_device_id IS NOT NULL`,
         set: {
           jobRunId: sql`excluded.job_run_id`,
+          recordKind: sql`excluded.record_kind`,
           probeStatus: sql`excluded.probe_status`,
           consistencyFlag: sql`excluded.consistency_flag`,
+          presenceCrm: sql`excluded.presence_crm`,
+          presenceProxy: sql`excluded.presence_proxy`,
+          presenceK8s: sql`excluded.presence_k8s`,
+          presenceBareMetal: sql`excluded.presence_bare_metal`,
+          orphanMergeKey: sql`excluded.orphan_merge_key`,
           proxyMatched: sql`excluded.proxy_matched`,
           proxyRentStatus: sql`excluded.proxy_rent_status`,
           proxyIsContainerInstance: sql`excluded.proxy_is_container_instance`,
@@ -289,8 +126,17 @@ async function upsertSnapshots(rows: BuiltSnapshot[]): Promise<void> {
           internalIp: sql`excluded.internal_ip`,
           dataCenterName: sql`excluded.data_center_name`,
           dataCenterId: sql`excluded.data_center_id`,
+          supplierId: sql`excluded.supplier_id`,
         },
       })
+  }
+}
+
+async function insertOrphanSnapshots(rows: ProbeSnapshotInsert[]): Promise<void> {
+  if (rows.length === 0) return
+  const chunkSize = 100
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    await db.insert(devicePlatformProbeSnapshot).values(rows.slice(i, i + chunkSize))
   }
 }
 
@@ -346,7 +192,9 @@ export async function runScheduledDevicePlatformProbe(input: {
 
     const inventory = await loadStagingInventory(jobRunId)
     const bareMetalRows = await loadStagingBareMetal(jobRunId)
-    const snapshots = buildSnapshots({
+    const idcMap = await loadIdcKeyDataCenterMap()
+
+    const { snapshots: crmSnapshots, claimed } = buildCrmSnapshots({
       jobRunId,
       snapshotHour,
       inventory,
@@ -356,17 +204,34 @@ export async function runScheduledDevicePlatformProbe(input: {
       bareMetalStale,
     })
 
-    await upsertSnapshots(snapshots)
+    await deleteOrphanSnapshotsForHour(snapshotHour)
+    await upsertCrmSnapshots(crmSnapshots)
+
+    const orphanSnapshots = buildOrphanSnapshots({
+      jobRunId,
+      snapshotHour,
+      proxyRows,
+      k8sRows,
+      bareMetalRows,
+      claimed,
+      idcMap,
+      bareMetalStale,
+    })
+    await insertOrphanSnapshots(orphanSnapshots)
+
     await purgeExcludedDeviceSnapshots(snapshotHour)
     await clearProbeStaging(jobRunId)
 
-    const matchedProxyCount = snapshots.filter((s) => s.proxyMatched).length
-    const matchedK8sCount = snapshots.filter((s) => s.k8sMatched).length
-    const matchedBareMetalCount = snapshots.filter((s) => s.bareMetalMatched).length
-    const ambiguousCount = snapshots.filter((s) => s.probeStatus === 'ambiguous').length
-    const missingPlatformCount = snapshots.filter((s) =>
+    const allSnapshots = [...crmSnapshots, ...orphanSnapshots]
+    const matchedProxyCount = allSnapshots.filter((s) => s.proxyMatched).length
+    const matchedK8sCount = allSnapshots.filter((s) => s.k8sMatched).length
+    const matchedBareMetalCount = allSnapshots.filter((s) => s.bareMetalMatched).length
+    const ambiguousCount = crmSnapshots.filter((s) => s.probeStatus === 'ambiguous').length
+    const missingPlatformCount = crmSnapshots.filter((s) =>
       isNeedsActionConsistency(s.consistencyFlag as never),
     ).length
+    const orphanCount = orphanSnapshots.length
+    const missingCrmCount = orphanSnapshots.filter((s) => s.consistencyFlag === 'missing_crm').length
 
     const finishedAt = new Date()
     const status = proxyError || k8sError ? 'partial' : 'success'
@@ -385,6 +250,8 @@ export async function runScheduledDevicePlatformProbe(input: {
         matchedBareMetalCount,
         ambiguousCount,
         missingPlatformCount,
+        orphanCount,
+        missingCrmCount,
         errorSummary: errorParts.length > 0 ? errorParts.join('; ') : null,
       })
       .where(sql`id = ${jobRunId}`)
@@ -399,7 +266,8 @@ export async function runScheduledDevicePlatformProbe(input: {
       jobRunId,
       status,
       inventoryCount,
-      snapshots: snapshots.length,
+      crmSnapshots: crmSnapshots.length,
+      orphanSnapshots: orphanSnapshots.length,
     })
 
     return { jobRunId, status }
@@ -425,7 +293,14 @@ export async function runScheduledDevicePlatformProbe(input: {
     return { jobRunId, status: 'failed' }
   } finally {
     await releaseLock()
-    await cleanupOldFailedStaging(getDevicePlatformProbeStagingRetentionHours())
+    try {
+      await cleanupOldFailedStaging(getDevicePlatformProbeStagingRetentionHours())
+    } catch (error) {
+      crmWarn('device-platform-probe', 'staging cleanup failed', {
+        traceId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 }
 

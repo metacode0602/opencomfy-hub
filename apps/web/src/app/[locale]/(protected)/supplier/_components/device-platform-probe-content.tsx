@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   CircleHelp,
   Eye,
+  Lightbulb,
   Loader2,
   RefreshCw,
   Search,
@@ -17,6 +18,13 @@ import { Alert, AlertDescription, AlertTitle } from '@workspace/ui/components/al
 import { Badge } from '@workspace/ui/components/badge'
 import { Button } from '@workspace/ui/components/button'
 import { Card, CardContent } from '@workspace/ui/components/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@workspace/ui/components/dialog'
 import { Input } from '@workspace/ui/components/input'
 import {
   Select,
@@ -44,6 +52,8 @@ import {
   CONSISTENCY_FLAG_LABELS,
   CONSISTENCY_FLAG_VARIANT,
   PROBE_STATUS_LABELS,
+  PRESENCE_LABELS,
+  RECORD_KIND_LABELS,
   devicePlatformProbeDetailPath,
   formatChannelHits,
   formatProxyRentDisplay,
@@ -72,11 +82,89 @@ function ConsistencyBadge({ flag }: { flag: ConsistencyFlag }) {
   )
 }
 
+function SuggestedActionCell({ row }: { row: DevicePlatformProbeRow }) {
+  const [open, setOpen] = useState(false)
+  const action = row.suggestedAction
+
+  if (!action || action === '—') {
+    return <span className="text-muted-foreground text-sm">—</span>
+  }
+
+  const isNoAction = action === '无需处理'
+  const isPending = action === '待评估'
+  const Icon = isNoAction ? CheckCircle2 : Lightbulb
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className={
+          isNoAction
+            ? 'h-7 gap-1 border-green-500/30 bg-green-500/5 text-green-700 hover:bg-green-500/10 dark:text-green-400'
+            : isPending
+              ? 'h-7 gap-1 text-muted-foreground'
+              : 'h-7 gap-1 border-amber-500/40 bg-amber-500/5 text-amber-800 hover:bg-amber-500/10 dark:text-amber-300'
+        }
+        onClick={() => setOpen(true)}
+      >
+        <Icon className="size-3.5 shrink-0" />
+        <span className="text-xs">查看建议</span>
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>建议处理</DialogTitle>
+            <DialogDescription className="font-mono text-xs">{row.sn}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <ConsistencyBadge flag={row.consistencyFlag} />
+              <Badge variant="outline" className="font-normal">
+                {PROBE_STATUS_LABELS[row.probeStatus]}
+              </Badge>
+            </div>
+            <p className="leading-relaxed text-foreground">{action}</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function PresenceBadges({ row }: { row: DevicePlatformProbeRow }) {
+  const items = [
+    { key: 'crm', hit: row.presence.crm, label: PRESENCE_LABELS.crm },
+    { key: 'proxy', hit: row.presence.proxy, label: PRESENCE_LABELS.proxy },
+    { key: 'k8s', hit: row.presence.k8s, label: PRESENCE_LABELS.k8s },
+    { key: 'bareMetal', hit: row.presence.bareMetal, label: PRESENCE_LABELS.bareMetal },
+  ] as const
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {items.map((item) => (
+        <Badge
+          key={item.key}
+          variant={item.hit ? 'secondary' : 'outline'}
+          className={
+            item.hit ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 'text-muted-foreground'
+          }
+        >
+          {item.label}
+          {item.hit ? ' ✓' : ''}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
 export function DevicePlatformProbeContent() {
   const [search, setSearch] = useState('')
   const [consistencyFilter, setConsistencyFilter] = useState<'all' | ConsistencyFlag>('all')
   const [probeStatusFilter, setProbeStatusFilter] = useState<'all' | ProbeStatus>('all')
   const [needsActionOnly, setNeedsActionOnly] = useState(false)
+  const [orphansOnly, setOrphansOnly] = useState(false)
   const [page, setPage] = useState(1)
   const pageSize = 20
 
@@ -86,10 +174,11 @@ export function DevicePlatformProbeContent() {
       consistencyFlag: consistencyFilter === 'all' ? undefined : consistencyFilter,
       probeStatus: probeStatusFilter === 'all' ? undefined : probeStatusFilter,
       needsActionOnly: needsActionOnly || undefined,
+      orphansOnly: orphansOnly || undefined,
       page,
       pageSize,
     }),
-    [search, consistencyFilter, probeStatusFilter, needsActionOnly, page, pageSize],
+    [search, consistencyFilter, probeStatusFilter, needsActionOnly, orphansOnly, page, pageSize],
   )
 
   const { data: state } = trpc.supplier.devicePlatformProbe.getState.useQuery()
@@ -112,7 +201,15 @@ export function DevicePlatformProbeContent() {
     onError: (err) => toast.error(err.message),
   })
 
-  const stats = data?.stats ?? { total: 0, consistent: 0, needsAction: 0, notEvaluated: 0, cpuCount: 0 }
+  const stats = data?.stats ?? {
+    total: 0,
+    consistent: 0,
+    needsAction: 0,
+    notEvaluated: 0,
+    cpuCount: 0,
+    orphanCount: 0,
+    missingCrmCount: 0,
+  }
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -182,7 +279,7 @@ export function DevicePlatformProbeContent() {
           </Alert>
         )}
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
           <Card>
             <CardContent className="p-4">
               <p className="text-2xl font-semibold">{stats.total}</p>
@@ -193,6 +290,22 @@ export function DevicePlatformProbeContent() {
             <CardContent className="p-4">
               <p className="text-2xl font-semibold text-muted-foreground">{stats.cpuCount}</p>
               <p className="text-xs text-muted-foreground">CPU 设备（不参与比对）</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-2xl font-semibold text-violet-600 dark:text-violet-400">
+                {stats.orphanCount}
+              </p>
+              <p className="text-xs text-muted-foreground">平台孤儿记录</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-2xl font-semibold text-red-600 dark:text-red-400">
+                {stats.missingCrmCount}
+              </p>
+              <p className="text-xs text-muted-foreground">缺 CRM 主数据</p>
             </CardContent>
           </Card>
           <Card>
@@ -278,6 +391,16 @@ export function DevicePlatformProbeContent() {
               </SelectContent>
             </Select>
             <Button
+              variant={orphansOnly ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => {
+                setOrphansOnly((v) => !v)
+                setPage(1)
+              }}
+            >
+              仅看孤儿
+            </Button>
+            <Button
               variant={needsActionOnly ? 'default' : 'outline'}
               size="sm"
               onClick={() => {
@@ -297,14 +420,16 @@ export function DevicePlatformProbeContent() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="min-w-[100px]">SN</TableHead>
+                    <TableHead className="min-w-[88px]">类型</TableHead>
                     <TableHead className="min-w-[120px]">内网 IP</TableHead>
                     <TableHead className="min-w-[120px]">机房</TableHead>
                     <TableHead className="min-w-[100px]">CRM 运维态</TableHead>
+                    <TableHead className="min-w-[200px]">所处位置</TableHead>
                     <TableHead className="min-w-[140px]">平台通道</TableHead>
                     <TableHead className="min-w-[130px]">接入端租赁态</TableHead>
                     <TableHead className="min-w-[100px]">平台命中</TableHead>
                     <TableHead className="min-w-[100px]">对账</TableHead>
-                    <TableHead className="min-w-[180px]">建议处理</TableHead>
+                    <TableHead className="min-w-[108px]">建议处理</TableHead>
                     <TableHead className="min-w-[110px]">快照时间</TableHead>
                     <TableHead className="w-[72px]">操作</TableHead>
                   </TableRow>
@@ -312,14 +437,14 @@ export function DevicePlatformProbeContent() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
                         <Loader2 className="size-5 animate-spin inline mr-2" />
                         加载中…
                       </TableCell>
                     </TableRow>
                   ) : rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
                         无匹配设备
                       </TableCell>
                     </TableRow>
@@ -355,7 +480,12 @@ export function DevicePlatformProbeContent() {
                 <code>is_container_instance</code> 推导（Idle→空闲；ElasticRenting+true→弹性服务；+false→裸金属）
               </li>
               <li>
-                <strong>对账</strong>：比较 CRM <code>ops_status</code> 与平台信号（设计 §4.4 CM-1）
+                <strong>所处位置</strong>：CRM / 接入端 / K8s / 裸金属 四方存在矩阵；<strong>平台孤儿</strong>{' '}
+                表示平台或订单有记录但 CRM 无对应库存设备
+              </li>
+              <li>
+                <strong>对账</strong>：库存设备比较 CRM <code>ops_status</code> 与平台信号（CM-1）；孤儿记录标记为{' '}
+                <strong>缺 CRM 主数据</strong>
               </li>
               <li>
                 点击 <strong>详情</strong> 进入独立页面，横向比对 CRM 与三路 API 抓取数据，并查看设备变更记录
@@ -386,12 +516,24 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
       }
     >
       <TableCell className="font-mono text-xs">{row.sn}</TableCell>
+      <TableCell>
+        <Badge variant={row.recordKind === 'platform_orphan' ? 'outline' : 'secondary'} className="font-normal">
+          {RECORD_KIND_LABELS[row.recordKind]}
+        </Badge>
+      </TableCell>
       <TableCell className="font-mono text-xs">{row.internalIp ?? '—'}</TableCell>
       <TableCell className="text-sm">{row.dataCenterName ?? '—'}</TableCell>
       <TableCell>
-        <Badge variant="outline" className="font-normal">
-          {row.opsStatus}
-        </Badge>
+        {row.opsStatus ? (
+          <Badge variant="outline" className="font-normal">
+            {row.opsStatus}
+          </Badge>
+        ) : (
+          <span className="text-muted-foreground text-sm">—</span>
+        )}
+      </TableCell>
+      <TableCell>
+        <PresenceBadges row={row} />
       </TableCell>
       <TableCell>
         <div className="flex flex-wrap gap-1">
@@ -437,8 +579,8 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
       <TableCell>
         <ConsistencyBadge flag={row.consistencyFlag} />
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground max-w-[220px]">
-        {row.suggestedAction}
+      <TableCell>
+        <SuggestedActionCell row={row} />
       </TableCell>
       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
         {formatSnapshotHourLabel(row.snapshotHour)}

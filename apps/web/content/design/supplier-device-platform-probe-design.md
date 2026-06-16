@@ -2,7 +2,7 @@
 
 > 版本：v1.5（草案）  
 > 日期：2026-06-15  
-> 状态：**v1.5 待确认 — CM-7 四方全景对账（孤儿记录）**  
+> 状态：**v1.5 CM-7 已实施**  
 > 变更：v1.5 — CM-7：在 CRM 锚点对账之外，增加平台/裸金属 **孤儿记录** 反扫与 **四方存在矩阵**（`presence_*`）；列表可完整看到「设备在 CRM / 接入端 / K8s / 裸金属 哪几方出现」  
 > 变更：v1.4 — CM-5 修订：`rent_status` 仅 Idle/ElasticRenting；以 `is_container_instance` 区分裸金属与弹性服务；snapshot 落库两字段供页面展示  
 > 性质：在既有 `supplier_device` 主数据之上，通过算算力 OpenAPI 三路数据源交叉比对，生成 **平台侧可观测状态** 并 **小时级落库**；**不替代** Excel 主数据导入，**不自动回写** `supplier_device.ops_status`。
@@ -179,6 +179,7 @@ activeInventoryDeviceFilter()
 | `unexpected_platform` | 平台有信号但主数据未体现 |
 | `multi_channel_conflict` | 多通道命中但 ops 无法解释 |
 | `not_evaluated` | `no_internal_ip` / `dc_unmapped` / ambiguous |
+| **`missing_crm`** | **v1.5** `platform_orphan`：平台/裸金属有信号但 CRM 无库存（§4.6.6） |
 
 ### 4.4 CM-1：`ops_status` 期望通道矩阵（`consistency_flag` 依据）
 
@@ -292,6 +293,161 @@ ElasticRenting + false        → 裸金属（出租中）
 | ops 属弹性池但 `ElasticRenting` + `is_container_instance=false` 且无 `bare_metal_matched` | `multi_channel_conflict` |
 | ops 属裸金属池但 `ElasticRenting` + `is_container_instance=true` 且无 `k8s_matched`（非双池 ops） | `multi_channel_conflict` |
 
+### 4.6 CM-7：四方全景对账与孤儿记录（v1.5 待确认）
+
+#### 4.6.1 背景与缺口
+
+v1.0～v1.4 采用 **CRM 左连接**（§8.2）：snapshot 一行对应一台 `supplier_device`，只能回答「CRM 设备在三路平台是否命中」，**不能**回答：
+
+| 缺口场景 | v1.4 行为 |
+|----------|-----------|
+| CRM 有，接入端 + K8s + 裸金属均无 | ✅ `platform_absent`（视 ops 可能 `missing_platform`） |
+| 接入端有，CRM + K8s 无 | ❌ 不出现在列表 |
+| K8s 有，CRM + 接入端无 | ❌ 不出现在列表 |
+| 裸金属订单有，CRM 无 | ❌ 不出现在列表 |
+
+CM-7 目标：**同一快照小时内，staging 里出现的有效记录，要么挂在某 CRM 锚点行上，要么以孤儿行补全**，且每条记录带 **四方存在矩阵**。
+
+#### 4.6.2 两方模型：`record_kind`
+
+| `record_kind` | 锚点 | 说明 |
+|---------------|------|------|
+| `crm_inventory` | `supplier_device_id` NOT NULL | 现有逻辑；CM-1 矩阵 / `consistency_flag` **仅对此类行生效** |
+| `platform_orphan` | `supplier_device_id` IS NULL | 由反扫 staging 产生；**至少一路**平台/裸金属有信号且 **无任何 CRM 库存行匹配** |
+
+> **不**为「缺 IP / 无机房的 CRM 行」做全平台 IP 扫描（CM-6 不变）。孤儿反扫范围 = 本次 job 已成功写入的 `staging_proxy` / `staging_k8s` / `staging_bare_metal` 行。
+
+#### 4.6.3 四方存在矩阵 `presence_*`
+
+每条 snapshot（含 CRM 锚点与孤儿）落库四个布尔列：
+
+| 列 | 含义 |
+|----|------|
+| `presence_crm` | 是否存在对应 CRM 有效库存设备（锚点行恒为 `true`；孤儿行恒为 `false`） |
+| `presence_proxy` | 本次 job 是否命中/关联 `staging_proxy` 记录 |
+| `presence_k8s` | 是否命中/关联 `staging_k8s` |
+| `presence_bare_metal` | 是否命中/关联 `staging_bare_metal` |
+
+**与现有 `*_matched` 的关系**：
+
+- CRM 锚点行：`presence_proxy` ≡ `proxy_matched`（k8s、bare_metal 同理）；`presence_crm = true`。
+- 孤儿行：`proxy_matched` 等列仍保留通道细节；`presence_*` 为 UI 主展示列（位置矩阵）。
+
+页面「平台通道」与「所处位置」：
+
+```text
+所处位置（presence）：CRM | 接入端 | K8s | 裸金属   ← 四方勾选
+平台通道（matched）：  接入端 | K8s | 裸金属         ← 与 v1.4 一致，孤儿行同样展示
+```
+
+#### 4.6.4 匹配与「已占用」判定
+
+**CRM 锚点匹配**（不变）：§3 匹配键 + PO-4 `endpointMatches`；一台 CRM 设备命中某 staging 行后，将该 staging 行 ID 记入 **已占用集合** `claimed_proxy_ids` / `claimed_k8s_ids` / `claimed_bare_metal_ids`。
+
+**占用规则**：
+
+1. 精确键命中（`idc_key::ip_host` / `region_key::ip_host` / bare metal 双键策略）占 1 条 staging。
+2. PO-4 复核命中亦占 1 条。
+3. ambiguous（同键多条）时 **不占** 任何 staging 行（与 v1.4 一致，避免误绑孤儿）。
+
+**孤儿反扫**（job 内 TS，在 CRM 锚点 snapshot upsert 之后）：
+
+```text
+FOR each row IN staging_proxy WHERE id NOT IN claimed_proxy_ids:
+  → 合并或新建 platform_orphan 行（见 §4.6.5）
+
+FOR each row IN staging_k8s WHERE id NOT IN claimed_k8s_ids:
+  → 同上
+
+FOR each row IN staging_bare_metal WHERE id NOT IN claimed_bare_metal_ids:
+  → 同上
+```
+
+#### 4.6.5 孤儿行合并键（同 IP 多通道）
+
+避免同一物理 IP 在列表出现 3 条孤儿，采用 **按快照小时 + ip_host + idc_key 合并**（`idc_key` 来自 proxy/bare_metal；K8s 孤儿若无可关联 `idc_key`，则 fallback 单独一行，`idc_key` 可空）：
+
+| 合并键 | 字段 |
+|--------|------|
+| 主键 | `(snapshot_hour, ip_host, coalesce(idc_key, '__none__'))` |
+| 冲突 | 同一合并键上多通道 orphan → **一行**，`presence_proxy/k8s/bare_metal` 按 OR 合并 |
+
+合并后孤儿行填充：
+
+| 字段 | 规则 |
+|------|------|
+| `internal_ip` / `ip_host` | 来自 staging |
+| `data_center_name` | `idc_key` 反查 `data_center.name`（可选）；无则展示 staging 原文 `idc_name` / `region` |
+| `sn` | 合成：`ORPHAN-{ip_host}` 或 K8s `device_name` 优先 |
+| `ops_status` / `lifecycle_status` | `NULL` |
+| `probe_status` | 由三路 presence 推导（同 §4.2：`proxy_only` / `k8s_only` / …） |
+| `consistency_flag` | 固定 **`missing_crm`**（见 §4.6.6） |
+| `suggested_action` | 「平台/订单有记录但 CRM 无对应库存设备，请补主数据或确认是否应下线」 |
+
+#### 4.6.6 扩展 `consistency_flag`：`missing_crm`
+
+| 代码 | 适用 | 含义 |
+|------|------|------|
+| **`missing_crm`** | `record_kind=platform_orphan` | 接入端 / K8s / 裸金属至少一处有信号，CRM 有效库存无对应设备 |
+| （既有） | `record_kind=crm_inventory` | CM-1 矩阵不变 |
+
+`isNeedsActionConsistency` 扩展：`missing_crm` 与 `missing_platform` / `unexpected_platform` / `multi_channel_conflict` 同为 **需处理**。
+
+CRM 锚点行 **不** 使用 `missing_crm`；孤儿行 **不** 跑 CM-1 矩阵（无 `ops_status`）。
+
+#### 4.6.7 场景覆盖对照（CM-7 确认用）
+
+| # | 业务场景 | CM-7 结果 |
+|---|----------|-----------|
+| S1 | CRM 有，接入端 + K8s + 裸金属均无 | `crm_inventory`；`presence: ✓✗✗✗`；`probe_status=platform_absent`；flag 视 ops |
+| S2 | K8s 有，CRM + 接入端无 | `platform_orphan`（或合并行）；`presence: ✗✗✓✗`；`missing_crm` |
+| S3 | 接入端有，CRM + K8s 无 | `platform_orphan`；`presence: ✗✓✗✗`；`missing_crm` |
+| S4 | 裸金属订单有，CRM 无 | `platform_orphan`；`presence: ✗✗✗✓`；`missing_crm` |
+| S5 | CRM + K8s 有，接入端无 | `crm_inventory`；`presence: ✓✗✓✗`；CM-1 判定 |
+| S6 | 接入端 + K8s 有，CRM 无 | 单行 orphan 合并；`presence: ✗✓✓✗`；`missing_crm` |
+| S7 | 四路均有 | `crm_inventory`；`presence: ✓✓✓✓`；CM-1 判定 |
+
+#### 4.6.8 与 purge / 排除规则
+
+`purgeExcludedDeviceSnapshots`（§8.8）在 upsert 后删除：
+
+- 已退订 / CPU-infra 的 **CRM 锚点** 行；
+- **不** 删除合法 `platform_orphan` 行。
+
+同一 `snapshot_hour` 重跑 job 时：
+
+1. upsert 全部 `crm_inventory` 行；
+2. **DELETE** 该小时内全部 `record_kind=platform_orphan` 后重建（幂等，避免合并键漂移残留）；
+3. 再执行 purgeExcluded。
+
+#### 4.6.9 平台 API 调用次数（不重复拉取 ✅）
+
+CM-7 **仅增加内存 / staging 内的反扫与 snapshot 写入**，**不增加** OpenAPI 请求。
+
+| 数据源 | 每个 probe job 调用次数 | CM-7 是否新增调用 |
+|--------|-------------------------|-------------------|
+| `device_info/list`（接入端） | **1 次**全量分页（`fetchDeviceProbeChannels`） | **否** — 孤儿反扫读同批 `proxyRows` / `staging_proxy` |
+| `node_device/list`（K8s） | **1 次**全量分页（同上） | **否** — 读同批 `k8sRows` / `staging_k8s` |
+| 裸金属订单 | **0 次**外部 API（本地 `INSERT … SELECT` → `staging_bare_metal`） | **否** — 读同批 `bareMetalRows` / `staging_bare_metal` |
+
+**job 内时序（与 v1.4 相同，仅多 TS 步骤）**：
+
+```text
+fetchDeviceProbeChannels()     ← 唯一 OpenAPI 拉取点（接入端 + K8s 各一次全量）
+  → insertStagingProxy/K8s
+  → insertStagingBareMetal     ← 本地 DB，非平台 API
+  → buildSnapshots (CRM 锚点)  ← 内存 Join，无 HTTP
+  → upsertSnapshots
+  → buildOrphanSnapshots       ← CM-7 新增：claimed 集合 + 未占用 staging/内存行，无 HTTP
+  → purgeExcluded
+  → clearProbeStaging
+```
+
+**不在 CM-7 范围内、仍可能触发 API 的路径**（行为不变）：
+
+- 详情页 **「实时比对」**（`reprobeLive`）— 按机房 scope 调用 `fetchDeviceProbeChannelsScoped`，与 Cron / 「立即探测」独立；
+- 用户手动多次点击「立即探测」— 每次 job 各拉一次 API（与 v1.4 相同，非 CM-7 引入）。
+
 ---
 
 ## 5. 数据库设计
@@ -323,24 +479,40 @@ ElasticRenting + false        → 裸金属（出租中）
 | `proxy_fetched_count` / `k8s_fetched_count` / `bare_metal_hit_count` | integer | |
 | `matched_proxy_count` / `matched_k8s_count` / `matched_bare_metal_count` | integer | |
 | `ambiguous_count` / `missing_platform_count` | integer | |
+| **`orphan_count`** | integer | **v1.5** 本 job 写入的 `platform_orphan` 行数 |
+| **`missing_crm_count`** | integer | **v1.5** 其中 `consistency_flag=missing_crm` 行数 |
 | `error_summary` | text | |
 
 索引：`(started_at DESC)`、`(status)`。
 
 #### `device_platform_probe_snapshot`
 
-设备 × 快照小时。除 `probe_status` / `consistency_flag` 外，接入端租赁态 **固定两列**（CM-5）：
+设备 × 快照小时（**v1.5 起含 CRM 锚点行与孤儿行**）。除 `probe_status` / `consistency_flag` 外，接入端租赁态 **固定两列**（CM-5）：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
+| **`record_kind`** | varchar(16) NOT NULL DEFAULT `'crm_inventory'` | **`crm_inventory`** \| **`platform_orphan`**（CM-7） |
+| **`presence_crm`** | boolean NOT NULL DEFAULT false | 四方存在矩阵（§4.6.3） |
+| **`presence_proxy`** | boolean NOT NULL DEFAULT false | |
+| **`presence_k8s`** | boolean NOT NULL DEFAULT false | |
+| **`presence_bare_metal`** | boolean NOT NULL DEFAULT false | |
+| `supplier_device_id` | text FK, **可空** | CRM 锚点必填；孤儿为 NULL |
 | `proxy_rent_status` | varchar(64) | 平台 `rent_status`：`Idle` \| `ElasticRenting` |
 | `proxy_is_container_instance` | boolean | 平台 `is_container_instance` |
 | `proxy_matched` | boolean | 是否命中 device_info |
-| … | | 其余 `k8s_*` / `bare_metal_*` / `match_flags` 等同 v1.0 设计 |
+| **`orphan_merge_key`** | varchar(128) | 孤儿合并键：`ip_host + idc_key`；CRM 行为 NULL |
+| … | | 其余 `k8s_*` / `bare_metal_*` / `match_flags` / `sn` / `internal_ip` 等同 v1.0 |
 
-**唯一约束**：`(supplier_device_id, snapshot_hour)`。
+**唯一约束（v1.5 调整）**：
 
-**索引**：`(snapshot_hour DESC, supplier_id)`、`(snapshot_hour DESC, data_center_id)`、`(snapshot_hour DESC, probe_status)`、`(snapshot_hour DESC, consistency_flag)`、`(supplier_device_id, snapshot_hour DESC)`。
+| 约束 | 条件 |
+|------|------|
+| `device_platform_probe_snapshot_crm_uk` | **UNIQUE** `(supplier_device_id, snapshot_hour)` **WHERE** `record_kind = 'crm_inventory'` |
+| `device_platform_probe_snapshot_orphan_uk` | **UNIQUE** `(snapshot_hour, orphan_merge_key)` **WHERE** `record_kind = 'platform_orphan'` |
+
+> 迁移：v1.4 已有 `(supplier_device_id, snapshot_hour)` 全表 UK 需改为上述 **partial unique index**；历史行默认 `record_kind=crm_inventory`，`presence_crm=true`，其余 presence 由 `*_matched` 回填。
+
+**索引**：`(snapshot_hour DESC, record_kind)`、`(snapshot_hour DESC, consistency_flag)` 保留；新增 `(snapshot_hour DESC) WHERE record_kind = 'platform_orphan'`。
 
 **历史保留（CM-3 ✅）**：仅保留 **3 个自然日**（含当天）的 snapshot 与 job_run 明细；更早数据由清理 job 删除。`device_platform_probe_latest` 视图始终指向未过期数据中的最新一行。
 
@@ -417,7 +589,9 @@ flowchart TB
   AMB --> PS[SQL CASE probe_status]
   PS --> CF[SQL/TS consistency_flag]
   CF --> EP[TS endpointMatches 边缘复核 PO-4]
-  EP --> COMMIT[COMMIT]
+  EP --> ORPH[TS 孤儿反扫 + 合并 CM-7]
+  ORPH --> PURGE[purgeExcluded 清理退订/infra CRM 行]
+  PURGE --> COMMIT[COMMIT]
   COMMIT --> CLEAN[DELETE staging 或 TTL 保留]
   CLEAN --> STATE[更新 probe_state + job_run]
   STATE --> UNLOCK[释放 lock]
@@ -442,8 +616,8 @@ flowchart TB
 | OpenAPI 拉取 | `integrations/suanli-device-probe-api.ts` | 分页 + Zod + 限流 |
 | Staging 写入 | `dataaccess/supplier/device-platform-probe-staging.ts` | COPY / 物化 inventory & bare_metal |
 | SQL 比对 | `dataaccess/supplier/device-platform-probe-sql.ts` | INSERT snapshot、ambiguous、probe_status CASE |
-| 一致性推导 | `dataaccess/supplier/device-platform-probe-consistency.ts` | `consistency_flag`（CM-1 矩阵）+ endpoint 复核 |
-| 调度入口 | `dataaccess/supplier/device-platform-probe-scheduled.ts` | lock、事务、清理 |
+| 一致性推导 | `dataaccess/supplier/device-platform-probe-consistency.ts` | `consistency_flag`（CM-1 矩阵）+ **`missing_crm`**（CM-7）+ endpoint 复核 |
+| 调度入口 | `dataaccess/supplier/device-platform-probe-scheduled.ts` | lock、CRM 锚点 snapshot、**孤儿反扫**、purge、事务、清理 |
 | 配置 | `dataaccess/supplier/device-platform-probe-config.ts` | env |
 | Redis 缓存 | `dataaccess/supplier/device-platform-probe-cache.ts` | **二期**；PO-3 首期不启用 |
 | Cron 注册 | `jobs/register-device-platform-probe-cron.ts` | 探测 + snapshot 清理（§8.6） |
@@ -523,9 +697,39 @@ WHERE s.job_run_id = $job_run_id AND s.probe_status = 'pending_derivation';
 
 ### 8.7 endpointMatches 边缘复核（PO-4 ✅）
 
-SQL Join 后，筛选 `internal_ip` 含端口且 staging 未命中、或 ambiguous 候选行，TS 调用 `endpointMatches(crmIp, platformIp)` 修正 `proxy_matched` / `k8s_matched` / `bare_metal_matched` 与 `match_flags`。
+SQL Join 后，筛选 `internal_ip` 含端口且 staging 未命中、或 ambiguous 候选行，TS 调用 `endpointMatches(crmIp, platformIp)` 修正 `proxy_matched` / `k8s_matched` / `bare_metal_matched` 与 `match_flags`；命中时将对应 staging 行 ID 加入 **claimed_*** 集合（CM-7）。
 
----
+### 8.8 CRM 锚点 purge 与孤儿幂等（v1.5）
+
+| 步骤 | 说明 |
+|------|------|
+| purgeExcluded | DELETE 当前 `snapshot_hour` 下 **CRM 锚点** 且设备已退订 / CPU-infra 的行 |
+| orphan rebuild | DELETE 当前 `snapshot_hour` 下 **全部** `record_kind=platform_orphan`，再按 §4.6.4～§4.6.5 重建 |
+| presence 回填 | CRM 锚点 upsert 时：`presence_crm=true`，`presence_*` = `*_matched` |
+
+### 8.9 孤儿 snapshot 写入（CM-7 示意）
+
+```typescript
+// device-platform-probe-scheduled.ts — buildOrphanSnapshots()
+const orphans = new Map<string, OrphanMergeAccumulator>() // key = orphan_merge_key
+
+for (const row of stagingProxy.filter(unclaimed)) {
+  mergeInto(orphans, row, { proxy: true })
+}
+// k8s、bare_metal 同理
+
+return [...orphans.values()].map((acc) => ({
+  record_kind: 'platform_orphan',
+  supplier_device_id: null,
+  presence_crm: false,
+  presence_proxy: acc.hasProxy,
+  presence_k8s: acc.hasK8s,
+  presence_bare_metal: acc.hasBareMetal,
+  consistency_flag: 'missing_crm',
+  orphan_merge_key: acc.mergeKey,
+  // probe_status / payloads 由 acc 推导
+}))
+```
 
 ## 9. API 拉取
 
@@ -562,9 +766,26 @@ Cron **不依赖** Redis；UI 列表页上线后启用。不参与 staging 比�
 
 文案推导逻辑见 §4.5.2；**不在 DB 存展示用衍生字段**。
 
-### 11.2 其他（二期）
+### 11.2 设备平台存在状态页（已实现 + v1.5 扩展）
 
-`probe_status`、`consistency_flag`、裸金属订单列、job 手动触发等。首期可先只做 §11.1 + 落库。
+| 区域 | v1.4 | v1.5 增量 |
+|------|------|-----------|
+| KPI | 算力设备 / CPU / 一致 / 需处理 / 未评估 | 新增 **孤儿记录**（`orphan_count`）、**缺 CRM**（`missing_crm_count`） |
+| 列表列 | SN、IP、机房、平台通道、对账 | 新增 **所处位置**（`presence_crm/proxy/k8s/bare_metal` 四 Badge）；**记录类型**（库存 / 孤儿） |
+| 筛选 | 对账结果、平台命中、仅看需处理 | 新增 **仅孤儿**、**缺 CRM**；搜索支持 orphan SN / K8s device_name |
+| 详情 | CRM 锚点设备可进详情 + 实时 reprobe | 孤儿行 **无** `supplier_device_id`：详情页展示平台/订单 payload + 建议动作；**不提供** reprobe（无 CRM 锚点） |
+| 图例 | 三路通道说明 | 补充 orphan / `missing_crm` / presence 矩阵说明 |
+
+**所处位置 Badge 示例**：
+
+```text
+CRM ✓  接入端 ✓  K8s ✗  裸金属 ✗   → crm_inventory，仅 proxy 命中
+CRM ✗  接入端 ✗  K8s ✓  裸金属 ✗   → platform_orphan，missing_crm
+```
+
+### 11.3 其他（二期）
+
+Redis 读缓存、告警推送等。首期 CM-7 与 §11.2 同步交付。
 
 ---
 
@@ -584,12 +805,19 @@ Cron **不依赖** Redis；UI 列表页上线后启用。不参与 staging 比�
 | **CM-5** | 接入端租赁态 | ✅ `proxy_rent_status` + `proxy_is_container_instance` 落库并页面展示（§4.5） |
 | **CM-6** | 无机房设备 | ✅ 不允许全平台 IP 扫描；标记 `dc_unmapped` |
 | **CM-1** | `ops_status` 期望通道矩阵 | ✅ 见 §4.4（`consistency_flag` 依据） |
+| **CM-7** | 四方全景对账 + 孤儿记录 | ⏳ **v1.5 待确认** — 见 §4.6 |
 
 ### 12.2 仍待确认
 
-（无 — v1.3 已全部确认）
+| # | 议题 | 草案 | 确认项 |
+|---|------|------|--------|
+| **CM-7a** | 孤儿合并键 | `(snapshot_hour, ip_host, idc_key)` | 是否接受 K8s-only 孤儿无 `idc_key` 时单独成行？ |
+| **CM-7b** | 列表默认视图 | CRM 锚点 + 孤儿 **同一列表** | 是否需默认隐藏孤儿，仅筛「仅孤儿」时展示？ |
+| **CM-7c** | 详情页 | 孤儿无 reprobe / 无变更记录 | 是否足够？ |
+| **CM-7d** | 迁移 | partial unique index 替换全表 UK | 停机迁移 or 在线 migration 窗口？ |
+| **CM-7e** | 平台 API 是否重复调用 | **否** — 孤儿反扫仅用同 job 已拉取的 staging/内存数据（§4.6.9） | 已确认约束，实施不得新增 HTTP |
 
-> **实施门禁**：P1～P6 可按 §15 顺序推进；P4 规则见 §4.4 / §4.5；P7 Redis 须 UI 方案就绪（PO-3）。
+> **实施门禁**：**CM-7 四项确认后** 再启动 P9 代码；v1.4 已实现部分（CRM 锚点、purge、CPU 排除）不阻塞 P9。
 
 ---
 
@@ -631,6 +859,12 @@ Cron **不依赖** Redis；UI 列表页上线后启用。不参与 staging 比�
 | T15 | `ElasticRenting` + `is_container_instance=true` | 页面展示「弹性服务部署」 |
 | T16 | `ElasticRenting` + `is_container_instance=false` | 页面展示「裸金属」 |
 | T14 | snapshot 超过 3 天 | 清理 job 删除 |
+| **T17** | 接入端 staging 行无 CRM 匹配 | `platform_orphan`；`presence_crm=false, presence_proxy=true`；`missing_crm` |
+| **T18** | K8s-only 孤儿 | 同上，`presence_k8s=true` |
+| **T19** | 裸金属订单 IP 无 CRM | `presence_bare_metal=true`；`missing_crm` |
+| **T20** | 同 IP 接入端 + K8s 均无 CRM | 单行 orphan 合并；`presence_proxy=true, presence_k8s=true` |
+| **T21** | 同 snapshot_hour 重跑 | orphan 先删后建，计数幂等 |
+| **T22** | CRM 锚点 + orphan 同 IP | 仅 CRM 行；staging 被 claimed，**不** 重复 orphan |
 
 ---
 
@@ -646,6 +880,8 @@ Cron **不依赖** Redis；UI 列表页上线后启用。不参与 staging 比�
 | P6 | Cron + internal route | P5 |
 | P7 | Redis 读缓存 | UI 方案；PO-3 |
 | P8 | tRPC + UI（§11.1 两列展示） | P6 |
+| **P9** | **CM-7**：schema 迁移 + `claimed_*` 占用集 + `buildOrphanSnapshots` + purge 调整 + job 计数 | **§12.2 CM-7 确认后** |
+| **P10** | **CM-7 UI**：所处位置、孤儿筛选、KPI、孤儿详情（§11.2） | P9 |
 
 ---
 
@@ -658,3 +894,4 @@ Cron **不依赖** Redis；UI 列表页上线后启用。不参与 staging 比�
 | v1.2 | 2026-06-15 | 采纳 PO-1～PO-4、CM-2/4/6；移除内存 Join 草案 |
 | v1.3 | 2026-06-15 | CM-1 阐明并落矩阵；CM-3 保留 3 天；CM-5 初版 rent_status |
 | v1.4 | 2026-06-15 | CM-5 修订：仅 Idle/ElasticRenting + `is_container_instance`；snapshot 两字段落库与 UI 展示 |
+| **v1.5** | **2026-06-15** | **草案 CM-7**：四方 presence 矩阵、`platform_orphan` 反扫、`missing_crm`、partial UK、UI/KPI 扩展；**待确认后实施** |
