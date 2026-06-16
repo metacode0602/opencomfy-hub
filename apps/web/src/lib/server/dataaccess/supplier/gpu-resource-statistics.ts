@@ -16,6 +16,7 @@ import type {
   GpuResourceTrendResult,
 } from '@/lib/types/supplier-overview-api'
 import { loadInternalHoldDeviceIds } from '@/lib/server/aggregation/pipeline-period-replay'
+import { activeInventoryDeviceFilter } from '@/lib/server/dataaccess/supplier/gpu-inventory-sync'
 import { isExcludedFromPlatformLedgerComparison } from '@/lib/server/aggregation/overview-aggregation'
 import { metricGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { dataCenter, gpuCardType, supplierDevice, supplierGpuInventory } from '@workspace/db/schema'
@@ -244,7 +245,7 @@ async function loadCrmRegionStats(
         eq(dataCenter.sourceDeleted, false),
         isNotNull(dataCenter.containerInstanceRegion),
         ne(dataCenter.containerInstanceRegion, ''),
-        ne(supplierDevice.lifecycleStatus, '退订'),
+        activeInventoryDeviceFilter(),
       ),
     )
 

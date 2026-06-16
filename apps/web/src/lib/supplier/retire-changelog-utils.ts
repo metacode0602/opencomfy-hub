@@ -33,9 +33,10 @@ export function resolveLifecycleFromChangelog(params: {
   inMaintenance: boolean
 }): string {
   if (params.inMaintenance) return '维护中'
-  if (DEVICE_UNSUBSCRIBE_ACTIONS.has(params.changeAction)) return '下线中'
+  if (DEVICE_UNSUBSCRIBE_ACTIONS.has(params.changeAction) || params.newOps === '已退订') {
+    return '退订'
+  }
   if (BARE_METAL_ACTIONS.has(params.changeAction)) return '接入中'
-  if (params.newOps === '已退订') return '下线中'
   return params.newOps === '预留闲置中' ? '接入中' : '待接入'
 }
 

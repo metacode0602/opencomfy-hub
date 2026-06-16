@@ -147,7 +147,7 @@ async function refreshDeviceRetireBatchProgress(
       touched: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId})::int`.mapWith(
         Number,
       ),
-      retired: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId}) filter (where ${supplierDevice.lifecycleStatus} = '下线中' or ${supplierDevice.opsStatus} = '已退订')::int`.mapWith(
+      retired: sql<number>`count(distinct ${onboardingBatchDeviceLink.supplierDeviceId}) filter (where ${supplierDevice.lifecycleStatus} in ('下线中', '退订') or ${supplierDevice.opsStatus} = '已退订')::int`.mapWith(
         Number,
       ),
     })

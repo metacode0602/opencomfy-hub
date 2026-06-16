@@ -133,7 +133,7 @@ export const DEVICE_OPS_STATUS_SEEDS: Array<{
     stateCode: "已退订",
     displayName: "已退订",
     sortOrder: 100,
-    payload: { lifecycle_status: "下线中", overview_bucket: "retired" },
+    payload: { lifecycle_status: "退订", overview_bucket: "retired" },
   },
 ]
 
