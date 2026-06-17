@@ -190,6 +190,7 @@ export async function runScheduledBareMetalOrderSync(input: {
             platformTenantId: tenantRow.platformTenantId,
             customerId: tenantRow.customerId,
           },
+          traceId,
         })
         orderUpsertedCount++
       } catch (e) {

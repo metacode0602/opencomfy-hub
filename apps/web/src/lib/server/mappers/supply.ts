@@ -127,6 +127,7 @@ export function mapDataCenterRow(
     location: row.location ?? '',
     address: row.address ?? '',
     status: row.status as DataCenter['status'],
+    cooperationStatus: (row.cooperationStatus ?? 'active') as DataCenter['cooperationStatus'],
     networkFee: toNumber(row.networkFeeMonthly),
     managementNodeFee: toNumber(row.mgmtNodeFeeMonthly),
     totalDeviceCount: deviceCounts?.total ?? 0,

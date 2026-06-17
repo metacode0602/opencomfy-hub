@@ -27,7 +27,7 @@ export type BatchProgressEventType =
   | 'work_order_closed'
 
 export type BatchProgressEventPayload = {
-  source?: 'manual_ui' | 'system' | 'changelog' | 'feishu_webhook'
+  source?: 'manual_ui' | 'system' | 'changelog' | 'feishu_webhook' | 'feishu_automation'
   reason?: string
   activity_id?: string
   operator_staff_id?: string

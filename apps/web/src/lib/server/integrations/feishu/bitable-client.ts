@@ -1,5 +1,10 @@
 import 'server-only'
 
+import {
+  collectPersonFieldIds,
+  resolveFeishuUserIdTypeForIds,
+  type FeishuUserIdType,
+} from './feishu-user-id'
 import { feishuApiRequest } from './feishu-http'
 import type { FeishuRuntimeConfig } from './config'
 
@@ -85,6 +90,51 @@ export async function listFeishuBitableRecords(input: {
   } while (pageToken)
 
   return items.slice(0, maxRecords)
+}
+
+type CreateRecordResponse = {
+  record?: FeishuBitableRecord
+}
+
+export async function createFeishuBitableRecord(
+  config: FeishuRuntimeConfig,
+  appToken: string,
+  tableId: string,
+  fields: Record<string, unknown>,
+  options?: { userIdType?: FeishuUserIdType },
+): Promise<FeishuBitableRecord> {
+  const personIds = collectPersonFieldIds(fields)
+  const userIdType = options?.userIdType ?? resolveFeishuUserIdTypeForIds(personIds)
+  const data = await feishuApiRequest<CreateRecordResponse>(
+    config,
+    'POST',
+    `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/records`,
+    {
+      body: { fields },
+      query: personIds.length ? { user_id_type: userIdType } : undefined,
+    },
+  )
+  if (!data.record?.record_id) {
+    throw new Error('飞书 Bitable 创建记录未返回 record_id')
+  }
+  return data.record
+}
+
+export async function getFeishuBitableRecord(
+  config: FeishuRuntimeConfig,
+  appToken: string,
+  tableId: string,
+  recordId: string,
+): Promise<FeishuBitableRecord> {
+  const data = await feishuApiRequest<{ record?: FeishuBitableRecord }>(
+    config,
+    'GET',
+    `/bitable/v1/apps/${encodeURIComponent(appToken)}/tables/${encodeURIComponent(tableId)}/records/${encodeURIComponent(recordId)}`,
+  )
+  if (!data.record) {
+    throw new Error('飞书 Bitable 记录不存在')
+  }
+  return data.record
 }
 
 export function extractFeishuBitableFieldText(value: unknown): string {

@@ -64,18 +64,6 @@ import {
 } from '@/lib/supplier/device-platform-probe-utils'
 import { trpc } from '@/lib/trpc/client'
 
-function ChannelBadge({ hit, label }: { hit: boolean; label: string }) {
-  return (
-    <Badge
-      variant={hit ? 'secondary' : 'outline'}
-      className={hit ? 'bg-green-500/10 text-green-700 dark:text-green-400' : 'text-muted-foreground'}
-    >
-      {label}
-      {hit ? ' ✓' : ''}
-    </Badge>
-  )
-}
-
 function ConsistencyBadge({ flag }: { flag: ConsistencyFlag }) {
   return (
     <Badge variant={CONSISTENCY_FLAG_VARIANT[flag]}>{CONSISTENCY_FLAG_LABELS[flag]}</Badge>
@@ -415,36 +403,35 @@ export function DevicePlatformProbeContent() {
 
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
+            <div className="overflow-x-scroll scrollbar-visible">
+              <Table className="w-max min-w-full">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="min-w-[100px]">SN</TableHead>
-                    <TableHead className="min-w-[88px]">类型</TableHead>
-                    <TableHead className="min-w-[120px]">内网 IP</TableHead>
-                    <TableHead className="min-w-[120px]">机房</TableHead>
-                    <TableHead className="min-w-[100px]">CRM 运维态</TableHead>
-                    <TableHead className="min-w-[200px]">所处位置</TableHead>
-                    <TableHead className="min-w-[140px]">平台通道</TableHead>
-                    <TableHead className="min-w-[130px]">接入端租赁态</TableHead>
-                    <TableHead className="min-w-[100px]">平台命中</TableHead>
-                    <TableHead className="min-w-[100px]">对账</TableHead>
-                    <TableHead className="min-w-[108px]">建议处理</TableHead>
-                    <TableHead className="min-w-[110px]">快照时间</TableHead>
-                    <TableHead className="w-[72px]">操作</TableHead>
+                    <TableHead className="min-w-[100px] max-w-[140px]">SN</TableHead>
+                    <TableHead className="whitespace-nowrap">类型</TableHead>
+                    <TableHead className="hidden md:table-cell whitespace-nowrap">内网 IP</TableHead>
+                    <TableHead className="hidden lg:table-cell min-w-[80px] max-w-[120px]">机房</TableHead>
+                    <TableHead className="hidden lg:table-cell whitespace-nowrap">CRM 运维态</TableHead>
+                    <TableHead className="hidden md:table-cell min-w-[140px]">所处位置</TableHead>
+                    <TableHead className="hidden lg:table-cell whitespace-nowrap">接入端租赁态</TableHead>
+                    <TableHead className="hidden md:table-cell whitespace-nowrap">平台命中</TableHead>
+                    <TableHead className="whitespace-nowrap">对账</TableHead>
+                    <TableHead className="whitespace-nowrap">建议处理</TableHead>
+                    <TableHead className="hidden xl:table-cell whitespace-nowrap">快照时间</TableHead>
+                    <TableHead className="w-[72px] whitespace-nowrap">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={12} className="h-24 text-center text-muted-foreground">
                         <Loader2 className="size-5 animate-spin inline mr-2" />
                         加载中…
                       </TableCell>
                     </TableRow>
                   ) : rows.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={13} className="h-24 text-center text-muted-foreground">
+                      <TableCell colSpan={12} className="h-24 text-center text-muted-foreground">
                         无匹配设备
                       </TableCell>
                     </TableRow>
@@ -473,7 +460,7 @@ export function DevicePlatformProbeContent() {
             <p className="font-medium text-foreground">图例</p>
             <ul className="list-disc pl-5 space-y-1">
               <li>
-                <strong>平台通道</strong>：接入端（device_info）、K8s（node_device）、裸金属订单三路命中情况
+                <strong>平台命中</strong>：汇总接入端（device_info）、K8s（node_device）、裸金属订单三路命中情况
               </li>
               <li>
                 <strong>接入端租赁态</strong>：由 <code>rent_status</code> +{' '}
@@ -515,15 +502,21 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
           : undefined
       }
     >
-      <TableCell className="font-mono text-xs">{row.sn}</TableCell>
+      <TableCell className="font-mono text-xs max-w-[140px] truncate" title={row.sn}>
+        {row.sn}
+      </TableCell>
       <TableCell>
         <Badge variant={row.recordKind === 'platform_orphan' ? 'outline' : 'secondary'} className="font-normal">
           {RECORD_KIND_LABELS[row.recordKind]}
         </Badge>
       </TableCell>
-      <TableCell className="font-mono text-xs">{row.internalIp ?? '—'}</TableCell>
-      <TableCell className="text-sm">{row.dataCenterName ?? '—'}</TableCell>
-      <TableCell>
+      <TableCell className="hidden md:table-cell font-mono text-xs whitespace-nowrap">
+        {row.internalIp ?? '—'}
+      </TableCell>
+      <TableCell className="hidden lg:table-cell text-sm max-w-[120px] truncate" title={row.dataCenterName ?? undefined}>
+        {row.dataCenterName ?? '—'}
+      </TableCell>
+      <TableCell className="hidden lg:table-cell">
         {row.opsStatus ? (
           <Badge variant="outline" className="font-normal">
             {row.opsStatus}
@@ -532,24 +525,10 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
           <span className="text-muted-foreground text-sm">—</span>
         )}
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden md:table-cell">
         <PresenceBadges row={row} />
       </TableCell>
-      <TableCell>
-        <div className="flex flex-wrap gap-1">
-          <ChannelBadge hit={row.proxyMatched} label="接入端" />
-          <ChannelBadge hit={row.k8sMatched} label="K8s" />
-          <ChannelBadge hit={row.bareMetalMatched} label="裸金属" />
-        </div>
-        {(row.k8sDeviceName || row.bareMetalOrderNo) && (
-          <p className="text-[11px] text-muted-foreground mt-1 truncate max-w-[200px]">
-            {row.k8sDeviceName}
-            {row.k8sDeviceName && row.bareMetalOrderNo ? ' · ' : ''}
-            {row.bareMetalOrderNo}
-          </p>
-        )}
-      </TableCell>
-      <TableCell>
+      <TableCell className="hidden lg:table-cell">
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-sm cursor-default">{rentLabel}</span>
@@ -570,7 +549,7 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
           </TooltipContent>
         </Tooltip>
       </TableCell>
-      <TableCell>
+      <TableCell className="hidden md:table-cell">
         <Badge variant="outline" className="font-normal">
           {PROBE_STATUS_LABELS[row.probeStatus]}
         </Badge>
@@ -582,7 +561,7 @@ function ProbeTableRow({ row }: { row: DevicePlatformProbeRow }) {
       <TableCell>
         <SuggestedActionCell row={row} />
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+      <TableCell className="hidden xl:table-cell text-xs text-muted-foreground whitespace-nowrap">
         {formatSnapshotHourLabel(row.snapshotHour)}
       </TableCell>
       <TableCell>

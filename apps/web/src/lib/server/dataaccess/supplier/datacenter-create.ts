@@ -138,6 +138,7 @@ export const datacenterCreateDataAccess = {
       address: input.address?.trim() || null,
       regionTags: buildRegionTags(importRow),
       status: input.status ?? 'offline',
+      cooperationStatus: 'active',
       networkFeeMonthly: formatMoney(input.networkFee ?? 0),
       mgmtNodeFeeMonthly: formatMoney(input.managementNodeFee ?? 0),
       externalOnboardingId: input.externalOnboardingId?.trim() || null,

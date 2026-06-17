@@ -527,6 +527,8 @@ export interface DataCenter {
   location: string
   address: string
   status: 'online' | 'offline' | 'maintenance'
+  /** active=合作中；pause=合作暂停；inactive=合作终止 */
+  cooperationStatus: 'active' | 'pause' | 'inactive'
   networkFee: number // 网络费用 (月)
   managementNodeFee: number // 管控节点费用 (月)
   totalDeviceCount: number

@@ -1,7 +1,7 @@
 # 供应域 — 裸金属订单表结构设计
 
 **状态**：**已确认 — 待实施**  
-**版本**：v1.3（2026-06-15）  
+**版本**：v1.4（2026-06-17）  
 **性质**：在既有 `packages/db/src/supply-schema.ts` 之上的 **增量专篇**；确认后修改 Drizzle schema、同步任务与前端页面。
 
 **关联（只读引用）**：
@@ -393,13 +393,15 @@ sequenceDiagram
   participant Dev as bare_metal_order_device
 
   Svc->>API: POST /admin/metal_order/list
-  API-->>Svc: orders + gpu_models + device_count
-  Svc->>Head: upsert（order_mark=online, source=platform_sync）
-  Svc->>Dev: 展开 gpu_models 或 device_count 占位行
-  opt 设备补全
-    Svc->>API: POST /admin/metal_order/device
-    Svc->>Dev: merge platform_device_id / IP / SN
+  API-->>Svc: orders + gpu_models[]（含 order_details_id）+ device_count
+  Svc->>Head: upsert 头表（order_mark=online, source=platform_sync）
+  Svc->>Dev: INSERT 明细占位行（按 gpu_models 或 device_count 展开）
+  loop 每条含 order_details_id 的明细
+    Svc->>API: POST /admin/metal_order/device { order_detail_id }
+    API-->>Svc: start_time / end_time / IP / gpu 等
+    Svc->>Dev: UPDATE 租用时段、时长、单价、行金额、IP 等
   end
+  Svc->>Head: rollup MIN(rent_starts_at) / MAX(rent_ends_at)
 ```
 
 | 平台字段 | 头表列 |
@@ -413,18 +415,114 @@ sequenceDiagram
 | `billing_type` | `billing_unit` |
 | `idc_name` | `idc_name` → 匹配 `data_center_id` |
 | `device_count` | `device_count` |
-| `gpu_models[]` | 拆分到明细 |
+| `gpu_models[]` | 拆分到明细；`order_details_id` → device 补全入口 |
+| `gpu_models[].total_price` | 明细 `line_amount`（经 §7.1.1 写入） |
 | — | `order_mark` = **`online`**；`source` = **`platform_sync`** |
 
 **明细展开（BM-3）**：
 
-1. `gpu_models[]` 存在 → 按型号 `count` 展开多行；
-2. 否则 → 按 `device_count` 生成 `planned` 占位行；
-3. device 接口返回后按 `platform_device_id` merge，禁止重复插入。
+1. `gpu_models[]` 存在 → 按数组元素 **一行一条明细**（每元素对应一台/一档设备槽位）；
+2. 否则 → 按 `device_count` 生成 `planned` 占位行（**无** `order_details_id`，无法调用 device 接口）；
+3. 占位行 INSERT 后，对含 `gpu_models[].order_details_id` 的行 **逐条** 调用 §7.1.1 device 接口补全；
+4. 补全按 `bare_metal_order_id` + `line_no`（或 `platform_device_id`）UPDATE，**禁止**因补全而重复 INSERT。
 
-**幂等**：同一 `platform_order_id` 重复同步 → UPDATE 头表 + reconcile 明细行（按 `line_no` / `platform_device_id`）。
+**幂等**：同一 `platform_order_id` 重复同步 → UPDATE 头表 + reconcile 明细行（按 `line_no` / `platform_device_id`）；device 补全可重复执行，以平台最新快照覆盖。
 
 ---
+
+#### 7.1.1 平台设备补全 — `POST /admin/metal_order/device`
+
+> **背景**：`metal_order/list` 仅含订单级字段与 `gpu_models[]` 摘要，**不含**租用起止、卡时单价等计费明细。详情页设备表（§8.4）所需字段需在本步骤补全。  
+> **范围**：仅 **`order_mark = online`** 且 **`source = platform_sync`** 的平台同步路径；线下 Excel 导入（§7.3）**不**调用本接口。
+
+##### 7.1.1.1 调用时机与顺序
+
+| 步骤 | 动作 |
+|------|------|
+| 1 | `upsertPlatformBareMetalOrder` 完成头表 upsert + 明细占位行 INSERT |
+| 2 | 遍历本订单刚写入（或 reconcile 后）的明细行 |
+| 3 | 若对应 `gpu_models[i].order_details_id` 存在 → 调用 device 接口 |
+| 4 | 将响应字段 UPDATE 至 `bare_metal_order_device` |
+| 5 | 根据明细 rollup 头表 `rent_starts_at` / `rent_ends_at` |
+
+封装建议：`enrichPlatformBareMetalOrderDevices({ orderId, record, traceId })`，由 `upsertPlatformBareMetalOrder` 在事务外 **顺序** 调用（OpenAPI 不宜长事务）。
+
+##### 7.1.1.2 请求与响应
+
+| 项 | 值 |
+|----|-----|
+| Path | `POST /admin/metal_order/device` |
+| 请求体 | `{ "order_detail_id": <number> }` — 取自 `gpu_models[].order_details_id`（注意请求字段名为 **单数** `order_detail_id`） |
+| 成功码 | `code === "0000"` |
+| 封装位置 | `suanli-billing-api.ts` 新增 `fetchPlatformMetalOrderDevice`（复用 `throttledPost` + `SuanliBillingApiError`，**不**使用 legacy `api.ts` 的 `getMetalOrderDevice`） |
+
+响应 `data` 示例字段（实施期 zod 校验，未知字段忽略）：
+
+| 响应字段 | 类型 | 说明 |
+|----------|------|------|
+| `order_details_id` | number | 平台明细 ID（与 list 中 `order_details_id` 对应） |
+| `start_time` | string | 租用开始（含时区） |
+| `end_time` | string | 租用结束 |
+| `pub_ip` | string | 公网 IP |
+| `inner_ip` | string | 内网 IP |
+| `gpu_count` | number | GPU 卡数 |
+| `gpu_model` | string | GPU 型号 |
+| `billing_type` | string | 如 `Hour` |
+| `cpu_model` / `memory_size` / `operating_system` 等 | — | 写入 `platform_payload`，本期 UI 不展示 |
+
+##### 7.1.1.3 明细字段映射
+
+| 平台 device 接口 / list 摘要 | `bare_metal_order_device` 列 | 规则 |
+|------------------------------|------------------------------|------|
+| `order_details_id` | `platform_device_id` | `String(order_details_id)` |
+| `start_time` | `rent_starts_at` | `parsePlatformDateTime` |
+| `end_time` | `rent_ends_at` | `parsePlatformDateTime` |
+| `end − start`（小时） | `duration_hours` | `(rentEndsAt − rentStartsAt) / 3600000`，保留 4 位小数（`toMoney`） |
+| `gpu_models[i].total_price`（list） | `line_amount` | `platformMetalOrderListAmountToMoneyString`；若 list 无 `total_price` 且仅 1 条明细，可回退 `record.total_price` |
+| 推导 | `unit_price_per_card_hour` | `line_amount ÷ (duration_hours × gpu_count)`，分母 > 0 时计算，4 位小数；否则 **null** |
+| `pub_ip` | `external_ip` | 可空 |
+| `inner_ip` | `internal_ip` | 可空 |
+| `gpu_model` | `device_model_text` | 仅当占位行原文为空时覆盖 |
+| `gpu_count` | `gpu_count` | 以 device 接口为准（与 list 不一致时以 device 为准并记 `match_flags.gpu_count_mismatch`） |
+| 完整 `data` | `platform_payload` | JSON 快照 |
+| — | `platform_payload.order_details_id` | 冗余存储，便于排查与幂等匹配 |
+| list `gpu_models[i].order_detail_status` | `device_status` | 可空 |
+
+**头表 rollup**（补全全部明细后）：
+
+| 头表列 | 规则 |
+|--------|------|
+| `rent_starts_at` | `MIN(明细.rent_starts_at)`（忽略 null） |
+| `rent_ends_at` | `MAX(明细.rent_ends_at)` |
+| `purchase_qty_text` | 可选：由 `billing_unit` + 租期跨度生成展示文案（非阻塞） |
+
+##### 7.1.1.4 跳过与失败策略
+
+| 场景 | 行为 |
+|------|------|
+| `gpu_models[]` 元素无 `order_details_id` | **跳过** device 调用；明细保持 `planned`，计费列为 null |
+| 按 `device_count` 展开的占位行 | **跳过**（无 platform 明细 ID） |
+| 单条 device 接口 4xx/5xx 或 `code ≠ 0000` | 记 `crmWarn` + 可选 `bare_metal_sync_job_item` 子项；**不**阻断同订单其他明细与同批其他订单 |
+| 同订单部分明细补全失败 | 头表 rollup 仅基于 **已成功补全** 的明细；订单级 `match_flags.device_enrich_partial = true` |
+| 限流 | 每条 device 请求前 `delayBillingApi(BILLING_API_DETAIL_DELAY_MS)`（默认 300ms，可 env 覆盖） |
+
+##### 7.1.1.5 幂等与 reconcile
+
+重复 cron 同步时：
+
+1. 头表 UPDATE；明细按 `line_no` reconcile（现有逻辑：删旧 INSERT 新 **或** 改为 upsert-by-line — 实施时 **推荐** 在 reconcile 后仍执行 device 补全）；
+2. device 补全按 `platform_device_id = String(order_details_id)` 定位行；若 reconcile 重建了行 ID，以 `line_no` + `order_details_id` 匹配；
+3. 已补全行再次同步 → UPDATE 租用/IP/金额字段，不新增行；
+4. **`order_mark = offline`** 订单：cron **不得** 覆盖明细计费字段（现有 offline 保护逻辑保持不变）。
+
+##### 7.1.1.6 实施文件清单
+
+| 文件 | 变更 |
+|------|------|
+| `suanli-billing-api.ts` | 新增 `PlatformMetalOrderDeviceRecord` 类型 + `fetchPlatformMetalOrderDevice` |
+| `bare-metal-order-sync.ts` | `buildDeviceLines` 保留 `order_details_id` / `total_price`；INSERT 后调用 enrich；头表 rollup |
+| `bare-metal-order-scheduled-sync.ts` | 无需改循环结构；统计可选增加 `deviceEnrichedCount` / `deviceEnrichFailedCount` |
+| `bare-metal-order-schema-design.md` | 本文 §7.1.1（v1.4） |
 
 **幂等**：同一 `platform_order_id` 重复同步 → UPDATE 头表 + reconcile 明细行；`order_mark` 保持 `online`，**不被**线下导入覆盖。
 
@@ -516,9 +614,15 @@ await tenantBillingImportDataAccess.directImport({
 
 **已存在于 CRM 的租户**：本轮 **不**触发 6 个月账单重拉（仅处理未知租户）。
 
-#### 7.2.6 订单 upsert
+#### 7.2.6 订单 upsert + 设备补全
 
-全量订单（或已能解析 `tenant_id` 的子集）逐条 upsert 至 `bare_metal_order` + 明细：
+全量订单（或已能解析 `tenant_id` 的子集）逐条：
+
+| 步骤 | 规则 |
+|------|------|
+| 1. upsert 头表 + 明细占位 | `order_mark = online`，`source = platform_sync`，`project_id = null` |
+| 2. device 补全 | 对含 `order_details_id` 的明细调用 §7.1.1 |
+| 3. 租户解析 | `tenant_id` 由平台 `tenant_id` 解析；未知且本轮导入失败则 **跳过** 整条订单 |
 
 | 字段 | 规则 |
 |------|------|
@@ -544,8 +648,10 @@ flowchart TB
   FULL --> UNK[diff 未知 platform_tenant_id]
   UNK --> AUTO[autoImportForBareMetalSync]
   AUTO --> BILL[directImport 近6个月 仅新租户]
-  BILL --> UPSERT[upsert bare_metal_order 全量订单]
-  UPSERT --> DONE[更新 last_success_at]
+  BILL --> UPSERT[upsert bare_metal_order + 明细占位]
+  UPSERT --> ENRICH[逐条 POST metal_order/device 补全明细]
+  ENRICH --> ROLLUP[rollup 头表 rent_starts_at / rent_ends_at]
+  ROLLUP --> DONE[更新 last_success_at]
   DONE --> UNLOCK[释放 lock]
 ```
 
@@ -799,10 +905,10 @@ type OfflineBareMetalOrderImportResult = {
 | 行号 | `line_no` |
 | 型号 | `device_model_text` / 卡型名 |
 | 卡数 | `gpu_count` |
-| 租用时段 | `rent_starts_at` ~ `rent_ends_at` |
-| 时长(h) | `duration_hours` |
-| 卡时单价 | `unit_price_per_card_hour` |
-| 行金额 | `line_amount` |
+| 租用时段 | `rent_starts_at` ~ `rent_ends_at`（线上单由 §7.1.1 device 接口补全；线下单来自 Excel） |
+| 时长(h) | `duration_hours`（线上单由起止时间推导；线下单来自 Excel） |
+| 卡时单价 | `unit_price_per_card_hour`（线上单由 `line_amount ÷ (hours × gpu_count)` 推导；线下单来自 Excel） |
+| 行金额 | `line_amount`（线上单来自 list `gpu_models[].total_price`；线下单来自 Excel） |
 
 **API**：`supplier.bareMetalOrder.getById`。
 
@@ -856,12 +962,13 @@ type OfflineBareMetalOrderImportResult = {
 
 ### Phase 2 — 同步与 API
 
-1. `bare-metal-order-sync.ts`（平台订单 upsert）
-2. `fetchPlatformMetalOrdersGlobal` + `autoImportForBareMetalSync`
-3. `register-bare-metal-order-sync-cron.ts` + 全量 scheduled sync（含新租户 `directImport`）
-4. `bare-metal-order-offline-excel-utils.ts` + preview/commit
-5. tRPC：`list` / `getById`；`previewOfflineBareMetalOrders` / `commitOfflineBareMetalOrders`
-6. Settings 同步状态卡片（建议同 PR）
+1. `bare-metal-order-sync.ts`（平台订单 upsert + §7.1.1 device 补全）
+2. `suanli-billing-api.ts` — `fetchPlatformMetalOrderDevice`
+3. `fetchPlatformMetalOrdersGlobal` + `autoImportForBareMetalSync`
+4. `register-bare-metal-order-sync-cron.ts` + 全量 scheduled sync（含新租户 `directImport`）
+5. `bare-metal-order-offline-excel-utils.ts` + preview/commit
+6. tRPC：`list` / `getById`；`previewOfflineBareMetalOrders` / `commitOfflineBareMetalOrders`
+7. Settings 同步状态卡片（建议同 PR；可选展示 device 补全成功/失败计数）
 
 ### Phase 3 — UI
 
@@ -878,7 +985,11 @@ type OfflineBareMetalOrderImportResult = {
 |------|------|
 | Schema | migration；UK / FK / CASCADE |
 | Upsert | 同一 `platform_order_id` 重复全量同步幂等 |
-| 展开 | `device_count=3` → 3 行明细 |
+| Device 补全 | `order_details_id=1284` → `rent_starts_at`/`rent_ends_at`/IP/`duration_hours`/`line_amount`/`unit_price_per_card_hour` 落库 |
+| Device 补全失败 | 单条 API 失败不阻断订单头与其余明细；`match_flags.device_enrich_partial` |
+| Device 跳过 | 无 `order_details_id` 的占位行不调 API，计费列保持 null |
+| 金额推导 | `line_amount` 来自 list `total_price`；`unit_price = line ÷ (hours × gpu_count)` 自洽 |
+| 展开 | `device_count=3` 且无 `gpu_models` → 3 行占位，均不补全 |
 | Cron 全量 | `tenant_tid=0` 拉全平台列表 |
 | Cron 未知租户 | 自动建 customer+tenant；触发 6 个月 `directImport` |
 | Cron 隔离 | 已存在租户 **不**重拉 6 个月账单 |
@@ -897,3 +1008,4 @@ type OfflineBareMetalOrderImportResult = {
 | v1.1 | 2026-06-15 | 确认 Q1–Q6；§6.1–6.3 本期独立；新增 §7.2 小时 cron、§7.3 项目导入、§8 导航与页面 |
 | v1.2 | 2026-06-15 | §7.2 全量列表 + 未知租户 + 6 个月账单；§7.3 线下 Excel + `order_mark` |
 | v1.3 | 2026-06-15 | §7.3 改为 **明细行 Excel**（7 列卡时格式）；一次上传补全 1 订单头；§5.2/§5.4 扩展字段与导入批次表 |
+| v1.4 | 2026-06-17 | §7.1.1 平台 device 接口补全：`POST /admin/metal_order/device` 写入租用时段/时长/单价/行金额/IP；头表 rollup；cron 流程与测试计划更新 |

@@ -358,6 +358,50 @@ export async function fetchPlatformMetalOrdersGlobal(input: {
   return rows.filter((r) => r.order_no && Number.isFinite(r.tenant_id))
 }
 
+const metalOrderDeviceSchema = z
+  .object({
+    order_details_id: z.number().optional(),
+    start_time: z.string().optional(),
+    end_time: z.string().optional(),
+    pub_ip: z.string().optional(),
+    inner_ip: z.string().optional(),
+    gpu_count: z.number().optional(),
+    gpu_model: z.string().optional(),
+    billing_type: z.string().optional(),
+  })
+  .passthrough()
+
+export type PlatformMetalOrderDeviceRecord = z.infer<typeof metalOrderDeviceSchema>
+
+export async function fetchPlatformMetalOrderDevice(input: {
+  orderDetailId: number
+  traceId?: string
+}): Promise<PlatformMetalOrderDeviceRecord> {
+  await delayBillingApi(BILLING_API_DETAIL_DELAY_MS, `metal_order_device:${input.orderDetailId}`)
+  try {
+    const data = await throttledPost<unknown>('metal_order_device', '/admin/metal_order/device', {
+      order_detail_id: input.orderDetailId,
+    })
+    const parsed = metalOrderDeviceSchema.safeParse(data)
+    if (!parsed.success) {
+      throw new SuanliBillingApiError('裸金属订单设备返回格式异常')
+    }
+    crmLog('suanli-billing-api', 'metal_order_device ok', {
+      traceId: input.traceId,
+      orderDetailId: input.orderDetailId,
+      orderDetailsId: parsed.data.order_details_id,
+    })
+    return parsed.data
+  } catch (e) {
+    crmWarn('suanli-billing-api', 'metal_order_device failed', {
+      traceId: input.traceId,
+      orderDetailId: input.orderDetailId,
+      error: e instanceof Error ? e.message : String(e),
+    })
+    parseApiError(e)
+  }
+}
+
 export async function fetchPlatformMonthlyBills(input: {
   platformTenantId: string
   startDate?: string

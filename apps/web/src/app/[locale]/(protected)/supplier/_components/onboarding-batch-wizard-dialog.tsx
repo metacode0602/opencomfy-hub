@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Loader2, Plus, Trash2, Upload } from 'lucide-react'
+import { AlertCircle, ChevronRight, Loader2, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@workspace/ui/components/button'
 import { Input } from '@workspace/ui/components/input'
@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select'
+import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import { Label } from '@workspace/ui/components/label'
 import { Textarea } from '@workspace/ui/components/textarea'
 import {
@@ -159,7 +160,15 @@ export function OnboardingBatchWizardDialog({
   const createMutation = trpc.supplier.onboardingBatch.create.useMutation()
   const parseListMutation = trpc.supplier.onboardingBatch.parseList.useMutation()
   const commitListMutation = trpc.supplier.onboardingBatch.commitList.useMutation()
-  const { manualWorkOrderRequired, autoCreateEnabled } = useFeishuIntegrationConfig(open)
+  const {
+    manualWorkOrderRequired,
+    autoCreateEnabled,
+    defaultUserOpenIdConfigured,
+    isLoading: feishuConfigLoading,
+  } = useFeishuIntegrationConfig(open)
+
+  const feishuSubmitterMissing =
+    isOnlineTasks && !manualWorkOrderRequired && !defaultUserOpenIdConfigured
 
   const [wizardStep, setWizardStep] = useState<WizardStep>('meta')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -317,6 +326,10 @@ export function OnboardingBatchWizardDialog({
   }
 
   const onMetaNext = async () => {
+    if (feishuSubmitterMissing) {
+      toast.error('未配置 FEISHU_DEFAULT_USER_OPEN_ID，无法自动创建飞书工单')
+      return
+    }
     if (manualWorkOrderRequired && !workOrderNo.trim()) {
       toast.error('请填写飞书审批工单号')
       return
@@ -372,7 +385,9 @@ export function OnboardingBatchWizardDialog({
     dataCenterId &&
     planValidation.ok &&
     (!isOnlineTasks || onlineReason) &&
-    (!isOrderAccess || (orderNo.trim() && remark.trim()))
+    (!isOrderAccess || (orderNo.trim() && remark.trim())) &&
+    !feishuSubmitterMissing &&
+    !(isOnlineTasks && feishuConfigLoading)
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -392,6 +407,15 @@ export function OnboardingBatchWizardDialog({
 
         {wizardStep === 'meta' && (
           <div className="space-y-4 py-2">
+            {feishuSubmitterMissing && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  未配置环境变量 <code className="text-xs">FEISHU_DEFAULT_USER_OPEN_ID</code>
+                  ，无法自动创建飞书工单。请联系管理员在服务端配置后再提交设备上架。
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="grid grid-cols-2 gap-4">
               {lockContext && defaultSupplierId && defaultDataCenterId ? (
                 <>

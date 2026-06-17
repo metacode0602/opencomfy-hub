@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { handleFeishuApprovalWebhook } from '@/lib/server/dataaccess/integrations/feishu/approval-webhook-handler'
+import { handleFeishuBitableRecordWebhook } from '@/lib/server/dataaccess/integrations/feishu/bitable-record-webhook-handler'
 import { loadFeishuRuntimeConfig } from '@/lib/server/integrations/feishu/config'
 import {
   decryptFeishuPayload,
@@ -69,6 +70,17 @@ export async function POST(request: Request, context: RouteContext) {
       await handleFeishuApprovalWebhook(envelope)
     } catch {
       // 仍返回 200，避免飞书无限重试；错误已记 job_run
+    }
+  }
+
+  if (
+    eventType.includes('bitable') ||
+    eventType === 'drive.file.bitable_record_changed_v1'
+  ) {
+    try {
+      await handleFeishuBitableRecordWebhook(envelope)
+    } catch {
+      // 仍返回 200
     }
   }
 

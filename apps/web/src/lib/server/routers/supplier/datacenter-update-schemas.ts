@@ -21,3 +21,8 @@ export const datacenterUpdateStatusSchema = z.object({
   dataCenterId: z.string().min(1),
   status: z.enum(['online', 'offline']),
 })
+
+export const datacenterUpdateCooperationStatusSchema = z.object({
+  dataCenterId: z.string().min(1),
+  cooperationStatus: z.enum(['active', 'pause', 'inactive']),
+})

@@ -14,9 +14,25 @@ export type FeishuBatchMetadata = {
     create_status?: 'pending' | 'created' | 'failed'
     last_webhook_at?: string
     last_feishu_status?: string
-    completion_source?: 'feishu_webhook' | 'refresh_batch_progress' | 'manual_ui'
+    last_sync_at?: string
+    last_sync_idempotency_key?: string
+    inbound_channel?: 'bitable_automation' | 'event_subscription'
+    completion_source?: 'feishu_webhook' | 'feishu_automation' | 'refresh_batch_progress' | 'manual_ui'
     last_task_name?: string
+    status_history?: FeishuStatusHistoryEntry[]
   }
+}
+
+export type FeishuStatusHistoryEntry = {
+  at: string
+  from_status?: string
+  to_status: string
+  batch_status_before: string
+  batch_status_after: string
+  inbound_channel: 'bitable_automation' | 'event_subscription'
+  idempotency_key: string
+  fields_snapshot_digest: string
+  operator_hint?: string
 }
 
 export type FeishuApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELED' | 'DELETED'

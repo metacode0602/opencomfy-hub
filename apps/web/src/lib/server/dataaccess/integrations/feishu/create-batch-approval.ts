@@ -16,6 +16,10 @@ import {
   FEISHU_BATCH_KIND_LABELS,
   type FeishuBatchMetadata,
 } from '@/lib/server/integrations/feishu/types'
+import {
+  resolveContainerInstanceRegion,
+  resolveWorkOrderLocationCode,
+} from '@/lib/server/integrations/feishu/work-order-content-builder'
 import { assertSupplierWorkOrderUnique } from '@/lib/server/dataaccess/supplier/work-order-uniqueness'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import {
@@ -44,13 +48,17 @@ function mergeBatchMetadata(
   }
 }
 
-function buildBatchApprovalSummary(batch: typeof onboardingBatch.$inferSelect): string {
+function buildBatchApprovalSummary(
+  batch: typeof onboardingBatch.$inferSelect,
+  containerInstanceRegion?: string | null,
+): string {
   const kindLabel = FEISHU_BATCH_KIND_LABELS[batch.batchKind] ?? batch.batchKind
+  const locationCode = resolveWorkOrderLocationCode(batch, containerInstanceRegion)
   const lines = [
     `批次编号: ${batch.batchCode}`,
     `批次类型: ${kindLabel}`,
     `供应商: ${batch.supplierName}`,
-    `机房: ${batch.dataCenterName} (${batch.idcCode})`,
+    `机房: ${batch.dataCenterName} (${locationCode})`,
     `计划台数: ${batch.plannedDeviceCount}`,
   ]
   if (batch.plannedReadyAt) {
@@ -152,7 +160,8 @@ export async function createFeishuApprovalForBatch(batchId: string): Promise<{
 
   try {
     const userOpenId = await resolveUserOpenId(batch.createdByStaffId, config!)
-    const summary = buildBatchApprovalSummary(batch)
+    const containerInstanceRegion = await resolveContainerInstanceRegion(batch.dataCenterId)
+    const summary = buildBatchApprovalSummary(batch, containerInstanceRegion)
     const form = buildFeishuApprovalFormJson(config!, summary)
     const created = await createFeishuApprovalInstance(config!, {
       approvalCode,

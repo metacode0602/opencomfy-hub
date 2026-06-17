@@ -22,6 +22,11 @@ export type UpdateDatacenterStatusInput = {
   status: 'online' | 'offline'
 }
 
+export type UpdateDatacenterCooperationStatusInput = {
+  dataCenterId: string
+  cooperationStatus: 'active' | 'pause' | 'inactive'
+}
+
 export type UpdateDatacenterResult = {
   dataCenter: DataCenter
 }

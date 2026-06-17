@@ -32,8 +32,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@workspace/ui/components/dropdown-menu'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@workspace/ui/components/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -51,7 +62,8 @@ import { SupplierDatacenterImportTrigger } from '@/components/dashboard/supplier
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenter } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
-import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
+import { dcStatusColors, statusNames, dcCooperationStatusNames, dcCooperationStatusColors, dcCooperationStatusIcons, dcCooperationStatusConfirmDescriptions, type DataCenterCooperationStatus } from '@/components/dashboard/supplier-detail-constants'
+import { toast } from 'sonner'
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -89,13 +101,38 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
   })
 
   const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('online')
+  const [cooperationStatusFilter, setCooperationStatusFilter] = useState('active')
   const [supplierFilter, setSupplierFilter] = useState('all')
   const [containerInstanceRegionFilter, setContainerInstanceRegionFilter] = useState('')
   const [bindDataCenter, setBindDataCenter] = useState<DataCenter | null>(null)
   const [bindDialogOpen, setBindDialogOpen] = useState(false)
   const [opsEngineerDataCenter, setOpsEngineerDataCenter] = useState<DataCenter | null>(null)
   const [opsEngineersDialogOpen, setOpsEngineersDialogOpen] = useState(false)
+  const [cooperationConfirmTarget, setCooperationConfirmTarget] = useState<{
+    dataCenterId: string
+    dataCenterName: string
+    cooperationStatus: DataCenterCooperationStatus
+  } | null>(null)
+
+  const updateCooperationStatusMutation = trpc.supplier.updateDataCenterCooperationStatus.useMutation({
+    onSuccess: (result) => {
+      toast.success(
+        `机房「${result.dataCenter.name}」合作状态已设为${dcCooperationStatusNames[result.dataCenter.cooperationStatus]}`,
+      )
+      setCooperationConfirmTarget(null)
+      void utils.supplier.listAllDataCenters.invalidate(
+        supplierIdFilter ? { supplierId: supplierIdFilter } : undefined,
+      )
+      void utils.supplier.getDataCenterStats.invalidate(
+        supplierIdFilter ? { supplierId: supplierIdFilter } : undefined,
+      )
+      void utils.supplier.list.invalidate()
+    },
+    onError: (error) => {
+      toast.error(error.message)
+    },
+  })
 
   const filtered = useMemo(() => {
     return dataCenters.filter((dc) => {
@@ -113,23 +150,26 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
         !regionQ ||
         (dc.containerInstanceRegion?.toLowerCase().includes(regionQ) ?? false)
       const matchStatus = statusFilter === 'all' || dc.status === statusFilter
+      const matchCooperationStatus =
+        cooperationStatusFilter === 'all' || dc.cooperationStatus === cooperationStatusFilter
       const matchSupplier =
         supplierIdFilter != null ||
         supplierFilter === 'all' ||
         dc.supplierId === supplierFilter
-      return matchQ && matchStatus && matchSupplier && matchContainerInstanceRegion
+      return matchQ && matchStatus && matchCooperationStatus && matchSupplier && matchContainerInstanceRegion
     })
   }, [
     dataCenters,
     searchTerm,
     statusFilter,
+    cooperationStatusFilter,
     supplierFilter,
     containerInstanceRegionFilter,
     supplierIdFilter,
   ])
 
   const pagination = useListPagination(filtered, {
-    resetDeps: [searchTerm, statusFilter, supplierFilter, containerInstanceRegionFilter],
+    resetDeps: [searchTerm, statusFilter, cooperationStatusFilter, supplierFilter, containerInstanceRegionFilter],
   })
 
   const displayStats = stats ?? {
@@ -279,13 +319,24 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="状态" />
+                <SelectValue placeholder="运行状态" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="all">全部运行状态</SelectItem>
                 <SelectItem value="online">在线</SelectItem>
                 <SelectItem value="offline">离线</SelectItem>
                 <SelectItem value="maintenance">维护中</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={cooperationStatusFilter} onValueChange={setCooperationStatusFilter}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="合作状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部合作状态</SelectItem>
+                <SelectItem value="active">合作中</SelectItem>
+                <SelectItem value="pause">合作暂停</SelectItem>
+                <SelectItem value="inactive">合作终止</SelectItem>
               </SelectContent>
             </Select>
             {!supplierIdFilter && (
@@ -326,7 +377,8 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
               <TableHead className="text-muted-foreground">容器区域</TableHead>
               <TableHead className="text-muted-foreground">容器编码</TableHead>
               <TableHead className="text-muted-foreground">裸金属区域</TableHead>
-              <TableHead className="text-muted-foreground">状态</TableHead>
+              <TableHead className="text-muted-foreground">运行状态</TableHead>
+              <TableHead className="text-muted-foreground">合作状态</TableHead>
               <TableHead className="text-muted-foreground">GPU 在线率</TableHead>
               {/* <TableHead className="text-muted-foreground">网络费 (月)</TableHead> */}
               {/* <TableHead className="text-muted-foreground">管控费 (月)</TableHead> */}
@@ -337,7 +389,7 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
             {pagination.totalItems === 0 ? (
               <TableRow className="border-border">
                 <TableCell
-                  colSpan={supplierIdFilter ? 8 : 9}
+                  colSpan={supplierIdFilter ? 9 : 10}
                   className="py-12 text-center text-muted-foreground"
                 >
                   {dataCenters.length === 0
@@ -408,6 +460,14 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                       </Badge>
                     </TableCell>
                     <TableCell>
+                      <Badge
+                        variant="outline"
+                        className={dcCooperationStatusColors[dc.cooperationStatus]}
+                      >
+                        {dcCooperationStatusNames[dc.cooperationStatus]}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-2">
                           <Progress value={onlineRate} className="h-2 w-16" />
@@ -433,7 +493,7 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
+                        <DropdownMenuContent align="end" className="w-full">
                           <DropdownMenuItem asChild>
                             <Link href={`/supplier/datacenters/${dc.id}`}>
                               <Eye className="mr-2 h-4 w-4" />
@@ -460,6 +520,31 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
                               平台绑定
                             </DropdownMenuItem>
                           )}
+                          {(['active', 'pause', 'inactive'] as DataCenterCooperationStatus[])
+                            .filter((status) => status !== dc.cooperationStatus).length > 0 && (
+                            <DropdownMenuSeparator />
+                          )}
+                          {(['active', 'pause', 'inactive'] as DataCenterCooperationStatus[])
+                            .filter((status) => status !== dc.cooperationStatus)
+                            .map((status) => {
+                              const StatusIcon = dcCooperationStatusIcons[status]
+                              return (
+                                <DropdownMenuItem
+                                  key={status}
+                                  disabled={updateCooperationStatusMutation.isPending}
+                                  onSelect={() =>
+                                    setCooperationConfirmTarget({
+                                      dataCenterId: dc.id,
+                                      dataCenterName: dc.name,
+                                      cooperationStatus: status,
+                                    })
+                                  }
+                                >
+                                  <StatusIcon className="mr-2 h-4 w-4" />
+                                  设为{dcCooperationStatusNames[status]}
+                                </DropdownMenuItem>
+                              )
+                            })}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -492,6 +577,47 @@ export function DatacentersContent({ supplierIdFilter }: { supplierIdFilter?: st
         onOpenChange={handleOpsEngineersOpenChange}
         dataCenter={opsEngineerDataCenter}
       />
+
+      <AlertDialog
+        open={cooperationConfirmTarget !== null}
+        onOpenChange={(open) => !open && setCooperationConfirmTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {cooperationConfirmTarget
+                ? `确认设为${dcCooperationStatusNames[cooperationConfirmTarget.cooperationStatus]}？`
+                : ''}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {cooperationConfirmTarget
+                ? `将机房「${cooperationConfirmTarget.dataCenterName}」${dcCooperationStatusConfirmDescriptions[cooperationConfirmTarget.cooperationStatus]}`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              type="button"
+              disabled={updateCooperationStatusMutation.isPending}
+            >
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={updateCooperationStatusMutation.isPending}
+              onClick={() => {
+                if (!cooperationConfirmTarget) return
+                updateCooperationStatusMutation.mutate({
+                  dataCenterId: cooperationConfirmTarget.dataCenterId,
+                  cooperationStatus: cooperationConfirmTarget.cooperationStatus,
+                })
+              }}
+            >
+              {updateCooperationStatusMutation.isPending ? '处理中…' : '确认'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

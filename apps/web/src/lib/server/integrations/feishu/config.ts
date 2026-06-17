@@ -71,13 +71,39 @@ export function isFeishuAutoCompleteOnApproval(config: FeishuRuntimeConfig | nul
   return Boolean(config?.enabled && config.webhookPolicy.auto_complete_on_approval)
 }
 
-export function getFeishuClientPublicConfig(config: FeishuRuntimeConfig | null) {
+export function getFeishuClientPublicConfig(
+  config: FeishuRuntimeConfig | null,
+  workOrder?: {
+    enabled: boolean
+    workOrderBackend: 'bitable' | 'approval'
+    inboundChannel?: 'event_subscription' | 'bitable_automation' | 'dual'
+  } | null,
+) {
+  const workOrderBackend = workOrder?.enabled ? workOrder.workOrderBackend : null
+  const automationInboundPath =
+    config?.appBaseUrl && workOrder?.enabled && workOrder.workOrderBackend === 'bitable'
+      ? buildAutomationInboundUrl(config)
+      : null
   return {
     integrationConfigured: Boolean(config?.enabled),
     autoCreateEnabled: isFeishuAutoCreateEnabled(config),
     autoCompleteOnApproval: isFeishuAutoCompleteOnApproval(config),
     manualWorkOrderRequired: !isFeishuAutoCreateEnabled(config),
+    defaultUserOpenIdConfigured: Boolean(config?.defaultUserOpenId),
+    workOrderConfigured: Boolean(workOrder?.enabled),
+    workOrderBackend,
+    workOrderInboundChannel: workOrder?.inboundChannel ?? null,
+    automationInboundUrl: automationInboundPath,
   }
+}
+
+export function buildAutomationInboundUrl(config: FeishuRuntimeConfig): string | null {
+  if (!config.appBaseUrl) return null
+  const secret =
+    process.env.FEISHU_AUTOMATION_SECRET?.trim() ||
+    process.env.FEISHU_WEBHOOK_SECRET?.trim() ||
+    '{secret}'
+  return `${config.appBaseUrl}/api/integrations/feishu/bitable-automation/${secret}`
 }
 
 export function resolveApprovalCode(

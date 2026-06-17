@@ -24,6 +24,7 @@ import {
   type ParsedWorkbook,
 } from './excel-parser'
 import {
+  isBaremetalPayStatusPaid,
   parseDeviceModel,
   parseDeviceQty,
   parsePurchaseQty,
@@ -157,14 +158,6 @@ function mapCustomerRows(sheet: ParsedWorkbook): {
     })
   }
   return { parsed, errors }
-}
-
-function isBaremetalPayStatusPaid(payStatus: string): boolean {
-  const s = payStatus.trim()
-  if (!s) return true
-  if (s.includes('已支付')) return true
-  if (s.toLowerCase() === 'paid') return true
-  return false
 }
 
 function mapBaremetalRows(

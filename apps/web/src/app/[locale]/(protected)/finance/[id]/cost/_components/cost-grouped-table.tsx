@@ -485,7 +485,7 @@ export function CostGroupedTable({
             <TableHead className="whitespace-nowrap">客户经理</TableHead>
             <TableHead className="whitespace-nowrap">成本单价版本</TableHead>
             <TableHead className="whitespace-nowrap">机房名称</TableHead>
-            <TableHead className="whitespace-nowrap">机房编码</TableHead>
+            <TableHead className="whitespace-nowrap">容器编码</TableHead>
             <TableHead className="whitespace-nowrap">卡型</TableHead>
             <TableHead className="whitespace-nowrap">行类型</TableHead>
             <TableHead className="whitespace-nowrap text-right">余额消费</TableHead>

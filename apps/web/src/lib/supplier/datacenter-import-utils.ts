@@ -530,6 +530,7 @@ export function commitDatacenterImportMock(
       location: fields.location ?? '',
       address: fields.address ?? '',
       status: fields.status ?? 'offline',
+      cooperationStatus: 'active',
       ...fields,
     }
     dataCenters.push(newDc)

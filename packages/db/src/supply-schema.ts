@@ -160,6 +160,8 @@ export const dataCenter = pgTable(
     regionTags: text("region_tags").array().notNull().default([]),
     address: text("address"),
     status: varchar("status", { length: 32 }).notNull(),
+    /** active=合作中；pause=合作暂停；inactive=合作终止 */
+    cooperationStatus: varchar("cooperation_status", { length: 32 }).notNull().default("active"),
     networkFeeMonthly: money("network_fee_monthly").notNull().default("0"),
     mgmtNodeFeeMonthly: money("mgmt_node_fee_monthly").notNull().default("0"),
     externalOnboardingId: varchar("external_onboarding_id", { length: 64 }),
@@ -179,6 +181,7 @@ export const dataCenter = pgTable(
     uniqueIndex("data_center_supplier_code_uk").on(table.supplierId, table.code),
     index("data_center_supplier_id_idx").on(table.supplierId),
     index("data_center_status_idx").on(table.status),
+    index("data_center_cooperation_status_idx").on(table.cooperationStatus),
     index("data_center_supplier_external_onboarding_id_idx").on(
       table.supplierId,
       table.externalOnboardingId,

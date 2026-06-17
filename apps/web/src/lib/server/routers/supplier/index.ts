@@ -91,6 +91,7 @@ import { datacenterCreateSchema } from '@/lib/server/routers/supplier/datacenter
 import {
   datacenterUpdateSchema,
   datacenterUpdateStatusSchema,
+  datacenterUpdateCooperationStatusSchema,
 } from '@/lib/server/routers/supplier/datacenter-update-schemas'
 import {
   unitCostListSchema,
@@ -403,6 +404,16 @@ export const supplierRouter = createTRPCRouter({
     .mutation(async ({ input }) => {
       try {
         return await datacenterUpdateDataAccess.updateStatus(input)
+      } catch (e) {
+        mapImportError(e)
+      }
+    }),
+
+  updateDataCenterCooperationStatus: supplyProcedure
+    .input(datacenterUpdateCooperationStatusSchema)
+    .mutation(async ({ input }) => {
+      try {
+        return await datacenterUpdateDataAccess.updateCooperationStatus(input)
       } catch (e) {
         mapImportError(e)
       }

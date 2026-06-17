@@ -98,6 +98,7 @@ function FeishuBitableSyncConfigDialog({
   const [bitableFields, setBitableFields] = useState<
     Array<{ fieldId: string; fieldName: string; suggestedExcelHeader: string | null }>
   >([])
+  const [fieldsLoading, setFieldsLoading] = useState(false)
 
   const { data: suppliers = [] } = trpc.supplier.list.useQuery(undefined, {
     enabled: open && !lockSupplierId,
@@ -134,13 +135,17 @@ function FeishuBitableSyncConfigDialog({
     setFieldMapping(initial?.fieldMappingJson ?? {})
     setExcelHeaders([])
     setBitableFields([])
+    setFieldsLoading(false)
   }, [open, initial, lockSupplierId, lockDataCenterId])
 
-  const onFetchFields = async () => {
+  const loadBitableFields = async (preserveMapping: boolean) => {
     if (!appToken.trim() || !tableId.trim()) {
-      toast.error('请先填写 app_token 与 table_id')
+      if (!preserveMapping) {
+        toast.error('请先填写 app_token 与 table_id')
+      }
       return
     }
+    setFieldsLoading(true)
     try {
       const result = await listFieldsMutation.mutateAsync({
         appToken: appToken.trim(),
@@ -148,12 +153,31 @@ function FeishuBitableSyncConfigDialog({
         syncKind,
       })
       setExcelHeaders(result.excelHeaders)
-      setFieldMapping(result.suggestedMapping)
       setBitableFields(result.fields)
-      toast.success(`已拉取 ${result.fields.length} 个字段，自动匹配 ${Object.keys(result.suggestedMapping).length} 列`)
+      if (!preserveMapping) {
+        setFieldMapping(result.suggestedMapping)
+        toast.success(
+          `已拉取 ${result.fields.length} 个字段，自动匹配 ${Object.keys(result.suggestedMapping).length} 列`,
+        )
+      }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '拉取字段失败')
+      if (!preserveMapping) {
+        toast.error(error instanceof Error ? error.message : '拉取字段失败')
+      }
+    } finally {
+      setFieldsLoading(false)
     }
+  }
+
+  useEffect(() => {
+    if (!open || !initial?.id) return
+    if (!appToken.trim() || !tableId.trim()) return
+    void loadBitableFields(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在编辑弹窗打开时按已保存 token 拉字段名
+  }, [open, initial?.id, appToken, tableId, syncKind])
+
+  const onFetchFields = async () => {
+    await loadBitableFields(false)
   }
 
   const onSave = () => {
@@ -190,12 +214,14 @@ function FeishuBitableSyncConfigDialog({
           '',
       }))
     }
-    return Object.entries(fieldMapping).map(([excelHeader, fieldId]) => ({
+    const fieldIds = [...new Set(Object.values(fieldMapping).filter(Boolean))]
+    if (fieldIds.length === 0) return []
+    return fieldIds.map((fieldId) => ({
       fieldId,
-      fieldName: fieldId,
-      excelHeader,
+      fieldName: fieldsLoading ? '加载中…' : fieldId,
+      excelHeader: Object.entries(fieldMapping).find(([, id]) => id === fieldId)?.[0] ?? '',
     }))
-  }, [bitableFields, fieldMapping])
+  }, [bitableFields, fieldMapping, fieldsLoading])
 
   const updateMappingForField = (fieldId: string, excelHeader: string) => {
     setFieldMapping((prev) => {
@@ -320,9 +346,9 @@ function FeishuBitableSyncConfigDialog({
             variant="outline"
             size="sm"
             onClick={() => void onFetchFields()}
-            disabled={listFieldsMutation.isPending}
+            disabled={listFieldsMutation.isPending || fieldsLoading}
           >
-            {listFieldsMutation.isPending ? (
+            {listFieldsMutation.isPending || fieldsLoading ? (
               <IconLoader2 className="mr-1 h-4 w-4 animate-spin" />
             ) : (
               <IconRefresh className="mr-1 h-4 w-4" />

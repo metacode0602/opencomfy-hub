@@ -29,7 +29,7 @@ import {
   type DeviceCooperationType,
 } from '@/lib/types/supplier-domain'
 import { appendBatchProgressEvent } from '@/lib/server/aggregation/batch-progress-events'
-import { createFeishuApprovalForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-approval'
+import { createFeishuWorkOrderForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-work-order'
 import {
   isFeishuAutoCreateEnabled,
   loadFeishuRuntimeConfig,
@@ -586,7 +586,7 @@ export const datacenterDeviceRetireDataAccess = {
 
     let finalWorkOrderNo = workOrderNo ?? preview.meta.workOrderNo
     if (autoCreateFeishu) {
-      const feishuResult = await createFeishuApprovalForBatch(batchId)
+      const feishuResult = await createFeishuWorkOrderForBatch(batchId)
       if (feishuResult.workOrderNo) {
         finalWorkOrderNo = feishuResult.workOrderNo
       }

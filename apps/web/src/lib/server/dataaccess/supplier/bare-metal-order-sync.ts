@@ -1,8 +1,13 @@
 import {
+  parsePlatformDateTime,
   platformMetalOrderListAmountToMoneyString,
 } from '@/lib/crm/tenant-billing-import-utils'
 import { db } from '@/lib/db'
-import type { PlatformMetalOrderRecord } from '@/lib/server/integrations/suanli-billing-api'
+import {
+  fetchPlatformMetalOrderDevice,
+  type PlatformMetalOrderRecord,
+} from '@/lib/server/integrations/suanli-billing-api'
+import { crmWarn } from '@/lib/server/dataaccess/crm/logger'
 import {
   loadCostMasterDataContext,
   resolveDataCenterByName,
@@ -15,7 +20,7 @@ import {
   dataCenter,
   supplier,
 } from '@workspace/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 function newId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`
@@ -57,6 +62,21 @@ type TenantRef = {
   customerId: string | null
 }
 
+type DeviceLine = {
+  deviceModelText: string | null
+  gpuCount: number
+  gpuCardTypeId: string | null
+  orderDetailsId: number | null
+  totalPrice: number | null
+  orderDetailStatus: string | null
+}
+
+export type EnrichPlatformBareMetalOrderDevicesResult = {
+  enrichedCount: number
+  failedCount: number
+  skippedCount: number
+}
+
 async function loadTenantByPlatformId(platformTenantId: string): Promise<TenantRef | null> {
   const rows = await db
     .select({
@@ -76,11 +96,7 @@ async function loadTenantByPlatformId(platformTenantId: string): Promise<TenantR
   }
 }
 
-function buildDeviceLines(record: PlatformMetalOrderRecord): Array<{
-  deviceModelText: string | null
-  gpuCount: number
-  gpuCardTypeId: string | null
-}> {
+function buildDeviceLines(record: PlatformMetalOrderRecord): DeviceLine[] {
   const models = record.gpu_models ?? []
   if (models.length > 0) {
     return models.map((model) => {
@@ -90,6 +106,9 @@ function buildDeviceLines(record: PlatformMetalOrderRecord): Array<{
         deviceModelText: text,
         gpuCount: gpuPerUnit,
         gpuCardTypeId: null,
+        orderDetailsId: model.order_details_id ?? null,
+        totalPrice: model.total_price ?? null,
+        orderDetailStatus: model.order_detail_status ?? null,
       }
     })
   }
@@ -99,12 +118,167 @@ function buildDeviceLines(record: PlatformMetalOrderRecord): Array<{
     deviceModelText: null,
     gpuCount: 1,
     gpuCardTypeId: null,
+    orderDetailsId: null,
+    totalPrice: null,
+    orderDetailStatus: null,
   }))
+}
+
+function resolveLineAmount(
+  line: DeviceLine,
+  record: PlatformMetalOrderRecord,
+  lineCount: number,
+): string | null {
+  if (line.totalPrice != null && Number.isFinite(line.totalPrice)) {
+    return platformMetalOrderListAmountToMoneyString(line.totalPrice)
+  }
+  if (lineCount === 1) {
+    return platformMetalOrderListAmountToMoneyString(record.total_price)
+  }
+  return null
+}
+
+function computeDurationHours(rentStartsAt: Date | null, rentEndsAt: Date | null): string | null {
+  if (!rentStartsAt || !rentEndsAt) return null
+  const hours = (rentEndsAt.getTime() - rentStartsAt.getTime()) / 3_600_000
+  if (!Number.isFinite(hours) || hours <= 0) return null
+  return toMoney(hours)
+}
+
+function computeUnitPricePerCardHour(
+  lineAmount: string | null,
+  durationHours: string | null,
+  gpuCount: number,
+): string | null {
+  if (!lineAmount || !durationHours || gpuCount <= 0) return null
+  const amountNum = Number(lineAmount)
+  const hoursNum = Number(durationHours)
+  const denom = hoursNum * gpuCount
+  if (!Number.isFinite(amountNum) || !Number.isFinite(hoursNum) || denom <= 0) return null
+  return toMoney(amountNum / denom)
+}
+
+export async function enrichPlatformBareMetalOrderDevices(input: {
+  orderId: string
+  record: PlatformMetalOrderRecord
+  deviceLines: DeviceLine[]
+  traceId?: string
+}): Promise<EnrichPlatformBareMetalOrderDevicesResult> {
+  let enrichedCount = 0
+  let failedCount = 0
+  let skippedCount = 0
+  let partialFailure = false
+  const rentStarts: Date[] = []
+  const rentEnds: Date[] = []
+
+  for (let index = 0; index < input.deviceLines.length; index++) {
+    const line = input.deviceLines[index]!
+    const lineNo = index + 1
+
+    if (line.orderDetailsId == null) {
+      skippedCount++
+      continue
+    }
+
+    try {
+      const deviceData = await fetchPlatformMetalOrderDevice({
+        orderDetailId: line.orderDetailsId,
+        traceId: input.traceId,
+      })
+
+      const rentStartsAt = deviceData.start_time
+        ? parsePlatformDateTime(deviceData.start_time)
+        : null
+      const rentEndsAt = deviceData.end_time ? parsePlatformDateTime(deviceData.end_time) : null
+      const durationHours = computeDurationHours(rentStartsAt, rentEndsAt)
+      const lineAmount = resolveLineAmount(line, input.record, input.deviceLines.length)
+      const gpuCount = deviceData.gpu_count ?? line.gpuCount
+      const unitPricePerCardHour = computeUnitPricePerCardHour(lineAmount, durationHours, gpuCount)
+
+      const deviceMatchFlags: Record<string, unknown> = {}
+      if (deviceData.gpu_count != null && deviceData.gpu_count !== line.gpuCount) {
+        deviceMatchFlags.gpu_count_mismatch = true
+      }
+
+      await db
+        .update(bareMetalOrderDevice)
+        .set({
+          platformDeviceId: String(deviceData.order_details_id ?? line.orderDetailsId),
+          rentStartsAt,
+          rentEndsAt,
+          durationHours,
+          lineAmount,
+          unitPricePerCardHour,
+          externalIp: deviceData.pub_ip ?? null,
+          internalIp: deviceData.inner_ip ?? null,
+          gpuCount,
+          deviceModelText: line.deviceModelText ?? deviceData.gpu_model ?? null,
+          deviceStatus: line.orderDetailStatus ?? null,
+          platformPayload: {
+            order_details_id: line.orderDetailsId,
+            ...deviceData,
+          },
+          matchFlags: deviceMatchFlags,
+        })
+        .where(
+          and(
+            eq(bareMetalOrderDevice.bareMetalOrderId, input.orderId),
+            eq(bareMetalOrderDevice.lineNo, lineNo),
+          ),
+        )
+
+      if (rentStartsAt) rentStarts.push(rentStartsAt)
+      if (rentEndsAt) rentEnds.push(rentEndsAt)
+      enrichedCount++
+    } catch (e) {
+      failedCount++
+      partialFailure = true
+      crmWarn('bare-metal-order-sync', 'device enrich failed', {
+        traceId: input.traceId,
+        orderId: input.orderId,
+        lineNo,
+        orderDetailsId: line.orderDetailsId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
+  if (rentStarts.length > 0 || rentEnds.length > 0 || partialFailure) {
+    const headUpdate: {
+      rentStartsAt?: Date
+      rentEndsAt?: Date
+      matchFlags?: Record<string, unknown>
+    } = {}
+
+    if (rentStarts.length > 0) {
+      headUpdate.rentStartsAt = new Date(Math.min(...rentStarts.map((d) => d.getTime())))
+    }
+    if (rentEnds.length > 0) {
+      headUpdate.rentEndsAt = new Date(Math.max(...rentEnds.map((d) => d.getTime())))
+    }
+
+    if (partialFailure) {
+      const [head] = await db
+        .select({ matchFlags: bareMetalOrder.matchFlags })
+        .from(bareMetalOrder)
+        .where(eq(bareMetalOrder.id, input.orderId))
+        .limit(1)
+      headUpdate.matchFlags = {
+        ...((head?.matchFlags ?? {}) as Record<string, unknown>),
+        device_enrich_partial: true,
+      }
+    }
+
+    await db.update(bareMetalOrder).set(headUpdate).where(eq(bareMetalOrder.id, input.orderId))
+  }
+
+  return { enrichedCount, failedCount, skippedCount }
 }
 
 export async function upsertPlatformBareMetalOrder(input: {
   record: PlatformMetalOrderRecord
   tenant: TenantRef
+  traceId?: string
 }): Promise<{ orderId: string; created: boolean }> {
   const { record, tenant } = input
   const master = await loadCostMasterDataContext()
@@ -192,13 +366,21 @@ export async function upsertPlatformBareMetalOrder(input: {
       gpuCardTypeId: card?.id ?? line.gpuCardTypeId,
       deviceModelText: line.deviceModelText,
       gpuCount: line.gpuCount,
-      platformPayload: {},
+      platformPayload:
+        line.orderDetailsId != null ? { order_details_id: line.orderDetailsId } : {},
     }
   })
 
   if (deviceRows.length > 0) {
     await db.insert(bareMetalOrderDevice).values(deviceRows)
   }
+
+  await enrichPlatformBareMetalOrderDevices({
+    orderId,
+    record,
+    deviceLines,
+    traceId: input.traceId,
+  })
 
   return { orderId, created }
 }

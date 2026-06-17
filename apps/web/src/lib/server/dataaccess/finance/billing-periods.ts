@@ -265,6 +265,21 @@ export const financeBillingPeriodsDataAccess = {
     const { importExcelFile } = await financeImport()
     return importExcelFile(...args)
   },
+
+  async previewBaremetalFromDb(billingPeriodId: string) {
+    const { previewBaremetalFromDb } = await import('./baremetal-db-import')
+    return previewBaremetalFromDb({ billingPeriodId })
+  },
+
+  async importBaremetalFromDb(input: {
+    billingPeriodId: string
+    actorId?: string | null
+    preserveIncomeDerived?: boolean
+  }) {
+    const { importBaremetalFromDb } = await import('./baremetal-db-import')
+    return importBaremetalFromDb(input)
+  },
+
   getImportSlotStatuses,
   computeBillingPeriodCost,
   computeBillingPeriodIncome,

@@ -46,7 +46,6 @@ import type { OnboardingBatchDetailTask } from '@/lib/types/onboarding-batch-api
 import { AdjustOnboardingBatchPlanDialog } from './adjust-onboarding-batch-plan-dialog'
 import { BatchLifecycleActions } from './batch-lifecycle-actions'
 import { BatchAdjustHistoryList, BatchProgressTimeline } from './batch-progress-timeline'
-import { OnboardingBatchProgressDevices } from './onboarding-batch-progress-devices'
 
 const TERMINAL_BATCH_STATUSES = ['已完成', '已取消', 'cancelled'] as const
 
@@ -118,6 +117,14 @@ export function OnboardingBatchDetailContent({
       void utils.supplier.onboardingBatch.getDetailPage.invalidate({ batchId })
       void utils.supplier.onboardingBatch.list.invalidate()
       invalidateGlobalDashboard(utils)
+    },
+    onError: (e) => toast.error(e.message),
+  })
+
+  const retryFeishuMutation = trpc.integration.feishu.retryBatchApproval.useMutation({
+    onSuccess: () => {
+      toast.success('已重新发起飞书工单')
+      void refetch()
     },
     onError: (e) => toast.error(e.message),
   })
@@ -255,13 +262,6 @@ export function OnboardingBatchDetailContent({
     batch.metadata && typeof batch.metadata === 'object'
       ? ((batch.metadata as { feishu?: { create_status?: string; last_feishu_status?: string; last_webhook_at?: string } }).feishu ?? null)
       : null
-  const retryFeishuMutation = trpc.integration.feishu.retryBatchApproval.useMutation({
-    onSuccess: () => {
-      toast.success('已重新发起飞书工单')
-      void refetch()
-    },
-    onError: (e) => toast.error(e.message),
-  })
 
   return (
     <div className="space-y-6">
@@ -462,7 +462,6 @@ export function OnboardingBatchDetailContent({
             </Card>
           )}
 
-          <OnboardingBatchProgressDevices batchId={batch.id} />
         </TabsContent>
 
         {hasImport && (

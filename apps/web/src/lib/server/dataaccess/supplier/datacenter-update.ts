@@ -4,6 +4,7 @@ import type {
   UpdateDatacenterInput,
   UpdateDatacenterResult,
   UpdateDatacenterStatusInput,
+  UpdateDatacenterCooperationStatusInput,
 } from '@/lib/types/datacenter-update'
 import { supplierLog } from '@/lib/server/dataaccess/supplier/logger'
 import { mapDataCenterRow } from '@/lib/server/mappers/supply'
@@ -209,6 +210,29 @@ export const datacenterUpdateDataAccess = {
       .update(dataCenter)
       .set({
         status: input.status,
+        updatedAt: new Date(),
+      })
+      .where(eq(dataCenter.id, input.dataCenterId))
+
+    const dataCenterResult = await loadDataCenterResult(input.dataCenterId)
+
+    return { dataCenter: dataCenterResult }
+  },
+
+  async updateCooperationStatus(
+    input: UpdateDatacenterCooperationStatusInput,
+  ): Promise<UpdateDatacenterResult> {
+    await assertDataCenterExists(input.dataCenterId)
+
+    supplierLog(logTag, 'update cooperation status', {
+      dataCenterId: input.dataCenterId,
+      cooperationStatus: input.cooperationStatus,
+    })
+
+    await db
+      .update(dataCenter)
+      .set({
+        cooperationStatus: input.cooperationStatus,
         updatedAt: new Date(),
       })
       .where(eq(dataCenter.id, input.dataCenterId))

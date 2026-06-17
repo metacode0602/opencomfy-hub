@@ -190,7 +190,22 @@ flowchart TB
 | `enabled` | boolean | 总开关 |
 | `created_at` / `updated_at` | timestamptz | |
 
-### 4.2 `feishu_bitable_sync_config`（按供应商或机房）
+### 4.2 `feishu_work_order_bitable_config`（租户级工单 Bitable，单行）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| `id` | text PK | 固定 `default` |
+| `app_token` | varchar | 工单 Bitable app_token |
+| `table_id` | varchar | 工单表 ID |
+| `view_id` | varchar 可空 | 可选视图 |
+| `work_order_backend` | varchar | `bitable`（默认）\| `approval` |
+| `field_mapping_json` | jsonb | `field_key` → `field_id`，见 §5.11 |
+| `defaults_json` | jsonb | `module`/`priority`/`category`/`initial_status`/`assignee_open_ids` |
+| `status_mapping_json` | jsonb | Bitable 状态 → CRM 语义 |
+| `enabled` | boolean | |
+| `created_at` / `updated_at` | timestamptz | |
+
+### 4.3 `feishu_bitable_sync_config`（按供应商或机房）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
@@ -209,14 +224,14 @@ flowchart TB
 | `enabled` | boolean | |
 | `last_run_at` / `last_success_at` | timestamptz | |
 
-### 4.3 `feishu_external_link`（CRM ↔ 飞书实体关联）
+### 4.4 `feishu_external_link`（CRM ↔ 飞书实体关联）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
 | `id` | text PK | |
 | `domain` | varchar | `onboarding_batch` \| `supplier_activity` \| `onboarding_batch_import` |
 | `ref_id` | text | CRM 主键 |
-| `external_type` | varchar | `approval_instance` \| `bitable_record` \| `approval_comment` |
+| `external_type` | varchar | `approval_instance` \| `bitable_work_order_record` \| `bitable_record` \| `approval_comment` |
 | `external_id` | varchar | 飞书侧 ID |
 | `external_code` | varchar 可空 | 如 `instance_code`（工单号） |
 | `metadata` | jsonb | 原始 payload 摘要 |
@@ -224,12 +239,12 @@ flowchart TB
 
 唯一索引：`(domain, ref_id, external_type)`、`(external_type, external_id)`。
 
-### 4.4 `feishu_integration_job_run`（任务日志）
+### 4.5 `feishu_integration_job_run`（任务日志）
 
 | 列 | 类型 | 说明 |
 |----|------|------|
 | `id` | text PK | |
-| `job_kind` | varchar | `webhook` \| `bitable_sync` \| `approval_create` \| `comment_push` |
+| `job_kind` | varchar | `webhook` \| `bitable_sync` \| `approval_create` \| `work_order_create` \| `comment_push` |
 | `status` | varchar | `running` \| `success` \| `failed` \| `skipped` |
 | `supplier_id` | text 可空 | |
 | `ref_domain` / `ref_id` | 可空 | |
@@ -238,7 +253,7 @@ flowchart TB
 | `error_message` | text | |
 | `started_at` / `finished_at` | timestamptz | |
 
-### 4.5 既有表扩展（JSONB，避免大迁移）
+### 4.6 既有表扩展（JSONB，避免大迁移）
 
 **`onboarding_batch.metadata`** 增量键：
 
@@ -574,6 +589,61 @@ buildApprovalFormPayload(batchKind, batchRow, extras?)
 | 某 `field_id` 飞书返回校验错误 | 跳过该字段 + job_run 记录；其余字段仍提交 |
 | 全部字段失败 | `create_status=failed`，批次可重试 / manual 补号 |
 
+### 5.11 Bitable 工单表出站 / 入站（ADR-F10，已确认）
+
+> **运营现网工单载体为飞书多维表格**（非 Approval 实例）。Phase 1.5-Bitable 为默认路径；`work_order_backend=approval` 保留兼容。
+
+#### 5.11.1 现网 Bitable 列（资源接入工单表）
+
+| Bitable 列 | CRM `field_key` | 出站 | 入站 |
+|------------|-----------------|------|------|
+| 工单ID编号 | `ticket_no` | 不写（自增）；建单后读回 → `work_order_no` | 桥接键 |
+| 所属模块 | `module` | 默认 **资源接入** | — |
+| 工单内容 | `work_order_content` | 按 `batch_kind` 模板生成 | — |
+| 截图或附件 | `attachments` | Phase 1.5e | P2 |
+| 当前状态 | `work_order_status` | 默认 **待审核** | 驱动 CRM |
+| 优先级 | `priority` | 默认 **紧急-P0** | — |
+| 工单分类 | `category` | 默认 **技术支持** | — |
+| 经办人 | `assignees` | 默认 **曲耀亮**（配置 open_id） | — |
+| 提交人 | `submitter` | CRM 用户 open_id | — |
+| 工单处理反馈 | `handler_feedback` | 不写 | P2 可读入时间线 |
+| 备注 | `remark` | `remark` / `retire_remark` | — |
+| 创建日期 | — | Bitable 自动 | — |
+| 工单完成时间 | `completed_at` | 不写 | `已结束` 时读入 metadata |
+
+#### 5.11.2 状态枚举与 CRM 映射（已确认）
+
+| Bitable `当前状态` | 出站默认 | CRM 动作 |
+|--------------------|----------|----------|
+| 待审核 | **建单默认值** | — |
+| 处理中 | — | 可选写时间线（P2） |
+| 已结束 | — | **F3 默认**：时间线 + `batch_status=已完成`（等同 ADR-F8 验收完成） |
+| 已终止 | — | `batch_status=已取消` |
+
+入站优先 **Bitable 记录变更事件订阅**（`drive.file.bitable_record_changed_v1` 等）；轮询为兜底。
+
+#### 5.11.3 数据模型 `feishu_work_order_bitable_config`（租户单行）
+
+见 §4.4；Settings「飞书工单映射」维护 `app_token`、`table_id`、`field_mapping_json`（`field_key` → `field_id`）、`defaults_json`、`status_mapping_json`、`assignee_open_ids`。
+
+#### 5.11.4 出站流程
+
+```text
+createBatch (workOrderMode=auto)
+  → INSERT onboarding_batch
+  → work-order-bitable-mapper.buildFields(batch, config)
+  → POST bitable/v1/.../records
+  → 读回 工单ID编号 → work_order_no
+  → feishu_external_link(bitable_work_order_record)
+```
+
+#### 5.11.5 与设备 Bitable 同步的区别
+
+| 能力 | 方向 | Settings 入口 |
+|------|------|---------------|
+| 设备主数据/变更表 | Bitable → CRM | 飞书多维表格 |
+| **资源接入工单** | **CRM → Bitable** + 状态入站 | **飞书工单映射** |
+
 ---
 
 ## 6. 场景二：批次评论与附件 ↔ 飞书工单同步
@@ -873,8 +943,12 @@ parseDeviceInventoryTable(table) / parseDeviceChangelogTable(table)
 
 | # | 议题 | 决策 | 状态 |
 |---|------|------|------|
-| **F1** | `work_order_no` 存什么 | 飞书 **`instance_code`**（对外工单号）；`instance_id` 放 metadata | 建议 |
-| **F2** | 工单产品形态 | **飞书审批**（`approval/v4`）；服务台不在本期范围 | **已确认** |
+| **F1** | `work_order_no` 存什么 | Bitable 模式：**`工单ID编号`**；Approval 模式：`instance_code`；`record_id` / `instance_id` 放 metadata | **已确认** |
+| **F2** | 工单产品形态 | **Bitable 工单表为主**（§5.11）；Approval API 兼容 | **已确认** |
+| **F10** | 工单载体 | `work_order_backend=bitable`（默认）；桥接键 = **工单ID编号** | **已确认** |
+| **F11** | 建单初始状态 | **待审核**；可选：处理中 / 已结束 / 已终止 | **已确认** |
+| **F12** | 默认优先级 / 经办人 | **紧急-P0** / **曲耀亮**（open_id 可配置） | **已确认** |
+| **F13** | 状态入站 | 优先 **Bitable 记录变更事件订阅** | **已确认** |
 | **F3** | 审批通过后 CRM 动作 | **可配置**；默认 **写机房时间线 + `batch_status=已完成`**；保守模式（`auto_complete_on_approval=false`）仅写时间线 | **已确认** |
 | **F8** | 飞书审批末级节点 | **「验收完成」**（与 §7.3 工单执行结束语义对齐） | **已确认** |
 | **F9** | 工单创建方式 | 表单内 **`auto`（默认）/ `manual`**；租户级 `auto_create_enabled` 为总闸；见 §5.9 | **建议** |

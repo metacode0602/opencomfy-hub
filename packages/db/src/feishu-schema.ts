@@ -119,3 +119,34 @@ export const feishuWebhookEvent = pgTable(
   },
   (table) => [uniqueIndex("feishu_webhook_event_idempotency_uk").on(table.idempotencyKey)],
 )
+
+/** 租户级飞书工单 Bitable 配置（单行，CRM → Bitable 建单） */
+export const feishuWorkOrderBitableConfig = pgTable("feishu_work_order_bitable_config", {
+  id: text("id").primaryKey(),
+  appToken: varchar("app_token", { length: 128 }).notNull().default(""),
+  tableId: varchar("table_id", { length: 128 }).notNull().default(""),
+  viewId: varchar("view_id", { length: 128 }),
+  workOrderBackend: varchar("work_order_backend", { length: 16 }).notNull().default("bitable"),
+  fieldMappingJson: jsonb("field_mapping_json").notNull().default({}),
+  defaultsJson: jsonb("defaults_json").notNull().default({}),
+  statusMappingJson: jsonb("status_mapping_json").notNull().default({
+    待审核: "pending_review",
+    待分配: "pending_assign",
+    处理中: "in_progress",
+    已结束: "completed",
+    已终止: "cancelled",
+  }),
+  inboundChannel: varchar("inbound_channel", { length: 32 }).notNull().default("bitable_automation"),
+  automationWebhookSecret: varchar("automation_webhook_secret", { length: 128 }),
+  automationToken: varchar("automation_token", { length: 255 }),
+  inboundPolicyJson: jsonb("inbound_policy_json")
+    .notNull()
+    .default({
+      timeline_on_every_sync: true,
+      timeline_on_terminal_only: false,
+      auto_sync_in_progress_status: true,
+      dedupe_window_seconds: 60,
+    }),
+  enabled: boolean("enabled").notNull().default(false),
+  ...feishuTimestamps,
+})

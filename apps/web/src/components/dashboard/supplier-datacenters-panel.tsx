@@ -30,7 +30,7 @@ import { Progress } from '@workspace/ui/components/progress'
 import { Alert, AlertDescription } from '@workspace/ui/components/alert'
 import type { Supplier } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
-import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
+import { dcStatusColors, statusNames, dcCooperationStatusNames, dcCooperationStatusColors } from '@/components/dashboard/supplier-detail-constants'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import { CreateDatacenterTrigger } from '@/components/dashboard/create-datacenter-dialog'
@@ -146,6 +146,12 @@ export function SupplierDatacentersPanel({ supplier }: SupplierDatacentersPanelP
                           </Link>
                           <Badge variant="outline" className={dcStatusColors[dc.status]}>
                             {statusNames[dc.status]}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={dcCooperationStatusColors[dc.cooperationStatus]}
+                          >
+                            {dcCooperationStatusNames[dc.cooperationStatus]}
                           </Badge>
                         </div>
                         <CardDescription className="mt-1 flex items-center gap-1">

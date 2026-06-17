@@ -283,6 +283,38 @@ export const financeRouter = createTRPCRouter({
         }
       }),
 
+    previewBaremetalFromDb: adminProcedure
+      .input(z.object({ billingPeriodId: z.string() }))
+      .query(async ({ input }) => {
+        try {
+          return await financeBillingPeriodsDataAccess.previewBaremetalFromDb(
+            input.billingPeriodId,
+          )
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
+    importBaremetalFromDb: adminProcedure
+      .input(
+        z.object({
+          billingPeriodId: z.string(),
+          preserveIncomeDerived: z.boolean().optional(),
+        }),
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const actorId = await resolveFinanceActorId(ctx.user)
+          return await financeBillingPeriodsDataAccess.importBaremetalFromDb({
+            billingPeriodId: input.billingPeriodId,
+            actorId,
+            preserveIncomeDerived: input.preserveIncomeDerived,
+          })
+        } catch (e) {
+          mapFinanceError(e)
+        }
+      }),
+
     saveAllocations: adminProcedure
       .input(
         z.object({

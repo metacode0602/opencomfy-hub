@@ -30,7 +30,7 @@ import { DEFAULT_GPU_PER_DEVICE, TERMINAL_BATCH_STATUSES } from '@/lib/server/ag
 import { isInfraCardType, resolveDeviceGpuCount, resolveGpuCardTypeRole } from '@/lib/supplier/gpu-card-type-metrics'
 import { supplierLog, supplierWarn, supplierError } from '@/lib/server/dataaccess/supplier/logger'
 import { assertSupplierWorkOrderUnique } from '@/lib/server/dataaccess/supplier/work-order-uniqueness'
-import { createFeishuApprovalForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-approval'
+import { createFeishuWorkOrderForBatch } from '@/lib/server/dataaccess/integrations/feishu/create-batch-work-order'
 import {
   isFeishuAutoCreateEnabled,
   loadFeishuRuntimeConfig,
@@ -672,7 +672,7 @@ export const onboardingBatchDataAccess = {
 
     let finalWorkOrderNo = workOrderNo ?? ''
     if (autoCreateFeishu) {
-      const feishuResult = await createFeishuApprovalForBatch(batchId)
+      const feishuResult = await createFeishuWorkOrderForBatch(batchId)
       finalWorkOrderNo = feishuResult.workOrderNo ?? ''
     }
 

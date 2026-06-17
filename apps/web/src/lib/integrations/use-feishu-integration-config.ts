@@ -12,6 +12,7 @@ export function useFeishuIntegrationConfig(enabled = true) {
     isLoading,
     autoCreateEnabled: data?.autoCreateEnabled ?? false,
     manualWorkOrderRequired: data?.manualWorkOrderRequired ?? true,
+    defaultUserOpenIdConfigured: data?.defaultUserOpenIdConfigured ?? false,
     integrationConfigured: data?.integrationConfigured ?? false,
   }
 }

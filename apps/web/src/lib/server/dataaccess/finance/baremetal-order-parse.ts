@@ -77,3 +77,48 @@ export function formatBaremetalPricingKey(input: {
 }): string {
   return `${input.regionCode} × ${input.cardCode}（${BILLING_UNIT_LABEL[input.billingUnit]}）`
 }
+
+/** 裸金属订单支付状态是否视为「已支付」（与 Excel 导入一致） */
+export function isBaremetalPayStatusPaid(payStatus: string): boolean {
+  const s = payStatus.trim()
+  if (!s) return true
+  if (s.includes('已支付')) return true
+  if (s.toLowerCase() === 'paid') return true
+  return false
+}
+
+const DURATION_PACKAGE_UNIT_LABEL: Record<PlatformBillingUnit, string> = {
+  hour: '小时',
+  day: '24小时',
+  week: '7天',
+  month: '30天',
+}
+
+/** 头表 billing_unit + purchase_qty → Excel 购买数量格式 */
+export function formatPurchaseQtyFromHead(
+  purchaseQty: number,
+  billingUnit: PlatformBillingUnit,
+): string {
+  return `${purchaseQty} x ${DURATION_PACKAGE_UNIT_LABEL[billingUnit]}时长包`
+}
+
+const HOURS_PER_UNIT: Record<PlatformBillingUnit, number> = {
+  hour: 1,
+  day: 24,
+  week: 168,
+  month: 720,
+}
+
+/** 从租用时长（小时）推导购买数量文案，优先匹配标准时长包 */
+export function derivePurchaseQtyFromDurationHours(hours: number): string | null {
+  if (!Number.isFinite(hours) || hours <= 0) return null
+  const units: PlatformBillingUnit[] = ['month', 'week', 'day', 'hour']
+  for (const unit of units) {
+    const unitHours = HOURS_PER_UNIT[unit]
+    const qty = hours / unitHours
+    if (Number.isInteger(qty) && qty > 0) {
+      return formatPurchaseQtyFromHead(qty, unit)
+    }
+  }
+  return `${hours} x 小时时长包`
+}

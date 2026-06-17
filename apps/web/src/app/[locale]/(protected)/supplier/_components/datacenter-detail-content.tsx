@@ -14,6 +14,7 @@ import {
   MapPin,
   Pencil,
   Power,
+  Handshake,
   Server,
   Settings2,
 } from 'lucide-react'
@@ -40,12 +41,26 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@workspace/ui/components/alert-dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@workspace/ui/components/dropdown-menu'
 import { ListPagination } from '@/components/shared/list-pagination'
 import { useListPagination } from '@/hooks/use-list-pagination'
 import type { DataCenterDevice, OpsStatusBreakdownItem } from '@/lib/data/types'
 import { trpc } from '@/lib/trpc/client'
 import { DEVICE_OPS_STATUS_SEEDS } from '@workspace/db/schema'
-import { dcStatusColors, statusNames } from '@/components/dashboard/supplier-detail-constants'
+import {
+  dcStatusColors,
+  statusNames,
+  dcCooperationStatusNames,
+  dcCooperationStatusColors,
+  dcCooperationStatusIcons,
+  dcCooperationStatusConfirmDescriptions,
+  type DataCenterCooperationStatus,
+} from '@/components/dashboard/supplier-detail-constants'
 import { DeviceImportCards } from '@/components/dashboard/device-import/device-import-cards'
 import { FeishuBitableSyncPanel } from '@/components/settings/feishu-bitable-sync-panel'
 import { SupplierUnitCostsPanel } from '@/components/dashboard/supplier-unit-costs-panel'
@@ -97,6 +112,8 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
   const [onboardingDialogOpen, setOnboardingDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [statusConfirmTarget, setStatusConfirmTarget] = useState<'online' | 'offline' | null>(null)
+  const [cooperationConfirmTarget, setCooperationConfirmTarget] =
+    useState<DataCenterCooperationStatus | null>(null)
   const [opsStatusDevicesFilter, setOpsStatusDevicesFilter] = useState<string | 'all' | null>(
     null,
   )
@@ -132,6 +149,19 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         `机房「${result.dataCenter.name}」已${result.dataCenter.status === 'online' ? '上线' : '下线'}`,
       )
       setStatusConfirmTarget(null)
+      invalidateAfterImport()
+    },
+    onError: (error) => {
+      toast.error(error.message)
+    },
+  })
+
+  const updateCooperationStatusMutation = trpc.supplier.updateDataCenterCooperationStatus.useMutation({
+    onSuccess: (result) => {
+      toast.success(
+        `合作状态已设为${dcCooperationStatusNames[result.dataCenter.cooperationStatus]}`,
+      )
+      setCooperationConfirmTarget(null)
       invalidateAfterImport()
     },
     onError: (error) => {
@@ -211,6 +241,12 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
             <Badge variant="outline" className={dcStatusColors[dataCenter.status]}>
               {statusNames[dataCenter.status]}
             </Badge>
+            <Badge
+              variant="outline"
+              className={dcCooperationStatusColors[dataCenter.cooperationStatus]}
+            >
+              {dcCooperationStatusNames[dataCenter.cooperationStatus]}
+            </Badge>
             {dataCenter.sourceDeleted && (
               <Badge
                 variant="outline"
@@ -256,6 +292,34 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
               {nextStatus === 'online' ? '设为在线' : '设为离线'}
             </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="gap-2"
+                disabled={updateCooperationStatusMutation.isPending}
+              >
+                <Handshake className="h-4 w-4" />
+                合作状态
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(['active', 'pause', 'inactive'] as DataCenterCooperationStatus[])
+                .filter((status) => status !== dataCenter.cooperationStatus)
+                .map((status) => {
+                  const StatusIcon = dcCooperationStatusIcons[status]
+                  return (
+                    <DropdownMenuItem
+                      key={status}
+                      onSelect={() => setCooperationConfirmTarget(status)}
+                    >
+                      <StatusIcon className="mr-2 h-4 w-4" />
+                      设为{dcCooperationStatusNames[status]}
+                    </DropdownMenuItem>
+                  )
+                })}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" onClick={() => setOnboardingDialogOpen(true)}>
             设备上架 / 接入
           </Button>
@@ -304,6 +368,47 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={cooperationConfirmTarget !== null}
+        onOpenChange={(open) => !open && setCooperationConfirmTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {cooperationConfirmTarget
+                ? `确认设为${dcCooperationStatusNames[cooperationConfirmTarget]}？`
+                : ''}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {cooperationConfirmTarget
+                ? `将机房「${dataCenter.name}」${dcCooperationStatusConfirmDescriptions[cooperationConfirmTarget]}`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              type="button"
+              disabled={updateCooperationStatusMutation.isPending}
+            >
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              type="button"
+              disabled={updateCooperationStatusMutation.isPending}
+              onClick={() => {
+                if (!cooperationConfirmTarget) return
+                updateCooperationStatusMutation.mutate({
+                  dataCenterId,
+                  cooperationStatus: cooperationConfirmTarget,
+                })
+              }}
+            >
+              {updateCooperationStatusMutation.isPending ? '处理中…' : '确认'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <DatacenterDeviceRetireDialog
         open={retireDialogOpen}
         onOpenChange={setRetireDialogOpen}
@@ -331,18 +436,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         opsStatusFilter={opsStatusDevicesFilter}
       />
 
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="text-base">运维工程师</CardTitle>
-          <CardDescription>本机房运维工程师联系方式</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <SupplierOpsEngineersList
-            engineers={opsEngineers}
-            emptyMessage="暂无运维工程师，可在机房列表「运维通讯录」中维护"
-          />
-        </CardContent>
-      </Card>
+
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="border-border bg-card">
@@ -403,7 +497,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         </Card>
       </div>
 
-      <DeviceImportCards
+      {/* <DeviceImportCards
         supplierId={dataCenter.supplierId}
         defaultDataCenterId={dataCenter.id}
         dataCenterName={dataCenter.name}
@@ -411,7 +505,7 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
         onSuccess={invalidateAfterImport}
         sectionTitle="运维数据导入"
         sectionDescription="在本机房下导入设备主数据、变更记录或故障记录，导入完成后将自动刷新库存与设备统计"
-      />
+      /> */}
 
       <FeishuBitableSyncPanel
         supplierId={dataCenter.supplierId}
@@ -452,6 +546,14 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
             <InfoRow label="运行状态">
               <Badge variant="outline" className={dcStatusColors[dataCenter.status]}>
                 {statusNames[dataCenter.status]}
+              </Badge>
+            </InfoRow>
+            <InfoRow label="合作状态">
+              <Badge
+                variant="outline"
+                className={dcCooperationStatusColors[dataCenter.cooperationStatus]}
+              >
+                {dcCooperationStatusNames[dataCenter.cooperationStatus]}
               </Badge>
             </InfoRow>
             <InfoRow label="区域标签">
@@ -505,7 +607,18 @@ export function DatacenterDetailContent({ dataCenterId }: { dataCenterId: string
           </CardContent>
         </Card>
       </div>
-
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="text-base">运维工程师</CardTitle>
+          <CardDescription>本机房运维工程师联系方式</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <SupplierOpsEngineersList
+            engineers={opsEngineers}
+            emptyMessage="暂无运维工程师，可在机房列表「运维通讯录」中维护"
+          />
+        </CardContent>
+      </Card>
       <SupplierUnitCostsPanel
         supplier={{
           id: dataCenter.supplierId,
